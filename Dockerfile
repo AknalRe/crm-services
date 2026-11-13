@@ -35,7 +35,7 @@ RUN cd backend && npm install --omit=dev
 COPY --from=backend-builder /app/backend/dist ./backend/dist
 
 # Nginx config & Entrypoint script
-COPY deploy/nginx-unified.conf /etc/nginx/conf.d/default.conf
+COPY deploy/nginx-unified.conf /etc/nginx/http.d/default.conf
 COPY deploy/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
