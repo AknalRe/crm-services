@@ -47,6 +47,18 @@ export default async function licenseRouter(fastify: FastifyInstance) {
     }
   });
 
+  // POST activate license with key
+  fastify.post('/activate', async (req: FastifyRequest<{
+    Body: { licenseKey: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const license = await licenseService.activateLicenseKey(req.body?.licenseKey || '');
+      return reply.send({ success: true, data: license, message: 'Lisensi berhasil diaktivasi.' });
+    } catch (error: any) {
+      return reply.status(400).send({ success: false, error: error.message });
+    }
+  });
+
   // GET license plans from Reneo
   fastify.get('/plans', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {

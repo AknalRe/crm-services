@@ -3,6 +3,8 @@ import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import QRCodeModal from './components/QRCodeModal';
 import { PlansModal } from './components/PlansModal';
+import { SetupLoginGate } from './components/SetupLoginGate';
+import { LicenseActivationScreen } from './components/LicenseActivationScreen';
 import { ToastProvider } from './components/ui/ToastProvider';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
@@ -12,9 +14,11 @@ import Tracking from './pages/Tracking';
 import Conversations from './pages/Conversations';
 import Settings from './pages/Settings';
 import api from './services/api';
-import { WahaStatus, LicenseInfo } from './types';
+import { AuthStatus, WahaStatus, LicenseInfo } from './types';
 
 function AppShell() {
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [wahaStatus, setWahaStatus] = useState<WahaStatus | null>(null);
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
@@ -51,7 +55,24 @@ function AppShell() {
     }
   };
 
+  const fetchAuthStatus = async () => {
+    try {
+      const data = await api.getAuthStatus();
+      setAuthStatus(data);
+    } catch (err) {
+      console.error('Failed to get Auth status:', err);
+      setAuthStatus({ initialized: false, authenticated: false, user: null });
+    } finally {
+      setAuthChecked(true);
+    }
+  };
+
   useEffect(() => {
+    fetchAuthStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!authStatus?.authenticated) return;
     fetchWahaStatus();
     fetchLicenseStatus();
     const interval = setInterval(() => {
@@ -59,7 +80,7 @@ function AppShell() {
       fetchLicenseStatus();
     }, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [authStatus?.authenticated]);
 
   const handleStartBroadcastWithContacts = (contactIds: string[]) => {
     setPreselectedContactIds(contactIds);
@@ -86,6 +107,49 @@ function AppShell() {
         return 'CRM WhatsApp Services';
     }
   };
+
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F5F6FA] text-gray-600 text-sm">
+        Memeriksa sesi CRM...
+      </div>
+    );
+  }
+
+  if (!authStatus?.authenticated) {
+    return (
+      <SetupLoginGate
+        initialized={Boolean(authStatus?.initialized)}
+        onAuthenticated={(user) =>
+          setAuthStatus({
+            initialized: true,
+            authenticated: true,
+            user,
+          })
+        }
+      />
+    );
+  }
+
+  if (licenseInfo && (licenseInfo.status === 'UNLICENSED' || licenseInfo.isExpired)) {
+    return (
+      <>
+        <LicenseActivationScreen
+          licenseInfo={licenseInfo}
+          user={authStatus.user ?? null}
+          onLicenseUpdated={fetchLicenseStatus}
+          onOpenPlans={() => setIsPlansModalOpen(true)}
+        />
+        <PlansModal
+          isOpen={isPlansModalOpen}
+          onClose={() => setIsPlansModalOpen(false)}
+          currentLicense={licenseInfo}
+          onLicenseUpdated={fetchLicenseStatus}
+          defaultBuyer={authStatus.user ?? undefined}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-[#F5F6FA] text-gray-900 overflow-hidden font-sans">
@@ -151,6 +215,7 @@ function AppShell() {
         onClose={() => setIsPlansModalOpen(false)}
         currentLicense={licenseInfo}
         onLicenseUpdated={fetchLicenseStatus}
+        defaultBuyer={authStatus.user ?? undefined}
       />
     </div>
   );

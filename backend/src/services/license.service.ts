@@ -1,11 +1,11 @@
 import axios from 'axios';
 import { db } from '../db';
 import { systemSettings } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { config } from '../config';
 
 export interface LicenseInfo {
-  status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'GRACE_PERIOD';
+  status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'GRACE_PERIOD' | 'UNLICENSED';
   plan: string; // e.g. "Bulanan (Pro)", "Tahunan", "Free Trial"
   period: 'monthly' | 'quarterly' | 'annual' | 'trial';
   expiresAt: string; // ISO string
@@ -107,32 +107,34 @@ export class LicenseService {
       const keySetting = settings.find((s) => s.key === 'license_key');
 
       const now = new Date();
-      // Default: 14-day trial from installation if not yet set
-      let expiresAt: Date;
-      let plan = planSetting?.value || 'Trial 14 Hari (Reneo)';
-
-      if (expiresSetting?.value) {
-        expiresAt = new Date(expiresSetting.value);
-      } else {
-        expiresAt = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-        await db
-          .insert(systemSettings)
-          .values({
-            key: 'license_expires_at',
-            value: expiresAt.toISOString(),
-            updatedAt: now,
-          })
-          .onConflictDoUpdate({
-            target: systemSettings.key,
-            set: { value: expiresAt.toISOString(), updatedAt: now },
-          });
+      if (!keySetting?.value || !expiresSetting?.value) {
+        this.cachedLicense = {
+          status: 'UNLICENSED',
+          plan: 'Belum Diaktivasi',
+          period: 'monthly',
+          expiresAt: now.toISOString(),
+          daysLeft: 0,
+          isExpired: true,
+          managedByReneo: true,
+          reneoBillingUrl: `${reneoUrl}/hosting`,
+          features: {
+            unlimitedBroadcast: false,
+            birthdayAutomation: false,
+            liveChatCrm: false,
+            maxContacts: 0,
+          },
+        };
+        this.lastCheckedAt = Date.now();
+        return this.cachedLicense;
       }
 
+      const expiresAt = new Date(expiresSetting.value);
+      const plan = planSetting?.value || 'Lisensi Aktif';
       const daysLeft = Math.max(0, Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
       const isExpired = expiresAt.getTime() < now.getTime();
 
       this.cachedLicense = {
-        status: isExpired ? 'EXPIRED' : plan.includes('Trial') ? 'TRIAL' : 'ACTIVE',
+        status: isExpired ? 'EXPIRED' : 'ACTIVE',
         plan,
         period: plan.toLowerCase().includes('tahun') ? 'annual' : 'monthly',
         expiresAt: expiresAt.toISOString(),
@@ -140,33 +142,32 @@ export class LicenseService {
         isExpired,
         managedByReneo: true,
         reneoBillingUrl: `${reneoUrl}/hosting`,
-        licenseKey: keySetting?.value || 'RENEO-MANAGED-CRM',
+        licenseKey: keySetting.value,
         features: {
           unlimitedBroadcast: !isExpired,
           birthdayAutomation: !isExpired,
-          liveChatCrm: true,
-          maxContacts: 5000,
+          liveChatCrm: !isExpired,
+          maxContacts: 10000,
         },
       };
       this.lastCheckedAt = Date.now();
       return this.cachedLicense;
     } catch (err) {
       console.error('[LicenseService] Error resolving license:', err);
-      // Fail-safe default
       return {
-        status: 'ACTIVE',
-        plan: 'Bulanan (Pro Reneo)',
+        status: 'UNLICENSED',
+        plan: 'Belum Diaktivasi',
         period: 'monthly',
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        daysLeft: 30,
-        isExpired: false,
+        expiresAt: new Date().toISOString(),
+        daysLeft: 0,
+        isExpired: true,
         managedByReneo: true,
         reneoBillingUrl: `${reneoUrl}/hosting`,
         features: {
-          unlimitedBroadcast: true,
-          birthdayAutomation: true,
-          liveChatCrm: true,
-          maxContacts: 10000,
+          unlimitedBroadcast: false,
+          birthdayAutomation: false,
+          liveChatCrm: false,
+          maxContacts: 0,
         },
       };
     }
@@ -221,6 +222,28 @@ export class LicenseService {
 
     this.cachedLicense = null;
     return await this.getLicense();
+  }
+
+  /**
+   * Activate license using a license key issued by Reneo
+   */
+  public async activateLicenseKey(licenseKey: string): Promise<LicenseInfo> {
+    const cleanKey = String(licenseKey || '').trim();
+    if (!cleanKey || cleanKey.length < 8) {
+      throw new Error('Kunci lisensi tidak valid (minimal 8 karakter).');
+    }
+
+    const synced = await this.syncWithReneo();
+    if (synced && !synced.isExpired && (!synced.licenseKey || synced.licenseKey === cleanKey)) {
+      return synced;
+    }
+
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    return this.updateLicense({
+      plan: synced?.plan && synced.plan !== 'Belum Diaktivasi' ? synced.plan : 'Lisensi Aktif (Reneo CRM)',
+      expiresAt: synced?.expiresAt && !synced.isExpired ? synced.expiresAt : expiresAt,
+      licenseKey: cleanKey,
+    });
   }
 
   /**
@@ -308,13 +331,24 @@ export class LicenseService {
     paymentMethod?: string;
   }) {
     const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    let buyerName = payload.buyerName;
+    let buyerEmail = payload.buyerEmail;
+    if (!buyerName || !buyerEmail) {
+      const rows = await db
+        .select()
+        .from(systemSettings)
+        .where(inArray(systemSettings.key, ['crm_admin_name', 'crm_admin_email']));
+      const map = new Map(rows.map((r) => [r.key, r.value]));
+      buyerName = buyerName || map.get('crm_admin_name') || 'Pelanggan CRM';
+      buyerEmail = buyerEmail || map.get('crm_admin_email') || undefined;
+    }
     const res = await axios.post(
       `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/order`,
       {
         catalogId: 'reneo-crm',
         planSlug: payload.planSlug,
-        buyerName: payload.buyerName || 'Pelanggan CRM',
-        buyerEmail: payload.buyerEmail,
+        buyerName,
+        buyerEmail,
         buyerPhone: payload.buyerPhone,
         paymentMethod: payload.paymentMethod || 'transfer',
       },

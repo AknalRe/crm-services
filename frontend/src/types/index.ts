@@ -139,8 +139,17 @@ export interface BirthdaySetting {
   lastRunDate?: string | null;
 }
 
+export interface AuthStatus {
+  initialized: boolean;
+  authenticated: boolean;
+  user: {
+    name: string;
+    email: string;
+  } | null;
+}
+
 export interface LicenseInfo {
-  status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'GRACE_PERIOD';
+  status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'GRACE_PERIOD' | 'UNLICENSED';
   plan: string;
   period: 'monthly' | 'quarterly' | 'annual' | 'trial';
   expiresAt: string;

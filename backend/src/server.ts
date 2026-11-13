@@ -10,6 +10,7 @@ import settingsRouter from './routes/settings';
 import wahaRouter from './routes/waha';
 import dashboardRouter from './routes/dashboard';
 import licenseRouter from './routes/license';
+import authRouter from './routes/auth';
 import { BirthdayService } from './services/birthday.service';
 import './services/queue.service'; // Start BullMQ worker
 
@@ -35,6 +36,7 @@ async function main() {
   });
 
   // Mount Routes
+  await fastify.register(authRouter, { prefix: '/api/auth' });
   await fastify.register(dashboardRouter, { prefix: '/api/dashboard' });
   await fastify.register(contactsRouter, { prefix: '/api/contacts' });
   await fastify.register(broadcastsRouter, { prefix: '/api/broadcasts' });

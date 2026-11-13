@@ -10,6 +10,7 @@ import {
   WahaSessionItem,
   BirthdaySetting,
   LicenseInfo,
+  AuthStatus,
   LicensePlan,
   LicenseOrder,
   PaymentMethodItem,
@@ -173,6 +174,23 @@ export const api = {
     return res.data;
   },
 
+  // Auth & Initial Setup
+  getAuthStatus: async (): Promise<AuthStatus> => {
+    const res = await client.get('/auth/status');
+    return res.data.data;
+  },
+  setupAuth: async (payload: { name: string; email: string; password: string }): Promise<{ user: { name: string; email: string } }> => {
+    const res = await client.post('/auth/setup', payload);
+    return res.data.data;
+  },
+  loginAuth: async (payload: { email: string; password: string }): Promise<{ user: { name: string; email: string } }> => {
+    const res = await client.post('/auth/login', payload);
+    return res.data.data;
+  },
+  logoutAuth: async (): Promise<void> => {
+    await client.post('/auth/logout');
+  },
+
   // License & Reneo Subscription
   getLicenseStatus: async (): Promise<LicenseInfo> => {
     const res = await client.get('/license/status');
@@ -180,6 +198,10 @@ export const api = {
   },
   syncLicense: async (): Promise<LicenseInfo> => {
     const res = await client.post('/license/sync');
+    return res.data.data;
+  },
+  activateLicense: async (licenseKey: string): Promise<LicenseInfo> => {
+    const res = await client.post('/license/activate', { licenseKey });
     return res.data.data;
   },
   getLicensePlans: async (): Promise<LicensePlan[]> => {

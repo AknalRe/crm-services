@@ -22,6 +22,7 @@ interface PlansModalProps {
   onClose: () => void;
   currentLicense: LicenseInfo | null;
   onLicenseUpdated: () => void;
+  defaultBuyer?: { name: string; email: string };
 }
 
 export const PlansModal: React.FC<PlansModalProps> = ({
@@ -29,6 +30,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
   onClose,
   currentLicense,
   onLicenseUpdated,
+  defaultBuyer,
 }) => {
   const toast = useToast();
   const [plans, setPlans] = useState<LicensePlan[]>([]);
@@ -70,8 +72,11 @@ export const PlansModal: React.FC<PlansModalProps> = ({
       loadPlans();
       setActiveOrder(null);
       setPaymentSuccess(false);
+      if (defaultBuyer?.name && !buyerName) {
+        setBuyerName(defaultBuyer.name);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, defaultBuyer?.name]);
 
   const handleCreateOrder = async () => {
     if (isSubmitting) return;
@@ -79,7 +84,8 @@ export const PlansModal: React.FC<PlansModalProps> = ({
       setIsSubmitting(true);
       const res = await api.createLicenseOrder({
         planSlug: selectedPlanSlug,
-        buyerName: buyerName.trim() || 'Pelanggan CRM',
+        buyerName: buyerName.trim() || defaultBuyer?.name || 'Pelanggan CRM',
+        buyerEmail: defaultBuyer?.email,
         buyerPhone: buyerPhone.trim(),
         paymentMethod,
       });
