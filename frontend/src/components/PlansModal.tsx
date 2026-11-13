@@ -3,12 +3,12 @@ import {
   ShieldCheck,
   Check,
   CreditCard,
-  Building,
-  Wallet,
   Receipt,
   Printer,
   CheckCircle2,
   Clock,
+  Copy,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { LicenseInfo, LicensePlan, LicenseOrder, PaymentMethodItem } from '../types';
@@ -40,7 +40,6 @@ export const PlansModal: React.FC<PlansModalProps> = ({
 
   const [buyerName, setBuyerName] = useState('');
   const [buyerPhone, setBuyerPhone] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'saldo' | 'qris' | 'transfer'>('saldo');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeOrder, setActiveOrder] = useState<LicenseOrder | null>(null);
@@ -87,7 +86,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
         buyerName: buyerName.trim() || defaultBuyer?.name || 'Pelanggan CRM',
         buyerEmail: defaultBuyer?.email,
         buyerPhone: buyerPhone.trim(),
-        paymentMethod,
+        paymentMethod: 'transfer',
       });
 
       setActiveOrder(res.order);
@@ -100,20 +99,33 @@ export const PlansModal: React.FC<PlansModalProps> = ({
     }
   };
 
-  const handlePayOrder = async () => {
+  const handleCheckOrderStatus = async () => {
     if (!activeOrder || isPaying) return;
     try {
       setIsPaying(true);
-      const res = await api.payLicenseOrder(activeOrder.publicId, paymentMethod);
+      const res = await api.getLicenseOrder(activeOrder.publicId);
       setActiveOrder(res.order);
-      setPaymentSuccess(true);
-      onLicenseUpdated();
-      toast.success('Pembayaran berhasil diverifikasi. Lisensi aktif.');
+      if (res.paymentMethods) {
+        setPaymentMethods(res.paymentMethods);
+      }
+      if (res.order.status === 'paid') {
+        setPaymentSuccess(true);
+        await api.syncLicense();
+        onLicenseUpdated();
+        toast.success('Pembayaran telah dikonfirmasi. Lisensi aktif!');
+      } else {
+        toast.info('Status invoice masih menunggu konfirmasi pembayaran.');
+      }
     } catch (err: any) {
-      toast.error('Gagal memproses pembayaran: ' + (err.response?.data?.error || err.message));
+      toast.error('Gagal memeriksa status invoice: ' + (err.response?.data?.error || err.message));
     } finally {
       setIsPaying(false);
     }
+  };
+
+  const copyValue = (label: string, value: string) => {
+    navigator.clipboard.writeText(value);
+    toast.success(`${label} disalin`);
   };
 
   const footerContent = !activeOrder ? (
@@ -158,11 +170,11 @@ export const PlansModal: React.FC<PlansModalProps> = ({
         {!paymentSuccess && (
           <Button
             variant="primary"
-            onClick={handlePayOrder}
+            onClick={handleCheckOrderStatus}
             isLoading={isPaying}
-            leftIcon={<CheckCircle2 className="w-4 h-4" />}
+            leftIcon={<RefreshCw className="w-4 h-4" />}
           >
-            Bayar Sekarang
+            Cek Status Pembayaran
           </Button>
         )}
         <Button variant="secondary" onClick={onClose} disabled={isPaying}>
@@ -319,35 +331,8 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-gray-700 font-medium mb-1.5">
-                  Metode Pembayaran
-                </label>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {[
-                    { id: 'saldo' as const, label: 'Saldo Reneo', icon: Wallet },
-                    { id: 'qris' as const, label: 'QRIS Instan', icon: CreditCard },
-                    { id: 'transfer' as const, label: 'Transfer Bank', icon: Building },
-                  ].map((item) => {
-                    const Icon = item.icon;
-                    const active = paymentMethod === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setPaymentMethod(item.id)}
-                        className={`p-2.5 rounded-md border text-center transition-colors flex flex-col items-center gap-1 ${
-                          active
-                            ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-semibold'
-                            : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                        }`}
-                      >
-                        <Icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+              <div className="text-[11px] text-gray-500">
+                Setelah invoice diterbitkan, instruksi rekening / e-wallet pembayaran resmi dari Pengaturan Reneo akan ditampilkan beserta kode unik transfer.
               </div>
             </div>
           </>
@@ -419,34 +404,60 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   </div>
                 )}
                 <div className="border-t border-gray-200 pt-2 flex items-center justify-between font-bold text-sm text-gray-900">
-                  <span>Total Pembayaran</span>
-                  <span className="text-base text-indigo-600 tabular-nums">
-                    Rp {activeOrder.amountTotal.toLocaleString('id-ID')}
-                  </span>
+                  <span>Transfer Tepat Sejumlah</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-base text-indigo-600 tabular-nums font-mono">
+                      Rp {activeOrder.amountTotal.toLocaleString('id-ID')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => copyValue('Nominal transfer', String(activeOrder.amountTotal))}
+                      className="p-1 rounded border border-gray-200 text-gray-500 hover:text-gray-800 hover:bg-gray-50"
+                      title="Salin nominal"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {!paymentSuccess && paymentMethods.length > 0 && (
+            {!paymentSuccess && (
               <div className="p-4 rounded-lg border border-gray-200 bg-gray-50 space-y-2.5">
                 <h5 className="font-semibold text-gray-900 flex items-center gap-2">
                   <CreditCard className="w-4 h-4 text-gray-600" />
-                  Rekening Pembayaran Resmi
+                  Rekening / Tujuan Pembayaran Resmi
                 </h5>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {paymentMethods.map((m) => (
-                    <div
-                      key={m.id}
-                      className="p-2.5 rounded-md border border-gray-200 bg-white text-[11px]"
-                    >
-                      <span className="font-semibold text-gray-900 block">{m.name}</span>
-                      <span className="font-mono font-semibold text-indigo-600 text-xs">
-                        {m.account}
-                      </span>
-                      <span className="block text-gray-500 text-[10px]">a/n {m.holder}</span>
-                    </div>
-                  ))}
-                </div>
+                {paymentMethods.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {paymentMethods.map((m) => (
+                      <div
+                        key={m.id}
+                        className="p-2.5 rounded-md border border-gray-200 bg-white text-[11px] flex items-start justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="font-semibold text-gray-900 block">{m.name}</span>
+                          <span className="font-mono font-semibold text-indigo-600 text-xs break-all">
+                            {m.account}
+                          </span>
+                          <span className="block text-gray-500 text-[10px]">a/n {m.holder}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyValue(m.name, m.account)}
+                          className="p-1 rounded border border-gray-200 text-gray-500 hover:text-gray-800 hover:bg-gray-50 shrink-0"
+                          title="Salin nomor rekening"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-2.5">
+                    Belum ada metode pembayaran aktif di Pengaturan Situs Reneo. Silakan hubungi admin atau lengkapi rekening di Reneo Panel.
+                  </p>
+                )}
               </div>
             )}
           </div>
