@@ -47,3 +47,4 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
     </Modal>
   );
 };
+
