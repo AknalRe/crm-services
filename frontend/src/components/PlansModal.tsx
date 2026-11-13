@@ -524,3 +524,4 @@ export const PlansModal: React.FC<PlansModalProps> = ({
     </div>
   );
 };
+
