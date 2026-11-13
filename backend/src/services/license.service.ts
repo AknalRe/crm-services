@@ -222,6 +222,133 @@ export class LicenseService {
     this.cachedLicense = null;
     return await this.getLicense();
   }
+
+  /**
+   * Fetch available license plans configured in Reneo
+   */
+  public async getPlans(): Promise<any[]> {
+    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    try {
+      const res = await axios.get(`${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/plans/reneo-crm`, {
+        timeout: 5000,
+      });
+      if (res.data && res.data.ok && Array.isArray(res.data.plans)) {
+        return res.data.plans;
+      }
+    } catch {
+      // Fallback preset plans if Reneo is offline
+    }
+
+    return [
+      {
+        id: 1,
+        catalogId: 'reneo-crm',
+        slug: 'starter-monthly',
+        name: 'Starter Bulanan',
+        tagline: 'Cocok untuk UMKM pemula yang mulai mengelola kontak & broadcast WhatsApp.',
+        period: 'monthly',
+        months: 1,
+        priceAmount: 49000,
+        highlighted: false,
+        features: {
+          unlimitedBroadcast: false,
+          maxContacts: 1000,
+          birthdayBot: true,
+          liveChat: false,
+          wahaSync: true,
+        },
+      },
+      {
+        id: 2,
+        catalogId: 'reneo-crm',
+        slug: 'pro-monthly',
+        name: 'Pro Bulanan',
+        tagline: 'Fitur komprehensif lengkap: broadcast tanpa batas, bot ultah, dan Live Chat CRM.',
+        period: 'monthly',
+        months: 1,
+        priceAmount: 99000,
+        highlighted: true,
+        features: {
+          unlimitedBroadcast: true,
+          maxContacts: 10000,
+          birthdayBot: true,
+          liveChat: true,
+          wahaSync: true,
+        },
+      },
+      {
+        id: 3,
+        catalogId: 'reneo-crm',
+        slug: 'enterprise-annual',
+        name: 'Enterprise Tahunan',
+        tagline: 'Paket tahunan super hemat (Diskon 17%): kapasitas kontak masif & support prioritas.',
+        period: 'annual',
+        months: 12,
+        priceAmount: 990000,
+        highlighted: false,
+        features: {
+          unlimitedBroadcast: true,
+          maxContacts: 50000,
+          birthdayBot: true,
+          liveChat: true,
+          wahaSync: true,
+        },
+      },
+    ];
+  }
+
+  /**
+   * Issue an official invoice order via Reneo
+   */
+  public async createOrder(payload: {
+    planSlug: string;
+    buyerName?: string;
+    buyerEmail?: string;
+    buyerPhone?: string;
+    paymentMethod?: string;
+  }) {
+    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    const res = await axios.post(
+      `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/order`,
+      {
+        catalogId: 'reneo-crm',
+        planSlug: payload.planSlug,
+        buyerName: payload.buyerName || 'Pelanggan CRM',
+        buyerEmail: payload.buyerEmail,
+        buyerPhone: payload.buyerPhone,
+        paymentMethod: payload.paymentMethod || 'transfer',
+      },
+      { timeout: 6000 }
+    );
+    return res.data;
+  }
+
+  /**
+   * Get invoice order status & payment instructions from Reneo
+   */
+  public async getOrder(publicId: string) {
+    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    const res = await axios.get(
+      `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/orders/${publicId}`,
+      { timeout: 5000 }
+    );
+    return res.data;
+  }
+
+  /**
+   * Pay/settle the invoice order in Reneo
+   */
+  public async payOrder(publicId: string, paymentMethod = 'saldo') {
+    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    const res = await axios.post(
+      `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/orders/${publicId}/pay`,
+      { paymentMethod },
+      { timeout: 6000 }
+    );
+    this.cachedLicense = null;
+    await this.syncWithReneo();
+    return res.data;
+  }
 }
 
 export const licenseService = LicenseService.getInstance();

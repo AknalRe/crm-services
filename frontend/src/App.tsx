@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import QRCodeModal from './components/QRCodeModal';
+import { PlansModal } from './components/PlansModal';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Broadcasts from './pages/Broadcasts';
@@ -17,6 +18,7 @@ export function App() {
   const [wahaStatus, setWahaStatus] = useState<WahaStatus | null>(null);
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [isPlansModalOpen, setIsPlansModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [preselectedContactIds, setPreselectedContactIds] = useState<string[]>([]);
 
@@ -101,6 +103,7 @@ export function App() {
           licenseInfo={licenseInfo}
           onRefresh={handleGlobalRefresh}
           onOpenQr={() => setIsQrModalOpen(true)}
+          onOpenPlans={() => setIsPlansModalOpen(true)}
           isRefreshing={isRefreshing}
         />
 
@@ -132,6 +135,14 @@ export function App() {
         isOpen={isQrModalOpen}
         onClose={() => setIsQrModalOpen(false)}
         onStatusChange={(newStatus) => setWahaStatus(newStatus)}
+      />
+
+      {/* Reneo License Plans & Invoice Modal */}
+      <PlansModal
+        isOpen={isPlansModalOpen}
+        onClose={() => setIsPlansModalOpen(false)}
+        currentLicense={licenseInfo}
+        onLicenseUpdated={fetchLicenseStatus}
       />
     </div>
   );

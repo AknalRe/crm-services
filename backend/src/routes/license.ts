@@ -46,5 +46,58 @@ export default async function licenseRouter(fastify: FastifyInstance) {
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
+
+  // GET license plans from Reneo
+  fastify.get('/plans', async (_req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const plans = await licenseService.getPlans();
+      return reply.send({ success: true, data: plans });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST create invoice order in Reneo
+  fastify.post('/order', async (req: FastifyRequest<{
+    Body: {
+      planSlug: string;
+      buyerName?: string;
+      buyerEmail?: string;
+      buyerPhone?: string;
+      paymentMethod?: string;
+    };
+  }>, reply: FastifyReply) => {
+    try {
+      const result = await licenseService.createOrder(req.body);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // GET invoice order details
+  fastify.get('/order/:publicId', async (req: FastifyRequest<{
+    Params: { publicId: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const result = await licenseService.getOrder(req.params.publicId);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST pay invoice order in Reneo
+  fastify.post('/order/:publicId/pay', async (req: FastifyRequest<{
+    Params: { publicId: string };
+    Body: { paymentMethod?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const result = await licenseService.payOrder(req.params.publicId, req.body?.paymentMethod);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
 }
 

@@ -9,6 +9,9 @@ import {
   WahaStatus,
   BirthdaySetting,
   LicenseInfo,
+  LicensePlan,
+  LicenseOrder,
+  PaymentMethodItem,
 } from '../types';
 
 const client = axios.create({
@@ -156,6 +159,28 @@ export const api = {
   syncLicense: async (): Promise<LicenseInfo> => {
     const res = await client.post('/license/sync');
     return res.data.data;
+  },
+  getLicensePlans: async (): Promise<LicensePlan[]> => {
+    const res = await client.get('/license/plans');
+    return res.data.data;
+  },
+  createLicenseOrder: async (data: {
+    planSlug: string;
+    buyerName?: string;
+    buyerEmail?: string;
+    buyerPhone?: string;
+    paymentMethod?: string;
+  }): Promise<{ order: LicenseOrder; paymentMethods: PaymentMethodItem[]; invoiceUrl: string }> => {
+    const res = await client.post('/license/order', data);
+    return res.data;
+  },
+  getLicenseOrder: async (publicId: string): Promise<{ order: LicenseOrder; paymentMethods: PaymentMethodItem[] }> => {
+    const res = await client.get(`/license/order/${publicId}`);
+    return res.data;
+  },
+  payLicenseOrder: async (publicId: string, paymentMethod = 'saldo'): Promise<{ order: LicenseOrder }> => {
+    const res = await client.post(`/license/order/${publicId}/pay`, { paymentMethod });
+    return res.data;
   },
 };
 

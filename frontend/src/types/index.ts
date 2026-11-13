@@ -145,3 +145,59 @@ export interface LicenseInfo {
   };
 }
 
+export interface LicensePlan {
+  id: number;
+  catalogId: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  period: string;
+  months: number;
+  priceAmount: number;
+  features: {
+    unlimitedBroadcast?: boolean;
+    maxContacts?: number;
+    birthdayBot?: boolean;
+    liveChat?: boolean;
+    wahaSync?: boolean;
+    [key: string]: any;
+  };
+  highlighted: boolean;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export interface PaymentMethodItem {
+  id: string;
+  kind: string;
+  name: string;
+  account: string;
+  holder: string;
+  enabled: boolean;
+}
+
+export interface LicenseOrder {
+  id: number;
+  publicId: string;
+  invoiceNumber: string;
+  userId: number;
+  catalogId: string;
+  appName: string;
+  planSlug: string;
+  planName: string;
+  period: string;
+  months: number;
+  amountList: number;
+  uniqueCode: number;
+  amountTotal: number;
+  status: 'pending' | 'paid' | 'cancelled';
+  paymentMethod: string;
+  buyerName: string;
+  buyerEmail: string;
+  buyerPhone: string;
+  createdAt: string;
+  expiresAt: string;
+  paidAt?: string;
+}
+
+

@@ -8,6 +8,7 @@ interface NavbarProps {
   licenseInfo?: LicenseInfo | null;
   onRefresh: () => void;
   onOpenQr: () => void;
+  onOpenPlans?: () => void;
   isRefreshing?: boolean;
 }
 
@@ -17,6 +18,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   licenseInfo,
   onRefresh,
   onOpenQr,
+  onOpenPlans,
   isRefreshing = false,
 }) => {
   const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
@@ -29,18 +31,17 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       <div className="flex items-center gap-3">
-        {/* Reneo Managed License Pill */}
+        {/* Reneo Managed License Pill / Button */}
         {licenseInfo && (
-          <a
-            href={licenseInfo.reneoBillingUrl}
-            target="_blank"
-            rel="noreferrer"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+          <button
+            type="button"
+            onClick={onOpenPlans}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
               isLicenseActive
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 hover:shadow-sm'
                 : 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100 animate-pulse'
             }`}
-            title="Kelola Langganan di Panel Reneo"
+            title="Pilih Paket & Terbitkan Invoice di Reneo"
           >
             {isLicenseActive ? (
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
@@ -50,9 +51,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>
               {isLicenseActive
                 ? `${licenseInfo.plan} (${licenseInfo.daysLeft} hari)`
-                : 'Lisensi Kedaluwarsa (Perpanjang di Reneo)'}
+                : 'Lisensi Kedaluwarsa (Pilih Paket)'}
             </span>
-          </a>
+          </button>
         )}
 
         {/* WA Status Pill */}
