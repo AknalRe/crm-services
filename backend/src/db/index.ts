@@ -1,0 +1,140 @@
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import * as schema from './schema';
+import { config } from '../config';
+
+const connectionString = config.databaseUrl;
+
+// Client for queries
+export const queryClient = postgres(connectionString, { max: 10 });
+export const db = drizzle(queryClient, { schema });
+
+/**
+ * Automatically create tables if they do not exist
+ */
+export async function initDb() {
+  const sql = queryClient;
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id TEXT PRIMARY KEY,
+        nama_lengkap TEXT NOT NULL,
+        nama_panggilan TEXT,
+        tanggal_lahir TIMESTAMP,
+        nomor_whatsapp TEXT NOT NULL UNIQUE,
+        alamat TEXT,
+        tags TEXT,
+        notes TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        message_template TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'IMMEDIATE',
+        status TEXT NOT NULL DEFAULT 'DRAFT',
+        scheduled_at TIMESTAMP,
+        delay_seconds INTEGER NOT NULL DEFAULT 5,
+        interval_seconds INTEGER NOT NULL DEFAULT 30,
+        batch_size INTEGER NOT NULL DEFAULT 10,
+        filter_tags TEXT,
+        total_count INTEGER NOT NULL DEFAULT 0,
+        sent_count INTEGER NOT NULL DEFAULT 0,
+        delivered_count INTEGER NOT NULL DEFAULT 0,
+        read_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS campaign_recipients (
+        id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        phone TEXT NOT NULL,
+        personalized_message TEXT NOT NULL,
+        waha_message_id TEXT UNIQUE,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        ack_status INTEGER NOT NULL DEFAULT 0,
+        sent_at TIMESTAMP,
+        delivered_at TIMESTAMP,
+        read_at TIMESTAMP,
+        error_message TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY,
+        contact_id TEXT NOT NULL UNIQUE REFERENCES contacts(id) ON DELETE CASCADE,
+        last_message TEXT,
+        last_message_at TIMESTAMP,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        direction TEXT NOT NULL,
+        body TEXT NOT NULL,
+        media_url TEXT,
+        waha_message_id TEXT UNIQUE,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        ack_status INTEGER NOT NULL DEFAULT 0,
+        sent_at TIMESTAMP,
+        delivered_at TIMESTAMP,
+        read_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS birthday_settings (
+        id TEXT PRIMARY KEY DEFAULT 'default',
+        is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        send_time TEXT NOT NULL DEFAULT '08:00',
+        message_template TEXT NOT NULL DEFAULT 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!',
+        delay_seconds INTEGER NOT NULL DEFAULT 5,
+        last_run_date TEXT,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS system_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // Ensure default birthday row exists
+    await sql`
+      INSERT INTO birthday_settings (id, is_enabled, send_time, message_template, delay_seconds, updated_at)
+      VALUES ('default', TRUE, '08:00', 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!', 5, NOW())
+      ON CONFLICT (id) DO NOTHING;
+    `;
+
+    console.log('[Drizzle ORM] PostgreSQL Database schema initialized successfully.');
+  } catch (err: any) {
+    console.error('[Drizzle ORM] Failed to initialize DB tables:', err.message);
+  }
+}
+
+export default db;
+
