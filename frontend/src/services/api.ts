@@ -15,7 +15,7 @@ import {
 } from '../types';
 
 const client = axios.create({
-  baseURL: '/api',
+  baseURL: './api',
   headers: {
     'Content-Type': 'application/json',
   },
