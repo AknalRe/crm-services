@@ -9,6 +9,18 @@ export interface WahaConfig {
   baseUrl: string;
   apiKey?: string;
   session: string;
+  mode?: 'INTERNAL' | 'EXTERNAL';
+  internalLocked?: boolean;
+  hasApiKey?: boolean;
+}
+
+export interface WahaSessionInfo {
+  name: string;
+  status: string;
+  me?: {
+    id?: string;
+    pushName?: string;
+  } | null;
 }
 
 export class WahaService {
@@ -23,26 +35,60 @@ export class WahaService {
     return WahaService.instance;
   }
 
+  private hasInternalEnv(): boolean {
+    return Boolean(process.env.WAHA_BASE_URL && process.env.WAHA_BASE_URL.trim() !== '');
+  }
+
   /**
-   * Get active WAHA configuration (database overrides .env)
+   * Get active WAHA configuration (internal mode locks URL & API key to env when configured)
    */
-  public async getConfig(): Promise<WahaConfig> {
+  public async getConfig(maskSecret = false): Promise<WahaConfig> {
+    const internalEnv = this.hasInternalEnv();
     try {
       const settings = await db.select().from(systemSettings);
+      const modeSetting = settings.find((s) => s.key === 'waha_mode');
       const urlSetting = settings.find((s) => s.key === 'waha_base_url');
       const keySetting = settings.find((s) => s.key === 'waha_api_key');
       const sessionSetting = settings.find((s) => s.key === 'waha_session');
 
+      const mode: 'INTERNAL' | 'EXTERNAL' =
+        modeSetting?.value === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+
+      if (mode === 'INTERNAL') {
+        const baseUrl = internalEnv
+          ? config.waha.baseUrl
+          : urlSetting?.value || config.waha.baseUrl;
+        const rawApiKey = internalEnv
+          ? config.waha.apiKey
+          : keySetting?.value || config.waha.apiKey;
+        const session = sessionSetting?.value || config.waha.session || 'default';
+        return {
+          baseUrl,
+          apiKey: maskSecret ? (rawApiKey ? '••••••••' : '') : rawApiKey,
+          session,
+          mode: 'INTERNAL',
+          internalLocked: true,
+          hasApiKey: Boolean(rawApiKey && rawApiKey.trim() !== ''),
+        };
+      }
+
+      const rawApiKey = keySetting?.value || '';
       return {
-        baseUrl: urlSetting?.value || config.waha.baseUrl,
-        apiKey: keySetting?.value || config.waha.apiKey,
-        session: sessionSetting?.value || config.waha.session,
+        baseUrl: urlSetting?.value || '',
+        apiKey: rawApiKey,
+        session: sessionSetting?.value || config.waha.session || 'default',
+        mode: 'EXTERNAL',
+        internalLocked: false,
+        hasApiKey: Boolean(rawApiKey && rawApiKey.trim() !== ''),
       };
     } catch {
       return {
         baseUrl: config.waha.baseUrl,
-        apiKey: config.waha.apiKey,
-        session: config.waha.session,
+        apiKey: maskSecret ? (config.waha.apiKey ? '••••••••' : '') : config.waha.apiKey,
+        session: config.waha.session || 'default',
+        mode: 'INTERNAL',
+        internalLocked: true,
+        hasApiKey: Boolean(config.waha.apiKey && config.waha.apiKey.trim() !== ''),
       };
     }
   }
@@ -81,7 +127,7 @@ export class WahaService {
     error?: string;
     config: WahaConfig;
   }> {
-    const currentConfig = await this.getConfig();
+    const currentConfig = await this.getConfig(true);
     try {
       const { client, session } = await this.getClient();
       
@@ -160,6 +206,74 @@ export class WahaService {
   }
 
   /**
+   * List all sessions on the configured WAHA server
+   */
+  public async listSessions(): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
+    const { client, session } = await this.getClient();
+    const res = await client.get('/api/sessions?all=true').catch(() => client.get('/api/sessions'));
+    const rawList = Array.isArray(res.data) ? res.data : [];
+    const sessions: WahaSessionInfo[] = rawList.map((item: any) => ({
+      name: String(item.name || 'default'),
+      status: String(item.status || 'UNKNOWN'),
+      me: item.me || null,
+    }));
+    return { sessions, activeSession: session };
+  }
+
+  /**
+   * Persist active WAHA session in database
+   */
+  public async setActiveSession(sessionName: string): Promise<string> {
+    const clean = sessionName.trim();
+    if (!clean || !/^[a-zA-Z0-9_-]+$/.test(clean)) {
+      throw new Error('Nama sesi hanya boleh huruf, angka, tanda hubung (-), atau underscore (_)');
+    }
+    const now = new Date();
+    await db
+      .insert(systemSettings)
+      .values({ key: 'waha_session', value: clean, updatedAt: now })
+      .onConflictDoUpdate({
+        target: systemSettings.key,
+        set: { value: clean, updatedAt: now },
+      });
+    return clean;
+  }
+
+  /**
+   * Create and start a WAHA session (and optionally set as active)
+   */
+  public async createAndStartSession(sessionName: string, setActive = true): Promise<any> {
+    const clean = sessionName.trim();
+    if (!clean || !/^[a-zA-Z0-9_-]+$/.test(clean)) {
+      throw new Error('Nama sesi hanya boleh huruf, angka, tanda hubung (-), atau underscore (_)');
+    }
+    const result = await this.startSession(clean);
+    if (setActive) {
+      await this.setActiveSession(clean);
+    }
+    return result;
+  }
+
+  /**
+   * Delete a session from WAHA
+   */
+  public async deleteSession(sessionName: string): Promise<any> {
+    const clean = sessionName.trim();
+    if (!clean) {
+      throw new Error('Nama sesi wajib diisi');
+    }
+    const { client } = await this.getClient();
+    try {
+      const res = await client.delete(`/api/sessions/${encodeURIComponent(clean)}`);
+      return res.data;
+    } catch {
+      await client.post('/api/sessions/stop', { name: clean }).catch(() => null);
+      const res = await client.post('/api/sessions/logout', { name: clean }).catch(() => ({ data: { ok: true } }));
+      return res.data;
+    }
+  }
+
+  /**
    * Get QR Code for scanning
    */
   public async getQrCode(sessionName?: string): Promise<{ qr?: string; status: string }> {
@@ -167,21 +281,24 @@ export class WahaService {
     const targetSession = sessionName || session;
 
     try {
-      const statusRes = await this.getStatus();
-      const currentStatus = statusRes.sessionStatus;
+      let currentStatus = 'UNKNOWN';
+      try {
+        const sRes = await client.get(`/api/sessions/${encodeURIComponent(targetSession)}`);
+        currentStatus = sRes.data?.status || 'UNKNOWN';
+      } catch {}
 
       if (currentStatus === 'WORKING') {
         return { status: 'WORKING' };
       }
 
       try {
-        const qrRes = await client.get(`/api/${targetSession}/auth/qr?format=raw`);
+        const qrRes = await client.get(`/api/${encodeURIComponent(targetSession)}/auth/qr?format=raw`);
         if (qrRes.data && qrRes.data.value) {
           return { qr: qrRes.data.value, status: 'SCAN_QR_CODE' };
         }
       } catch {}
 
-      const imgRes = await client.get(`/api/${targetSession}/auth/qr`, {
+      const imgRes = await client.get(`/api/${encodeURIComponent(targetSession)}/auth/qr`, {
         responseType: 'arraybuffer',
       });
       const base64 = Buffer.from(imgRes.data, 'binary').toString('base64');

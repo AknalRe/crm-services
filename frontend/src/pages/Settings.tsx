@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Server,
   RefreshCw,
@@ -8,9 +8,13 @@ import {
   Power,
   ShieldCheck,
   Globe,
+  Lock,
+  Plus,
+  Check,
+  Trash2,
 } from 'lucide-react';
 import api from '../services/api';
-import { WahaStatus } from '../types';
+import { WahaSessionItem, WahaStatus } from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
@@ -18,7 +22,7 @@ import { useToast } from '../components/ui/ToastProvider';
 interface SettingsProps {
   wahaStatus: WahaStatus | null;
   onRefreshStatus: () => void;
-  onOpenQr: () => void;
+  onOpenQr: (sessionName?: string) => void;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
@@ -27,11 +31,17 @@ export const Settings: React.FC<SettingsProps> = ({
   onOpenQr,
 }) => {
   const toast = useToast();
-  const [configMode, setConfigMode] = useState<'LOCAL' | 'RENEO'>('LOCAL');
-  const [baseUrl, setBaseUrl] = useState('http://localhost:3000');
+  const [configMode, setConfigMode] = useState<'INTERNAL' | 'EXTERNAL'>('INTERNAL');
+  const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [session, setSession] = useState('default');
   const [saving, setSaving] = useState(false);
+
+  const [sessions, setSessions] = useState<WahaSessionItem[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [newSessionName, setNewSessionName] = useState('');
+  const [creatingSession, setCreatingSession] = useState(false);
+  const [sessionBusyName, setSessionBusyName] = useState<string | null>(null);
 
   const [testPhone, setTestPhone] = useState('');
   const [testMessage, setTestMessage] = useState('Halo, ini adalah pesan uji coba dari CRM WhatsApp.');
@@ -41,48 +51,115 @@ export const Settings: React.FC<SettingsProps> = ({
   const [sessionActionLoading, setSessionActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'stop' | 'logout' | null>(null);
 
+  const fetchSessions = useCallback(async () => {
+    setSessionsLoading(true);
+    try {
+      const data = await api.getWahaSessions();
+      setSessions(data.sessions || []);
+    } catch {
+      setSessions([]);
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (wahaStatus?.config) {
-      setBaseUrl(wahaStatus.config.baseUrl);
+      const mode = wahaStatus.config.mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+      setConfigMode(mode);
+      setBaseUrl(wahaStatus.config.baseUrl || '');
       setApiKey(wahaStatus.config.apiKey || '');
       setSession(wahaStatus.config.session || 'default');
-
-      if (
-        wahaStatus.config.baseUrl.includes('reneo') ||
-        (wahaStatus.config.apiKey && wahaStatus.config.apiKey.length > 0)
-      ) {
-        setConfigMode('RENEO');
-      } else {
-        setConfigMode('LOCAL');
-      }
     }
   }, [wahaStatus]);
 
-  const handleApplyPreset = (mode: 'LOCAL' | 'RENEO') => {
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions, wahaStatus?.connected]);
+
+  const handleSelectMode = async (mode: 'INTERNAL' | 'EXTERNAL') => {
     setConfigMode(mode);
-    if (mode === 'LOCAL') {
-      setBaseUrl('http://waha:3000');
-      setApiKey('');
-      setSession('default');
+    if (mode === 'INTERNAL') {
+      try {
+        await api.updateWahaSettings({ mode: 'INTERNAL', session });
+        toast.success('Mode WAHA Internal otomatis diaktifkan dan dikunci.');
+        onRefreshStatus();
+        fetchSessions();
+      } catch (err: any) {
+        toast.error(err.response?.data?.error || 'Gagal mengaktifkan mode WAHA Internal');
+      }
     } else {
-      setBaseUrl('https://wa.reneo.id');
-      setApiKey('');
-      setSession('reneo_crm');
+      if (wahaStatus?.config?.mode === 'INTERNAL') {
+        setBaseUrl('');
+        setApiKey('');
+      }
     }
   };
 
   const handleSaveWahaSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving) return;
+    if (saving || configMode === 'INTERNAL') return;
     setSaving(true);
     try {
-      await api.updateWahaSettings({ baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), session: session.trim() });
-      toast.success('Konfigurasi koneksi WAHA berhasil disimpan.');
+      await api.updateWahaSettings({
+        mode: 'EXTERNAL',
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim(),
+        session: session.trim() || 'default',
+      });
+      toast.success('Konfigurasi WAHA eksternal berhasil disimpan.');
       onRefreshStatus();
+      fetchSessions();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal menyimpan konfigurasi WAHA');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCreateSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newSessionName.trim();
+    if (!clean || creatingSession) return;
+    setCreatingSession(true);
+    try {
+      await api.createWahaSession(clean, true);
+      setNewSessionName('');
+      toast.success(`Sesi "${clean}" berhasil ditambahkan dan diaktifkan.`);
+      onRefreshStatus();
+      fetchSessions();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menambahkan sesi WhatsApp');
+    } finally {
+      setCreatingSession(false);
+    }
+  };
+
+  const handleSwitchActiveSession = async (targetName: string) => {
+    setSessionBusyName(targetName);
+    try {
+      await api.setActiveWahaSession(targetName);
+      toast.success(`Sesi aktif beralih ke "${targetName}".`);
+      onRefreshStatus();
+      fetchSessions();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengganti sesi aktif');
+    } finally {
+      setSessionBusyName(null);
+    }
+  };
+
+  const handleDeleteSession = async (targetName: string) => {
+    setSessionBusyName(targetName);
+    try {
+      await api.deleteWahaSession(targetName);
+      toast.info(`Sesi "${targetName}" dihapus.`);
+      onRefreshStatus();
+      fetchSessions();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menghapus sesi');
+    } finally {
+      setSessionBusyName(null);
     }
   };
 
@@ -167,112 +244,272 @@ export const Settings: React.FC<SettingsProps> = ({
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
-          <form onSubmit={handleSaveWahaSettings} className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-            <div>
-              <h3 className="font-semibold text-gray-900 text-sm">Mode Koneksi WhatsApp</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Sesuaikan dengan infrastruktur server atau gateway WhatsApp Anda.
-              </p>
+          <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm">Mode Koneksi WhatsApp</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  WAHA Internal terkonfigurasi otomatis dari server dan terkunci. Anda cukup mengelola sesi WhatsApp.
+                </p>
+              </div>
+              {configMode === 'INTERNAL' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                  <Lock className="w-3 h-3" />
+                  Terkunci Otomatis
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => handleApplyPreset('LOCAL')}
+                onClick={() => handleSelectMode('INTERNAL')}
                 className={`p-3.5 rounded-lg border text-left transition-colors ${
-                  configMode === 'LOCAL'
+                  configMode === 'INTERNAL'
                     ? 'border-indigo-600 bg-indigo-50/40 text-gray-900'
                     : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
                 }`}
               >
                 <div className="flex items-center gap-2 font-semibold text-xs mb-1 text-gray-900">
                   <Server className="w-4 h-4 text-indigo-600" />
-                  <span>WAHA Internal (Docker)</span>
+                  <span>WAHA Internal (Otomatis)</span>
                 </div>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
-                  Menggunakan server WAHA yang berjalan dalam Docker Compose crm-services.
+                  Terhubung otomatis ke runtime WAHA internal Reneo dengan dukungan multi-sesi.
                 </p>
               </button>
 
               <button
                 type="button"
-                onClick={() => handleApplyPreset('RENEO')}
+                onClick={() => handleSelectMode('EXTERNAL')}
                 className={`p-3.5 rounded-lg border text-left transition-colors ${
-                  configMode === 'RENEO'
+                  configMode === 'EXTERNAL'
                     ? 'border-indigo-600 bg-indigo-50/40 text-gray-900'
                     : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
                 }`}
               >
                 <div className="flex items-center gap-2 font-semibold text-xs mb-1 text-gray-900">
                   <Globe className="w-4 h-4 text-blue-600" />
-                  <span>Service Reneo / WAHA Eksternal</span>
+                  <span>WAHA Eksternal</span>
                 </div>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
-                  Menggunakan URL dan API Key dari gateway WAHA eksternal.
+                  Gunakan URL dan API Key gateway WAHA eksternal milik Anda sendiri.
                 </p>
               </button>
             </div>
 
-            <div className="space-y-3.5 pt-1">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Base URL Server WAHA <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="http://waha:3000 atau https://wa.reneo.id"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                />
-                <span className="text-[11px] text-gray-400 mt-1 block">
-                  Dalam satu network Docker gunakan <code className="font-mono">http://waha:3000</code>.
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    API Key / Secret Token (Opsional)
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="Kosongkan jika tanpa auth"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                  <span className="text-[11px] text-gray-400 mt-1 block">
-                    Dikirim via header <code className="font-mono">X-Api-Key</code>
-                  </span>
+            {configMode === 'INTERNAL' ? (
+              <div className="space-y-4 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Base URL WAHA Internal
+                    </label>
+                    <input
+                      type="text"
+                      disabled
+                      readOnly
+                      value={baseUrl || 'Terhubung otomatis dari environment'}
+                      className="w-full h-9 px-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-md text-[13px] font-mono cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      API Key WAHA Internal
+                    </label>
+                    <input
+                      type="text"
+                      disabled
+                      readOnly
+                      value={wahaStatus?.config?.hasApiKey ? '•••••••• (Dikelola otomatis)' : 'Tidak memerlukan API key'}
+                      className="w-full h-9 px-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-md text-[13px] font-mono cursor-not-allowed"
+                    />
+                  </div>
                 </div>
 
+                {/* Multi-Session Management */}
+                <div className="pt-3 border-t border-gray-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-900">Daftar Sesi WhatsApp (Multi-Sesi)</h4>
+                      <p className="text-[11px] text-gray-500">
+                        Tambahkan beberapa sesi dan pilih sesi aktif yang dipakai untuk pengiriman CRM.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={fetchSessions}
+                      isLoading={sessionsLoading}
+                      leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                    >
+                      Muat Ulang
+                    </Button>
+                  </div>
+
+                  <form onSubmit={handleCreateSession} className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nama sesi baru (contoh: cs-1, sales-utama)"
+                      value={newSessionName}
+                      onChange={(e) => setNewSessionName(e.target.value)}
+                      className="flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="md"
+                      isLoading={creatingSession}
+                      disabled={!newSessionName.trim()}
+                      leftIcon={<Plus className="w-4 h-4" />}
+                    >
+                      Tambah Sesi
+                    </Button>
+                  </form>
+
+                  <div className="divide-y divide-gray-200 border border-gray-200 rounded-md overflow-hidden">
+                    {sessions.length === 0 ? (
+                      <div className="p-3 text-xs text-gray-500 text-center bg-gray-50">
+                        {sessionsLoading
+                          ? 'Memuat daftar sesi...'
+                          : `Belum ada sesi terdeteksi. Sesi aktif saat ini: ${session}`}
+                      </div>
+                    ) : (
+                      sessions.map((item) => {
+                        const isActive = item.name === session;
+                        const isWorking = item.status === 'WORKING';
+                        const isBusy = sessionBusyName === item.name;
+                        return (
+                          <div
+                            key={item.name}
+                            className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-xs ${
+                              isActive ? 'bg-indigo-50/40' : 'bg-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-mono font-semibold text-gray-900 truncate">
+                                {item.name}
+                              </span>
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                                  isWorking
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : item.status === 'SCAN_QR_CODE'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-gray-100 text-gray-600 border-gray-200'
+                                }`}
+                              >
+                                {item.status}
+                              </span>
+                              {isActive && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-100 text-indigo-700">
+                                  <Check className="w-3 h-3" />
+                                  Aktif
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              {!isActive && (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  disabled={isBusy}
+                                  onClick={() => handleSwitchActiveSession(item.name)}
+                                >
+                                  Pilih Aktif
+                                </Button>
+                              )}
+                              {!isWorking && (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => onOpenQr(item.name)}
+                                  leftIcon={<QrCode className="w-3.5 h-3.5" />}
+                                >
+                                  Scan QR
+                                </Button>
+                              )}
+                              {sessions.length > 1 && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={isBusy}
+                                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                                  onClick={() => handleDeleteSession(item.name)}
+                                  aria-label={`Hapus sesi ${item.name}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleSaveWahaSettings} className="space-y-3.5 pt-1">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Nama Sesi
+                    Base URL Server WAHA <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="default"
-                    value={session}
-                    onChange={(e) => setSession(e.target.value)}
+                    placeholder="https://wa.domainanda.com"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
                     className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
                   />
-                  <span className="text-[11px] text-gray-400 mt-1 block">
-                    Default sesi WhatsApp: <code className="font-mono">default</code>
-                  </span>
                 </div>
-              </div>
-            </div>
 
-            <div className="pt-3 border-t border-gray-200 flex justify-end">
-              <Button type="submit" variant="primary" isLoading={saving}>
-                Simpan Konfigurasi WAHA
-              </Button>
-            </div>
-          </form>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      API Key / Secret Token (Opsional)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="Kosongkan jika tanpa auth"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                    <span className="text-[11px] text-gray-400 mt-1 block">
+                      Dikirim via header <code className="font-mono">X-Api-Key</code>
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Nama Sesi
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="default"
+                      value={session}
+                      onChange={(e) => setSession(e.target.value)}
+                      className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-gray-200 flex justify-end">
+                  <Button type="submit" variant="primary" isLoading={saving}>
+                    Simpan Konfigurasi WAHA
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
 
           <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
             <div>
@@ -373,7 +610,7 @@ export const Settings: React.FC<SettingsProps> = ({
               <Button
                 variant="primary"
                 className="w-full"
-                onClick={onOpenQr}
+                onClick={() => onOpenQr()}
                 leftIcon={<QrCode className="w-4 h-4" />}
               >
                 Buka Scanner QR WhatsApp

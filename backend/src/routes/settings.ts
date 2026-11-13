@@ -9,7 +9,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   // GET all settings
   fastify.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const wahaConfig = await wahaService.getConfig();
+      const wahaConfig = await wahaService.getConfig(true);
       let list = await db
         .select()
         .from(birthdaySettings)
@@ -29,21 +29,29 @@ export default async function settingsRouter(fastify: FastifyInstance) {
 
   // POST update WAHA settings
   fastify.post('/waha', async (req: FastifyRequest<{
-    Body: { baseUrl: string; apiKey?: string; session?: string };
+    Body: { mode?: 'INTERNAL' | 'EXTERNAL'; baseUrl?: string; apiKey?: string; session?: string };
   }>, reply: FastifyReply) => {
     try {
-      const { baseUrl, apiKey, session } = req.body;
-      if (!baseUrl) {
-        return reply.status(400).send({ success: false, error: 'Base URL WAHA wajib diisi' });
-      }
-
+      const { mode = 'INTERNAL', baseUrl, apiKey, session } = req.body || {};
       const now = new Date();
 
-      const pairs = [
-        { key: 'waha_base_url', value: baseUrl },
-        { key: 'waha_api_key', value: apiKey || '' },
-        { key: 'waha_session', value: session || 'default' },
+      const pairs: Array<{ key: string; value: string }> = [
+        { key: 'waha_mode', value: mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL' },
       ];
+
+      if (mode === 'EXTERNAL') {
+        if (!baseUrl || !baseUrl.trim()) {
+          return reply.status(400).send({ success: false, error: 'Base URL WAHA wajib diisi untuk mode eksternal' });
+        }
+        pairs.push(
+          { key: 'waha_base_url', value: baseUrl.trim() },
+          { key: 'waha_api_key', value: (apiKey || '').trim() },
+        );
+      }
+
+      if (session && session.trim()) {
+        pairs.push({ key: 'waha_session', value: session.trim() });
+      }
 
       for (const p of pairs) {
         await db

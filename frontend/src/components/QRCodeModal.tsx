@@ -9,12 +9,14 @@ interface QRCodeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onStatusChange?: (status: WahaStatus) => void;
+  sessionName?: string;
 }
 
 export const QRCodeModal: React.FC<QRCodeModalProps> = ({
   isOpen,
   onClose,
   onStatusChange,
+  sessionName,
 }) => {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -28,13 +30,13 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
       const statusRes = await api.getWahaStatus();
       if (onStatusChange) onStatusChange(statusRes);
 
-      if (statusRes.sessionStatus === 'WORKING') {
+      if (!sessionName && statusRes.sessionStatus === 'WORKING') {
         setStatus('WORKING');
         setLoading(false);
         return;
       }
 
-      if (statusRes.sessionStatus === 'STOPPED' || statusRes.sessionStatus === 'NOT_FOUND') {
+      if (!sessionName && (statusRes.sessionStatus === 'STOPPED' || statusRes.sessionStatus === 'NOT_FOUND')) {
         try {
           await api.startWahaSession();
         } catch {
@@ -42,7 +44,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
         }
       }
 
-      const qrRes = await api.getWahaQr();
+      const qrRes = await api.getWahaQr(sessionName);
       setStatus(qrRes.status);
       if (qrRes.qr) {
         setQrCode(qrRes.qr);
@@ -52,7 +54,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [onStatusChange]);
+  }, [onStatusChange, sessionName]);
 
   useEffect(() => {
     if (!isOpen) return;

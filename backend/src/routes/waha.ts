@@ -23,10 +23,59 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET QR code
-  fastify.get('/qr', async (_req: FastifyRequest, reply: FastifyReply) => {
+  // GET all WAHA sessions
+  fastify.get('/sessions', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const qrData = await wahaService.getQrCode();
+      const data = await wahaService.listSessions();
+      return reply.send({ success: true, data });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST create & start a new WAHA session
+  fastify.post('/sessions', async (req: FastifyRequest<{
+    Body: { name: string; setActive?: boolean };
+  }>, reply: FastifyReply) => {
+    try {
+      const { name, setActive = true } = req.body || {};
+      const result = await wahaService.createAndStartSession(name, setActive);
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.status(400).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST switch active WAHA session
+  fastify.post('/sessions/active', async (req: FastifyRequest<{
+    Body: { session: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const active = await wahaService.setActiveSession(req.body?.session || '');
+      return reply.send({ success: true, data: { activeSession: active } });
+    } catch (error: any) {
+      return reply.status(400).send({ success: false, error: error.message });
+    }
+  });
+
+  // DELETE remove a WAHA session
+  fastify.delete('/sessions/:name', async (req: FastifyRequest<{
+    Params: { name: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const result = await wahaService.deleteSession(req.params.name);
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // GET QR code
+  fastify.get('/qr', async (req: FastifyRequest<{
+    Querystring: { session?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const qrData = await wahaService.getQrCode(req.query?.session);
       return reply.send({ success: true, data: qrData });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -34,9 +83,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST start session
-  fastify.post('/session/start', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/session/start', async (req: FastifyRequest<{
+    Body?: { session?: string };
+  }>, reply: FastifyReply) => {
     try {
-      const result = await wahaService.startSession();
+      const result = await wahaService.startSession(req.body?.session);
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -44,9 +95,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST stop session
-  fastify.post('/session/stop', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/session/stop', async (req: FastifyRequest<{
+    Body?: { session?: string };
+  }>, reply: FastifyReply) => {
     try {
-      const result = await wahaService.stopSession();
+      const result = await wahaService.stopSession(req.body?.session);
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -54,9 +107,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST logout session
-  fastify.post('/session/logout', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/session/logout', async (req: FastifyRequest<{
+    Body?: { session?: string };
+  }>, reply: FastifyReply) => {
     try {
-      const result = await wahaService.logoutSession();
+      const result = await wahaService.logoutSession(req.body?.session);
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

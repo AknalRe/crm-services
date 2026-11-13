@@ -7,6 +7,7 @@ import {
   ChatMessage,
   DashboardStats,
   WahaStatus,
+  WahaSessionItem,
   BirthdaySetting,
   LicenseInfo,
   LicensePlan,
@@ -112,23 +113,44 @@ export const api = {
     const res = await client.get('/waha/status');
     return res.data.data;
   },
-  getWahaQr: async (): Promise<{ qr?: string; status: string }> => {
-    const res = await client.get('/waha/qr');
+  getWahaQr: async (session?: string): Promise<{ qr?: string; status: string }> => {
+    const res = await client.get('/waha/qr', { params: session ? { session } : undefined });
     return res.data.data;
   },
-  startWahaSession: async (): Promise<any> => {
-    const res = await client.post('/waha/session/start');
+  getWahaSessions: async (): Promise<{ sessions: WahaSessionItem[]; activeSession: string }> => {
+    const res = await client.get('/waha/sessions');
     return res.data.data;
   },
-  stopWahaSession: async (): Promise<any> => {
-    const res = await client.post('/waha/session/stop');
+  createWahaSession: async (name: string, setActive = true): Promise<any> => {
+    const res = await client.post('/waha/sessions', { name, setActive });
     return res.data.data;
   },
-  logoutWahaSession: async (): Promise<any> => {
-    const res = await client.post('/waha/session/logout');
+  setActiveWahaSession: async (session: string): Promise<any> => {
+    const res = await client.post('/waha/sessions/active', { session });
     return res.data.data;
   },
-  updateWahaSettings: async (data: { baseUrl: string; apiKey?: string; session?: string }): Promise<any> => {
+  deleteWahaSession: async (name: string): Promise<any> => {
+    const res = await client.delete(`/waha/sessions/${encodeURIComponent(name)}`);
+    return res.data.data;
+  },
+  startWahaSession: async (session?: string): Promise<any> => {
+    const res = await client.post('/waha/session/start', session ? { session } : undefined);
+    return res.data.data;
+  },
+  stopWahaSession: async (session?: string): Promise<any> => {
+    const res = await client.post('/waha/session/stop', session ? { session } : undefined);
+    return res.data.data;
+  },
+  logoutWahaSession: async (session?: string): Promise<any> => {
+    const res = await client.post('/waha/session/logout', session ? { session } : undefined);
+    return res.data.data;
+  },
+  updateWahaSettings: async (data: {
+    mode?: 'INTERNAL' | 'EXTERNAL';
+    baseUrl?: string;
+    apiKey?: string;
+    session?: string;
+  }): Promise<any> => {
     const res = await client.post('/settings/waha', data);
     return res.data;
   },

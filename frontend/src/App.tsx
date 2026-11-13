@@ -19,6 +19,7 @@ function AppShell() {
   const [wahaStatus, setWahaStatus] = useState<WahaStatus | null>(null);
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [qrSessionName, setQrSessionName] = useState<string | undefined>(undefined);
   const [isPlansModalOpen, setIsPlansModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [preselectedContactIds, setPreselectedContactIds] = useState<string[]>([]);
@@ -125,7 +126,10 @@ function AppShell() {
               <Settings
                 wahaStatus={wahaStatus}
                 onRefreshStatus={fetchWahaStatus}
-                onOpenQr={() => setIsQrModalOpen(true)}
+                onOpenQr={(sessionName?: string) => {
+                  setQrSessionName(sessionName);
+                  setIsQrModalOpen(true);
+                }}
               />
             )}
           </div>
@@ -134,8 +138,12 @@ function AppShell() {
 
       <QRCodeModal
         isOpen={isQrModalOpen}
-        onClose={() => setIsQrModalOpen(false)}
+        onClose={() => {
+          setIsQrModalOpen(false);
+          setQrSessionName(undefined);
+        }}
         onStatusChange={(newStatus) => setWahaStatus(newStatus)}
+        sessionName={qrSessionName}
       />
 
       <PlansModal

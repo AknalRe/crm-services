@@ -106,6 +106,15 @@ export interface DashboardStats {
   recentActivity: CampaignRecipient[];
 }
 
+export interface WahaSessionItem {
+  name: string;
+  status: string;
+  me?: {
+    id?: string;
+    pushName?: string;
+  } | null;
+}
+
 export interface WahaStatus {
   connected: boolean;
   sessionStatus: string;
@@ -115,6 +124,9 @@ export interface WahaStatus {
     baseUrl: string;
     apiKey?: string;
     session: string;
+    mode?: 'INTERNAL' | 'EXTERNAL';
+    internalLocked?: boolean;
+    hasApiKey?: boolean;
   };
 }
 
