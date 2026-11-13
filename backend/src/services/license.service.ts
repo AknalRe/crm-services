@@ -68,6 +68,31 @@ export class LicenseService {
             timeout: 5000,
           });
 
+          if (res.data && res.data.ok && res.data.status === 'UNLICENSED') {
+            await db
+              .delete(systemSettings)
+              .where(inArray(systemSettings.key, ['license_key', 'license_plan', 'license_expires_at']));
+
+            this.cachedLicense = {
+              status: 'UNLICENSED',
+              plan: 'Belum Diaktivasi',
+              period: 'monthly',
+              expiresAt: new Date().toISOString(),
+              daysLeft: 0,
+              isExpired: true,
+              managedByReneo: true,
+              reneoBillingUrl: res.data.billingUrl || `${reneoUrl}/hosting`,
+              features: {
+                unlimitedBroadcast: false,
+                birthdayAutomation: false,
+                liveChatCrm: false,
+                maxContacts: 0,
+              },
+            };
+            this.lastCheckedAt = Date.now();
+            return this.cachedLicense;
+          }
+
           if (
             res.data &&
             res.data.ok &&
