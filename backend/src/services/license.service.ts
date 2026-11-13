@@ -68,7 +68,14 @@ export class LicenseService {
             timeout: 5000,
           });
 
-          if (res.data && res.data.ok) {
+          if (
+            res.data &&
+            res.data.ok &&
+            res.data.status !== 'UNLICENSED' &&
+            !res.data.isExpired &&
+            res.data.licenseKey &&
+            res.data.licenseKey !== 'RN-CRM-DEMO-2026'
+          ) {
             const data = res.data;
             const expDate = new Date(data.expiresAt);
             const now = new Date();
@@ -86,9 +93,9 @@ export class LicenseService {
               reneoBillingUrl: data.billingUrl || `${reneoUrl}/hosting`,
               licenseKey: data.licenseKey,
               features: {
-                unlimitedBroadcast: true,
-                birthdayAutomation: true,
-                liveChatCrm: true,
+                unlimitedBroadcast: !isExpired,
+                birthdayAutomation: !isExpired,
+                liveChatCrm: !isExpired,
                 maxContacts: data.maxContacts || 10000,
               },
             };

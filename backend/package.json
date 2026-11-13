@@ -1,6 +1,6 @@
 {
   "name": "crm-backend",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "CRM Services WhatsApp Broadcast & Management API with Fastify and Drizzle ORM",
   "main": "dist/server.js",
   "scripts": {
