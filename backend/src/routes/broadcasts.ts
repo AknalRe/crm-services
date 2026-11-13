@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eq, desc, sql, or, ilike } from 'drizzle-orm';
+import { and, eq, desc, sql, or, ilike } from 'drizzle-orm';
 import { db } from '../db';
 import { campaigns, campaignRecipients, contacts } from '../db/schema';
 import { BroadcastService } from '../services/broadcast.service';
@@ -71,7 +71,6 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const { status, type } = req.query;
-      let query = db.select().from(campaigns);
 
       const conditions: any[] = [];
       if (status && status !== 'ALL') conditions.push(eq(campaigns.status, status));
@@ -80,7 +79,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
       const list = await db
         .select()
         .from(campaigns)
-        .where(conditions.length > 0 ? sql`${conditions[0]}` : undefined)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(campaigns.createdAt));
 
       return reply.send({ success: true, data: list.map(formatCampaign) });

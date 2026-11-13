@@ -5,9 +5,9 @@ import {
   Send,
   Cake,
   CheckCheck,
-  MessageSquare,
+  MessageCircle,
   Settings,
-  Radio,
+  Smartphone,
 } from 'lucide-react';
 import { WahaStatus } from '../types';
 
@@ -27,102 +27,97 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'contacts', label: 'Kontak Pelanggan', icon: Users },
-    { id: 'broadcasts', label: 'Broadcast WA', icon: Send },
-    { id: 'birthday', label: 'Ucapan Ulang Tahun', icon: Cake },
-    { id: 'tracking', label: 'Lead & Read Tracking', icon: CheckCheck },
-    { id: 'conversations', label: 'Live Chat CRM', icon: MessageSquare },
+    { id: 'broadcasts', label: 'Siaran WhatsApp', icon: Send },
+    { id: 'birthday', label: 'Ulang Tahun', icon: Cake },
+    { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck },
+    { id: 'conversations', label: 'Live Chat CRM', icon: MessageCircle },
     { id: 'settings', label: 'Koneksi WAHA', icon: Settings },
   ];
 
   const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
-  const isScanRequired = wahaStatus?.sessionStatus === 'SCAN_QR_CODE';
 
   return (
-    <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 min-h-screen">
+    <aside className="w-60 bg-[#121622] text-gray-200 flex flex-col h-screen shrink-0 border-r border-[#1E2438] select-none">
       {/* Brand Header */}
-      <div className="h-16 flex items-center px-6 gap-3 border-b border-slate-800">
-        <div className="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-xl border border-emerald-500/20">
-          W
-        </div>
-        <div>
-          <h1 className="font-semibold text-white tracking-wide text-base leading-tight">
+      <div className="h-14 px-4 flex items-center gap-2.5 border-b border-[#1E2438]">
+        <MessageCircle className="w-5 h-5 text-indigo-400 shrink-0" />
+        <div className="min-w-0">
+          <h1 className="font-semibold text-sm text-white tracking-tight truncate">
             CRM WhatsApp
           </h1>
-          <span className="text-xs text-slate-400">Marketing & Lead Engine</span>
+          <p className="text-[11px] text-gray-400 truncate">Reneo Business Suite</p>
         </div>
       </div>
 
-      {/* Nav Menu */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      {/* Navigation Links */}
+      <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+        <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+          Menu Utama
+        </div>
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentTab === item.id;
           return (
             <button
               key={item.id}
+              type="button"
               onClick={() => setCurrentTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] font-medium transition-colors ${
                 isActive
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70'
+                  ? 'bg-[#1E2438] text-white'
+                  : 'text-gray-400 hover:bg-[#1E2438]/60 hover:text-gray-100'
               }`}
             >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-              <span>{item.label}</span>
+              <Icon
+                className={`w-4 h-4 shrink-0 ${
+                  isActive ? 'text-indigo-400' : 'text-gray-400'
+                }`}
+              />
+              <span className="truncate">{item.label}</span>
             </button>
           );
         })}
       </nav>
 
-      {/* WAHA Connection Status Badge */}
-      <div className="p-4 border-t border-slate-800 bg-slate-950/40">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <Radio className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">
-              Status WAHA
+      {/* WAHA Status Card */}
+      <div className="p-3 border-t border-[#1E2438]">
+        <div className="bg-[#181D2D] rounded-md p-3 border border-[#242B42]">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[11px] font-medium text-gray-400">Status WAHA</span>
+            <span
+              className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                isConnected
+                  ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
+                  : 'bg-amber-950/60 text-amber-400 border border-amber-800/60'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isConnected ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+              {isConnected ? 'Terhubung' : 'Terputus'}
             </span>
           </div>
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-              isConnected
-                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                : isScanRequired
-                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
-                : 'bg-red-500/10 text-red-400 border border-red-500/20'
-            }`}
-          >
-            {isConnected ? 'Terhubung' : isScanRequired ? 'Perlu Scan' : 'Offline'}
-          </span>
-        </div>
 
-        <div className="text-xs text-slate-500 mb-3 truncate">
-          Session: <span className="text-slate-300 font-mono">{wahaStatus?.config?.session || 'default'}</span>
-        </div>
+          <p className="text-[11px] text-gray-400 font-mono truncate mb-2.5">
+            {wahaStatus?.sessionStatus || 'CHECKING'}
+          </p>
 
-        {isScanRequired ? (
-          <button
-            onClick={onOpenQrModal}
-            className="w-full py-1.5 px-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold rounded text-xs transition-colors flex items-center justify-center gap-1.5 shadow"
-          >
-            <span>Scan QR WhatsApp</span>
-          </button>
-        ) : !isConnected ? (
-          <button
-            onClick={() => setCurrentTab('settings')}
-            className="w-full py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs transition-colors"
-          >
-            Atur Koneksi
-          </button>
-        ) : (
-          <div className="text-[11px] text-emerald-400/90 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-            Siap mengirim broadcast
-          </div>
-        )}
+          {!isConnected && (
+            <button
+              type="button"
+              onClick={onOpenQrModal}
+              className="w-full h-8 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-md flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Scan QR WhatsApp</span>
+            </button>
+          )}
+        </div>
       </div>
     </aside>
   );
 };
-export default Sidebar;
 
+export default Sidebar;

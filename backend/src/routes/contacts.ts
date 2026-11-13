@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eq, or, ilike, desc, sql } from 'drizzle-orm';
+import { and, eq, or, ilike, desc, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { contacts } from '../db/schema';
 import { normalizePhoneNumber } from '../services/phone.utils';
@@ -32,8 +32,6 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       const limitNum = parseInt(limit, 10) || 100;
       const offset = (pageNum - 1) * limitNum;
 
-      let query = db.select().from(contacts);
-
       const conditions: any[] = [];
       if (search && search.trim()) {
         const s = `%${search.trim()}%`;
@@ -51,10 +49,12 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         conditions.push(ilike(contacts.tags, `%${tag}%`));
       }
 
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
       const allContacts = await db
         .select()
         .from(contacts)
-        .where(conditions.length > 0 ? or(...conditions) : undefined)
+        .where(whereClause)
         .orderBy(desc(contacts.createdAt))
         .limit(limitNum)
         .offset(offset);
@@ -62,7 +62,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       const totalResult = await db
         .select({ count: sql<number>`count(*)` })
         .from(contacts)
-        .where(conditions.length > 0 ? or(...conditions) : undefined);
+        .where(whereClause);
 
       const total = Number(totalResult[0]?.count || 0);
 

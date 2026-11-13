@@ -1,6 +1,7 @@
 import React from 'react';
 import { QrCode, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { WahaStatus, LicenseInfo } from '../types';
+import { Button } from './ui/Button';
 
 interface NavbarProps {
   title: string;
@@ -25,71 +26,67 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isLicenseActive = licenseInfo && !licenseInfo.isExpired;
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-20">
-      <div>
-        <h2 className="text-xl font-bold text-slate-800">{title}</h2>
+    <header className="h-14 bg-white border-b border-gray-200 px-6 flex items-center justify-between sticky top-0 z-20 shrink-0">
+      <div className="min-w-0">
+        <h2 className="text-base font-semibold text-gray-900 truncate">{title}</h2>
       </div>
 
-      <div className="flex items-center gap-3">
-        {/* Reneo Managed License Pill / Button */}
+      <div className="flex items-center gap-2.5 shrink-0">
         {licenseInfo && (
           <button
             type="button"
             onClick={onOpenPlans}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+            className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded text-xs font-medium border transition-colors ${
               isLicenseActive
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 hover:shadow-sm'
-                : 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100 animate-pulse'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                : 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100'
             }`}
-            title="Pilih Paket & Terbitkan Invoice di Reneo"
+            title="Kelola Paket & Lisensi Reneo"
           >
             {isLicenseActive ? (
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
             ) : (
-              <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+              <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
             )}
-            <span>
+            <span className="tabular-nums">
               {isLicenseActive
                 ? `${licenseInfo.plan} (${licenseInfo.daysLeft} hari)`
-                : 'Lisensi Kedaluwarsa (Pilih Paket)'}
+                : 'Lisensi Kedaluwarsa'}
             </span>
           </button>
         )}
 
-        {/* WA Status Pill */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 text-xs font-medium border border-slate-200">
+        <div className="hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded bg-gray-50 text-xs font-medium border border-gray-200 text-gray-700">
           <span
-            className={`w-2 h-2 rounded-full ${
+            className={`w-1.5 h-1.5 rounded-full ${
               isConnected ? 'bg-emerald-500' : 'bg-amber-500'
             }`}
           />
-          <span className="text-slate-600">
-            {isConnected ? 'WhatsApp Aktif' : 'WhatsApp Belum Terhubung'}
-          </span>
+          <span>{isConnected ? 'WhatsApp Aktif' : 'Belum Terhubung'}</span>
         </div>
 
-        {/* Scan QR Button */}
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={onOpenQr}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors"
-          title="Buka QR Code Scanner"
+          leftIcon={<QrCode className="w-3.5 h-3.5" />}
         >
-          <QrCode className="w-3.5 h-3.5" />
-          <span>Scan QR</span>
-        </button>
+          Scan QR
+        </Button>
 
-        {/* Global Refresh Button */}
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={onRefresh}
           disabled={isRefreshing}
-          className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
           title="Segarkan Data"
+          aria-label="Segarkan Data"
         >
-          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-emerald-600' : ''}`} />
-        </button>
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-600' : ''}`} />
+        </Button>
       </div>
     </header>
   );
 };
-export default Navbar;
 
+export default Navbar;

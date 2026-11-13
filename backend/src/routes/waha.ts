@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eq, or, sql } from 'drizzle-orm';
+import { and, eq, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   campaignRecipients,
@@ -107,49 +107,60 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           const recipient = recList[0];
 
           if (recipient) {
-            const updateData: any = { ackStatus: ackValue, updatedAt: now };
+            const currentAck = recipient.ackStatus ?? 0;
+            if (ackValue > currentAck) {
+              const updateData: any = { ackStatus: ackValue, updatedAt: now };
 
-            if (ackValue === 2) {
-              updateData.status = 'DELIVERED';
-              updateData.deliveredAt = now;
+              if (ackValue >= 2 && !recipient.deliveredAt) {
+                updateData.deliveredAt = now;
+                await db
+                  .update(campaigns)
+                  .set({
+                    deliveredCount: sql`${campaigns.deliveredCount} + 1`,
+                    updatedAt: now,
+                  })
+                  .where(eq(campaigns.id, recipient.campaignId));
+              }
+
+              if (ackValue === 2) {
+                updateData.status = 'DELIVERED';
+              } else if (ackValue >= 3) {
+                updateData.status = 'READ';
+                if (!recipient.readAt) {
+                  updateData.readAt = now;
+                  await db
+                    .update(campaigns)
+                    .set({
+                      readCount: sql`${campaigns.readCount} + 1`,
+                      updatedAt: now,
+                    })
+                    .where(eq(campaigns.id, recipient.campaignId));
+                }
+              }
+
               await db
-                .update(campaigns)
-                .set({
-                  deliveredCount: sql`${campaigns.deliveredCount} + 1`,
-                  updatedAt: now,
-                })
-                .where(eq(campaigns.id, recipient.campaignId));
-            } else if (ackValue >= 3) {
-              updateData.status = 'READ';
-              updateData.readAt = now;
-              await db
-                .update(campaigns)
-                .set({
-                  readCount: sql`${campaigns.readCount} + 1`,
-                  updatedAt: now,
-                })
-                .where(eq(campaigns.id, recipient.campaignId));
+                .update(campaignRecipients)
+                .set(updateData)
+                .where(eq(campaignRecipients.id, recipient.id));
             }
-
-            await db
-              .update(campaignRecipients)
-              .set(updateData)
-              .where(eq(campaignRecipients.id, recipient.id));
           }
 
-          // Update ChatMessages if matched
+          // Update ChatMessages if matched (never downgrade ackStatus)
           await db
             .update(chatMessages)
             .set({
               ackStatus: ackValue,
               status: ackValue >= 3 ? 'READ' : ackValue === 2 ? 'DELIVERED' : 'SENT',
-              deliveredAt: ackValue === 2 ? now : undefined,
+              deliveredAt: ackValue >= 2 ? now : undefined,
               readAt: ackValue >= 3 ? now : undefined,
             })
             .where(
-              or(
-                eq(chatMessages.wahaMessageId, msgId),
-                payload.id?.id ? eq(chatMessages.wahaMessageId, payload.id.id) : undefined
+              and(
+                or(
+                  eq(chatMessages.wahaMessageId, msgId),
+                  payload.id?.id ? eq(chatMessages.wahaMessageId, payload.id.id) : undefined
+                ),
+                lt(chatMessages.ackStatus, ackValue)
               )
             );
         }

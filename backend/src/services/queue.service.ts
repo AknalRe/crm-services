@@ -1,5 +1,5 @@
 import { Queue, Worker, Job } from 'bullmq';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, ne, sql } from 'drizzle-orm';
 import { redisConnection } from './redis';
 import { db } from '../db';
 import {
@@ -185,8 +185,8 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           completedAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(eq(campaigns.id, campaignId));
-      console.log(`[Queue Worker] Campaign ${campaignId} marked as COMPLETED.`);
+        .where(and(eq(campaigns.id, campaignId), ne(campaigns.status, 'CANCELLED')));
+      console.log(`[Queue Worker] Campaign ${campaignId} check completed.`);
     }
   },
   {

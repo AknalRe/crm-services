@@ -4,70 +4,71 @@ import { LucideIcon } from 'lucide-react';
 interface StatCardProps {
   title: string;
   value: string | number;
-  subtext?: string;
+  subtitle?: string;
   icon: LucideIcon;
-  color?: 'emerald' | 'blue' | 'indigo' | 'amber' | 'purple' | 'red';
-  badge?: string;
+  color?: 'emerald' | 'blue' | 'amber' | 'rose' | 'indigo' | 'purple';
+  trend?: {
+    value: string;
+    positive?: boolean;
+  };
+  onClick?: () => void;
 }
+
+const ICON_COLOR_CLASSES: Record<NonNullable<StatCardProps['color']>, string> = {
+  emerald: 'text-emerald-600',
+  blue: 'text-blue-600',
+  amber: 'text-amber-600',
+  rose: 'text-red-600',
+  indigo: 'text-indigo-600',
+  purple: 'text-purple-600',
+};
 
 export const StatCard: React.FC<StatCardProps> = ({
   title,
   value,
-  subtext,
+  subtitle,
   icon: Icon,
-  color = 'emerald',
-  badge,
+  color = 'indigo',
+  trend,
+  onClick,
 }) => {
-  const colorMap = {
-    emerald: {
-      bg: 'bg-emerald-50 text-emerald-600 border-emerald-100',
-      badge: 'bg-emerald-100 text-emerald-800',
-    },
-    blue: {
-      bg: 'bg-blue-50 text-blue-600 border-blue-100',
-      badge: 'bg-blue-100 text-blue-800',
-    },
-    indigo: {
-      bg: 'bg-indigo-50 text-indigo-600 border-indigo-100',
-      badge: 'bg-indigo-100 text-indigo-800',
-    },
-    amber: {
-      bg: 'bg-amber-50 text-amber-600 border-amber-100',
-      badge: 'bg-amber-100 text-amber-800',
-    },
-    purple: {
-      bg: 'bg-purple-50 text-purple-600 border-purple-100',
-      badge: 'bg-purple-100 text-purple-800',
-    },
-    red: {
-      bg: 'bg-red-50 text-red-600 border-red-100',
-      badge: 'bg-red-100 text-red-800',
-    },
-  };
-
-  const selectedColor = colorMap[color] || colorMap.emerald;
-
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow transition-shadow">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{title}</span>
-        <div className={`w-9 h-9 rounded-lg flex items-center justify-center border ${selectedColor.bg}`}>
-          <Icon className="w-5 h-5" />
+    <div
+      onClick={onClick}
+      className={`bg-white rounded-lg p-5 border border-gray-200 transition-colors ${
+        onClick ? 'cursor-pointer hover:border-gray-300' : ''
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wider truncate">
+            {title}
+          </p>
+          <div className="mt-1.5 flex items-baseline gap-2.5 flex-wrap">
+            <h3 className="text-2xl font-bold text-gray-900 tracking-tight tabular-nums">
+              {value}
+            </h3>
+            {trend && (
+              <span
+                className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${
+                  trend.positive
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-red-50 text-red-700 border border-red-200'
+                }`}
+              >
+                {trend.value}
+              </span>
+            )}
+          </div>
+          {subtitle && (
+            <p className="mt-1.5 text-xs text-gray-500 truncate">{subtitle}</p>
+          )}
         </div>
-      </div>
 
-      <div className="mt-3 flex items-baseline gap-2">
-        <span className="text-2xl font-bold text-slate-800">{value}</span>
-        {badge && (
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${selectedColor.badge}`}>
-            {badge}
-          </span>
-        )}
+        <Icon className={`w-5 h-5 shrink-0 mt-0.5 ${ICON_COLOR_CLASSES[color]}`} />
       </div>
-
-      {subtext && <p className="mt-1 text-xs text-slate-500">{subtext}</p>}
     </div>
   );
 };
-export default StatCard;
 
+export default StatCard;

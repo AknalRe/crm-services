@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import QRCodeModal from './components/QRCodeModal';
 import { PlansModal } from './components/PlansModal';
+import { ToastProvider } from './components/ui/ToastProvider';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Broadcasts from './pages/Broadcasts';
@@ -13,7 +14,7 @@ import Settings from './pages/Settings';
 import api from './services/api';
 import { WahaStatus, LicenseInfo } from './types';
 
-export function App() {
+function AppShell() {
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [wahaStatus, setWahaStatus] = useState<WahaStatus | null>(null);
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
@@ -42,8 +43,11 @@ export function App() {
 
   const handleGlobalRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([fetchWahaStatus(), fetchLicenseStatus()]);
-    setTimeout(() => setIsRefreshing(false), 600);
+    try {
+      await Promise.all([fetchWahaStatus(), fetchLicenseStatus()]);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   useEffect(() => {
@@ -68,11 +72,11 @@ export function App() {
       case 'contacts':
         return 'Data Kontak Pelanggan';
       case 'broadcasts':
-        return 'WhatsApp Broadcast Engine';
+        return 'Siaran WhatsApp';
       case 'birthday':
         return 'Ucapan Ulang Tahun Otomatis';
       case 'tracking':
-        return 'Lead Status & Delivery Receipts';
+        return 'Pelacakan Status Pengiriman';
       case 'conversations':
         return 'Live Chat CRM WhatsApp';
       case 'settings':
@@ -83,8 +87,7 @@ export function App() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden font-sans">
-      {/* Sidebar Navigation */}
+    <div className="flex h-screen bg-[#F5F6FA] text-gray-900 overflow-hidden font-sans">
       <Sidebar
         currentTab={currentTab}
         setCurrentTab={(tab) => {
@@ -95,7 +98,6 @@ export function App() {
         onOpenQrModal={() => setIsQrModalOpen(true)}
       />
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Navbar
           title={getPageTitle()}
@@ -107,7 +109,7 @@ export function App() {
           isRefreshing={isRefreshing}
         />
 
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="flex-1 overflow-y-auto p-6">
           <div className="max-w-7xl mx-auto">
             {currentTab === 'dashboard' && <Dashboard onNavigate={setCurrentTab} />}
             {currentTab === 'contacts' && (
@@ -130,14 +132,12 @@ export function App() {
         </main>
       </div>
 
-      {/* QR Code Scanner Modal */}
       <QRCodeModal
         isOpen={isQrModalOpen}
         onClose={() => setIsQrModalOpen(false)}
         onStatusChange={(newStatus) => setWahaStatus(newStatus)}
       />
 
-      {/* Reneo License Plans & Invoice Modal */}
       <PlansModal
         isOpen={isPlansModalOpen}
         onClose={() => setIsPlansModalOpen(false)}
@@ -148,5 +148,12 @@ export function App() {
   );
 }
 
-export default App;
+export function App() {
+  return (
+    <ToastProvider>
+      <AppShell />
+    </ToastProvider>
+  );
+}
 
+export default App;
