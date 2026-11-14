@@ -12,10 +12,13 @@ import dashboardRouter from './routes/dashboard';
 import licenseRouter from './routes/license';
 import authRouter from './routes/auth';
 import eventsRouter from './routes/events';
+import publicCsatRouter from './routes/publicCsat';
+import agentsRouter from './routes/agents';
 import { BirthdayService } from './services/birthday.service';
 import './services/queue.service'; // Start BullMQ worker
 
 const fastify = Fastify({
+  bodyLimit: 15 * 1024 * 1024,
   logger: {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
   },
@@ -46,6 +49,8 @@ async function main() {
   await fastify.register(wahaRouter, { prefix: '/api/waha' });
   await fastify.register(licenseRouter, { prefix: '/api/license' });
   await fastify.register(eventsRouter, { prefix: '/api/events' });
+  await fastify.register(publicCsatRouter, { prefix: '/api/public/csat' });
+  await fastify.register(agentsRouter, { prefix: '/api/agents' });
 
   // Initialize DB Schema (PostgreSQL)
   try {

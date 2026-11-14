@@ -77,13 +77,35 @@ export async function initDb() {
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
         contact_id TEXT NOT NULL UNIQUE REFERENCES contacts(id) ON DELETE CASCADE,
+        waha_session TEXT,
+        status TEXT NOT NULL DEFAULT 'OPEN',
+        labels TEXT,
         last_message TEXT,
         last_message_at TIMESTAMP,
         unread_count INTEGER NOT NULL DEFAULT 0,
+        first_inbound_at TIMESTAMP,
+        first_response_at TIMESTAMP,
+        resolved_at TIMESTAMP,
+        csat_token TEXT UNIQUE,
+        csat_rating INTEGER,
+        csat_feedback TEXT,
+        csat_submitted_at TIMESTAMP,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_agent_id TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_agent_name TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'OPEN';`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS labels TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS first_inbound_at TIMESTAMP;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMP;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_token TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_rating INTEGER;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_feedback TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_submitted_at TIMESTAMP;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS chat_messages (
@@ -91,8 +113,12 @@ export async function initDb() {
         conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         direction TEXT NOT NULL,
+        message_type TEXT NOT NULL DEFAULT 'TEXT',
+        waha_session TEXT,
         body TEXT NOT NULL,
         media_url TEXT,
+        media_type TEXT,
+        media_name TEXT,
         waha_message_id TEXT UNIQUE,
         status TEXT NOT NULL DEFAULT 'PENDING',
         ack_status INTEGER NOT NULL DEFAULT 0,
@@ -102,6 +128,10 @@ export async function initDb() {
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_type TEXT NOT NULL DEFAULT 'TEXT';`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_type TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS birthday_settings (
@@ -121,6 +151,31 @@ export async function initDb() {
       CREATE TABLE IF NOT EXISTS system_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_agents (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'AGENT',
+        permissions TEXT NOT NULL DEFAULT '["dashboard","conversations","contacts"]',
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS canned_responses (
+        id TEXT PRIMARY KEY,
+        short_code TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;

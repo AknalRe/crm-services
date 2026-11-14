@@ -64,9 +64,21 @@ export interface CampaignRecipient {
 export interface Conversation {
   id: string;
   contactId: string;
+  wahaSession?: string | null;
+  status?: 'OPEN' | 'PENDING' | 'RESOLVED';
+  labels?: string | null;
   lastMessage?: string | null;
   lastMessageAt?: string | null;
+  assignedAgentId?: string | null;
+  assignedAgentName?: string | null;
   unreadCount: number;
+  firstInboundAt?: string | null;
+  firstResponseAt?: string | null;
+  resolvedAt?: string | null;
+  csatToken?: string | null;
+  csatRating?: number | null;
+  csatFeedback?: string | null;
+  csatSubmittedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   contact: Contact;
@@ -77,8 +89,12 @@ export interface ChatMessage {
   conversationId: string;
   contactId: string;
   direction: 'INBOUND' | 'OUTBOUND';
+  messageType?: 'TEXT' | 'MEDIA' | 'NOTE' | 'CSAT';
+  wahaSession?: string | null;
   body: string;
   mediaUrl?: string | null;
+  mediaType?: 'image' | 'document' | 'audio' | 'video' | null;
+  mediaName?: string | null;
   wahaMessageId?: string | null;
   status: string;
   ackStatus: number;
@@ -86,6 +102,53 @@ export interface ChatMessage {
   deliveredAt?: string | null;
   readAt?: string | null;
   createdAt: string;
+}
+
+export interface ConversationAnalytics {
+  totalConversations: number;
+  openCount: number;
+  pendingCount: number;
+  resolvedCount: number;
+  avgFirstResponseSeconds: number | null;
+  avgResolutionSeconds: number | null;
+  slaTargetSeconds: number;
+  slaMeasuredCount: number;
+  slaMetCount: number;
+  slaBreachedCount: number;
+  slaComplianceRate: number | null;
+  csatCount: number;
+  csatAverage: number | null;
+  csatDistribution: Record<number, number>;
+  recentCsat: Array<{
+    conversationId: string;
+    contactName: string;
+    phone: string;
+    wahaSession: string | null;
+    rating: number;
+    feedback: string | null;
+    submittedAt: string | null;
+  }>;
+  bySession: Array<{
+    session: string;
+    count: number;
+    resolvedCount: number;
+    avgCsat: number | null;
+  }>;
+  byAgent?: Array<{
+    agentName: string;
+    count: number;
+    resolvedCount: number;
+    slaRate: number | null;
+    avgCsat: number | null;
+  }>;
+}
+
+export interface CannedResponse {
+  id: string;
+  shortCode: string;
+  title: string;
+  content: string;
+  createdAt?: string;
 }
 
 export interface DashboardStats {
@@ -102,6 +165,7 @@ export interface DashboardStats {
     readRate: number;
     birthdayTodayCount: number;
   };
+  conversationAnalytics?: ConversationAnalytics;
   recentCampaigns: Campaign[];
   recentActivity: CampaignRecipient[];
 }
@@ -149,9 +213,37 @@ export interface AuthStatus {
   initialized: boolean;
   authenticated: boolean;
   user: {
+    id?: string;
     name: string;
     email: string;
+    role?: 'ADMIN' | 'AGENT';
+    permissions?: string[];
   } | null;
+}
+
+export interface AgentItem {
+  id: string;
+  name: string;
+  email: string;
+  role: 'ADMIN' | 'AGENT';
+  permissions: string[];
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AgentQuota {
+  multiAgent: boolean;
+  maxAgents: number;
+  currentCount: number;
+  plan: string;
+}
+
+export interface CrmSlaCsatSettings {
+  csatTemplate: string;
+  csatAutoOnResolve: boolean;
+  slaTargetMinutes: number;
+  csatBaseUrl?: string;
 }
 
 export interface LicenseInfo {
@@ -164,6 +256,7 @@ export interface LicenseInfo {
   managedByReneo: boolean;
   reneoBillingUrl: string;
   licenseKey?: string;
+  publicUrls?: string[];
   features: {
     unlimitedBroadcast: boolean;
     birthdayAutomation: boolean;
@@ -171,6 +264,8 @@ export interface LicenseInfo {
     multiSession: boolean;
     maxSessions: number;
     maxContacts: number;
+    multiAgent?: boolean;
+    maxAgents?: number;
   };
 }
 

@@ -14,6 +14,7 @@ export interface LicenseInfo {
   managedByReneo: boolean;
   reneoBillingUrl: string;
   licenseKey?: string;
+  publicUrls?: string[];
   features: {
     unlimitedBroadcast: boolean;
     maxBroadcastPerMonth: number;
@@ -24,6 +25,8 @@ export interface LicenseInfo {
     maxContacts: number;
     maxTemplates: number;
     maxUsers: number;
+    multiAgent: boolean;
+    maxAgents: number;
     apiAccess: boolean;
     supportPriority: string;
   };
@@ -40,6 +43,8 @@ function buildLockedFeatures(): LicenseInfo['features'] {
     maxContacts: 0,
     maxTemplates: 0,
     maxUsers: 0,
+    multiAgent: false,
+    maxAgents: 0,
     apiAccess: false,
     supportPriority: 'standard',
   };
@@ -91,8 +96,19 @@ function resolveFeatures(raw: any, isExpired: boolean, planName?: string): Licen
       : 10000;
   const maxTemplates =
     typeof src.maxTemplates === 'number' && src.maxTemplates >= 0 ? src.maxTemplates : 0;
-  const maxUsers =
-    typeof src.maxUsers === 'number' && src.maxUsers > 0 ? src.maxUsers : 1;
+  const multiAgent =
+    src.multiAgent !== undefined ? Boolean(src.multiAgent) : !isStarter;
+  const maxAgents =
+    typeof src.maxAgents === 'number' && src.maxAgents > 0
+      ? src.maxAgents
+      : typeof src.maxUsers === 'number' && src.maxUsers > 0
+      ? src.maxUsers
+      : multiAgent
+      ? isEnterprise
+        ? 25
+        : 5
+      : 1;
+  const maxUsers = maxAgents;
   const apiAccess =
     src.apiAccess !== undefined ? Boolean(src.apiAccess) : !isStarter;
   const supportPriority =
@@ -114,6 +130,8 @@ function resolveFeatures(raw: any, isExpired: boolean, planName?: string): Licen
     maxContacts,
     maxTemplates,
     maxUsers,
+    multiAgent,
+    maxAgents,
     apiAccess,
     supportPriority,
   };
@@ -246,6 +264,7 @@ export class LicenseService {
               isExpired,
               managedByReneo: true,
               reneoBillingUrl: data.billingUrl || `${reneoUrl}/hosting`,
+              publicUrls: Array.isArray(data.publicUrls) ? data.publicUrls.map(String) : undefined,
               licenseKey: data.licenseKey,
               features,
             };

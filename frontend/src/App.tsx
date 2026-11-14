@@ -13,6 +13,7 @@ import BirthdayAutomation from './pages/BirthdayAutomation';
 import Tracking from './pages/Tracking';
 import Conversations from './pages/Conversations';
 import Settings from './pages/Settings';
+import PublicCsatPage from './pages/PublicCsatPage';
 import api from './services/api';
 import { subscribeLiveEvent } from './services/liveEvents';
 import { AuthStatus, WahaStatus, LicenseInfo } from './types';
@@ -130,6 +131,16 @@ function AppShell() {
     };
   }, [authStatus?.authenticated]);
 
+  useEffect(() => {
+    const user = authStatus?.user;
+    if (!user || user.role === 'ADMIN' || !Array.isArray(user.permissions) || user.permissions.length === 0) {
+      return;
+    }
+    if (!user.permissions.includes(currentTab)) {
+      setCurrentTab(user.permissions[0]);
+    }
+  }, [authStatus?.user, currentTab]);
+
   const handleStartBroadcastWithContacts = (contactIds: string[]) => {
     setPreselectedContactIds(contactIds);
     setCurrentTab('broadcasts');
@@ -150,7 +161,7 @@ function AppShell() {
       case 'conversations':
         return 'Live Chat CRM WhatsApp';
       case 'settings':
-        return 'Koneksi Server WhatsApp WAHA';
+        return 'Pengaturan & Koneksi WAHA';
       default:
         return 'CRM WhatsApp Services';
     }
@@ -209,6 +220,15 @@ function AppShell() {
         }}
         wahaStatus={wahaStatus}
         licenseInfo={licenseInfo}
+        user={authStatus?.user}
+        onLogout={async () => {
+          try {
+            await api.logoutAuth();
+          } catch {
+            // ignore
+          }
+          setAuthStatus({ initialized: true, authenticated: false, user: null });
+        }}
         onOpenQrModal={() => setIsQrModalOpen(true)}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
@@ -246,6 +266,7 @@ function AppShell() {
             {currentTab === 'conversations' && (
               <Conversations
                 licenseInfo={licenseInfo}
+                currentUser={authStatus?.user}
                 onOpenPlans={() => setIsPlansModalOpen(true)}
               />
             )}
@@ -253,6 +274,7 @@ function AppShell() {
               <Settings
                 wahaStatus={wahaStatus}
                 licenseInfo={licenseInfo}
+                currentUser={authStatus?.user}
                 onOpenPlans={() => setIsPlansModalOpen(true)}
                 onRefreshStatus={fetchWahaStatus}
                 onOpenQr={(sessionName?: string) => {
@@ -287,6 +309,17 @@ function AppShell() {
 }
 
 export function App() {
+  const isCsatRoute =
+    typeof window !== 'undefined' && /\/csat\/?$/i.test(window.location.pathname);
+
+  if (isCsatRoute) {
+    return (
+      <ToastProvider>
+        <PublicCsatPage />
+      </ToastProvider>
+    );
+  }
+
   return (
     <ToastProvider>
       <AppShell />

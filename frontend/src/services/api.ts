@@ -14,6 +14,10 @@ import {
   LicensePlan,
   LicenseOrder,
   PaymentMethodItem,
+  AgentItem,
+  AgentQuota,
+  CrmSlaCsatSettings,
+  CannedResponse,
 } from '../types';
 
 const client = axios.create({
@@ -105,9 +109,64 @@ export const api = {
     const res = await client.get(`/conversations/${id}/messages`);
     return res.data.data;
   },
-  sendConversationMessage: async (id: string, body: string, session?: string): Promise<ChatMessage> => {
-    const res = await client.post(`/conversations/${id}/messages`, { body, session });
+  sendConversationMessage: async (
+    id: string,
+    payload: {
+      body?: string;
+      session?: string;
+      mediaBase64?: string;
+      mediaMimetype?: string;
+      mediaName?: string;
+    }
+  ): Promise<ChatMessage> => {
+    const res = await client.post(`/conversations/${id}/messages`, payload);
     return res.data.data;
+  },
+  updateConversation: async (
+    id: string,
+    payload: {
+      status?: 'OPEN' | 'PENDING' | 'RESOLVED';
+      labels?: string | null;
+      wahaSession?: string | null;
+      contactNotes?: string | null;
+      contactTags?: string | null;
+      assignedAgentId?: string | null;
+      sendCsat?: boolean;
+      baseUrl?: string;
+    }
+  ): Promise<{ csatSent?: boolean }> => {
+    const res = await client.patch(`/conversations/${id}`, payload);
+    return res.data.data || {};
+  },
+  addConversationNote: async (id: string, body: string): Promise<ChatMessage> => {
+    const res = await client.post(`/conversations/${id}/notes`, { body });
+    return res.data.data;
+  },
+  sendConversationCsatCta: async (
+    id: string,
+    payload: { session?: string; baseUrl?: string; customMessage?: string }
+  ): Promise<{ message: ChatMessage; csatUrl: string; csatToken: string }> => {
+    const res = await client.post(`/conversations/${id}/csat-cta`, payload);
+    return res.data.data;
+  },
+  getPublicCsat: async (
+    token: string
+  ): Promise<{
+    contactName: string;
+    alreadyRated: boolean;
+    rating?: number | null;
+    feedback?: string | null;
+    submittedAt?: string | null;
+  }> => {
+    const res = await client.get(`/public/csat/${encodeURIComponent(token)}`);
+    return res.data.data;
+  },
+  submitPublicCsat: async (
+    token: string,
+    payload: { rating: number; feedback?: string }
+  ): Promise<any> => {
+    const res = await client.post(`/public/csat/${encodeURIComponent(token)}`, payload);
+    return res.data;
   },
 
   // WAHA & WhatsApp Integration
@@ -179,6 +238,75 @@ export const api = {
   getAuthStatus: async (): Promise<AuthStatus> => {
     const res = await client.get('/auth/status');
     return res.data.data;
+  },
+  // CRM CSAT Template & SLA Settings
+  getCrmSettings: async (): Promise<CrmSlaCsatSettings> => {
+    const res = await client.get('/settings');
+    return res.data.data.crm;
+  },
+  updateCrmSettings: async (data: Partial<CrmSlaCsatSettings>): Promise<CrmSlaCsatSettings> => {
+    const res = await client.post('/settings/crm', data);
+    return res.data.data;
+  },
+
+  // Multi-Agent Management
+  getAgents: async (): Promise<{ agents: AgentItem[]; quota: AgentQuota }> => {
+    const res = await client.get('/agents');
+    return res.data.data;
+  },
+  createAgent: async (data: {
+    name: string;
+    email: string;
+    password: string;
+    role: 'ADMIN' | 'AGENT';
+    permissions: string[];
+  }): Promise<AgentItem> => {
+    const res = await client.post('/agents', data);
+    return res.data.data;
+  },
+  updateAgent: async (
+    id: string,
+    data: {
+      name?: string;
+      email?: string;
+      password?: string;
+      role?: 'ADMIN' | 'AGENT';
+      permissions?: string[];
+      isActive?: boolean;
+    }
+  ): Promise<AgentItem> => {
+    const res = await client.patch(`/agents/${id}`, data);
+    return res.data.data;
+  },
+  deleteAgent: async (id: string): Promise<void> => {
+    await client.delete(`/agents/${id}`);
+  },
+
+  // Open Conversation with any contact
+  openConversation: async (contactId: string, session?: string): Promise<Conversation> => {
+    const res = await client.post('/conversations/open', { contactId, session });
+    return res.data.data;
+  },
+
+  // Assignable Agents & Canned Responses
+  getAssignableAgents: async (): Promise<Array<{ id: string; name: string; email: string; role: string }>> => {
+    const res = await client.get('/conversations/agents');
+    return res.data.data;
+  },
+  getCannedResponses: async (): Promise<CannedResponse[]> => {
+    const res = await client.get('/conversations/canned');
+    return res.data.data;
+  },
+  createCannedResponse: async (data: {
+    shortCode: string;
+    title: string;
+    content: string;
+  }): Promise<CannedResponse> => {
+    const res = await client.post('/conversations/canned', data);
+    return res.data.data;
+  },
+  deleteCannedResponse: async (id: string): Promise<void> => {
+    await client.delete(`/conversations/canned/${id}`);
   },
   setupAuth: async (payload: { name: string; email: string; password: string }): Promise<{ user: { name: string; email: string } }> => {
     const res = await client.post('/auth/setup', payload);

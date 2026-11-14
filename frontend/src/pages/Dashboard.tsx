@@ -9,6 +9,10 @@ import {
   Clock,
   ArrowUpRight,
   TrendingUp,
+  MessageSquare,
+  Star,
+  ShieldCheck,
+  Smartphone,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { Button } from '../components/ui/Button';
@@ -19,6 +23,17 @@ import { DashboardStats } from '../types';
 
 interface DashboardProps {
   onNavigate: (tab: string) => void;
+}
+
+function formatDurationShort(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return '-';
+  if (seconds < 60) return `${seconds} dtk`;
+  const mins = Math.floor(seconds / 60);
+  const remSec = seconds % 60;
+  if (mins < 60) return remSec > 0 ? `${mins}m ${remSec}d` : `${mins} mnt`;
+  const hours = Math.floor(mins / 60);
+  const remMin = mins % 60;
+  return remMin > 0 ? `${hours}j ${remMin}m` : `${hours} jam`;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
@@ -95,6 +110,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     deliveryRate: 0,
     readRate: 0,
     birthdayTodayCount: 0,
+  };
+
+  const convAnalytics = stats?.conversationAnalytics || {
+    totalConversations: 0,
+    openCount: 0,
+    pendingCount: 0,
+    resolvedCount: 0,
+    avgFirstResponseSeconds: null,
+    avgResolutionSeconds: null,
+    slaTargetSeconds: 900,
+    slaMeasuredCount: 0,
+    slaMetCount: 0,
+    slaBreachedCount: 0,
+    slaComplianceRate: null,
+    csatCount: 0,
+    csatAverage: null,
+    csatDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    recentCsat: [],
+    bySession: [],
   };
 
   return (
@@ -277,6 +311,227 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+
+      {/* Chatwoot-style Conversation, SLA & CSAT Analytics */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+                <MessageSquare className="w-4 h-4 text-indigo-600" />
+                <span>Analitik Percakapan &amp; SLA Live Chat</span>
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Metrik respon awal (FRT), waktu penyelesaian, dan kepatuhan SLA (target &le;{' '}
+                {Math.max(1, Math.round((convAnalytics.slaTargetSeconds || 900) / 60))} menit)
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate('conversations')}
+              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-0.5"
+            >
+              Buka Live Chat <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 rounded-md bg-gray-50 border border-gray-200">
+              <span className="text-[11px] text-gray-500 block">Rata-rata Respon Awal</span>
+              <span className="text-base font-bold text-gray-900 font-mono tabular-nums mt-0.5 block">
+                {formatDurationShort(convAnalytics.avgFirstResponseSeconds)}
+              </span>
+              <span className="text-[10px] text-gray-400">First Response Time</span>
+            </div>
+            <div className="p-3 rounded-md bg-gray-50 border border-gray-200">
+              <span className="text-[11px] text-gray-500 block">Rata-rata Penyelesaian</span>
+              <span className="text-base font-bold text-gray-900 font-mono tabular-nums mt-0.5 block">
+                {formatDurationShort(convAnalytics.avgResolutionSeconds)}
+              </span>
+              <span className="text-[10px] text-gray-400">Resolution Time</span>
+            </div>
+            <div className="p-3 rounded-md bg-emerald-50/70 border border-emerald-200">
+              <span className="text-[11px] text-emerald-700 flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3" />
+                Kepatuhan SLA
+              </span>
+              <span className="text-base font-bold text-emerald-800 font-mono tabular-nums mt-0.5 block">
+                {convAnalytics.slaComplianceRate !== null
+                  ? `${convAnalytics.slaComplianceRate}%`
+                  : '-'}
+              </span>
+              <span className="text-[10px] text-emerald-700/80">
+                {convAnalytics.slaMetCount}/{convAnalytics.slaMeasuredCount} tepat waktu
+              </span>
+            </div>
+            <div className="p-3 rounded-md bg-indigo-50/70 border border-indigo-200">
+              <span className="text-[11px] text-indigo-700 block">Status Percakapan</span>
+              <div className="flex items-center gap-2 mt-1 text-[11px] font-semibold tabular-nums">
+                <span className="text-blue-700">{convAnalytics.openCount} Open</span>
+                <span className="text-amber-700">{convAnalytics.pendingCount} Wait</span>
+                <span className="text-emerald-700">{convAnalytics.resolvedCount} Done</span>
+              </div>
+              <span className="text-[10px] text-indigo-700/80">
+                Total {convAnalytics.totalConversations} obrolan
+              </span>
+            </div>
+          </div>
+
+          {convAnalytics.bySession.length > 0 && (
+            <div className="pt-3 border-t border-gray-200">
+              <span className="text-[11px] font-semibold text-gray-600 block mb-2">
+                Distribusi per Sesi WhatsApp
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {convAnalytics.bySession.map((sess) => (
+                  <div
+                    key={sess.session}
+                    className="flex items-center justify-between px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 text-xs"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span className="font-mono text-[11px] font-medium text-gray-800 truncate">
+                        {sess.session}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] tabular-nums shrink-0">
+                      <span className="text-gray-700 font-semibold">{sess.count} chat</span>
+                      {sess.avgCsat !== null && (
+                        <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                          {sess.avgCsat}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col justify-between space-y-4">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+                  <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
+                  <span>Hasil Rating CSAT</span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">Kepuasan pelanggan dari tautan CTA</p>
+              </div>
+              <div className="text-right">
+                <span className="text-xl font-bold text-gray-900 font-mono tabular-nums">
+                  {convAnalytics.csatAverage !== null ? convAnalytics.csatAverage.toFixed(1) : '-'}
+                </span>
+                <span className="text-[11px] text-gray-400 block">
+                  / 5.0 ({convAnalytics.csatCount} nilai)
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              {[5, 4, 3, 2, 1].map((star) => {
+                const count = convAnalytics.csatDistribution?.[star] || 0;
+                const pct =
+                  convAnalytics.csatCount > 0
+                    ? Math.round((count / convAnalytics.csatCount) * 100)
+                    : 0;
+                return (
+                  <div key={star} className="flex items-center gap-2 text-[11px]">
+                    <span className="w-8 font-mono text-gray-600 flex items-center gap-0.5">
+                      {star}
+                      <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-500" />
+                    </span>
+                    <div className="flex-1 bg-gray-100 rounded h-1.5 overflow-hidden">
+                      <div
+                        className="bg-amber-400 h-1.5 rounded transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="w-6 text-right font-mono text-gray-500 tabular-nums">
+                      {count}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-gray-200 space-y-2">
+            <span className="text-[11px] font-semibold text-gray-600 block">Ulasan Terbaru</span>
+            {convAnalytics.recentCsat.length === 0 ? (
+              <p className="text-[11px] text-gray-400">
+                Belum ada ulasan CSAT masuk. Kirim tautan CSAT dari Live Chat CRM.
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                {convAnalytics.recentCsat.map((item) => (
+                  <div
+                    key={item.conversationId}
+                    className="p-2 rounded bg-amber-50/60 border border-amber-200 text-[11px]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-gray-900 truncate">
+                        {item.contactName}
+                      </span>
+                      <span className="inline-flex items-center gap-0.5 font-mono font-semibold text-amber-800 shrink-0">
+                        <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                        {item.rating}
+                      </span>
+                    </div>
+                    {item.feedback && (
+                      <p className="text-gray-600 truncate mt-0.5 italic">"{item.feedback}"</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Per-Agent Performance Breakdown */}
+      {convAnalytics.byAgent && convAnalytics.byAgent.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-semibold text-gray-900 text-sm">Performa Percakapan per Agent</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Ringkasan jumlah obrolan, tingkat selesai, kepatuhan SLA, dan rata-rata CSAT masing-masing agent
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
+                  <th className="py-2 pr-3 font-medium">Agent</th>
+                  <th className="py-2 px-3 font-medium">Total Obrolan</th>
+                  <th className="py-2 px-3 font-medium">Selesai</th>
+                  <th className="py-2 px-3 font-medium">Kepatuhan SLA</th>
+                  <th className="py-2 pl-3 font-medium text-right">Rata-rata CSAT</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {convAnalytics.byAgent.map((ag) => (
+                  <tr key={ag.agentName} className="hover:bg-gray-50/70">
+                    <td className="py-2 pr-3 font-medium text-gray-900">{ag.agentName}</td>
+                    <td className="py-2 px-3 font-mono">{ag.count}</td>
+                    <td className="py-2 px-3 font-mono text-emerald-700">{ag.resolvedCount}</td>
+                    <td className="py-2 px-3 font-mono">
+                      {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
+                    </td>
+                    <td className="py-2 pl-3 font-mono text-right">
+                      {ag.avgCsat !== null ? `${ag.avgCsat}/5` : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Campaigns & Activity Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

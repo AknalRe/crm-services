@@ -12,17 +12,40 @@ import {
   Plus,
   Check,
   Trash2,
+  Users,
+  Clock,
+  Star,
+  Edit3,
+  UserPlus,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { LicenseInfo, WahaSessionItem, WahaStatus } from '../types';
+import {
+  AgentItem,
+  AgentQuota,
+  AuthStatus,
+  LicenseInfo,
+  WahaSessionItem,
+  WahaStatus,
+} from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
 
+const PERMISSION_OPTIONS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'contacts', label: 'Kontak Pelanggan' },
+  { id: 'broadcasts', label: 'Siaran WhatsApp' },
+  { id: 'birthday', label: 'Ulang Tahun' },
+  { id: 'tracking', label: 'Pelacakan Status' },
+  { id: 'conversations', label: 'Live Chat CRM' },
+  { id: 'settings', label: 'Pengaturan & WAHA' },
+];
+
 interface SettingsProps {
   wahaStatus: WahaStatus | null;
   licenseInfo?: LicenseInfo | null;
+  currentUser?: AuthStatus['user'] | null;
   onOpenPlans?: () => void;
   onRefreshStatus: () => void;
   onOpenQr: (sessionName?: string) => void;
@@ -31,6 +54,7 @@ interface SettingsProps {
 export const Settings: React.FC<SettingsProps> = ({
   wahaStatus,
   licenseInfo,
+  currentUser,
   onOpenPlans,
   onRefreshStatus,
   onOpenQr,
@@ -60,6 +84,161 @@ export const Settings: React.FC<SettingsProps> = ({
   const [sessionActionLoading, setSessionActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'stop' | 'logout' | null>(null);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
+
+  // CRM CSAT Template & SLA state
+  const [csatTemplate, setCsatTemplate] = useState(
+    'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}'
+  );
+  const [csatAutoOnResolve, setCsatAutoOnResolve] = useState(false);
+  const [slaTargetMinutes, setSlaTargetMinutes] = useState(15);
+  const [csatBaseUrl, setCsatBaseUrl] = useState('');
+  const [savingCrm, setSavingCrm] = useState(false);
+
+  // Multi-Agent state (ADMIN only)
+  const isAdmin = !currentUser || currentUser.role !== 'AGENT';
+  const [agents, setAgents] = useState<AgentItem[]>([]);
+  const [agentQuota, setAgentQuota] = useState<AgentQuota | null>(null);
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [showAgentForm, setShowAgentForm] = useState(false);
+  const [agentName, setAgentName] = useState('');
+  const [agentEmail, setAgentEmail] = useState('');
+  const [agentPassword, setAgentPassword] = useState('');
+  const [agentRole, setAgentRole] = useState<'ADMIN' | 'AGENT'>('AGENT');
+  const [agentPermissions, setAgentPermissions] = useState<string[]>(['dashboard', 'contacts', 'conversations']);
+  const [savingAgent, setSavingAgent] = useState(false);
+  const [confirmDeleteAgent, setConfirmDeleteAgent] = useState<AgentItem | null>(null);
+
+  const fetchCrmSettings = useCallback(async () => {
+    try {
+      const crm = await api.getCrmSettings();
+      if (crm) {
+        setCsatTemplate(crm.csatTemplate);
+        setCsatAutoOnResolve(Boolean(crm.csatAutoOnResolve));
+        setSlaTargetMinutes(crm.slaTargetMinutes || 15);
+        setCsatBaseUrl(crm.csatBaseUrl || '');
+      }
+    } catch {
+      // keep defaults
+    }
+  }, []);
+
+  const fetchAgents = useCallback(async () => {
+    if (!isAdmin) return;
+    setAgentsLoading(true);
+    try {
+      const data = await api.getAgents();
+      setAgents(data.agents || []);
+      setAgentQuota(data.quota || null);
+    } catch {
+      setAgents([]);
+    } finally {
+      setAgentsLoading(false);
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    void fetchCrmSettings();
+    void fetchAgents();
+  }, [fetchCrmSettings, fetchAgents]);
+
+  const handleSaveCrmSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingCrm(true);
+    try {
+      await api.updateCrmSettings({
+        csatTemplate,
+        csatAutoOnResolve,
+        slaTargetMinutes: Math.max(1, Math.min(1440, Number(slaTargetMinutes) || 15)),
+        csatBaseUrl: csatBaseUrl.trim().replace(/\/+$/, ''),
+      });
+      toast.success('Pengaturan CSAT & SLA berhasil disimpan.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menyimpan pengaturan CSAT & SLA.');
+    } finally {
+      setSavingCrm(false);
+    }
+  };
+
+  const resetAgentForm = () => {
+    setEditingAgentId(null);
+    setAgentName('');
+    setAgentEmail('');
+    setAgentPassword('');
+    setAgentRole('AGENT');
+    setAgentPermissions(['dashboard', 'contacts', 'conversations']);
+    setShowAgentForm(false);
+  };
+
+  const handleStartEditAgent = (agent: AgentItem) => {
+    setEditingAgentId(agent.id);
+    setAgentName(agent.name);
+    setAgentEmail(agent.email);
+    setAgentPassword('');
+    setAgentRole(agent.role);
+    setAgentPermissions(agent.permissions || []);
+    setShowAgentForm(true);
+  };
+
+  const togglePermission = (perm: string) => {
+    setAgentPermissions((prev) =>
+      prev.includes(perm) ? prev.filter((p) => p !== perm) : [...prev, perm]
+    );
+  };
+
+  const handleSaveAgent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingAgent(true);
+    try {
+      if (editingAgentId) {
+        await api.updateAgent(editingAgentId, {
+          name: agentName.trim(),
+          email: agentEmail.trim(),
+          ...(agentPassword.trim() ? { password: agentPassword.trim() } : {}),
+          role: agentRole,
+          permissions: agentRole === 'ADMIN' ? PERMISSION_OPTIONS.map((p) => p.id) : agentPermissions,
+        });
+        toast.success('Data agent berhasil diperbarui.');
+      } else {
+        await api.createAgent({
+          name: agentName.trim(),
+          email: agentEmail.trim(),
+          password: agentPassword.trim(),
+          role: agentRole,
+          permissions: agentRole === 'ADMIN' ? PERMISSION_OPTIONS.map((p) => p.id) : agentPermissions,
+        });
+        toast.success('Agent baru berhasil ditambahkan.');
+      }
+      resetAgentForm();
+      await fetchAgents();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menyimpan data agent.');
+    } finally {
+      setSavingAgent(false);
+    }
+  };
+
+  const handleToggleAgentActive = async (agent: AgentItem) => {
+    try {
+      await api.updateAgent(agent.id, { isActive: !agent.isActive });
+      toast.success(agent.isActive ? 'Agent dinonaktifkan.' : 'Agent diaktifkan.');
+      await fetchAgents();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengubah status agent.');
+    }
+  };
+
+  const handleConfirmDeleteAgent = async () => {
+    if (!confirmDeleteAgent) return;
+    try {
+      await api.deleteAgent(confirmDeleteAgent.id);
+      toast.success('Agent berhasil dihapus.');
+      setConfirmDeleteAgent(null);
+      await fetchAgents();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menghapus agent.');
+    }
+  };
 
   const fetchSessions = useCallback(async () => {
     setSessionsLoading(true);
@@ -740,6 +919,397 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
       </div>
 
+      {/* Pengaturan CSAT Template & SLA */}
+      <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <Star className="w-4 h-4 text-amber-500" />
+              <span>Pengaturan CSAT Template & Target SLA</span>
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Atur template pesan penilaian pelanggan (CSAT) dan target waktu respon pertama (SLA) untuk analitik Dashboard.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveCrmSettings} className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div className="lg:col-span-2 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs font-medium text-gray-700">Template Pesan CTA CSAT</label>
+              <div className="flex flex-wrap gap-1.5">
+                {['{nama_panggilan}', '{nama_lengkap}', '{link_csat}'].map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => setCsatTemplate((prev) => `${prev}${prev.endsWith(' ') || prev.endsWith('\n') ? '' : ' '}${chip}`)}
+                    className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-mono hover:bg-indigo-100"
+                  >
+                    + {chip}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <textarea
+              rows={4}
+              value={csatTemplate}
+              onChange={(e) => setCsatTemplate(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+              placeholder="Halo {nama_panggilan}, mohon isi penilaian layanan melalui {link_csat}"
+            />
+            <label className="inline-flex items-center gap-2 text-xs text-gray-700 cursor-pointer pt-1">
+              <input
+                type="checkbox"
+                checked={csatAutoOnResolve}
+                onChange={(e) => setCsatAutoOnResolve(e.target.checked)}
+                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span>Kirim link CSAT otomatis saat percakapan diakhiri (Resolved)</span>
+            </label>
+
+            <div className="pt-2">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-gray-500" />
+                  <span>URL Publik CSAT (Domain / Cloudflare Tunnel)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCsatBaseUrl(
+                      `${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}`
+                    )
+                  }
+                  className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
+                >
+                  Gunakan URL Saat Ini
+                </button>
+              </div>
+              <input
+                type="url"
+                value={csatBaseUrl}
+                onChange={(e) => setCsatBaseUrl(e.target.value)}
+                placeholder="https://crm.domain.com atau https://panel.domain.com/app/reneo-crm"
+                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Opsional. Jika diisi, tautan CSAT akan memakai domain/tunnel ini (berguna saat admin membuka panel dari localhost/IP lokal). Contoh hasil:{' '}
+                <code className="font-mono text-gray-600">
+                  {(csatBaseUrl.trim().replace(/\/+$/, '') || `${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}`).replace(/\/csat$/i, '')}/csat?token=...
+                </code>
+              </p>
+              {licenseInfo?.publicUrls && licenseInfo.publicUrls.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                  <span className="text-[11px] text-gray-500">Tunnel terdeteksi:</span>
+                  {licenseInfo.publicUrls.map((u) => (
+                    <button
+                      key={u}
+                      type="button"
+                      onClick={() => setCsatBaseUrl(u)}
+                      className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-mono hover:bg-emerald-100"
+                    >
+                      {u}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-gray-500" />
+                <span>Target SLA Respon Pertama (Menit)</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                value={slaTargetMinutes}
+                onChange={(e) => setSlaTargetMinutes(Number(e.target.value) || 15)}
+                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Digunakan untuk menghitung tingkat kepatuhan SLA di Dashboard (1 - 1440 menit).
+              </p>
+            </div>
+
+            <Button type="submit" variant="primary" isLoading={savingCrm} className="w-full">
+              Simpan Pengaturan CSAT & SLA
+            </Button>
+          </div>
+        </form>
+      </div>
+
+      {/* Manajemen Multi-Agent & Hak Akses (ADMIN only) */}
+      {isAdmin && (
+        <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100">
+            <div>
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-sm font-semibold text-gray-900">Manajemen Akun & Agent</h3>
+                {agentQuota && (
+                  <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-[11px] font-mono">
+                    {agentQuota.currentCount}/{agentQuota.maxAgents} akun
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Kelola akun agent dan batasi akses menu untuk masing-masing agent sesuai paket lisensi.
+              </p>
+            </div>
+
+            {agentQuota && !agentQuota.multiAgent ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={onOpenPlans}
+                leftIcon={<Lock className="w-3.5 h-3.5 text-amber-500" />}
+              >
+                Upgrade untuk Multi-Agent
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  resetAgentForm();
+                  setShowAgentForm(true);
+                }}
+                disabled={Boolean(agentQuota && agentQuota.currentCount >= agentQuota.maxAgents)}
+                leftIcon={<UserPlus className="w-3.5 h-3.5" />}
+              >
+                Tambah Agent
+              </Button>
+            )}
+          </div>
+
+          {agentQuota && !agentQuota.multiAgent && (
+            <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center justify-between gap-3">
+              <span>
+                Paket <strong>{agentQuota.plan}</strong> hanya mendukung 1 akun admin utama. Upgrade ke paket Pro (maks 5 agent) atau Enterprise (maks 25 agent) untuk menambah agent dengan pembatasan akses.
+              </span>
+              {onOpenPlans && (
+                <button
+                  type="button"
+                  onClick={onOpenPlans}
+                  className="px-2.5 py-1 rounded bg-amber-600 text-white text-[11px] font-medium hover:bg-amber-700 shrink-0"
+                >
+                  Lihat Paket
+                </button>
+              )}
+            </div>
+          )}
+
+          {showAgentForm && (
+            <form onSubmit={handleSaveAgent} className="p-4 rounded-lg bg-gray-50 border border-gray-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-semibold text-gray-900">
+                  {editingAgentId ? 'Edit Data Agent' : 'Tambah Agent Baru'}
+                </h4>
+                <button
+                  type="button"
+                  onClick={resetAgentForm}
+                  className="text-xs text-gray-500 hover:text-gray-800"
+                >
+                  Batal
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-700 mb-1">Nama</label>
+                  <input
+                    type="text"
+                    required
+                    value={agentName}
+                    onChange={(e) => setAgentName(e.target.value)}
+                    placeholder="Nama Agent"
+                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    required
+                    value={agentEmail}
+                    onChange={(e) => setAgentEmail(e.target.value)}
+                    placeholder="agent@domain.com"
+                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-700 mb-1">
+                    Password {editingAgentId ? '(kosongkan jika tetap)' : ''}
+                  </label>
+                  <input
+                    type="password"
+                    required={!editingAgentId}
+                    minLength={6}
+                    value={agentPassword}
+                    onChange={(e) => setAgentPassword(e.target.value)}
+                    placeholder="Min. 6 karakter"
+                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-700 mb-1">Peran</label>
+                  <select
+                    value={agentRole}
+                    onChange={(e) => setAgentRole(e.target.value as 'ADMIN' | 'AGENT')}
+                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs"
+                  >
+                    <option value="AGENT">AGENT (Terbatas)</option>
+                    <option value="ADMIN">ADMIN (Akses Penuh)</option>
+                  </select>
+                </div>
+              </div>
+
+              {agentRole === 'AGENT' && (
+                <div>
+                  <label className="block text-[11px] font-medium text-gray-700 mb-1.5">
+                    Batasan Akses Menu
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {PERMISSION_OPTIONS.map((perm) => {
+                      const checked = agentPermissions.includes(perm.id);
+                      return (
+                        <label
+                          key={perm.id}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs cursor-pointer ${
+                            checked
+                              ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
+                              : 'bg-white border-gray-200 text-gray-600'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => togglePermission(perm.id)}
+                            className="rounded border-gray-300 text-indigo-600"
+                          />
+                          <span>{perm.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="secondary" size="sm" onClick={resetAgentForm}>
+                  Batal
+                </Button>
+                <Button type="submit" variant="primary" size="sm" isLoading={savingAgent}>
+                  {editingAgentId ? 'Simpan Perubahan' : 'Buat Akun Agent'}
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {agentsLoading ? (
+            <div className="text-xs text-gray-500 py-4 text-center">Memuat daftar agent...</div>
+          ) : agents.length === 0 ? (
+            <div className="text-xs text-gray-500 py-4 text-center">Belum ada data agent.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
+                    <th className="py-2 pr-3 font-medium">Nama & Email</th>
+                    <th className="py-2 px-3 font-medium">Peran</th>
+                    <th className="py-2 px-3 font-medium">Akses Menu</th>
+                    <th className="py-2 px-3 font-medium">Status</th>
+                    <th className="py-2 pl-3 font-medium text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {agents.map((ag) => {
+                    const isSelf = currentUser?.id === ag.id || currentUser?.email === ag.email;
+                    return (
+                      <tr key={ag.id} className="hover:bg-gray-50/70">
+                        <td className="py-2.5 pr-3">
+                          <div className="font-medium text-gray-900">{ag.name}</div>
+                          <div className="text-[11px] text-gray-500 font-mono">{ag.email}</div>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                              ag.role === 'ADMIN'
+                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                : 'bg-sky-50 text-sky-700 border border-sky-200'
+                            }`}
+                          >
+                            {ag.role}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {ag.role === 'ADMIN' ? (
+                            <span className="text-[11px] text-gray-500">Semua Menu</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {(ag.permissions || []).map((p) => (
+                                <span
+                                  key={p}
+                                  className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]"
+                                >
+                                  {PERMISSION_OPTIONS.find((o) => o.id === p)?.label || p}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <button
+                            type="button"
+                            disabled={isSelf}
+                            onClick={() => void handleToggleAgentActive(ag)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                              ag.isActive
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-gray-100 text-gray-500 border border-gray-200'
+                            } ${isSelf ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                          >
+                            {ag.isActive ? 'Aktif' : 'Nonaktif'}
+                          </button>
+                        </td>
+                        <td className="py-2.5 pl-3 text-right">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditAgent(ag)}
+                              className="p-1.5 rounded text-gray-500 hover:text-indigo-600 hover:bg-indigo-50"
+                              title="Edit Agent"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            {!isSelf && (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteAgent(ag)}
+                                className="p-1.5 rounded text-gray-500 hover:text-red-600 hover:bg-red-50"
+                                title="Hapus Agent"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       <ConfirmModal
         isOpen={confirmAction !== null}
         onClose={() => setConfirmAction(null)}
@@ -763,6 +1333,16 @@ export const Settings: React.FC<SettingsProps> = ({
         title={`Hapus Sesi "${confirmDeleteSession}"?`}
         description="Sesi WhatsApp ini akan dihapus dari server WAHA. Jika ini adalah sesi aktif, sistem akan mengalihkan sesi aktif ke sesi lain."
         confirmLabel="Ya, Hapus Sesi"
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={confirmDeleteAgent !== null}
+        onClose={() => setConfirmDeleteAgent(null)}
+        onConfirm={handleConfirmDeleteAgent}
+        title={`Hapus Agent "${confirmDeleteAgent?.name}"?`}
+        description="Akun agent ini akan dihapus permanen dan tidak bisa login lagi ke CRM."
+        confirmLabel="Ya, Hapus Agent"
         variant="danger"
       />
     </div>

@@ -3,6 +3,7 @@ import { and, eq, desc, sql, or, ilike } from 'drizzle-orm';
 import { db } from '../db';
 import { campaigns, campaignRecipients, contacts } from '../db/schema';
 import { BroadcastService } from '../services/broadcast.service';
+import { requirePermission } from './auth';
 
 export function formatCampaign(c: any) {
   if (!c) return null;
@@ -65,6 +66,13 @@ export function formatRecipient(r: any, contact?: any, campaign?: any) {
 }
 
 export default async function broadcastsRouter(fastify: FastifyInstance) {
+  fastify.addHook('preHandler', async (req, reply) => {
+    const allowed =
+      req.method === 'GET'
+        ? requirePermission('broadcasts', 'tracking')
+        : requirePermission('broadcasts');
+    return allowed(req, reply);
+  });
   // GET all campaigns
   fastify.get('/', async (req: FastifyRequest<{
     Querystring: { status?: string; type?: string };

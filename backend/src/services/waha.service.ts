@@ -596,6 +596,55 @@ export class WahaService {
       };
     }
   }
+
+  /**
+   * Send WhatsApp image or document file via WAHA
+   */
+  public async sendMediaMessage(
+    phone: string,
+    file: { base64: string; mimetype: string; filename: string; caption?: string },
+    sessionName?: string
+  ): Promise<{ success: boolean; messageId?: string; sessionUsed?: string; error?: string }> {
+    try {
+      const { client, session } = await this.getClient();
+      const targetSession = sessionName || session;
+      const chatId = toWahaChatId(phone);
+      const isImage = file.mimetype.startsWith('image/');
+      const endpoint = isImage ? '/api/sendImage' : '/api/sendFile';
+      const cleanBase64 = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
+
+      const response = await client.post(endpoint, {
+        session: targetSession,
+        chatId,
+        file: {
+          mimetype: file.mimetype,
+          filename: file.filename,
+          data: cleanBase64,
+        },
+        caption: file.caption || '',
+      });
+
+      const wahaMsgId =
+        response.data?.id?._serialized ||
+        (typeof response.data?.id === 'string' ? response.data.id : null) ||
+        response.data?.id?.id ||
+        response.data?.key?.id ||
+        response.data?.messageId ||
+        `WAHA_${Date.now()}`;
+
+      return {
+        success: true,
+        messageId: wahaMsgId,
+        sessionUsed: targetSession,
+      };
+    } catch (err: any) {
+      console.error('[WahaService] Send media failed:', err.response?.data || err.message);
+      return {
+        success: false,
+        error: err.response?.data?.message || err.message,
+      };
+    }
+  }
 }
 
 export const wahaService = WahaService.getInstance();

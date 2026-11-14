@@ -63,9 +63,21 @@ export const conversations = pgTable('conversations', {
     .references(() => contacts.id, { onDelete: 'cascade' })
     .unique()
     .notNull(),
+  wahaSession: text('waha_session'),
+  assignedAgentId: text('assigned_agent_id'),
+  assignedAgentName: text('assigned_agent_name'),
+  status: text('status').default('OPEN').notNull(), // OPEN, PENDING, RESOLVED
+  labels: text('labels'), // comma-separated labels
   lastMessage: text('last_message'),
   lastMessageAt: timestamp('last_message_at'),
   unreadCount: integer('unread_count').default(0).notNull(),
+  firstInboundAt: timestamp('first_inbound_at'),
+  firstResponseAt: timestamp('first_response_at'),
+  resolvedAt: timestamp('resolved_at'),
+  csatToken: text('csat_token').unique(),
+  csatRating: integer('csat_rating'),
+  csatFeedback: text('csat_feedback'),
+  csatSubmittedAt: timestamp('csat_submitted_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -79,8 +91,12 @@ export const chatMessages = pgTable('chat_messages', {
     .references(() => contacts.id, { onDelete: 'cascade' })
     .notNull(),
   direction: text('direction').notNull(), // INBOUND or OUTBOUND
+  messageType: text('message_type').default('TEXT').notNull(), // TEXT, MEDIA, NOTE, CSAT
+  wahaSession: text('waha_session'),
   body: text('body').notNull(),
   mediaUrl: text('media_url'),
+  mediaType: text('media_type'), // image, document, audio, video
+  mediaName: text('media_name'),
   wahaMessageId: text('waha_message_id').unique(),
   status: text('status').default('PENDING').notNull(),
   ackStatus: integer('ack_status').default(0).notNull(),
@@ -108,6 +124,27 @@ export const birthdaySettings = pgTable('birthday_settings', {
 export const systemSettings = pgTable('system_settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const crmAgents = pgTable('crm_agents', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  role: text('role').default('AGENT').notNull(), // ADMIN | AGENT
+  permissions: text('permissions').default('["dashboard","conversations","contacts"]').notNull(), // JSON array of tab keys
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const cannedResponses = pgTable('canned_responses', {
+  id: text('id').primaryKey(),
+  shortCode: text('short_code').notNull().unique(),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 

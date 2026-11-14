@@ -113,6 +113,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           await db.insert(conversations).values({
             id: convId,
             contactId,
+            wahaSession: sessionName || null,
             lastMessage: message,
             lastMessageAt: now,
             unreadCount: 0,
@@ -123,6 +124,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           await db
             .update(conversations)
             .set({
+              wahaSession: sessionName || undefined,
               lastMessage: message,
               lastMessageAt: now,
               updatedAt: now,
@@ -135,6 +137,8 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           conversationId: convId,
           contactId,
           direction: 'OUTBOUND',
+          messageType: 'TEXT',
+          wahaSession: sessionName || null,
           body: message,
           wahaMessageId: sendResult.messageId,
           status: 'SENT',

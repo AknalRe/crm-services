@@ -335,9 +335,22 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         if (digitCount < 8 || digitCount > 15) {
           return reply.send({ success: true, message: 'Webhook ignored (non-phone JID)' });
         }
-        const body = payload.body || '';
+        const body = payload.body || (payload.hasMedia ? '[Lampiran Media]' : '');
         const now = new Date();
         const msgId = payload.id?._serialized || payload.id?.id || payload.id;
+        const inboundSession = webhookSession ? String(webhookSession).trim() : null;
+        const mediaUrl = payload.media?.url || payload.mediaUrl || null;
+        const rawMime = String(payload.media?.mimetype || payload._data?.mimetype || '');
+        const mediaType = rawMime.startsWith('image/')
+          ? 'image'
+          : rawMime.startsWith('video/')
+          ? 'video'
+          : rawMime.startsWith('audio/')
+          ? 'audio'
+          : payload.hasMedia || mediaUrl
+          ? 'document'
+          : null;
+        const mediaName = payload.media?.filename || payload._data?.filename || null;
 
         // Find or create contact
         const contactList = await db
@@ -369,15 +382,19 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           .from(conversations)
           .where(eq(conversations.contactId, contact.id));
 
-        let convId = convList[0]?.id;
+        const existingConv = convList[0];
+        let convId = existingConv?.id;
 
         if (!convId) {
           convId = crypto.randomUUID();
           await db.insert(conversations).values({
             id: convId,
             contactId: contact.id,
+            wahaSession: inboundSession,
+            status: 'OPEN',
             lastMessage: body,
             lastMessageAt: now,
+            firstInboundAt: now,
             unreadCount: 1,
             createdAt: now,
             updatedAt: now,
@@ -386,6 +403,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           await db
             .update(conversations)
             .set({
+              wahaSession: inboundSession || existingConv.wahaSession,
+              status: existingConv.status === 'RESOLVED' ? 'OPEN' : existingConv.status,
+              firstInboundAt: existingConv.firstInboundAt || now,
               lastMessage: body,
               lastMessageAt: now,
               unreadCount: sql`${conversations.unreadCount} + 1`,
@@ -400,7 +420,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           conversationId: convId,
           contactId: contact.id,
           direction: 'INBOUND',
+          messageType: mediaType ? 'MEDIA' : 'TEXT',
+          wahaSession: inboundSession,
           body,
+          mediaUrl,
+          mediaType,
+          mediaName,
           wahaMessageId: msgId,
           status: 'DELIVERED',
           ackStatus: 2,

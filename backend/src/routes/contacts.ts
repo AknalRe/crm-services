@@ -4,6 +4,7 @@ import { db } from '../db';
 import { contacts } from '../db/schema';
 import { normalizePhoneNumber } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
+import { requirePermission } from './auth';
 import crypto from 'crypto';
 
 export function formatContact(c: any) {
@@ -23,6 +24,13 @@ export function formatContact(c: any) {
 }
 
 export default async function contactsRouter(fastify: FastifyInstance) {
+  fastify.addHook('preHandler', async (req, reply) => {
+    const allowed =
+      req.method === 'GET'
+        ? requirePermission('contacts', 'conversations', 'broadcasts')
+        : requirePermission('contacts');
+    return allowed(req, reply);
+  });
   // GET all contacts with search and filter
   fastify.get('/', async (req: FastifyRequest<{
     Querystring: { search?: string; tag?: string; page?: string; limit?: string };

@@ -1,12 +1,21 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { sql, desc, eq, gte, isNotNull, or } from 'drizzle-orm';
 import { db } from '../db';
-import { contacts, campaigns, campaignRecipients } from '../db/schema';
+import { contacts, campaigns, campaignRecipients, conversations } from '../db/schema';
 import { formatCampaign, formatRecipient } from './broadcasts';
+import { getSettingMap, requirePermission } from './auth';
+
+const DEFAULT_SLA_TARGET_MINUTES = 15;
 
 export default async function dashboardRouter(fastify: FastifyInstance) {
+  fastify.addHook('preHandler', requirePermission('dashboard'));
   fastify.get('/stats', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const settings = await getSettingMap();
+      const slaRaw = Number.parseInt(settings.sla_target_minutes || String(DEFAULT_SLA_TARGET_MINUTES), 10);
+      const slaTargetMinutes = Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : DEFAULT_SLA_TARGET_MINUTES;
+      const slaTargetSeconds = slaTargetMinutes * 60;
+
       // Parallel aggregations
       const [
         totalContactsRes,
@@ -20,6 +29,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         recentCampaignsList,
         recentActivityList,
         birthdayContactsList,
+        conversationRows,
       ] = await Promise.all([
         db.select({ count: sql<number>`count(*)` }).from(contacts),
         db.select({ count: sql<number>`count(*)` }).from(campaigns),
@@ -50,6 +60,13 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           .orderBy(desc(campaignRecipients.updatedAt))
           .limit(10),
         db.select({ tanggalLahir: contacts.tanggalLahir }).from(contacts).where(isNotNull(contacts.tanggalLahir)),
+        db
+          .select({
+            conv: conversations,
+            contact: contacts,
+          })
+          .from(conversations)
+          .leftJoin(contacts, eq(conversations.contactId, contacts.id)),
       ]);
 
       const totalContacts = Number(totalContactsRes[0]?.count || 0);
@@ -81,6 +98,166 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         return bDate.getMonth() + 1 === currentMonth && bDate.getDate() === currentDay;
       }).length;
 
+      // Chatwoot-style Conversation, SLA & CSAT Analytics
+      let openCount = 0;
+      let pendingCount = 0;
+      let resolvedCount = 0;
+      let frtTotalSec = 0;
+      let frtCount = 0;
+      let slaMetCount = 0;
+      let resTotalSec = 0;
+      let resCount = 0;
+      let csatSum = 0;
+      let csatCount = 0;
+      const csatDistribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      const sessionMap = new Map<
+        string,
+        { session: string; count: number; resolvedCount: number; csatSum: number; csatCount: number }
+      >();
+      const agentMap = new Map<
+        string,
+        {
+          agentName: string;
+          count: number;
+          resolvedCount: number;
+          slaMetCount: number;
+          slaMeasuredCount: number;
+          csatSum: number;
+          csatCount: number;
+        }
+      >();
+
+      const recentCsatList: Array<{
+        conversationId: string;
+        contactName: string;
+        phone: string;
+        wahaSession: string | null;
+        rating: number;
+        feedback: string | null;
+        submittedAt: Date | null;
+      }> = [];
+
+      for (const row of conversationRows) {
+        const c = row.conv;
+        const st = (c.status || 'OPEN').toUpperCase();
+        if (st === 'RESOLVED') resolvedCount++;
+        else if (st === 'PENDING') pendingCount++;
+        else openCount++;
+
+        if (c.firstInboundAt && c.firstResponseAt) {
+          const frtSec = Math.max(
+            0,
+            Math.round((new Date(c.firstResponseAt).getTime() - new Date(c.firstInboundAt).getTime()) / 1000)
+          );
+          frtTotalSec += frtSec;
+          frtCount++;
+          if (frtSec <= slaTargetSeconds) slaMetCount++;
+        }
+
+        if (c.resolvedAt && c.createdAt) {
+          const resSec = Math.max(
+            0,
+            Math.round((new Date(c.resolvedAt).getTime() - new Date(c.createdAt).getTime()) / 1000)
+          );
+          resTotalSec += resSec;
+          resCount++;
+        }
+
+        if (c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
+          csatSum += c.csatRating;
+          csatCount++;
+          csatDistribution[c.csatRating] = (csatDistribution[c.csatRating] || 0) + 1;
+          recentCsatList.push({
+            conversationId: c.id,
+            contactName: row.contact?.namaLengkap || row.contact?.nomorWhatsapp || 'Pelanggan',
+            phone: row.contact?.nomorWhatsapp || '',
+            wahaSession: c.wahaSession,
+            rating: c.csatRating,
+            feedback: c.csatFeedback,
+            submittedAt: c.csatSubmittedAt,
+          });
+        }
+
+        const sessKey = c.wahaSession || 'Default';
+        const prevSess = sessionMap.get(sessKey) || {
+          session: sessKey,
+          count: 0,
+          resolvedCount: 0,
+          csatSum: 0,
+          csatCount: 0,
+        };
+        prevSess.count++;
+        if (st === 'RESOLVED') prevSess.resolvedCount++;
+        if (c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
+          prevSess.csatSum += c.csatRating;
+          prevSess.csatCount++;
+        }
+        sessionMap.set(sessKey, prevSess);
+
+        const agentKey = c.assignedAgentId || 'unassigned';
+        const prevAgent = agentMap.get(agentKey) || {
+          agentName: c.assignedAgentName || 'Belum Ditugaskan',
+          count: 0,
+          resolvedCount: 0,
+          slaMetCount: 0,
+          slaMeasuredCount: 0,
+          csatSum: 0,
+          csatCount: 0,
+        };
+        prevAgent.count++;
+        if (st === 'RESOLVED') prevAgent.resolvedCount++;
+        if (c.firstInboundAt && c.firstResponseAt) {
+          const frtSec = Math.max(
+            0,
+            Math.round((new Date(c.firstResponseAt).getTime() - new Date(c.firstInboundAt).getTime()) / 1000)
+          );
+          prevAgent.slaMeasuredCount++;
+          if (frtSec <= slaTargetSeconds) prevAgent.slaMetCount++;
+        }
+        if (c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
+          prevAgent.csatSum += c.csatRating;
+          prevAgent.csatCount++;
+        }
+        agentMap.set(agentKey, prevAgent);
+      }
+
+      recentCsatList.sort((a, b) => {
+        const ta = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+        const tb = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+        return tb - ta;
+      });
+
+      const conversationAnalytics = {
+        totalConversations: conversationRows.length,
+        openCount,
+        pendingCount,
+        resolvedCount,
+        avgFirstResponseSeconds: frtCount > 0 ? Math.round(frtTotalSec / frtCount) : null,
+        avgResolutionSeconds: resCount > 0 ? Math.round(resTotalSec / resCount) : null,
+        slaTargetSeconds,
+        slaMeasuredCount: frtCount,
+        slaMetCount,
+        slaBreachedCount: Math.max(0, frtCount - slaMetCount),
+        slaComplianceRate: frtCount > 0 ? Math.round((slaMetCount / frtCount) * 100) : null,
+        csatCount,
+        csatAverage: csatCount > 0 ? Number((csatSum / csatCount).toFixed(2)) : null,
+        csatDistribution,
+        recentCsat: recentCsatList.slice(0, 6),
+        bySession: Array.from(sessionMap.values()).map((s) => ({
+          session: s.session,
+          count: s.count,
+          resolvedCount: s.resolvedCount,
+          avgCsat: s.csatCount > 0 ? Number((s.csatSum / s.csatCount).toFixed(2)) : null,
+        })),
+        byAgent: Array.from(agentMap.values()).map((a) => ({
+          agentName: a.agentName,
+          count: a.count,
+          resolvedCount: a.resolvedCount,
+          slaRate: a.slaMeasuredCount > 0 ? Math.round((a.slaMetCount / a.slaMeasuredCount) * 100) : null,
+          avgCsat: a.csatCount > 0 ? Number((a.csatSum / a.csatCount).toFixed(2)) : null,
+        })),
+      };
+
       return reply.send({
         success: true,
         data: {
@@ -97,6 +274,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             readRate,
             birthdayTodayCount,
           },
+          conversationAnalytics,
           recentCampaigns: recentCampaignsList.map(formatCampaign),
           recentActivity: recentActivityList.map((r) =>
             formatRecipient(r.recipient, r.contact, r.campaign)

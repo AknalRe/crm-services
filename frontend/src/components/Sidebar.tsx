@@ -10,14 +10,17 @@ import {
   Smartphone,
   Lock,
   X,
+  LogOut,
 } from 'lucide-react';
-import { LicenseInfo, WahaStatus } from '../types';
+import { AuthStatus, LicenseInfo, WahaStatus } from '../types';
 
 interface SidebarProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
   wahaStatus: WahaStatus | null;
   licenseInfo?: LicenseInfo | null;
+  user?: AuthStatus['user'] | null;
+  onLogout?: () => void;
   onOpenQrModal: () => void;
   isOpen?: boolean;
   onClose?: () => void;
@@ -28,6 +31,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setCurrentTab,
   wahaStatus,
   licenseInfo,
+  user,
+  onLogout,
   onOpenQrModal,
   isOpen = false,
   onClose,
@@ -36,15 +41,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
   );
 
-  const menuItems = [
+  const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, locked: false },
     { id: 'contacts', label: 'Kontak Pelanggan', icon: Users, locked: false },
     { id: 'broadcasts', label: 'Siaran WhatsApp', icon: Send, locked: false },
     { id: 'birthday', label: 'Ulang Tahun', icon: Cake, locked: false },
     { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck, locked: false },
     { id: 'conversations', label: 'Live Chat CRM', icon: MessageCircle, locked: !isLiveChatUnlocked },
-    { id: 'settings', label: 'Koneksi WAHA', icon: Settings, locked: false },
+    { id: 'settings', label: 'Pengaturan & WAHA', icon: Settings, locked: false },
   ];
+
+  const menuItems = allMenuItems.filter((item) => {
+    if (!user || user.role === 'ADMIN' || !Array.isArray(user.permissions)) return true;
+    return user.permissions.includes(item.id);
+  });
 
   const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
 
@@ -126,8 +136,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </nav>
 
-      {/* WAHA Status Card */}
-      <div className="p-3 border-t border-[#1E2438]">
+      {/* WAHA Status & User Card */}
+      <div className="p-3 border-t border-[#1E2438] space-y-2">
+        {user && (
+          <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-[#181D2D] border border-[#242B42]">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-medium text-white truncate">{user.name}</p>
+              <p className="text-[10px] text-gray-400 truncate">{user.email}</p>
+            </div>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase shrink-0 ${
+                user.role === 'AGENT'
+                  ? 'bg-sky-950/70 text-sky-300 border border-sky-800/60'
+                  : 'bg-indigo-950/70 text-indigo-300 border border-indigo-800/60'
+              }`}
+            >
+              {user.role === 'AGENT' ? 'Agent' : 'Admin'}
+            </span>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                title="Keluar / Ganti Akun"
+                className="p-1 rounded text-gray-400 hover:text-red-300 hover:bg-red-950/40 shrink-0 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
         <div className="bg-[#181D2D] rounded-md p-3 border border-[#242B42]">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[11px] font-medium text-gray-400">Status WAHA</span>
