@@ -100,6 +100,7 @@ export const birthdaySettings = pgTable('birthday_settings', {
     )
     .notNull(),
   delaySeconds: integer('delay_seconds').default(5).notNull(),
+  wahaSession: text('waha_session'),
   lastRunDate: text('last_run_date'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

@@ -141,6 +141,7 @@ export interface BirthdaySetting {
   sendTime: string;
   messageTemplate: string;
   delaySeconds: number;
+  wahaSession?: string | null;
   lastRunDate?: string | null;
 }
 

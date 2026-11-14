@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { sql, desc, eq, isNotNull } from 'drizzle-orm';
+import { sql, desc, eq, gte, isNotNull, or } from 'drizzle-orm';
 import { db } from '../db';
 import { contacts, campaigns, campaignRecipients } from '../db/schema';
 import { formatCampaign, formatRecipient } from './broadcasts';
@@ -25,10 +25,18 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         db.select({ count: sql<number>`count(*)` }).from(campaigns),
         db.select({ count: sql<number>`count(*)` }).from(campaignRecipients),
         db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(eq(campaignRecipients.status, 'PENDING')),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(eq(campaignRecipients.status, 'SENT')),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(eq(campaignRecipients.status, 'DELIVERED')),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(eq(campaignRecipients.status, 'READ')),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(eq(campaignRecipients.status, 'FAILED')),
+        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(
+          or(eq(campaignRecipients.status, 'SENT'), eq(campaignRecipients.ackStatus, 1))
+        ),
+        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(
+          or(eq(campaignRecipients.status, 'DELIVERED'), eq(campaignRecipients.ackStatus, 2))
+        ),
+        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(
+          or(eq(campaignRecipients.status, 'READ'), gte(campaignRecipients.ackStatus, 3))
+        ),
+        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(
+          or(eq(campaignRecipients.status, 'FAILED'), eq(campaignRecipients.ackStatus, -1))
+        ),
         db.select().from(campaigns).orderBy(desc(campaigns.createdAt)).limit(5),
         db
           .select({

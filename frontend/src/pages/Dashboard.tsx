@@ -49,10 +49,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     const unsubWaha = subscribeLiveEvent('waha:status', () => {
       void loadData();
     });
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const interval = window.setInterval(() => {
+      void loadData();
+    }, 30_000);
     return () => {
       unsubTracking();
       unsubConv();
       unsubWaha();
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(interval);
     };
   }, [loadData]);
 
@@ -294,6 +305,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               stats.recentCampaigns.map((camp) => {
                 const total = camp.totalCount || 1;
                 const percentSent = Math.round((camp.sentCount / total) * 100);
+                const percentDelivered = Math.round((camp.deliveredCount / total) * 100);
                 const percentRead = Math.round((camp.readCount / total) * 100);
 
                 return (
@@ -336,7 +348,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       />
                       <div
                         className="bg-emerald-600 h-2 transition-all"
-                        style={{ width: `${Math.max(0, percentSent - percentRead)}%` }}
+                        style={{ width: `${Math.max(0, percentDelivered - percentRead)}%` }}
+                        title={`Sampai: ${camp.deliveredCount}`}
+                      />
+                      <div
+                        className="bg-blue-500 h-2 transition-all"
+                        style={{ width: `${Math.max(0, percentSent - Math.max(percentDelivered, percentRead))}%` }}
                         title={`Terkirim: ${camp.sentCount}`}
                       />
                     </div>

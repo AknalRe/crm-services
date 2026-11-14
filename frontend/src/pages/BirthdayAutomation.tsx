@@ -8,7 +8,8 @@ import {
   Sliders,
 } from 'lucide-react';
 import api from '../services/api';
-import { Contact } from '../types';
+import { subscribeLiveEvent } from '../services/liveEvents';
+import { Contact, WahaSessionItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
@@ -28,6 +29,19 @@ export const BirthdayAutomation: React.FC = () => {
   const [sendTime, setSendTime] = useState('08:00');
   const [messageTemplate, setMessageTemplate] = useState('');
   const [delaySeconds, setDelaySeconds] = useState(5);
+  const [wahaSession, setWahaSession] = useState('');
+  const [wahaSessions, setWahaSessions] = useState<WahaSessionItem[]>([]);
+  const [activeWahaSession, setActiveWahaSession] = useState('');
+
+  const loadWahaSessions = useCallback(async () => {
+    try {
+      const data = await api.getWahaSessions();
+      setWahaSessions(data.sessions || []);
+      setActiveWahaSession(data.activeSession || '');
+    } catch {
+      // Ignore if WAHA offline
+    }
+  }, []);
 
   const loadBirthdayData = useCallback(async () => {
     setLoading(true);
@@ -40,6 +54,7 @@ export const BirthdayAutomation: React.FC = () => {
           'Halo {nama_panggilan}! Selamat ulang tahun, semoga panjang umur dan sehat selalu.'
       );
       setDelaySeconds(data.setting?.delaySeconds || 5);
+      setWahaSession(data.setting?.wahaSession || '');
       setCelebrantsToday(data.celebrants.today || []);
       setTotalRegistered(data.celebrants.totalRegistered || 0);
       setError(null);
@@ -52,7 +67,14 @@ export const BirthdayAutomation: React.FC = () => {
 
   useEffect(() => {
     loadBirthdayData();
-  }, [loadBirthdayData]);
+    loadWahaSessions();
+    const unsubWaha = subscribeLiveEvent('waha:status', () => {
+      void loadWahaSessions();
+    });
+    return () => {
+      unsubWaha();
+    };
+  }, [loadBirthdayData, loadWahaSessions]);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +86,7 @@ export const BirthdayAutomation: React.FC = () => {
         sendTime,
         messageTemplate,
         delaySeconds,
+        wahaSession: wahaSession.trim() || null,
       });
       toast.success('Pengaturan ucapan ulang tahun berhasil disimpan.');
       loadBirthdayData();
@@ -202,6 +225,31 @@ export const BirthdayAutomation: React.FC = () => {
                   Jeda pengiriman saat terdapat beberapa penerima
                 </span>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Sesi WhatsApp Pengirim
+              </label>
+              <select
+                value={wahaSession}
+                onChange={(e) => setWahaSession(e.target.value)}
+                className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">
+                  {activeWahaSession
+                    ? `Sesi aktif bawaan (${activeWahaSession})`
+                    : 'Sesi aktif bawaan'}
+                </option>
+                {wahaSessions.map((sess) => (
+                  <option key={sess.name} value={sess.name}>
+                    {sess.name} ({sess.status})
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-gray-400 mt-1 block">
+                Pilih sesi WhatsApp khusus untuk mengirim ucapan ulang tahun otomatis
+              </span>
             </div>
 
             <div>

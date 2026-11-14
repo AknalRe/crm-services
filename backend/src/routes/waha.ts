@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, lt, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, like, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   campaignRecipients,
@@ -13,6 +13,61 @@ import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
 import crypto from 'crypto';
+
+function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: string[] } {
+  const rawCandidates = [
+    payload?.id?._serialized,
+    typeof payload?.id === 'string' ? payload.id : null,
+    payload?.id?.id,
+    payload?._data?.id?._serialized,
+    payload?._data?.id?.id,
+    payload?._data?.Info?.ID,
+    payload?._data?.key?.id,
+  ];
+  const exactSet = new Set<string>();
+  const stanzaSet = new Set<string>();
+
+  for (const val of rawCandidates) {
+    if (typeof val !== 'string') continue;
+    const trimmed = val.trim();
+    if (!trimmed) continue;
+    exactSet.add(trimmed);
+    const lastUnderscore = trimmed.lastIndexOf('_');
+    if (lastUnderscore !== -1 && lastUnderscore < trimmed.length - 1) {
+      const stanza = trimmed.slice(lastUnderscore + 1).trim();
+      if (stanza.length >= 8) {
+        stanzaSet.add(stanza);
+      }
+    }
+  }
+
+  return {
+    exactIds: Array.from(exactSet),
+    stanzaIds: Array.from(stanzaSet),
+  };
+}
+
+function normalizeWahaAck(payload: any): number | null {
+  if (typeof payload?.ack === 'number' && !Number.isNaN(payload.ack)) {
+    return payload.ack;
+  }
+  if (
+    payload?.ack !== undefined &&
+    payload?.ack !== null &&
+    String(payload.ack).trim() !== '' &&
+    !Number.isNaN(Number(payload.ack))
+  ) {
+    return Number(payload.ack);
+  }
+  const ackName = String(payload?.ackName || '').toUpperCase().trim();
+  if (ackName === 'READ') return 3;
+  if (ackName === 'PLAYED') return 4;
+  if (ackName === 'DEVICE' || ackName === 'DELIVERED') return 2;
+  if (ackName === 'SERVER' || ackName === 'SENT') return 1;
+  if (ackName === 'ERROR' || ackName === 'FAILED') return -1;
+  if (ackName === 'PENDING') return 0;
+  return null;
+}
 
 export default async function wahaRouter(fastify: FastifyInstance) {
   // GET WAHA server & session status
@@ -192,24 +247,23 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
       // 1. Delivery & Read Receipts (message.ack)
       if (event === 'message.ack' && payload) {
-        const ackValue = payload.ack; // 1 = SERVER/SENT, 2 = DELIVERED, 3 = READ
-        const msgId = payload.id?._serialized || payload.id?.id || payload.id;
+        const ackValue = normalizeWahaAck(payload); // 1 = SERVER/SENT, 2 = DELIVERED, 3 = READ, 4 = PLAYED
+        const { exactIds, stanzaIds } = extractWahaMessageIds(payload);
+        const allIds = Array.from(new Set([...exactIds, ...stanzaIds]));
         const now = new Date();
 
-        if (msgId) {
+        if (ackValue !== null && allIds.length > 0) {
+          const recipientConditions = [
+            inArray(campaignRecipients.wahaMessageId, allIds),
+            ...stanzaIds.map((stanza) => like(campaignRecipients.wahaMessageId, `%_${stanza}`)),
+          ];
+
           const recList = await db
             .select()
             .from(campaignRecipients)
-            .where(
-              or(
-                eq(campaignRecipients.wahaMessageId, msgId),
-                payload.id?.id ? eq(campaignRecipients.wahaMessageId, payload.id.id) : undefined
-              )
-            );
+            .where(or(...recipientConditions));
 
-          const recipient = recList[0];
-
-          if (recipient) {
+          for (const recipient of recList) {
             const currentAck = recipient.ackStatus ?? 0;
             if (ackValue > currentAck) {
               const updateData: any = { ackStatus: ackValue, updatedAt: now };
@@ -249,6 +303,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           }
 
           // Update ChatMessages if matched (never downgrade ackStatus)
+          const chatConditions = [
+            inArray(chatMessages.wahaMessageId, allIds),
+            ...stanzaIds.map((stanza) => like(chatMessages.wahaMessageId, `%_${stanza}`)),
+          ];
           await db
             .update(chatMessages)
             .set({
@@ -257,18 +315,14 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               deliveredAt: ackValue >= 2 ? now : undefined,
               readAt: ackValue >= 3 ? now : undefined,
             })
-            .where(
-              and(
-                or(
-                  eq(chatMessages.wahaMessageId, msgId),
-                  payload.id?.id ? eq(chatMessages.wahaMessageId, payload.id.id) : undefined
-                ),
-                lt(chatMessages.ackStatus, ackValue)
-              )
-            );
+            .where(and(or(...chatConditions), lt(chatMessages.ackStatus, ackValue)));
+
+          console.log(
+            `[WAHA Webhook] message.ack session=${webhookSession || '-'} ack=${ackValue} ids=${allIds.join(',')} matchedRecipients=${recList.length}`
+          );
         }
-        liveEvents.emit('tracking:update', { ack: ackValue, msgId });
-        liveEvents.emit('conversations:update', { ack: ackValue, msgId });
+        liveEvents.emit('tracking:update', { ack: ackValue, msgId: exactIds[0] });
+        liveEvents.emit('conversations:update', { ack: ackValue, msgId: exactIds[0] });
       }
 
       // 2. Incoming Messages (message) - only personal 1:1 chats (@c.us / @s.whatsapp.net)

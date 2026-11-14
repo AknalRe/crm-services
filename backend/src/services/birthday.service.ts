@@ -113,6 +113,7 @@ export class BirthdayService {
       delaySeconds: setting.delaySeconds || 5,
       intervalSeconds: 15,
       batchSize: 5,
+      sessionName: setting.wahaSession || undefined,
       contactIds: birthdayContacts.map((c) => c.id),
     });
 

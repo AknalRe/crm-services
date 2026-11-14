@@ -110,10 +110,12 @@ export async function initDb() {
         send_time TEXT NOT NULL DEFAULT '08:00',
         message_template TEXT NOT NULL DEFAULT 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!',
         delay_seconds INTEGER NOT NULL DEFAULT 5,
+        waha_session TEXT,
         last_run_date TEXT,
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS system_settings (

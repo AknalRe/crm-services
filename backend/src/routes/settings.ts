@@ -86,6 +86,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         messageTemplate:
           'Halo {nama_panggilan}! Selamat ulang tahun, semoga panjang umur, sehat selalu, dan sukses selalu.',
         delaySeconds: 5,
+        wahaSession: null,
         lastRunDate: null,
       };
 
@@ -108,10 +109,11 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       sendTime?: string;
       messageTemplate?: string;
       delaySeconds?: number;
+      wahaSession?: string | null;
     };
   }>, reply: FastifyReply) => {
     try {
-      const { isEnabled, sendTime, messageTemplate, delaySeconds } = req.body;
+      const { isEnabled, sendTime, messageTemplate, delaySeconds, wahaSession } = req.body;
       const now = new Date();
 
       const updateData: any = { updatedAt: now };
@@ -119,6 +121,9 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       if (sendTime) updateData.sendTime = sendTime;
       if (messageTemplate) updateData.messageTemplate = messageTemplate;
       if (delaySeconds) updateData.delaySeconds = Number(delaySeconds);
+      if (wahaSession !== undefined) {
+        updateData.wahaSession = wahaSession && wahaSession.trim() ? wahaSession.trim() : null;
+      }
 
       const updated = await db
         .insert(birthdaySettings)
@@ -130,6 +135,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
             messageTemplate ||
             'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!',
           delaySeconds: delaySeconds ? Number(delaySeconds) : 5,
+          wahaSession: wahaSession && wahaSession.trim() ? wahaSession.trim() : null,
           updatedAt: now,
         })
         .onConflictDoUpdate({

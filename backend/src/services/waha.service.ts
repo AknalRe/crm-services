@@ -25,6 +25,7 @@ export interface WahaSessionInfo {
 
 export class WahaService {
   private static instance: WahaService;
+  private webhookSyncAt = new Map<string, number>();
 
   private constructor() {}
 
@@ -217,6 +218,13 @@ export class WahaService {
           : [{ name: session, status: status === 'NOT_FOUND' ? 'STOPPED' : status }];
       const connectedSessions = sessionSummaries.filter((s) => s.status === 'WORKING').length;
 
+      // Ensure active/QR sessions have CRM's current webhook URL + message.ack subscribed
+      for (const item of ownedList) {
+        if (item.status === 'WORKING' || item.status === 'SCAN_QR_CODE') {
+          void this.ensureSessionWebhook(client, item.name, item.raw);
+        }
+      }
+
       return {
         connected: true,
         sessionStatus: status,
@@ -240,6 +248,70 @@ export class WahaService {
         webhookUrl: config.webhookUrl,
         config: currentConfig,
       };
+    }
+  }
+
+  /**
+   * Ensure a WAHA session has CRM's webhook URL and required events configured
+   */
+  private async ensureSessionWebhook(
+    client: AxiosInstance,
+    sessionName: string,
+    existingSessionData?: any
+  ): Promise<void> {
+    const targetUrl = (config.webhookUrl || '').trim();
+    if (!targetUrl) return;
+
+    const requiredEvents = ['message', 'message.ack', 'session.status'];
+    let sessionData = existingSessionData;
+    if (!sessionData) {
+      try {
+        const res = await client.get(`/api/sessions/${encodeURIComponent(sessionName)}`);
+        sessionData = res.data;
+      } catch {
+        return;
+      }
+    }
+
+    const existingConfig = sessionData?.config && typeof sessionData.config === 'object' ? sessionData.config : {};
+    const existingWebhooks: any[] = Array.isArray(existingConfig.webhooks) ? existingConfig.webhooks : [];
+    const hasValidWebhook = existingWebhooks.some((wh) => {
+      if (!wh || wh.url !== targetUrl) return false;
+      const evs: string[] = Array.isArray(wh.events) ? wh.events : [];
+      return evs.includes('*') || requiredEvents.every((ev) => evs.includes(ev));
+    });
+
+    if (hasValidWebhook) return;
+
+    const lastAttempt = this.webhookSyncAt.get(sessionName) || 0;
+    if (Date.now() - lastAttempt < 30_000) return;
+    this.webhookSyncAt.set(sessionName, Date.now());
+
+    const preservedWebhooks = existingWebhooks.filter(
+      (wh) => wh && typeof wh.url === 'string' && !wh.url.endsWith('/api/waha/webhook')
+    );
+    const nextWebhooks = [
+      ...preservedWebhooks,
+      {
+        url: targetUrl,
+        events: requiredEvents,
+      },
+    ];
+
+    try {
+      await client.put(`/api/sessions/${encodeURIComponent(sessionName)}`, {
+        name: sessionName,
+        config: {
+          ...existingConfig,
+          webhooks: nextWebhooks,
+        },
+      });
+      console.log(`[WahaService] Synced webhook for session "${sessionName}" -> ${targetUrl}`);
+    } catch (err: any) {
+      console.warn(
+        `[WahaService] Failed to sync webhook for session "${sessionName}":`,
+        err?.response?.data || err?.message
+      );
     }
   }
 
@@ -505,8 +577,10 @@ export class WahaService {
       });
 
       const wahaMsgId =
-        response.data?.id?.id ||
+        response.data?.id?._serialized ||
         (typeof response.data?.id === 'string' ? response.data.id : null) ||
+        response.data?.id?.id ||
+        response.data?.key?.id ||
         response.data?.messageId ||
         `WAHA_${Date.now()}`;
 
