@@ -433,8 +433,11 @@ export const Settings: React.FC<SettingsProps> = ({
                         return (
                           <div
                             key={item.name}
+                            onClick={() => {
+                              if (!isActive && !isBusy) void handleSwitchActiveSession(item.name);
+                            }}
                             className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-xs ${
-                              isActive ? 'bg-indigo-50/40' : 'bg-white'
+                              isActive ? 'bg-indigo-50/40' : 'bg-white hover:bg-gray-50 cursor-pointer'
                             }`}
                           >
                             <div className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -465,7 +468,7 @@ export const Settings: React.FC<SettingsProps> = ({
                               )}
                             </div>
 
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                               {!isActive && (
                                 <Button
                                   type="button"
@@ -631,10 +634,15 @@ export const Settings: React.FC<SettingsProps> = ({
 
         <div className="space-y-5">
           <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-            <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
-              <QrCode className="w-4 h-4 text-indigo-600" />
-              <span>Status Sesi WhatsApp</span>
-            </h3>
+            <div>
+              <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-indigo-600" />
+                <span>Status Sesi WhatsApp</span>
+              </h3>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Menampilkan status sesi aktif yang dipilih dari daftar sesi di sebelah kiri.
+              </p>
+            </div>
 
             <div className="p-4 rounded-md bg-gray-50 border border-gray-200 text-center space-y-1.5">
               <span

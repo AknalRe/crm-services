@@ -40,6 +40,42 @@ export class WahaService {
   }
 
   /**
+   * In shared internal WAHA mode, scope all sessions to this CRM instance's owner prefix
+   * (e.g. "nivertari" -> allows "nivertari" and "nivertari-*") so tenants never see or touch
+   * another user's WhatsApp sessions.
+   */
+  private getOwnerPrefix(mode?: 'INTERNAL' | 'EXTERNAL'): string | null {
+    if (mode !== 'INTERNAL') return null;
+    const base = (config.waha.session || '').trim();
+    if (!base || base === 'default') return null;
+    return base;
+  }
+
+  private isOwnedSession(sessionName: string, ownerPrefix: string | null): boolean {
+    if (!ownerPrefix) return true;
+    return (
+      sessionName === ownerPrefix ||
+      sessionName.startsWith(`${ownerPrefix}-`) ||
+      sessionName.startsWith(`${ownerPrefix}_`)
+    );
+  }
+
+  private resolveOwnedSessionName(inputName: string, ownerPrefix: string | null): string {
+    const clean = inputName.trim();
+    if (!ownerPrefix) return clean;
+    if (this.isOwnedSession(clean, ownerPrefix)) return clean;
+    return `${ownerPrefix}-${clean}`;
+  }
+
+  private assertOwnedSession(sessionName: string, ownerPrefix: string | null): void {
+    if (!this.isOwnedSession(sessionName, ownerPrefix)) {
+      const err: any = new Error('Sesi WhatsApp ini tidak dimiliki oleh akun CRM Anda.');
+      err.statusCode = 403;
+      throw err;
+    }
+  }
+
+  /**
    * Get active WAHA configuration (internal mode locks URL & API key to env when configured)
    */
   public async getConfig(maskSecret = false): Promise<WahaConfig> {
@@ -96,8 +132,11 @@ export class WahaService {
   /**
    * Create Axios client with authentication headers
    */
-  private async getClient(): Promise<{ client: AxiosInstance; session: string }> {
+  private async getClient(): Promise<{ client: AxiosInstance; session: string; ownerPrefix: string | null }> {
     const conf = await this.getConfig();
+    const ownerPrefix = this.getOwnerPrefix(conf.mode);
+    const activeSession =
+      ownerPrefix && !this.isOwnedSession(conf.session, ownerPrefix) ? ownerPrefix : conf.session;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
@@ -114,7 +153,7 @@ export class WahaService {
       timeout: 30000,
     });
 
-    return { client, session: conf.session };
+    return { client, session: activeSession, ownerPrefix };
   }
 
   /**
@@ -173,8 +212,11 @@ export class WahaService {
    * Create/update session with automatic webhook tracking and start it
    */
   public async startSession(sessionName?: string): Promise<any> {
-    const { client, session } = await this.getClient();
-    const targetSession = sessionName || session;
+    const { client, session, ownerPrefix } = await this.getClient();
+    const targetSession = sessionName
+      ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
+      : session;
+    this.assertOwnedSession(targetSession, ownerPrefix);
     const webhookConfigs = [
       {
         url: config.webhookUrl,
@@ -218,8 +260,9 @@ export class WahaService {
    * Stop a session
    */
   public async stopSession(sessionName?: string): Promise<any> {
-    const { client, session } = await this.getClient();
-    const targetSession = sessionName || session;
+    const { client, session, ownerPrefix } = await this.getClient();
+    const targetSession = sessionName ? sessionName.trim() : session;
+    this.assertOwnedSession(targetSession, ownerPrefix);
     const response = await client.post('/api/sessions/stop', { name: targetSession });
     return response.data;
   }
@@ -228,24 +271,27 @@ export class WahaService {
    * Logout a session
    */
   public async logoutSession(sessionName?: string): Promise<any> {
-    const { client, session } = await this.getClient();
-    const targetSession = sessionName || session;
+    const { client, session, ownerPrefix } = await this.getClient();
+    const targetSession = sessionName ? sessionName.trim() : session;
+    this.assertOwnedSession(targetSession, ownerPrefix);
     const response = await client.post('/api/sessions/logout', { name: targetSession });
     return response.data;
   }
 
   /**
-   * List all sessions on the configured WAHA server
+   * List sessions belonging to this CRM instance (scoped in shared internal WAHA mode)
    */
   public async listSessions(): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
-    const { client, session } = await this.getClient();
+    const { client, session, ownerPrefix } = await this.getClient();
     const res = await client.get('/api/sessions?all=true').catch(() => client.get('/api/sessions'));
     const rawList = Array.isArray(res.data) ? res.data : [];
-    const sessions: WahaSessionInfo[] = rawList.map((item: any) => ({
-      name: String(item.name || 'default'),
-      status: String(item.status || 'UNKNOWN'),
-      me: item.me || null,
-    }));
+    const sessions: WahaSessionInfo[] = rawList
+      .map((item: any) => ({
+        name: String(item.name || 'default'),
+        status: String(item.status || 'UNKNOWN'),
+        me: item.me || null,
+      }))
+      .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
     return { sessions, activeSession: session };
   }
 
@@ -257,6 +303,9 @@ export class WahaService {
     if (!clean || !/^[a-zA-Z0-9_-]+$/.test(clean)) {
       throw new Error('Nama sesi hanya boleh huruf, angka, tanda hubung (-), atau underscore (_)');
     }
+    const conf = await this.getConfig();
+    const ownerPrefix = this.getOwnerPrefix(conf.mode);
+    this.assertOwnedSession(clean, ownerPrefix);
     const now = new Date();
     await db
       .insert(systemSettings)
@@ -276,9 +325,12 @@ export class WahaService {
     if (!clean || !/^[a-zA-Z0-9_-]+$/.test(clean)) {
       throw new Error('Nama sesi hanya boleh huruf, angka, tanda hubung (-), atau underscore (_)');
     }
-    const result = await this.startSession(clean);
+    const conf = await this.getConfig();
+    const ownerPrefix = this.getOwnerPrefix(conf.mode);
+    const scopedName = this.resolveOwnedSessionName(clean, ownerPrefix);
+    const result = await this.startSession(scopedName);
     if (setActive) {
-      await this.setActiveSession(clean);
+      await this.setActiveSession(scopedName);
     }
     return result;
   }
@@ -291,7 +343,8 @@ export class WahaService {
     if (!clean) {
       throw new Error('Nama sesi wajib diisi');
     }
-    const { client, session: currentActive } = await this.getClient();
+    const { client, session: currentActive, ownerPrefix } = await this.getClient();
+    this.assertOwnedSession(clean, ownerPrefix);
     let result: any;
     try {
       const res = await client.delete(`/api/sessions/${encodeURIComponent(clean)}`);
@@ -303,12 +356,13 @@ export class WahaService {
     }
 
     if (currentActive === clean) {
+      const fallback = ownerPrefix || 'default';
       try {
         const remaining = await this.listSessions();
-        const nextSession = remaining.sessions.find((s) => s.name !== clean)?.name || 'default';
+        const nextSession = remaining.sessions.find((s) => s.name !== clean)?.name || fallback;
         await this.setActiveSession(nextSession);
       } catch {
-        await this.setActiveSession('default').catch(() => null);
+        await this.setActiveSession(fallback).catch(() => null);
       }
     }
 
