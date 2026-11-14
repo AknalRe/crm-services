@@ -162,6 +162,10 @@ export class WahaService {
   public async getStatus(): Promise<{
     connected: boolean;
     sessionStatus?: string;
+    activeSession?: string;
+    connectedSessions?: number;
+    totalSessions?: number;
+    sessions?: Array<{ name: string; status: string }>;
     details?: any;
     error?: string;
     webhookUrl?: string;
@@ -169,30 +173,57 @@ export class WahaService {
   }> {
     const currentConfig = await this.getConfig(true);
     try {
-      const { client, session } = await this.getClient();
-      
-      let sessionData: any = null;
-      try {
-        const res = await client.get(`/api/sessions/${session}`);
-        sessionData = res.data;
-      } catch (err: any) {
-        if (err.response?.status === 404) {
-          return {
-            connected: true,
-            sessionStatus: 'NOT_FOUND',
-            webhookUrl: config.webhookUrl,
-            config: currentConfig,
-          };
+      const { client, session, ownerPrefix } = await this.getClient();
+      currentConfig.session = session;
+
+      const resAll = await client
+        .get('/api/sessions?all=true')
+        .catch(() => client.get('/api/sessions'))
+        .catch(() => null);
+      const rawList = Array.isArray(resAll?.data) ? resAll.data : [];
+      const ownedList: Array<{ name: string; status: string; raw: any }> = rawList
+        .map((item: any) => ({
+          name: String(item.name || 'default'),
+          status: String(item.status || 'UNKNOWN'),
+          raw: item,
+        }))
+        .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
+
+      let sessionData: any = ownedList.find((s) => s.name === session)?.raw || null;
+      if (!sessionData) {
+        try {
+          const res = await client.get(`/api/sessions/${encodeURIComponent(session)}`);
+          sessionData = res.data;
+        } catch (err: any) {
+          if (err.response?.status === 404 && ownedList.length === 0) {
+            return {
+              connected: true,
+              sessionStatus: 'NOT_FOUND',
+              activeSession: session,
+              connectedSessions: 0,
+              totalSessions: 1,
+              sessions: [{ name: session, status: 'STOPPED' }],
+              webhookUrl: config.webhookUrl,
+              config: currentConfig,
+            };
+          }
         }
-        const resAll = await client.get('/api/sessions');
-        const list = Array.isArray(resAll.data) ? resAll.data : [];
-        sessionData = list.find((s: any) => s.name === session);
       }
 
-      const status = sessionData?.status || 'UNKNOWN';
+      const status = sessionData?.status || 'NOT_FOUND';
+      const sessionSummaries =
+        ownedList.length > 0
+          ? ownedList.map((s) => ({ name: s.name, status: s.status }))
+          : [{ name: session, status: status === 'NOT_FOUND' ? 'STOPPED' : status }];
+      const connectedSessions = sessionSummaries.filter((s) => s.status === 'WORKING').length;
+
       return {
         connected: true,
         sessionStatus: status,
+        activeSession: session,
+        connectedSessions,
+        totalSessions: sessionSummaries.length,
+        sessions: sessionSummaries,
         details: sessionData,
         webhookUrl: config.webhookUrl,
         config: currentConfig,
@@ -201,6 +232,10 @@ export class WahaService {
       return {
         connected: false,
         sessionStatus: 'OFFLINE',
+        activeSession: currentConfig.session,
+        connectedSessions: 0,
+        totalSessions: 0,
+        sessions: [],
         error: err.response?.data?.message || err.message,
         webhookUrl: config.webhookUrl,
         config: currentConfig,

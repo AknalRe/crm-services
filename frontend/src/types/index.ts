@@ -118,6 +118,10 @@ export interface WahaSessionItem {
 export interface WahaStatus {
   connected: boolean;
   sessionStatus: string;
+  activeSession?: string;
+  connectedSessions?: number;
+  totalSessions?: number;
+  sessions?: Array<{ name: string; status: string }>;
   details?: any;
   error?: string;
   webhookUrl?: string;

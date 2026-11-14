@@ -1,8 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import {
   Search,
   Plus,
   Upload,
+  Download,
+  FileSpreadsheet,
   Edit,
   Trash2,
   Phone,
@@ -55,6 +58,9 @@ export const Contacts: React.FC<ContactsProps> = ({
   });
 
   const [importText, setImportText] = useState('');
+  const [importFileName, setImportFileName] = useState<string | null>(null);
+  const [importFileRows, setImportFileRows] = useState<any[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
@@ -171,29 +177,175 @@ export const Contacts: React.FC<ContactsProps> = ({
     }
   };
 
+  const formatExcelDate = (val: unknown): string | undefined => {
+    if (val === null || val === undefined || val === '') return undefined;
+    if (typeof val === 'number' && val > 1000) {
+      const parsed = XLSX.SSF.parse_date_code(val);
+      if (parsed && parsed.y && parsed.m && parsed.d) {
+        const mm = String(parsed.m).padStart(2, '0');
+        const dd = String(parsed.d).padStart(2, '0');
+        return `${parsed.y}-${mm}-${dd}`;
+      }
+    }
+    const str = String(val).trim();
+    return str || undefined;
+  };
+
+  const normalizeImportHeader = (key: string) =>
+    key.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const mapExcelRowToContact = (row: Record<string, unknown>) => {
+    const normalized: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(row)) {
+      normalized[normalizeImportHeader(k)] = v;
+    }
+    const namaLengkap = String(
+      normalized.namalengkap ?? normalized.nama ?? normalized.name ?? normalized.fullname ?? ''
+    ).trim();
+    const nomorWhatsapp = String(
+      normalized.nomorwhatsapp ??
+        normalized.nowhatsapp ??
+        normalized.nowa ??
+        normalized.whatsapp ??
+        normalized.phone ??
+        normalized.telepon ??
+        normalized.hp ??
+        ''
+    ).trim();
+    if (!namaLengkap || !nomorWhatsapp) return null;
+
+    return {
+      nama_lengkap: namaLengkap,
+      nomor_whatsapp: nomorWhatsapp,
+      nama_panggilan:
+        String(normalized.namapanggilan ?? normalized.panggilan ?? normalized.nickname ?? '').trim() ||
+        undefined,
+      tanggal_lahir: formatExcelDate(
+        normalized.tanggallahir ?? normalized.tgllahir ?? normalized.birthday ?? normalized.dob
+      ),
+      alamat: String(normalized.alamat ?? normalized.address ?? '').trim() || undefined,
+      tags: String(normalized.tag ?? normalized.tags ?? normalized.label ?? '').trim() || undefined,
+      notes: String(normalized.catatan ?? normalized.notes ?? normalized.note ?? '').trim() || undefined,
+    };
+  };
+
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheet = workbook.SheetNames[0];
+      if (!firstSheet) {
+        toast.warning('File tidak memiliki sheet data.');
+        return;
+      }
+      const sheet = workbook.Sheets[firstSheet];
+      const objectRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+      let parsed = objectRows.map(mapExcelRowToContact).filter(Boolean);
+
+      if (parsed.length === 0) {
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
+        parsed = matrix
+          .filter((r) => Array.isArray(r) && r.length >= 2)
+          .map((r) => ({
+            nama_lengkap: String(r[0] ?? '').trim(),
+            nomor_whatsapp: String(r[1] ?? '').trim(),
+            nama_panggilan: String(r[2] ?? '').trim() || undefined,
+            tanggal_lahir: formatExcelDate(r[3]),
+            alamat: String(r[4] ?? '').trim() || undefined,
+            tags: String(r[5] ?? '').trim() || undefined,
+            notes: String(r[6] ?? '').trim() || undefined,
+          }))
+          .filter(
+            (item) =>
+              item.nama_lengkap &&
+              item.nomor_whatsapp &&
+              normalizeImportHeader(item.nama_lengkap) !== 'namalengkap'
+          );
+      }
+
+      if (parsed.length === 0) {
+        toast.warning(
+          'Tidak ada baris kontak valid ditemukan. Pastikan kolom Nama Lengkap dan Nomor WhatsApp terisi.'
+        );
+        return;
+      }
+
+      setImportFileName(file.name);
+      setImportFileRows(parsed);
+      toast.success(`${parsed.length} kontak terbaca dari "${file.name}".`);
+    } catch {
+      toast.error('Gagal membaca file Excel/CSV. Pastikan format file valid.');
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDownloadTemplate = (format: 'xlsx' | 'csv') => {
+    const templateRows = [
+      {
+        'Nama Lengkap': 'Budi Santoso',
+        'Nomor WhatsApp': '081234567890',
+        'Nama Panggilan': 'Budi',
+        'Tanggal Lahir (YYYY-MM-DD)': '1992-05-14',
+        Alamat: 'Jakarta Selatan',
+        Tag: 'VIP',
+        Catatan: 'Pelanggan tetap',
+      },
+      {
+        'Nama Lengkap': 'Siti Rahma',
+        'Nomor WhatsApp': '082198765432',
+        'Nama Panggilan': 'Siti',
+        'Tanggal Lahir (YYYY-MM-DD)': '1995-11-20',
+        Alamat: 'Bandung',
+        Tag: 'Retail',
+        Catatan: '',
+      },
+    ];
+    const ws = XLSX.utils.json_to_sheet(templateRows);
+    ws['!cols'] = [
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 24 },
+      { wch: 24 },
+      { wch: 14 },
+      { wch: 22 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template Kontak');
+    if (format === 'xlsx') {
+      XLSX.writeFile(wb, 'template-kontak-crm.xlsx');
+    } else {
+      XLSX.writeFile(wb, 'template-kontak-crm.csv', { bookType: 'csv' });
+    }
+  };
+
   const handleBulkImport = async () => {
-    if (importing || !importText.trim()) return;
+    if (importing || (!importText.trim() && importFileRows.length === 0)) return;
     setImporting(true);
     try {
-      const lines = importText.split('\n').filter((l) => l.trim().length > 0);
-      const items: any[] = [];
-
-      for (const line of lines) {
-        const parts = line.split(',').map((p) => p.trim());
-        if (parts.length >= 2) {
-          items.push({
-            nama_lengkap: parts[0],
-            nomor_whatsapp: parts[1],
-            nama_panggilan: parts[2] || undefined,
-            tanggal_lahir: parts[3] || undefined,
-            alamat: parts[4] || undefined,
-            tags: parts[5] || undefined,
-          });
+      const items: any[] = [...importFileRows];
+      if (importText.trim()) {
+        const lines = importText.split('\n').filter((l) => l.trim().length > 0);
+        for (const line of lines) {
+          const parts = line.split(',').map((p) => p.trim());
+          if (parts.length >= 2) {
+            items.push({
+              nama_lengkap: parts[0],
+              nomor_whatsapp: parts[1],
+              nama_panggilan: parts[2] || undefined,
+              tanggal_lahir: parts[3] || undefined,
+              alamat: parts[4] || undefined,
+              tags: parts[5] || undefined,
+            });
+          }
         }
       }
 
       if (items.length === 0) {
-        toast.warning('Format CSV tidak valid. Minimal: Nama Lengkap, Nomor WhatsApp.');
+        toast.warning('Data import belum tersedia. Unggah file Excel/CSV atau tempel data CSV.');
         return;
       }
 
@@ -201,9 +353,11 @@ export const Contacts: React.FC<ContactsProps> = ({
       toast.success(res.message || `${items.length} kontak berhasil diimpor.`);
       setIsImportModalOpen(false);
       setImportText('');
+      setImportFileName(null);
+      setImportFileRows([]);
       fetchContacts();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Gagal mengimpor data CSV');
+      toast.error(err.response?.data?.error || 'Gagal mengimpor data kontak');
     } finally {
       setImporting(false);
     }
@@ -570,18 +724,26 @@ export const Contacts: React.FC<ContactsProps> = ({
         </form>
       </Modal>
 
-      {/* Bulk Import CSV Modal */}
+      {/* Bulk Import Excel / CSV Modal */}
       <Modal
         isOpen={isImportModalOpen}
-        onClose={() => setIsImportModalOpen(false)}
-        title="Import Data Pelanggan CSV"
-        subtitle="Tempel data teks CSV (satu pelanggan per baris)"
+        onClose={() => {
+          setIsImportModalOpen(false);
+          setImportFileName(null);
+          setImportFileRows([]);
+        }}
+        title="Import Data Pelanggan (Excel / CSV)"
+        subtitle="Unggah file .xlsx / .xls / .csv atau tempel data teks CSV"
         isLoading={importing}
         footer={
           <>
             <Button
               variant="secondary"
-              onClick={() => setIsImportModalOpen(false)}
+              onClick={() => {
+                setIsImportModalOpen(false);
+                setImportFileName(null);
+                setImportFileRows([]);
+              }}
               disabled={importing}
             >
               Batal
@@ -590,22 +752,73 @@ export const Contacts: React.FC<ContactsProps> = ({
               variant="primary"
               onClick={handleBulkImport}
               isLoading={importing}
-              disabled={!importText.trim()}
+              disabled={!importText.trim() && importFileRows.length === 0}
             >
-              Proses Import
+              Proses Import{importFileRows.length > 0 ? ` (${importFileRows.length})` : ''}
             </Button>
           </>
         }
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-md bg-gray-50 border border-gray-200">
+            <span className="text-xs font-medium text-gray-700">
+              Unduh template resmi agar format kolom sesuai:
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleDownloadTemplate('xlsx')}
+                leftIcon={<Download className="w-3.5 h-3.5" />}
+              >
+                Template Excel (.xlsx)
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleDownloadTemplate('csv')}
+                leftIcon={<Download className="w-3.5 h-3.5" />}
+              >
+                Template CSV
+              </Button>
+            </div>
+          </div>
+
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleImportFileChange}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full p-4 border-2 border-dashed border-gray-300 hover:border-indigo-400 rounded-lg bg-white hover:bg-indigo-50/30 transition-colors flex flex-col items-center justify-center gap-1.5 text-center"
+            >
+              <FileSpreadsheet className="w-6 h-6 text-indigo-600" />
+              <span className="text-xs font-semibold text-gray-800">
+                {importFileName
+                  ? `${importFileName} (${importFileRows.length} kontak siap diimpor)`
+                  : 'Klik untuk pilih file Excel (.xlsx / .xls) atau CSV'}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                Kolom wajib: Nama Lengkap & Nomor WhatsApp
+              </span>
+            </button>
+          </div>
+
           <div className="text-xs text-gray-600">
-            Format kolom per baris:
+            Atau tempel teks CSV (satu pelanggan per baris):
             <code className="block mt-1 text-gray-800 font-mono text-[11px] bg-gray-100 px-2 py-1.5 rounded border border-gray-200">
               Nama Lengkap, Nomor WhatsApp, Nama Panggilan, YYYY-MM-DD, Alamat, Tag
             </code>
           </div>
           <textarea
-            rows={6}
+            rows={4}
             placeholder="Budi Santoso, 081234567890, Budi, 1992-05-14, Jakarta Selatan, VIP&#10;Siti Rahma, 082198765432, Siti, 1995-11-20, Bandung, Retail"
             value={importText}
             onChange={(e) => setImportText(e.target.value)}

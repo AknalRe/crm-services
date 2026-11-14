@@ -115,9 +115,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </div>
 
-          <p className="text-[11px] text-gray-400 font-mono truncate mb-2.5">
+          <p className="text-[11px] text-gray-400 font-mono truncate mb-1">
+            {wahaStatus?.activeSession || wahaStatus?.config?.session || 'default'} •{' '}
             {wahaStatus?.sessionStatus || 'CHECKING'}
           </p>
+          {(wahaStatus?.totalSessions ?? 0) > 1 && (
+            <p className="text-[10px] text-gray-400 mb-2">
+              {wahaStatus?.connectedSessions ?? 0}/{wahaStatus?.totalSessions ?? 0} sesi aktif
+            </p>
+          )}
 
           {!isConnected && (
             <button
