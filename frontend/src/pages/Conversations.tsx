@@ -946,11 +946,11 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
           {/* Composer */}
           <div className="bg-white border-t border-gray-200 p-3 space-y-2 shrink-0 relative">
             <div className="flex items-center justify-between gap-2">
-              <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50 text-[11px]">
+              <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50 text-[11px] shrink-0">
                 <button
                   type="button"
                   onClick={() => setComposerMode('REPLY')}
-                  className={`px-2.5 py-1 rounded font-medium transition-colors ${
+                  className={`px-2.5 py-1 rounded font-medium whitespace-nowrap transition-colors ${
                     composerMode === 'REPLY'
                       ? 'bg-white text-indigo-700 shadow-sm'
                       : 'text-gray-600 hover:text-gray-900'
@@ -964,7 +964,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                     setComposerMode('NOTE');
                     setPendingAttachment(null);
                   }}
-                  className={`px-2.5 py-1 rounded font-medium inline-flex items-center gap-1 transition-colors ${
+                  className={`px-2.5 py-1 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
                     composerMode === 'NOTE'
                       ? 'bg-amber-100 text-amber-900 shadow-sm'
                       : 'text-gray-600 hover:text-gray-900'
@@ -1246,7 +1246,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
 
       {/* Right Contact Profile (Collapsible) */}
       {showContactPanel && selectedConversation?.contact && (
-        <div className="w-full md:w-76 border-l border-gray-200 bg-white p-4 flex flex-col shrink-0 overflow-y-auto">
+        <div className="w-full md:w-72 lg:w-80 border-l border-gray-200 bg-white p-4 flex flex-col shrink-0 overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
               Detail Kontak
