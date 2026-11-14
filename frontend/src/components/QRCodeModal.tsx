@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 import { WahaStatus } from '../types';
@@ -23,16 +23,23 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
   const [status, setStatus] = useState<string>('CHECKING');
   const [error, setError] = useState<string | null>(null);
 
+  const onStatusChangeRef = useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const inFlightRef = useRef(false);
+
   const fetchQr = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
     try {
       const statusRes = await api.getWahaStatus();
-      if (onStatusChange) onStatusChange(statusRes);
+      if (onStatusChangeRef.current) onStatusChangeRef.current(statusRes);
 
       if (!sessionName && statusRes.sessionStatus === 'WORKING') {
         setStatus('WORKING');
-        setLoading(false);
         return;
       }
 
@@ -52,22 +59,23 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || 'Gagal memuat QR Code');
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
-  }, [onStatusChange, sessionName]);
+  }, [sessionName]);
 
   useEffect(() => {
     if (!isOpen) return;
-    fetchQr();
+    void fetchQr();
 
     const timer = setInterval(() => {
-      if (status !== 'WORKING') {
-        fetchQr();
+      if (statusRef.current !== 'WORKING') {
+        void fetchQr();
       }
     }, 6000);
 
     return () => clearInterval(timer);
-  }, [isOpen, status, fetchQr]);
+  }, [isOpen, fetchQr]);
 
   return (
     <Modal

@@ -714,7 +714,7 @@ export const Settings: React.FC<SettingsProps> = ({
               WAHA mengirimkan event <code className="font-mono text-gray-800">message.ack</code> ke endpoint backend CRM:
             </p>
             <div className="bg-gray-50 p-2.5 rounded-md font-mono text-[11px] text-gray-800 break-all select-all border border-gray-200">
-              http://backend:5000/api/waha/webhook
+              {wahaStatus?.webhookUrl || `${window.location.origin}/api/waha/webhook`}
             </div>
             <p className="text-[11px] text-gray-400">
               Event ini mencatat status pesan sampai (Centang Dua) dan dibaca (Centang Biru).

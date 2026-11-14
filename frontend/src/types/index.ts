@@ -120,6 +120,7 @@ export interface WahaStatus {
   sessionStatus: string;
   details?: any;
   error?: string;
+  webhookUrl?: string;
   config: {
     baseUrl: string;
     apiKey?: string;

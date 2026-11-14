@@ -125,6 +125,7 @@ export class WahaService {
     sessionStatus?: string;
     details?: any;
     error?: string;
+    webhookUrl?: string;
     config: WahaConfig;
   }> {
     const currentConfig = await this.getConfig(true);
@@ -140,6 +141,7 @@ export class WahaService {
           return {
             connected: true,
             sessionStatus: 'NOT_FOUND',
+            webhookUrl: config.webhookUrl,
             config: currentConfig,
           };
         }
@@ -153,6 +155,7 @@ export class WahaService {
         connected: true,
         sessionStatus: status,
         details: sessionData,
+        webhookUrl: config.webhookUrl,
         config: currentConfig,
       };
     } catch (err: any) {
@@ -160,29 +163,55 @@ export class WahaService {
         connected: false,
         sessionStatus: 'OFFLINE',
         error: err.response?.data?.message || err.message,
+        webhookUrl: config.webhookUrl,
         config: currentConfig,
       };
     }
   }
 
   /**
-   * Start a session
+   * Create/update session with automatic webhook tracking and start it
    */
   public async startSession(sessionName?: string): Promise<any> {
     const { client, session } = await this.getClient();
     const targetSession = sessionName || session;
-    const response = await client.post('/api/sessions/start', {
-      name: targetSession,
-      config: {
-        webhooks: [
-          {
-            url: config.webhookUrl,
-            events: ['message', 'message.ack', 'session.status'],
-          },
-        ],
+    const webhookConfigs = [
+      {
+        url: config.webhookUrl,
+        events: ['message', 'message.ack', 'session.status'],
       },
-    });
-    return response.data;
+    ];
+
+    try {
+      const createRes = await client.post('/api/sessions', {
+        name: targetSession,
+        start: true,
+        config: { webhooks: webhookConfigs },
+      });
+      return createRes.data;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 409 || status === 422 || status === 404 || status === 405) {
+        if (status === 409 || status === 422) {
+          await client
+            .put(`/api/sessions/${encodeURIComponent(targetSession)}`, {
+              config: { webhooks: webhookConfigs },
+            })
+            .catch(() => {});
+        }
+        try {
+          const startRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/start`);
+          return startRes.data;
+        } catch {
+          const legacyRes = await client.post('/api/sessions/start', {
+            name: targetSession,
+            config: { webhooks: webhookConfigs },
+          });
+          return legacyRes.data;
+        }
+      }
+      throw err;
+    }
   }
 
   /**
