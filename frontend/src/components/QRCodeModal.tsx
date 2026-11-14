@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { WahaStatus } from '../types';
+import { WahaSessionItem, WahaStatus } from '../types';
 import { Modal } from './ui/Modal';
 import { Button } from './ui/Button';
 
@@ -23,6 +23,8 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>('CHECKING');
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<WahaSessionItem[]>([]);
+  const [selectedSession, setSelectedSession] = useState<string | undefined>(sessionName);
 
   const onStatusChangeRef = useRef(onStatusChange);
   onStatusChangeRef.current = onStatusChange;
@@ -31,41 +33,67 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
   const inFlightRef = useRef(false);
   const autoRecoveredRef = useRef(false);
 
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedSession(sessionName);
+      setQrCode(null);
+      setStatus('CHECKING');
+      setError(null);
+      autoRecoveredRef.current = false;
+    }
+  }, [isOpen, sessionName]);
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const res = await api.getWahaSessions();
+      const list = res.sessions || [];
+      setSessions(list);
+      setSelectedSession((prev) => prev || res.activeSession || list[0]?.name);
+    } catch {
+      // Abaikan jika daftar sesi belum tersedia
+    }
+  }, []);
+
   const fetchQr = useCallback(async (forceRecover = false) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setLoading(true);
     setError(null);
+    const targetSession = selectedSession;
     try {
       const statusRes = await api.getWahaStatus();
       if (onStatusChangeRef.current) onStatusChangeRef.current(statusRes);
 
-      if (!sessionName && statusRes.sessionStatus === 'WORKING') {
+      const effectiveTarget = targetSession || statusRes.activeSession || statusRes.config?.session;
+      const targetSummary = statusRes.sessions?.find((s) => s.name === effectiveTarget);
+      const targetCurrentStatus = targetSummary?.status || (!targetSession ? statusRes.sessionStatus : undefined);
+
+      if (targetCurrentStatus === 'WORKING') {
         setStatus('WORKING');
+        setQrCode(null);
         return;
       }
 
       if (
         forceRecover ||
-        (!sessionName &&
-          (statusRes.sessionStatus === 'STOPPED' ||
-            statusRes.sessionStatus === 'NOT_FOUND' ||
-            (statusRes.sessionStatus === 'FAILED' && !autoRecoveredRef.current)))
+        targetCurrentStatus === 'STOPPED' ||
+        targetCurrentStatus === 'NOT_FOUND' ||
+        (targetCurrentStatus === 'FAILED' && !autoRecoveredRef.current)
       ) {
         autoRecoveredRef.current = true;
         try {
-          await api.startWahaSession(sessionName);
+          await api.startWahaSession(effectiveTarget);
         } catch {
           // Abaikan jika sesi sedang dimulai
         }
       }
 
-      const qrRes = await api.getWahaQr(sessionName);
+      const qrRes = await api.getWahaQr(effectiveTarget);
       if (qrRes.status === 'FAILED' && !autoRecoveredRef.current) {
         autoRecoveredRef.current = true;
         try {
-          await api.startWahaSession(sessionName);
-          const retryRes = await api.getWahaQr(sessionName);
+          await api.startWahaSession(effectiveTarget);
+          const retryRes = await api.getWahaQr(effectiveTarget);
           setStatus(retryRes.status);
           if (retryRes.qr && retryRes.qr.startsWith('data:image/')) {
             setQrCode(retryRes.qr);
@@ -89,16 +117,18 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
       inFlightRef.current = false;
       setLoading(false);
     }
-  }, [sessionName]);
+  }, [selectedSession]);
 
   useEffect(() => {
     if (!isOpen) {
       autoRecoveredRef.current = false;
       return;
     }
+    void loadSessions();
     void fetchQr();
 
     const unsubWaha = subscribeLiveEvent('waha:status', () => {
+      void loadSessions();
       if (statusRef.current !== 'WORKING') {
         void fetchQr();
       }
@@ -114,7 +144,16 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
       unsubWaha();
       clearInterval(timer);
     };
-  }, [isOpen, fetchQr]);
+  }, [isOpen, fetchQr, loadSessions]);
+
+  const handleSelectSession = (nextName: string) => {
+    if (!nextName || nextName === selectedSession) return;
+    autoRecoveredRef.current = false;
+    setQrCode(null);
+    setStatus('CHECKING');
+    setError(null);
+    setSelectedSession(nextName);
+  };
 
   return (
     <Modal
@@ -152,7 +191,29 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
         </div>
       }
     >
-      <div className="flex flex-col items-center justify-center min-h-[260px] bg-gray-50 rounded-lg border border-gray-200 p-4">
+      <div className="space-y-3">
+        {sessions.length > 0 && (
+          <div className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+            <label htmlFor="qr-session-select" className="text-xs font-medium text-gray-600 shrink-0">
+              Sesi WhatsApp:
+            </label>
+            <select
+              id="qr-session-select"
+              value={selectedSession || ''}
+              onChange={(e) => handleSelectSession(e.target.value)}
+              disabled={sessions.length <= 1}
+              className="flex-1 min-w-0 h-8 px-2.5 bg-gray-50 border border-gray-200 rounded text-xs font-mono text-gray-900 focus:outline-none focus:border-indigo-500 disabled:opacity-75"
+            >
+              {sessions.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.name} ({item.status})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="flex flex-col items-center justify-center min-h-[260px] bg-gray-50 rounded-lg border border-gray-200 p-4">
         {loading && !qrCode ? (
           <div className="flex flex-col items-center gap-2.5">
             <RefreshCw className="w-6 h-6 text-indigo-600 animate-spin" />
@@ -187,6 +248,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
             </p>
           </div>
         )}
+        </div>
       </div>
     </Modal>
   );
