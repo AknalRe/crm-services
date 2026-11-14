@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
-import { conversations, contacts } from '../db/schema';
+import { conversations, contacts, csatResponses } from '../db/schema';
 import { liveEvents } from '../services/events.service';
 
 export default async function publicCsatRouter(fastify: FastifyInstance) {
@@ -11,6 +11,29 @@ export default async function publicCsatRouter(fastify: FastifyInstance) {
       const token = (req.params.token || '').trim();
       if (!token) {
         return reply.status(400).send({ success: false, error: 'Token CSAT tidak valid' });
+      }
+
+      const csatRows = await db
+        .select({
+          csat: csatResponses,
+          contact: contacts,
+        })
+        .from(csatResponses)
+        .leftJoin(contacts, eq(csatResponses.contactId, contacts.id))
+        .where(eq(csatResponses.token, token));
+
+      if (csatRows[0]) {
+        const item = csatRows[0];
+        return reply.send({
+          success: true,
+          data: {
+            contactName: item.contact?.namaPanggilan || item.contact?.namaLengkap || 'Pelanggan',
+            alreadyRated: Boolean(item.csat.rating),
+            rating: item.csat.rating,
+            feedback: item.csat.feedback,
+            submittedAt: item.csat.submittedAt,
+          },
+        });
       }
 
       const rows = await db
@@ -59,17 +82,34 @@ export default async function publicCsatRouter(fastify: FastifyInstance) {
         return reply.status(400).send({ success: false, error: 'Penilaian harus berupa angka 1 sampai 5' });
       }
 
-      const rows = await db
+      const now = new Date();
+      const csatRows = await db
         .select()
-        .from(conversations)
-        .where(eq(conversations.csatToken, token));
+        .from(csatResponses)
+        .where(eq(csatResponses.token, token));
 
-      const conv = rows[0];
-      if (!conv) {
-        return reply.status(404).send({ success: false, error: 'Tautan penilaian tidak ditemukan' });
+      let convId: string | null = null;
+      if (csatRows[0]) {
+        convId = csatRows[0].conversationId;
+        await db
+          .update(csatResponses)
+          .set({
+            rating,
+            feedback,
+            submittedAt: now,
+          })
+          .where(eq(csatResponses.id, csatRows[0].id));
+      } else {
+        const rows = await db
+          .select()
+          .from(conversations)
+          .where(eq(conversations.csatToken, token));
+        if (!rows[0]) {
+          return reply.status(404).send({ success: false, error: 'Tautan penilaian tidak ditemukan' });
+        }
+        convId = rows[0].id;
       }
 
-      const now = new Date();
       await db
         .update(conversations)
         .set({
@@ -78,10 +118,10 @@ export default async function publicCsatRouter(fastify: FastifyInstance) {
           csatSubmittedAt: now,
           updatedAt: now,
         })
-        .where(eq(conversations.id, conv.id));
+        .where(eq(conversations.id, convId));
 
-      liveEvents.emit('conversations:update', { conversationId: conv.id, csatRating: rating });
-      liveEvents.emit('tracking:update', { conversationId: conv.id, csatRating: rating });
+      liveEvents.emit('conversations:update', { conversationId: convId, csatRating: rating });
+      liveEvents.emit('tracking:update', { conversationId: convId, csatRating: rating });
 
       return reply.send({
         success: true,

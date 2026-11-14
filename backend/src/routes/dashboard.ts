@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { sql, desc, eq, gte, isNotNull, or } from 'drizzle-orm';
 import { db } from '../db';
-import { contacts, campaigns, campaignRecipients, conversations } from '../db/schema';
+import { contacts, campaigns, campaignRecipients, conversations, csatResponses } from '../db/schema';
 import { formatCampaign, formatRecipient } from './broadcasts';
 import { getSettingMap, requirePermission } from './auth';
 
@@ -30,6 +30,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         recentActivityList,
         birthdayContactsList,
         conversationRows,
+        csatRows,
       ] = await Promise.all([
         db.select({ count: sql<number>`count(*)` }).from(contacts),
         db.select({ count: sql<number>`count(*)` }).from(campaigns),
@@ -67,6 +68,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           })
           .from(conversations)
           .leftJoin(contacts, eq(conversations.contactId, contacts.id)),
+        db.select().from(csatResponses).where(isNotNull(csatResponses.rating)),
       ]);
 
       const totalContacts = Number(totalContactsRes[0]?.count || 0);
@@ -137,8 +139,19 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         submittedAt: Date | null;
       }> = [];
 
+      const convIdsWithCsatRows = new Set<string>(csatRows.map((r) => r.conversationId));
+      const convMetaMap = new Map<
+        string,
+        { contactName: string; phone: string; wahaSession: string | null }
+      >();
+
       for (const row of conversationRows) {
         const c = row.conv;
+        convMetaMap.set(c.id, {
+          contactName: row.contact?.namaLengkap || row.contact?.nomorWhatsapp || 'Pelanggan',
+          phone: row.contact?.nomorWhatsapp || '',
+          wahaSession: c.wahaSession,
+        });
         const st = (c.status || 'OPEN').toUpperCase();
         if (st === 'RESOLVED') resolvedCount++;
         else if (st === 'PENDING') pendingCount++;
@@ -163,7 +176,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           resCount++;
         }
 
-        if (c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
+        if (!convIdsWithCsatRows.has(c.id) && c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
           csatSum += c.csatRating;
           csatCount++;
           csatDistribution[c.csatRating] = (csatDistribution[c.csatRating] || 0) + 1;
@@ -188,7 +201,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         };
         prevSess.count++;
         if (st === 'RESOLVED') prevSess.resolvedCount++;
-        if (c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
+        if (!convIdsWithCsatRows.has(c.id) && c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
           prevSess.csatSum += c.csatRating;
           prevSess.csatCount++;
         }
@@ -214,11 +227,42 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           prevAgent.slaMeasuredCount++;
           if (frtSec <= slaTargetSeconds) prevAgent.slaMetCount++;
         }
-        if (c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
+        if (!convIdsWithCsatRows.has(c.id) && c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
           prevAgent.csatSum += c.csatRating;
           prevAgent.csatCount++;
         }
         agentMap.set(agentKey, prevAgent);
+      }
+
+      for (const r of csatRows) {
+        if (!r.rating || r.rating < 1 || r.rating > 5) continue;
+        const meta = convMetaMap.get(r.conversationId);
+        csatSum += r.rating;
+        csatCount++;
+        csatDistribution[r.rating] = (csatDistribution[r.rating] || 0) + 1;
+        recentCsatList.push({
+          conversationId: r.conversationId,
+          contactName: meta?.contactName || 'Pelanggan',
+          phone: meta?.phone || '',
+          wahaSession: r.wahaSession || meta?.wahaSession || null,
+          rating: r.rating,
+          feedback: r.feedback || null,
+          submittedAt: r.submittedAt || null,
+        });
+
+        const sessKey = r.wahaSession || meta?.wahaSession || 'Default';
+        const sessEntry = sessionMap.get(sessKey);
+        if (sessEntry) {
+          sessEntry.csatSum += r.rating;
+          sessEntry.csatCount++;
+        }
+
+        const agentKey = r.assignedAgentId || 'unassigned';
+        const agentEntry = agentMap.get(agentKey);
+        if (agentEntry) {
+          agentEntry.csatSum += r.rating;
+          agentEntry.csatCount++;
+        }
       }
 
       recentCsatList.sort((a, b) => {

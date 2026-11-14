@@ -337,6 +337,10 @@ export const api = {
     const res = await client.get('/license/plans');
     return res.data.data;
   },
+  startLicenseTrial: async (planSlug: string): Promise<LicenseInfo> => {
+    const res = await client.post('/license/trial', { planSlug });
+    return res.data.data;
+  },
   createLicenseOrder: async (data: {
     planSlug: string;
     buyerName?: string;

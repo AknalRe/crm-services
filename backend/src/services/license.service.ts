@@ -313,10 +313,11 @@ export class LicenseService {
         }
       }
 
+      const isTrial = plan.toLowerCase().includes('trial');
       this.cachedLicense = {
-        status: isExpired ? 'EXPIRED' : 'ACTIVE',
+        status: isExpired ? 'EXPIRED' : isTrial ? 'TRIAL' : 'ACTIVE',
         plan,
-        period: plan.toLowerCase().includes('tahun') ? 'annual' : 'monthly',
+        period: isTrial ? 'trial' : plan.toLowerCase().includes('tahun') ? 'annual' : 'monthly',
         expiresAt: expiresAt.toISOString(),
         daysLeft,
         isExpired,
@@ -478,6 +479,7 @@ export class LicenseService {
         tagline: 'Cocok untuk UMKM pemula yang mulai mengelola kontak & broadcast WhatsApp.',
         period: 'monthly',
         months: 1,
+        trialDays: 7,
         priceAmount: 49000,
         highlighted: false,
         features: {
@@ -498,6 +500,7 @@ export class LicenseService {
         tagline: 'Fitur komprehensif lengkap: broadcast tanpa batas, bot ultah, multi-sesi, dan Live Chat CRM.',
         period: 'monthly',
         months: 1,
+        trialDays: 7,
         priceAmount: 99000,
         highlighted: true,
         features: {
@@ -518,6 +521,7 @@ export class LicenseService {
         tagline: 'Paket tahunan hemat 17%: kapasitas kontak masif, multi-sesi hingga 25 akun, & support prioritas.',
         period: 'annual',
         months: 12,
+        trialDays: 7,
         priceAmount: 990000,
         highlighted: false,
         features: {
@@ -531,6 +535,59 @@ export class LicenseService {
         },
       },
     ];
+  }
+
+  /**
+   * Start a 7-day trial for any plan tier via Reneo (with local fallback if offline)
+   */
+  public async startTrial(planSlug: string): Promise<LicenseInfo> {
+    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    const slug = (planSlug || 'pro-monthly').trim();
+    try {
+      const res = await axios.post(
+        `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/trial`,
+        { catalogId: 'reneo-crm', planSlug: slug },
+        { timeout: 6000 }
+      );
+      if (res.data?.ok) {
+        this.cachedLicense = null;
+        return this.syncWithReneo();
+      }
+    } catch (err: any) {
+      if (err?.response?.status && err.response.status >= 400 && err.response.status < 500) {
+        const msg = err.response.data?.error || 'Gagal mengaktifkan paket trial.';
+        const e: any = new Error(msg);
+        e.statusCode = err.response.status;
+        throw e;
+      }
+      // Reneo offline: fallback to local trial activation
+    }
+
+    const plans = await this.getPlans();
+    const target = plans.find((p) => p.slug === slug) || plans[1] || plans[0];
+    const trialDays = typeof target?.trialDays === 'number' && target.trialDays > 0 ? target.trialDays : 7;
+    const now = new Date();
+    const expDate = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
+    const trialPlanName = `${target?.name || 'Pro Bulanan'} (Trial ${trialDays} Hari)`;
+    const trialKey = `RN-TRIAL-${slug.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)}-${Date.now().toString(36).toUpperCase()}`;
+
+    const pairs = [
+      { key: 'license_plan', value: trialPlanName },
+      { key: 'license_expires_at', value: expDate.toISOString() },
+      { key: 'license_key', value: trialKey },
+      { key: 'license_features', value: JSON.stringify(target?.features || {}) },
+    ];
+    for (const pair of pairs) {
+      await db
+        .insert(systemSettings)
+        .values({ key: pair.key, value: pair.value, updatedAt: now })
+        .onConflictDoUpdate({
+          target: systemSettings.key,
+          set: { value: pair.value, updatedAt: now },
+        });
+    }
+    this.cachedLicense = null;
+    return this.getLicense();
   }
 
   /**

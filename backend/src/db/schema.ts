@@ -148,6 +148,25 @@ export const cannedResponses = pgTable('canned_responses', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const csatResponses = pgTable('csat_responses', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id')
+    .references(() => conversations.id, { onDelete: 'cascade' })
+    .notNull(),
+  contactId: text('contact_id')
+    .references(() => contacts.id, { onDelete: 'cascade' })
+    .notNull(),
+  wahaSession: text('waha_session'),
+  assignedAgentId: text('assigned_agent_id'),
+  assignedAgentName: text('assigned_agent_name'),
+  token: text('token').notNull().unique(),
+  triggerType: text('trigger_type').default('MANUAL').notNull(), // MANUAL | AUTO_RESOLVE
+  rating: integer('rating'),
+  feedback: text('feedback'),
+  sentAt: timestamp('sent_at').defaultNow().notNull(),
+  submittedAt: timestamp('submitted_at'),
+});
+
 // Relations
 export const contactsRelations = relations(contacts, ({ many, one }) => ({
   recipients: many(campaignRecipients),

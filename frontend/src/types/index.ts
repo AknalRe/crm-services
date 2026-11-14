@@ -79,9 +79,23 @@ export interface Conversation {
   csatRating?: number | null;
   csatFeedback?: string | null;
   csatSubmittedAt?: string | null;
+  csatHistory?: CsatHistoryItem[];
   createdAt: string;
   updatedAt: string;
   contact: Contact;
+}
+
+export interface CsatHistoryItem {
+  id: string;
+  conversationId: string;
+  wahaSession?: string | null;
+  assignedAgentName?: string | null;
+  token: string;
+  triggerType: string;
+  rating?: number | null;
+  feedback?: string | null;
+  sentAt: string;
+  submittedAt?: string | null;
 }
 
 export interface ChatMessage {
@@ -277,6 +291,7 @@ export interface LicensePlan {
   tagline: string;
   period: string;
   months: number;
+  trialDays?: number;
   priceAmount: number;
   features: {
     unlimitedBroadcast?: boolean;

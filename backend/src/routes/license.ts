@@ -73,6 +73,23 @@ export default async function licenseRouter(fastify: FastifyInstance) {
     }
   });
 
+  // POST start a trial for any license plan
+  fastify.post('/trial', async (req: FastifyRequest<{
+    Body: { planSlug?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const license = await licenseService.startTrial(req.body?.planSlug || 'pro-monthly');
+      liveEvents.emit('license:update', { action: 'trial' });
+      return reply.send({
+        success: true,
+        data: license,
+        message: `Paket trial (${license.plan}) berhasil diaktifkan.`,
+      });
+    } catch (error: any) {
+      return reply.status(error?.statusCode || 400).send({ success: false, error: error.message });
+    }
+  });
+
   // POST create invoice order in Reneo
   fastify.post('/order', async (req: FastifyRequest<{
     Body: {

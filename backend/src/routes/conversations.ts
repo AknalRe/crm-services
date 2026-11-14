@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eq, desc, asc } from 'drizzle-orm';
 import axios from 'axios';
 import { db } from '../db';
-import { conversations, chatMessages, contacts, crmAgents, cannedResponses } from '../db/schema';
+import { conversations, chatMessages, contacts, crmAgents, cannedResponses, csatResponses } from '../db/schema';
 import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
@@ -16,10 +16,10 @@ const DEFAULT_CSAT_TEMPLATE =
 async function sendCsatCtaForConversation(
   conv: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
-  opts: { session?: string; baseUrl?: string; customMessage?: string }
+  opts: { session?: string; baseUrl?: string; customMessage?: string; triggerType?: 'MANUAL' | 'AUTO_RESOLVE' }
 ) {
   const settings = await getSettingMap();
-  const token = conv.csatToken || crypto.randomBytes(12).toString('hex');
+  const token = crypto.randomBytes(12).toString('hex');
   const configuredBase = (settings.csat_base_url || '').trim().replace(/\/+$/, '');
   const runtimeBase = (opts.baseUrl || '').trim().replace(/\/+$/, '');
   const base = configuredBase || runtimeBase;
@@ -41,6 +41,18 @@ async function sendCsatCtaForConversation(
   );
 
   const now = new Date();
+  await db.insert(csatResponses).values({
+    id: crypto.randomUUID(),
+    conversationId: conv.id,
+    contactId: conv.contactId,
+    wahaSession: targetSession || null,
+    assignedAgentId: conv.assignedAgentId || null,
+    assignedAgentName: conv.assignedAgentName || null,
+    token,
+    triggerType: opts.triggerType || 'MANUAL',
+    sentAt: now,
+  });
+
   const inserted = await db
     .insert(chatMessages)
     .values({
@@ -212,6 +224,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
         .orderBy(desc(conversations.updatedAt));
 
+      const csatRows = await db
+        .select()
+        .from(csatResponses)
+        .orderBy(desc(csatResponses.sentAt));
+      const csatByConv = new Map<string, typeof csatRows>();
+      for (const cr of csatRows) {
+        const list = csatByConv.get(cr.conversationId) || [];
+        list.push(cr);
+        csatByConv.set(cr.conversationId, list);
+      }
+
       const data = rows.map((r) => ({
         id: r.conv.id,
         contactId: r.conv.contactId,
@@ -230,6 +253,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         csatRating: r.conv.csatRating,
         csatFeedback: r.conv.csatFeedback,
         csatSubmittedAt: r.conv.csatSubmittedAt,
+        csatHistory: csatByConv.get(r.conv.id) || [],
         createdAt: r.conv.createdAt,
         updatedAt: r.conv.updatedAt,
         contact: r.contact
@@ -417,7 +441,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       let csatSent = false;
       const transitioningToResolved =
         convUpdate.status === 'RESOLVED' && existing.status !== 'RESOLVED';
-      if (transitioningToResolved && !existing.csatRating) {
+      if (transitioningToResolved) {
         const settings = await getSettingMap();
         const shouldSendCsat =
           req.body?.sendCsat === true ||
@@ -431,6 +455,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             const refreshedConv = { ...existing, ...convUpdate };
             await sendCsatCtaForConversation(refreshedConv, contactRows[0], {
               baseUrl: req.body?.baseUrl,
+              triggerType: 'AUTO_RESOLVE',
             });
             csatSent = true;
           }

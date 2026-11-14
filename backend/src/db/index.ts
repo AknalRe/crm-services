@@ -180,6 +180,23 @@ export async function initDb() {
       );
     `;
 
+    await sql`
+      CREATE TABLE IF NOT EXISTS csat_responses (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        waha_session TEXT,
+        assigned_agent_id TEXT,
+        assigned_agent_name TEXT,
+        token TEXT NOT NULL UNIQUE,
+        trigger_type TEXT NOT NULL DEFAULT 'MANUAL',
+        rating INTEGER,
+        feedback TEXT,
+        sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        submitted_at TIMESTAMP
+      );
+    `;
+
     // Ensure default birthday row exists
     await sql`
       INSERT INTO birthday_settings (id, is_enabled, send_time, message_template, delay_seconds, updated_at)

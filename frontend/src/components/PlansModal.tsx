@@ -46,6 +46,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodItem[]>([]);
   const [isPaying, setIsPaying] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [startingTrialSlug, setStartingTrialSlug] = useState<string | null>(null);
 
   const loadPlans = async () => {
     try {
@@ -76,6 +77,21 @@ export const PlansModal: React.FC<PlansModalProps> = ({
       }
     }
   }, [isOpen, defaultBuyer?.name]);
+
+  const handleStartTrial = async (planSlug: string) => {
+    if (startingTrialSlug || isSubmitting) return;
+    try {
+      setStartingTrialSlug(planSlug);
+      const lic = await api.startLicenseTrial(planSlug);
+      toast.success(`Paket ${lic.plan} berhasil diaktifkan!`);
+      onLicenseUpdated();
+      onClose();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Gagal mengaktifkan paket trial');
+    } finally {
+      setStartingTrialSlug(null);
+    }
+  };
 
   const handleCreateOrder = async () => {
     if (isSubmitting) return;
@@ -300,6 +316,25 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                           )}
                         </div>
                       </div>
+
+                      {(!currentLicense || currentLicense.status !== 'ACTIVE' || currentLicense.isExpired) && (
+                        <div className="pt-3 mt-3 border-t border-gray-100">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            isLoading={startingTrialSlug === p.slug}
+                            disabled={Boolean(startingTrialSlug) || isSubmitting}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleStartTrial(p.slug);
+                            }}
+                            className="w-full justify-center"
+                          >
+                            Coba Trial {p.trialDays || 7} Hari
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
