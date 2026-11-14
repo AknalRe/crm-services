@@ -45,7 +45,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
 
       if (!sessionName && (statusRes.sessionStatus === 'STOPPED' || statusRes.sessionStatus === 'NOT_FOUND')) {
         try {
-          await api.startWahaSession();
+          await api.startWahaSession(sessionName);
         } catch {
           // Abaikan jika sesi sedang dimulai
         }
@@ -53,8 +53,10 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
 
       const qrRes = await api.getWahaQr(sessionName);
       setStatus(qrRes.status);
-      if (qrRes.qr) {
+      if (qrRes.qr && qrRes.qr.startsWith('data:image/')) {
         setQrCode(qrRes.qr);
+      } else if (qrRes.status === 'FAILED' || qrRes.status === 'STOPPED') {
+        setQrCode(null);
       }
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || 'Gagal memuat QR Code');
@@ -69,7 +71,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
     void fetchQr();
 
     const timer = setInterval(() => {
-      if (statusRef.current !== 'WORKING') {
+      if (statusRef.current !== 'WORKING' && statusRef.current !== 'FAILED') {
         void fetchQr();
       }
     }, 6000);

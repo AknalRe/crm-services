@@ -380,38 +380,61 @@ export class WahaService {
    * Get QR Code for scanning
    */
   public async getQrCode(sessionName?: string): Promise<{ qr?: string; status: string }> {
-    const { client, session } = await this.getClient();
-    const targetSession = sessionName || session;
+    const { client, session, ownerPrefix } = await this.getClient();
+    const targetSession = sessionName
+      ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
+      : session;
+    this.assertOwnedSession(targetSession, ownerPrefix);
 
+    let currentStatus = 'UNKNOWN';
     try {
-      let currentStatus = 'UNKNOWN';
       try {
         const sRes = await client.get(`/api/sessions/${encodeURIComponent(targetSession)}`);
         currentStatus = sRes.data?.status || 'UNKNOWN';
-      } catch {}
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          currentStatus = 'NOT_FOUND';
+        }
+      }
 
       if (currentStatus === 'WORKING') {
         return { status: 'WORKING' };
       }
 
-      try {
-        const qrRes = await client.get(`/api/${encodeURIComponent(targetSession)}/auth/qr?format=raw`);
-        if (qrRes.data && qrRes.data.value) {
-          return { qr: qrRes.data.value, status: 'SCAN_QR_CODE' };
+      if (currentStatus === 'STOPPED' || currentStatus === 'NOT_FOUND' || currentStatus === 'UNKNOWN') {
+        await this.startSession(targetSession).catch(() => {});
+        try {
+          const sRes = await client.get(`/api/sessions/${encodeURIComponent(targetSession)}`);
+          currentStatus = sRes.data?.status || 'STARTING';
+        } catch {
+          currentStatus = 'STARTING';
         }
-      } catch {}
+      }
+
+      if (currentStatus === 'WORKING') {
+        return { status: 'WORKING' };
+      }
 
       const imgRes = await client.get(`/api/${encodeURIComponent(targetSession)}/auth/qr`, {
         responseType: 'arraybuffer',
       });
+      const contentType = String(imgRes.headers?.['content-type'] || 'image/png');
+      if (contentType.includes('application/json')) {
+        const parsed = JSON.parse(Buffer.from(imgRes.data).toString('utf8'));
+        if (parsed?.data && String(parsed.data).startsWith('data:image/')) {
+          return { qr: parsed.data, status: 'SCAN_QR_CODE' };
+        }
+        return { status: currentStatus !== 'UNKNOWN' ? currentStatus : 'STARTING', qr: undefined };
+      }
+      const mime = contentType.split(';')[0].trim() || 'image/png';
       const base64 = Buffer.from(imgRes.data, 'binary').toString('base64');
       return {
-        qr: `data:image/png;base64,${base64}`,
+        qr: `data:${mime};base64,${base64}`,
         status: 'SCAN_QR_CODE',
       };
-    } catch (err: any) {
+    } catch {
       return {
-        status: 'FAILED',
+        status: currentStatus !== 'UNKNOWN' ? currentStatus : 'FAILED',
         qr: undefined,
       };
     }
