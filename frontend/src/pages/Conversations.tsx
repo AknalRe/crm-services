@@ -9,7 +9,7 @@ import {
   Calendar,
   MapPin,
   Lock,
-  ShieldCheck,
+  KeyRound,
   PanelRightClose,
   PanelRightOpen,
   X,
@@ -509,7 +509,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
               variant="primary"
               size="md"
               onClick={onOpenPlans}
-              leftIcon={<ShieldCheck className="w-4 h-4" />}
+              leftIcon={<KeyRound className="w-4 h-4" />}
             >
               Lihat &amp; Upgrade Paket Lisensi
             </Button>
@@ -543,10 +543,10 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   const activeLabels = getLabelList(selectedConversation);
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-116px)] sm:h-[calc(100vh-132px)] flex flex-col md:flex-row">
+    <div className="relative bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-84px)] sm:h-[calc(100vh-100px)] lg:h-[calc(100vh-108px)] flex flex-col md:flex-row">
       {/* Left List */}
       <div
-        className={`w-full md:w-72 lg:w-80 border-b md:border-b-0 md:border-r border-gray-200 flex-col shrink-0 bg-gray-50/50 ${
+        className={`w-full md:w-64 lg:w-72 xl:w-80 border-b md:border-b-0 md:border-r border-gray-200 flex-col shrink-0 bg-gray-50/50 ${
           selectedConversation ? 'hidden md:flex' : 'flex flex-1 md:flex-none min-h-0'
         }`}
       >
@@ -703,11 +703,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
 
       {/* Middle Chat Feed */}
       {selectedConversation ? (
-        <div
-          className={`flex-1 flex-col bg-gray-50 min-w-0 min-h-0 ${
-            showContactPanel ? 'hidden md:flex' : 'flex'
-          }`}
-        >
+        <div className="flex flex-1 flex-col bg-gray-50 min-w-0 min-h-0">
           <div className="min-h-[3.5rem] bg-white border-b border-gray-200 px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
             <div className="flex items-center gap-2 min-w-0">
               <button
@@ -751,11 +747,11 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                   value={selectedSession}
                   onChange={(e) => setSelectedSession(e.target.value)}
                   title="Pilih sesi WAHA pengirim"
-                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] font-mono text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[140px]"
+                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] font-mono text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[175px] sm:max-w-[200px] min-w-0"
                 >
                   {sessions.map((s) => (
                     <option key={s.name} value={s.name}>
-                      {s.name} ({s.status})
+                      {s.name} • {s.status === 'WORKING' ? 'Aktif' : s.status}
                     </option>
                   ))}
                 </select>
@@ -766,7 +762,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                   value={selectedConversation.assignedAgentId || ''}
                   onChange={(e) => void handleAssignAgent(e.target.value || null)}
                   title="Tugaskan ke Agent"
-                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[125px]"
+                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[135px] min-w-0"
                 >
                   <option value="">Belum Ditugaskan</option>
                   {assignableAgents.map((ag) => (
@@ -783,7 +779,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                   handleStatusChange(e.target.value as 'OPEN' | 'PENDING' | 'RESOLVED')
                 }
                 title="Status Percakapan"
-                className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none ${
+                className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none shrink-0 ${
                   selectedConversation.status === 'RESOLVED'
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                     : selectedConversation.status === 'PENDING'
@@ -1000,7 +996,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
           </div>
 
           {/* Composer */}
-          <div className="bg-white border-t border-gray-200 p-3 space-y-2 shrink-0 relative">
+          <div className="bg-white border-t border-gray-200 p-2.5 sm:p-3 space-y-2 shrink-0">
             <div className="flex items-center justify-between gap-2 overflow-x-auto">
               <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50 text-[11px] shrink-0">
                 <button
@@ -1020,6 +1016,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                   onClick={() => {
                     setComposerMode('NOTE');
                     setPendingAttachment(null);
+                    setShowCannedPicker(false);
                   }}
                   className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
                     composerMode === 'NOTE'
@@ -1058,48 +1055,51 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
               </div>
             )}
 
-            {showEmojiPicker && (
-              <div className="absolute bottom-16 left-3 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2.5 w-64 grid grid-cols-8 gap-1">
-                {QUICK_EMOJIS.map((em) => (
-                  <button
-                    key={em}
-                    type="button"
-                    onClick={() => {
-                      setInputText((prev) => prev + em);
-                      setShowEmojiPicker(false);
-                    }}
-                    className="h-7 w-7 rounded hover:bg-gray-100 text-base flex items-center justify-center"
-                  >
-                    {em}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {showCannedPicker && (
-              <div className="absolute bottom-16 left-3 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 max-w-[90vw] space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-900 flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-amber-500" />
-                    Balasan Cepat (Canned Responses)
-                  </span>
-                  <div className="flex items-center gap-2">
+            <div className="relative">
+              {showEmojiPicker && (
+                <div className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2.5 w-64 max-w-[calc(100vw-2.5rem)] grid grid-cols-8 gap-1">
+                  {QUICK_EMOJIS.map((em) => (
                     <button
+                      key={em}
                       type="button"
-                      onClick={() => setShowAddCanned((v) => !v)}
-                      className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
+                      onClick={() => {
+                        setInputText((prev) => prev + em);
+                        setShowEmojiPicker(false);
+                      }}
+                      className="h-7 w-7 rounded hover:bg-gray-100 text-base flex items-center justify-center"
                     >
-                      {showAddCanned ? 'Tutup' : '+ Tambah'}
+                      {em}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowCannedPicker(false)}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  ))}
                 </div>
+              )}
+
+              {showCannedPicker && (
+                <div className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 sm:w-96 max-w-[calc(100vw-2.5rem)] space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-900 inline-flex items-center gap-1.5 whitespace-nowrap truncate">
+                      <Zap className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span>Balasan Cepat</span>
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddCanned((v) => !v)}
+                        className="h-6 px-2 rounded border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-medium text-indigo-700 inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+                      >
+                        {!showAddCanned && <Plus className="w-3 h-3 shrink-0" />}
+                        <span>{showAddCanned ? 'Tutup' : 'Tambah'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowCannedPicker(false)}
+                        title="Tutup Balasan Cepat"
+                        className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
 
                 {showAddCanned && (
                   <form onSubmit={handleCreateCanned} className="p-2 rounded bg-gray-50 border border-gray-200 space-y-1.5">
@@ -1176,15 +1176,15 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
               </div>
             )}
 
-            {composerMode === 'REPLY' &&
-              !showCannedPicker &&
-              inputText.startsWith('/') &&
-              !inputText.includes(' ') &&
-              cannedList.some((c) =>
-                c.shortCode.toLowerCase().includes(inputText.slice(1).toLowerCase()) ||
-                c.title.toLowerCase().includes(inputText.slice(1).toLowerCase())
-              ) && (
-                <div className="absolute bottom-16 left-3 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 w-80 max-w-[90vw] max-h-48 overflow-y-auto divide-y divide-gray-100">
+              {composerMode === 'REPLY' &&
+                !showCannedPicker &&
+                inputText.startsWith('/') &&
+                !inputText.includes(' ') &&
+                cannedList.some((c) =>
+                  c.shortCode.toLowerCase().includes(inputText.slice(1).toLowerCase()) ||
+                  c.title.toLowerCase().includes(inputText.slice(1).toLowerCase())
+                ) && (
+                  <div className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 w-80 sm:w-96 max-w-[calc(100vw-2.5rem)] max-h-48 overflow-y-auto divide-y divide-gray-100">
                   {cannedList
                     .filter((c) => {
                       const q = inputText.slice(1).toLowerCase();
@@ -1290,6 +1290,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                 {composerMode === 'NOTE' ? 'Simpan' : 'Kirim'}
               </Button>
             </form>
+            </div>
           </div>
         </div>
       ) : (
@@ -1301,9 +1302,15 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
         </div>
       )}
 
-      {/* Right Contact Profile (Collapsible) */}
+      {/* Right Contact Profile (Collapsible: drawer on <xl, docked column on xl+) */}
       {showContactPanel && selectedConversation?.contact && (
-        <div className="w-full flex-1 md:flex-none md:w-72 lg:w-80 border-l border-gray-200 bg-white p-4 flex flex-col shrink-0 overflow-y-auto min-h-0">
+        <>
+          <div
+            className="fixed inset-0 z-20 bg-black/20 xl:hidden"
+            onClick={() => toggleContactPanel(false)}
+            aria-hidden="true"
+          />
+          <div className="absolute inset-y-0 right-0 z-30 w-full sm:w-80 xl:static xl:z-auto xl:w-80 border-l border-gray-200 bg-white p-4 flex flex-col shrink-0 overflow-y-auto min-h-0 shadow-xl xl:shadow-none">
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
               Detail Kontak
@@ -1562,6 +1569,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
             </a>
           </div>
         </div>
+        </>
       )}
 
       {showNewChatModal && (

@@ -1,5 +1,5 @@
 import React from 'react';
-import { QrCode, RefreshCw, ShieldCheck, AlertTriangle, Menu } from 'lucide-react';
+import { QrCode, RefreshCw, KeyRound, AlertTriangle, Menu } from 'lucide-react';
 import { WahaStatus, LicenseInfo } from '../types';
 import { Button } from './ui/Button';
 
@@ -64,7 +64,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onOpenPlans}
-            className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded text-xs font-medium border transition-colors ${
+            className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium border whitespace-nowrap transition-colors ${
               isLicenseActive
                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                 : 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100'
@@ -72,11 +72,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="Kelola Paket & Lisensi Reneo"
           >
             {isLicenseActive ? (
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <KeyRound className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
             ) : (
               <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
             )}
-            <span className="tabular-nums truncate max-w-[120px] sm:max-w-none">
+            <span className="tabular-nums truncate max-w-[130px] sm:max-w-none">
               {isLicenseActive
                 ? `${licenseInfo.plan} (${licenseInfo.daysLeft} hari)`
                 : 'Lisensi Kedaluwarsa'}

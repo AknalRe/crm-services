@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  ShieldCheck,
+  KeyRound,
   Check,
   CreditCard,
   Receipt,
@@ -220,7 +220,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
             {currentLicense && (
               <div className="p-3.5 rounded-lg border border-gray-200 bg-gray-50 flex flex-wrap items-center justify-between gap-3 text-xs">
                 <div className="flex items-center gap-2">
-                  <ShieldCheck className="text-emerald-600 shrink-0 w-4 h-4" />
+                  <KeyRound className="text-emerald-600 shrink-0 w-4 h-4" />
                   <span className="text-gray-600">Status Saat Ini:</span>
                   <strong className="text-gray-900 font-semibold tabular-nums">
                     {currentLicense.plan} ({currentLicense.daysLeft} hari tersisa)

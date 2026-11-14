@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, CreditCard, RefreshCw, ShieldAlert } from 'lucide-react';
+import { KeyRound, CreditCard, RefreshCw } from 'lucide-react';
 import api from '../services/api';
 import { LicenseInfo } from '../types';
 import { Button } from './ui/Button';
@@ -62,7 +62,7 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 pb-4">
           <div className="flex items-start gap-3">
             <div className="h-10 w-10 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
-              <ShieldAlert className="w-5 h-5 text-amber-600" />
+              <KeyRound className="w-5 h-5 text-amber-600" />
             </div>
             <div>
               <h1 className="text-base font-semibold text-gray-900">
