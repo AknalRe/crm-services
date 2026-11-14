@@ -9,6 +9,7 @@ import {
   Settings,
   Smartphone,
   Lock,
+  X,
 } from 'lucide-react';
 import { LicenseInfo, WahaStatus } from '../types';
 
@@ -18,6 +19,8 @@ interface SidebarProps {
   wahaStatus: WahaStatus | null;
   licenseInfo?: LicenseInfo | null;
   onOpenQrModal: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -26,6 +29,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   wahaStatus,
   licenseInfo,
   onOpenQrModal,
+  isOpen = false,
+  onClose,
 }) => {
   const isLiveChatUnlocked = Boolean(
     licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
@@ -44,17 +49,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
 
   return (
-    <aside className="w-60 bg-[#121622] text-gray-200 flex flex-col h-screen shrink-0 border-r border-[#1E2438] select-none">
-      {/* Brand Header */}
-      <div className="h-14 px-4 flex items-center gap-2.5 border-b border-[#1E2438]">
-        <MessageCircle className="w-5 h-5 text-indigo-400 shrink-0" />
-        <div className="min-w-0">
-          <h1 className="font-semibold text-sm text-white tracking-tight truncate">
-            CRM WhatsApp
-          </h1>
-          <p className="text-[11px] text-gray-400 truncate">Reneo Business Suite</p>
+    <>
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-60 bg-[#121622] text-gray-200 flex flex-col h-screen shrink-0 border-r border-[#1E2438] select-none transition-transform duration-200 lg:static lg:translate-x-0 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {/* Brand Header */}
+        <div className="h-14 px-4 flex items-center justify-between gap-2.5 border-b border-[#1E2438]">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <MessageCircle className="w-5 h-5 text-indigo-400 shrink-0" />
+            <div className="min-w-0">
+              <h1 className="font-semibold text-sm text-white tracking-tight truncate">
+                CRM WhatsApp
+              </h1>
+              <p className="text-[11px] text-gray-400 truncate">Reneo Business Suite</p>
+            </div>
+          </div>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="lg:hidden p-1 text-gray-400 hover:text-white rounded"
+              aria-label="Tutup Menu"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
-      </div>
 
       {/* Navigation Links */}
       <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
@@ -68,7 +97,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={item.id}
               type="button"
-              onClick={() => setCurrentTab(item.id)}
+              onClick={() => {
+                setCurrentTab(item.id);
+                onClose?.();
+              }}
               className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] font-medium transition-colors ${
                 isActive
                   ? 'bg-[#1E2438] text-white'
@@ -138,6 +170,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
     </aside>
+    </>
   );
 };
 

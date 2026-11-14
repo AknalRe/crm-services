@@ -1,5 +1,5 @@
 import React from 'react';
-import { QrCode, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { QrCode, RefreshCw, ShieldCheck, AlertTriangle, Menu } from 'lucide-react';
 import { WahaStatus, LicenseInfo } from '../types';
 import { Button } from './ui/Button';
 
@@ -10,6 +10,7 @@ interface NavbarProps {
   onRefresh: () => void;
   onOpenQr: () => void;
   onOpenPlans?: () => void;
+  onMenuClick?: () => void;
   isRefreshing?: boolean;
 }
 
@@ -20,6 +21,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onRefresh,
   onOpenQr,
   onOpenPlans,
+  onMenuClick,
   isRefreshing = false,
 }) => {
   const activeSession = wahaStatus?.activeSession || wahaStatus?.config?.session || 'default';
@@ -42,12 +44,22 @@ export const Navbar: React.FC<NavbarProps> = ({
   })();
 
   return (
-    <header className="h-14 bg-white border-b border-gray-200 px-6 flex items-center justify-between sticky top-0 z-20 shrink-0">
-      <div className="min-w-0">
-        <h2 className="text-base font-semibold text-gray-900 truncate">{title}</h2>
+    <header className="h-14 bg-white border-b border-gray-200 px-3 sm:px-6 flex items-center justify-between gap-2 sticky top-0 z-20 shrink-0">
+      <div className="flex items-center gap-2 min-w-0">
+        {onMenuClick && (
+          <button
+            type="button"
+            onClick={onMenuClick}
+            className="lg:hidden p-1.5 -ml-1 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+            aria-label="Buka Menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+        <h2 className="text-sm sm:text-base font-semibold text-gray-900 truncate">{title}</h2>
       </div>
 
-      <div className="flex items-center gap-2.5 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
         {licenseInfo && (
           <button
             type="button"

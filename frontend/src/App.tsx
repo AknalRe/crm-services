@@ -17,10 +17,47 @@ import api from './services/api';
 import { subscribeLiveEvent } from './services/liveEvents';
 import { AuthStatus, WahaStatus, LicenseInfo } from './types';
 
+const VALID_TABS = new Set([
+  'dashboard',
+  'contacts',
+  'broadcasts',
+  'birthday',
+  'tracking',
+  'conversations',
+  'settings',
+]);
+
+function getInitialTab(): string {
+  if (typeof window === 'undefined') return 'dashboard';
+  const hashTab = window.location.hash.replace(/^#/, '').trim();
+  if (VALID_TABS.has(hashTab)) return hashTab;
+  try {
+    const saved = localStorage.getItem('crm_current_tab') || '';
+    if (VALID_TABS.has(saved)) return saved;
+  } catch {
+    // Ignore storage access error
+  }
+  return 'dashboard';
+}
+
 function AppShell() {
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [currentTab, setCurrentTab] = useState('dashboard');
+  const [currentTab, setCurrentTabState] = useState<string>(getInitialTab);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const setCurrentTab = (tab: string) => {
+    const next = VALID_TABS.has(tab) ? tab : 'dashboard';
+    setCurrentTabState(next);
+    try {
+      localStorage.setItem('crm_current_tab', next);
+    } catch {
+      // Ignore storage error
+    }
+    if (typeof window !== 'undefined' && window.location.hash !== `#${next}`) {
+      window.history.replaceState(null, '', `#${next}`);
+    }
+  };
+
   const [wahaStatus, setWahaStatus] = useState<WahaStatus | null>(null);
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
@@ -173,6 +210,8 @@ function AppShell() {
         wahaStatus={wahaStatus}
         licenseInfo={licenseInfo}
         onOpenQrModal={() => setIsQrModalOpen(true)}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -183,10 +222,11 @@ function AppShell() {
           onRefresh={handleGlobalRefresh}
           onOpenQr={() => setIsQrModalOpen(true)}
           onOpenPlans={() => setIsPlansModalOpen(true)}
+          onMenuClick={() => setIsSidebarOpen(true)}
           isRefreshing={isRefreshing}
         />
 
-        <main className="flex-1 overflow-y-auto p-5 lg:p-6">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
           <div className="w-full">
             {currentTab === 'dashboard' && <Dashboard onNavigate={setCurrentTab} />}
             {currentTab === 'contacts' && (
