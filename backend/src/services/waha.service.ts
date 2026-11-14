@@ -292,6 +292,13 @@ export class WahaService {
         me: item.me || null,
       }))
       .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
+    if (sessions.length === 0 && session) {
+      sessions.push({
+        name: session,
+        status: 'STOPPED',
+        me: null,
+      });
+    }
     return { sessions, activeSession: session };
   }
 
