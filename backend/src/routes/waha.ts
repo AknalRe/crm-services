@@ -271,9 +271,16 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         liveEvents.emit('conversations:update', { ack: ackValue, msgId });
       }
 
-      // 2. Incoming Messages (message)
-      if (event === 'message' && payload && !payload.fromMe) {
-        const fromPhone = normalizePhoneNumber(fromWahaChatId(payload.from));
+      // 2. Incoming Messages (message) - only personal 1:1 chats (@c.us / @s.whatsapp.net)
+      const rawFrom = String(payload?.from || '');
+      const isPersonalChat =
+        rawFrom.endsWith('@c.us') || rawFrom.endsWith('@s.whatsapp.net');
+      if (event === 'message' && payload && !payload.fromMe && isPersonalChat) {
+        const fromPhone = normalizePhoneNumber(fromWahaChatId(rawFrom));
+        const digitCount = fromPhone.replace(/\D/g, '').length;
+        if (digitCount < 8 || digitCount > 15) {
+          return reply.send({ success: true, message: 'Webhook ignored (non-phone JID)' });
+        }
         const body = payload.body || '';
         const now = new Date();
         const msgId = payload.id?._serialized || payload.id?.id || payload.id;

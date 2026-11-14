@@ -416,7 +416,7 @@ export const Contacts: React.FC<ContactsProps> = ({
             onClick={() => setIsImportModalOpen(true)}
             leftIcon={<Upload className="w-4 h-4" />}
           >
-            Import CSV
+            Import Excel / CSV
           </Button>
 
           <Button
