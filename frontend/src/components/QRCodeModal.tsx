@@ -28,8 +28,9 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
   const statusRef = useRef(status);
   statusRef.current = status;
   const inFlightRef = useRef(false);
+  const autoRecoveredRef = useRef(false);
 
-  const fetchQr = useCallback(async () => {
+  const fetchQr = useCallback(async (forceRecover = false) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setLoading(true);
@@ -43,7 +44,14 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
         return;
       }
 
-      if (!sessionName && (statusRes.sessionStatus === 'STOPPED' || statusRes.sessionStatus === 'NOT_FOUND')) {
+      if (
+        forceRecover ||
+        (!sessionName &&
+          (statusRes.sessionStatus === 'STOPPED' ||
+            statusRes.sessionStatus === 'NOT_FOUND' ||
+            (statusRes.sessionStatus === 'FAILED' && !autoRecoveredRef.current)))
+      ) {
+        autoRecoveredRef.current = true;
         try {
           await api.startWahaSession(sessionName);
         } catch {
@@ -52,6 +60,22 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
       }
 
       const qrRes = await api.getWahaQr(sessionName);
+      if (qrRes.status === 'FAILED' && !autoRecoveredRef.current) {
+        autoRecoveredRef.current = true;
+        try {
+          await api.startWahaSession(sessionName);
+          const retryRes = await api.getWahaQr(sessionName);
+          setStatus(retryRes.status);
+          if (retryRes.qr && retryRes.qr.startsWith('data:image/')) {
+            setQrCode(retryRes.qr);
+          } else {
+            setQrCode(null);
+          }
+          return;
+        } catch {
+          // Lanjutkan tampilkan status FAILED bila pemulihan gagal
+        }
+      }
       setStatus(qrRes.status);
       if (qrRes.qr && qrRes.qr.startsWith('data:image/')) {
         setQrCode(qrRes.qr);
@@ -67,7 +91,10 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
   }, [sessionName]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      autoRecoveredRef.current = false;
+      return;
+    }
     void fetchQr();
 
     const timer = setInterval(() => {
@@ -102,7 +129,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
             <Button
               variant="secondary"
               size="sm"
-              onClick={fetchQr}
+              onClick={() => void fetchQr(true)}
               isLoading={loading}
               leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
             >

@@ -245,11 +245,17 @@ export class WahaService {
           const startRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/start`);
           return startRes.data;
         } catch {
-          const legacyRes = await client.post('/api/sessions/start', {
-            name: targetSession,
-            config: { webhooks: webhookConfigs },
-          });
-          return legacyRes.data;
+          try {
+            const restartRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/restart`);
+            return restartRes.data;
+          } catch {
+            await client.post('/api/sessions/stop', { name: targetSession }).catch(() => {});
+            const legacyRes = await client.post('/api/sessions/start', {
+              name: targetSession,
+              config: { webhooks: webhookConfigs },
+            });
+            return legacyRes.data;
+          }
         }
       }
       throw err;
@@ -421,8 +427,12 @@ export class WahaService {
       const contentType = String(imgRes.headers?.['content-type'] || 'image/png');
       if (contentType.includes('application/json')) {
         const parsed = JSON.parse(Buffer.from(imgRes.data).toString('utf8'));
-        if (parsed?.data && String(parsed.data).startsWith('data:image/')) {
-          return { qr: parsed.data, status: 'SCAN_QR_CODE' };
+        if (parsed?.data) {
+          const rawData = String(parsed.data);
+          const qrDataUrl = rawData.startsWith('data:image/')
+            ? rawData
+            : `data:${parsed.mimetype || 'image/png'};base64,${rawData}`;
+          return { qr: qrDataUrl, status: 'SCAN_QR_CODE' };
         }
         return { status: currentStatus !== 'UNKNOWN' ? currentStatus : 'STARTING', qr: undefined };
       }
