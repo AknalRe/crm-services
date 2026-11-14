@@ -5,7 +5,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { config } from '../config';
 
 export interface LicenseInfo {
-  status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'GRACE_PERIOD' | 'UNLICENSED';
+  status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'SUSPENDED' | 'GRACE_PERIOD' | 'UNLICENSED';
   plan: string; // e.g. "Bulanan (Pro)", "Tahunan", "Free Trial"
   period: 'monthly' | 'quarterly' | 'annual' | 'trial';
   expiresAt: string; // ISO string
@@ -185,10 +185,29 @@ export class LicenseService {
             return this.cachedLicense;
           }
 
+          if (res.data && res.data.ok && (res.data.status === 'SUSPENDED' || res.data.isSuspended)) {
+            this.cachedLicense = {
+              status: 'SUSPENDED',
+              plan: res.data.plan || 'Disuspend',
+              period: res.data.period || 'monthly',
+              expiresAt: res.data.expiresAt || new Date().toISOString(),
+              daysLeft: 0,
+              isExpired: true,
+              managedByReneo: true,
+              reneoBillingUrl: res.data.billingUrl || `${reneoUrl}/hosting`,
+              licenseKey: res.data.licenseKey,
+              features: buildLockedFeatures(),
+            };
+            this.lastCheckedAt = Date.now();
+            return this.cachedLicense;
+          }
+
           if (
             res.data &&
             res.data.ok &&
             res.data.status !== 'UNLICENSED' &&
+            res.data.status !== 'SUSPENDED' &&
+            !res.data.isSuspended &&
             !res.data.isExpired &&
             res.data.licenseKey &&
             res.data.licenseKey !== 'RN-CRM-DEMO-2026'
@@ -310,6 +329,13 @@ export class LicenseService {
    */
   public async assertLicenseActive(): Promise<LicenseInfo> {
     const lic = await this.getLicense();
+    if (lic.status === 'SUSPENDED') {
+      const err: any = new Error(
+        `Lisensi aplikasi Anda sedang disuspend oleh administrator (${lic.plan}). Hubungi admin untuk mengaktifkan kembali.`
+      );
+      err.statusCode = 403;
+      throw err;
+    }
     if (lic.isExpired || lic.status === 'EXPIRED' || lic.status === 'UNLICENSED') {
       const err: any = new Error(
         lic.status === 'UNLICENSED'
