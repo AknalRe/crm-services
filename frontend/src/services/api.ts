@@ -35,7 +35,7 @@ export const api = {
   },
 
   // Contacts
-  getContacts: async (params?: { search?: string; tag?: string; page?: number; limit?: number }) => {
+  getContacts: async (params?: { search?: string; tag?: string; kategori?: string; page?: number; limit?: number }) => {
     const res = await client.get('/contacts', { params });
     return res.data;
   },

@@ -6,13 +6,15 @@ import {
   Upload,
   Download,
   FileSpreadsheet,
-  Edit,
+  Pencil,
   Trash2,
   Phone,
   Calendar,
   Send,
   Cake,
   Users,
+  UserPlus,
+  FolderKanban,
 } from 'lucide-react';
 import api from '../services/api';
 import { Contact, LicenseInfo } from '../types';
@@ -27,6 +29,8 @@ interface ContactsProps {
   licenseInfo?: LicenseInfo | null;
 }
 
+const CONTACT_CATEGORIES = ['Umum', 'VIP', 'Prospek', 'Pelanggan Tetap', 'Korporat', 'Partner'];
+
 export const Contacts: React.FC<ContactsProps> = ({
   onStartBroadcastWithContacts,
   licenseInfo,
@@ -37,6 +41,7 @@ export const Contacts: React.FC<ContactsProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [selectedTag, setSelectedTag] = useState('ALL');
+  const [selectedKategori, setSelectedKategori] = useState('ALL');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -53,6 +58,7 @@ export const Contacts: React.FC<ContactsProps> = ({
     tanggal_lahir: '',
     nomor_whatsapp: '',
     alamat: '',
+    kategori: '',
     tags: '',
     notes: '',
   });
@@ -68,6 +74,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       const res = await api.getContacts({
         search: search || undefined,
         tag: selectedTag !== 'ALL' ? selectedTag : undefined,
+        kategori: selectedKategori !== 'ALL' ? selectedKategori : undefined,
         limit: 500,
       });
       setContacts(res.data);
@@ -77,7 +84,7 @@ export const Contacts: React.FC<ContactsProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [search, selectedTag]);
+  }, [search, selectedTag, selectedKategori]);
 
   useEffect(() => {
     fetchContacts();
@@ -96,6 +103,13 @@ export const Contacts: React.FC<ContactsProps> = ({
     )
   );
 
+  const availableCategories = Array.from(
+    new Set([
+      ...CONTACT_CATEGORIES,
+      ...contacts.map((c) => (c.kategori || '').trim()).filter(Boolean),
+    ])
+  );
+
   const handleOpenAddModal = () => {
     setEditingContact(null);
     setFormData({
@@ -104,6 +118,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       tanggal_lahir: '',
       nomor_whatsapp: '',
       alamat: '',
+      kategori: '',
       tags: '',
       notes: '',
     });
@@ -118,6 +133,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       tanggal_lahir: contact.tanggal_lahir || '',
       nomor_whatsapp: contact.nomor_whatsapp,
       alamat: contact.alamat || '',
+      kategori: contact.kategori || '',
       tags: contact.tags || '',
       notes: contact.notes || '',
     });
@@ -380,6 +396,21 @@ export const Contacts: React.FC<ContactsProps> = ({
           </form>
 
           <select
+            value={selectedKategori}
+            onChange={(e) => setSelectedKategori(e.target.value)}
+            title="Filter Kelompok / Kategori Kontak"
+            className="h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500"
+          >
+            <option value="ALL">Semua Kelompok</option>
+            {availableCategories.map((cat) => (
+              <option key={cat} value={cat}>
+                Kelompok: {cat}
+              </option>
+            ))}
+            <option value="UNGROUPED">Tanpa Kelompok</option>
+          </select>
+
+          <select
             value={selectedTag}
             onChange={(e) => setSelectedTag(e.target.value)}
             className="h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500"
@@ -395,7 +426,7 @@ export const Contacts: React.FC<ContactsProps> = ({
 
         <div className="flex items-center gap-2 flex-wrap">
           {licenseInfo && licenseInfo.features?.maxContacts > 0 && (
-            <span className="inline-flex items-center h-8 px-2.5 rounded text-xs font-mono font-medium bg-gray-50 text-gray-700 border border-gray-200 tabular-nums">
+            <span className="inline-flex items-center h-9 px-2.5 rounded-md text-xs font-mono font-medium bg-gray-50 text-gray-700 border border-gray-200 tabular-nums">
               {contacts.length}/{licenseInfo.features.maxContacts.toLocaleString('id-ID')} kontak
             </span>
           )}
@@ -404,9 +435,9 @@ export const Contacts: React.FC<ContactsProps> = ({
               variant="primary"
               size="md"
               onClick={() => onStartBroadcastWithContacts(selectedIds)}
-              leftIcon={<Send className="w-4 h-4" />}
+              leftIcon={<Send className="w-4 h-4" strokeWidth={1.75} />}
             >
-              Siaran ke {selectedIds.length} Terpilih
+              Siaran ({selectedIds.length})
             </Button>
           )}
 
@@ -414,16 +445,16 @@ export const Contacts: React.FC<ContactsProps> = ({
             variant="secondary"
             size="md"
             onClick={() => setIsImportModalOpen(true)}
-            leftIcon={<Upload className="w-4 h-4" />}
+            leftIcon={<FileSpreadsheet className="w-4 h-4" strokeWidth={1.75} />}
           >
-            Import Excel / CSV
+            Import Data
           </Button>
 
           <Button
             variant={selectedIds.length > 0 ? 'secondary' : 'primary'}
             size="md"
             onClick={handleOpenAddModal}
-            leftIcon={<Plus className="w-4 h-4" />}
+            leftIcon={<UserPlus className="w-4 h-4" strokeWidth={1.75} />}
           >
             Tambah Kontak
           </Button>
@@ -462,6 +493,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                   </th>
                   <th className="py-3 px-4">Nama Lengkap &amp; Panggilan</th>
                   <th className="py-3 px-4">Nomor WhatsApp</th>
+                  <th className="py-3 px-4">Kelompok</th>
                   <th className="py-3 px-4">Tanggal Lahir</th>
                   <th className="py-3 px-4">Alamat</th>
                   <th className="py-3 px-4">Tag / Segmen</th>
@@ -516,6 +548,17 @@ export const Contacts: React.FC<ContactsProps> = ({
                       </td>
 
                       <td className="py-3 px-4">
+                        {contact.kategori ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
+                            <FolderKanban className="w-3 h-3 text-slate-500 shrink-0" strokeWidth={1.75} />
+                            <span>{contact.kategori}</span>
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-gray-400">Umum</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4">
                         {birthDate ? (
                           <div className="flex items-center gap-1.5 tabular-nums text-gray-700">
                             <Calendar className="w-3 h-3 text-gray-400" />
@@ -563,24 +606,24 @@ export const Contacts: React.FC<ContactsProps> = ({
                       </td>
 
                       <td className="py-3 px-4 text-right">
-                        <div className="inline-flex items-center gap-1">
+                        <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">
                           <button
                             type="button"
                             onClick={() => handleOpenEditModal(contact)}
-                            className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
                             title="Edit Kontak"
                           >
-                            <Edit className="w-3.5 h-3.5" />
+                            <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
                           </button>
                           <button
                             type="button"
                             onClick={() =>
                               setDeleteTarget({ id: contact.id, name: contact.nama_lengkap })
                             }
-                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 transition-colors"
                             title="Hapus Kontak"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
                           </button>
                         </div>
                       </td>
@@ -695,6 +738,35 @@ export const Contacts: React.FC<ContactsProps> = ({
               value={formData.alamat}
               onChange={(e) => setFormData({ ...formData, alamat: e.target.value })}
               className="w-full p-2.5 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Kategori / Kelompok Kontak
+            </label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {CONTACT_CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setFormData({ ...formData, kategori: cat })}
+                  className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-colors ${
+                    formData.kategori === cat
+                      ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                      : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              placeholder="Pilih di atas atau ketik kelompok kustom..."
+              value={formData.kategori}
+              onChange={(e) => setFormData({ ...formData, kategori: e.target.value })}
+              className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
             />
           </div>
 

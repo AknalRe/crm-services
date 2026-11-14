@@ -5,6 +5,7 @@ export interface Contact {
   tanggal_lahir?: string | null;
   nomor_whatsapp: string;
   alamat?: string | null;
+  kategori?: string | null;
   tags?: string | null;
   notes?: string | null;
   createdAt: string;

@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, ne, or, ilike, desc, sql } from 'drizzle-orm';
+import { and, eq, ne, or, ilike, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db';
 import { contacts } from '../db/schema';
 import { normalizePhoneNumber } from '../services/phone.utils';
@@ -16,6 +16,7 @@ export function formatContact(c: any) {
     tanggal_lahir: c.tanggalLahir,
     nomor_whatsapp: c.nomorWhatsapp,
     alamat: c.alamat,
+    kategori: c.kategori || null,
     tags: c.tags,
     notes: c.notes,
     createdAt: c.createdAt,
@@ -33,10 +34,10 @@ export default async function contactsRouter(fastify: FastifyInstance) {
   });
   // GET all contacts with search and filter
   fastify.get('/', async (req: FastifyRequest<{
-    Querystring: { search?: string; tag?: string; page?: string; limit?: string };
+    Querystring: { search?: string; tag?: string; kategori?: string; page?: string; limit?: string };
   }>, reply: FastifyReply) => {
     try {
-      const { search, tag, page = '1', limit = '100' } = req.query;
+      const { search, tag, kategori, page = '1', limit = '100' } = req.query;
       const pageNum = parseInt(page, 10) || 1;
       const limitNum = parseInt(limit, 10) || 100;
       const offset = (pageNum - 1) * limitNum;
@@ -49,13 +50,22 @@ export default async function contactsRouter(fastify: FastifyInstance) {
             ilike(contacts.namaLengkap, s),
             ilike(contacts.namaPanggilan, s),
             ilike(contacts.nomorWhatsapp, s),
-            ilike(contacts.alamat, s)
+            ilike(contacts.alamat, s),
+            ilike(contacts.kategori, s)
           )
         );
       }
 
       if (tag && tag !== 'ALL') {
         conditions.push(ilike(contacts.tags, `%${tag}%`));
+      }
+
+      if (kategori && kategori !== 'ALL') {
+        if (kategori === 'UNGROUPED') {
+          conditions.push(or(isNull(contacts.kategori), eq(contacts.kategori, '')));
+        } else {
+          conditions.push(eq(contacts.kategori, kategori));
+        }
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -111,6 +121,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       tanggal_lahir?: string;
       nomor_whatsapp: string;
       alamat?: string;
+      kategori?: string;
       tags?: string | string[];
       notes?: string;
     };
@@ -122,6 +133,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         tanggal_lahir,
         nomor_whatsapp,
         alamat,
+        kategori,
         tags,
         notes,
       } = req.body;
@@ -170,6 +182,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           tanggalLahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
           nomorWhatsapp: normalizedPhone,
           alamat: alamat || null,
+          kategori: kategori?.trim() || null,
           tags: Array.isArray(tags) ? tags.join(',') : tags || null,
           notes: notes || null,
           createdAt: now,
@@ -192,6 +205,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       tanggal_lahir?: string;
       nomor_whatsapp?: string;
       alamat?: string;
+      kategori?: string;
       tags?: string | string[];
       notes?: string;
     };
@@ -203,6 +217,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         tanggal_lahir,
         nomor_whatsapp,
         alamat,
+        kategori,
         tags,
         notes,
       } = req.body;
@@ -226,6 +241,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         updateData.nomorWhatsapp = normalizedPhone;
       }
       if (alamat !== undefined) updateData.alamat = alamat;
+      if (kategori !== undefined) updateData.kategori = kategori ? kategori.trim() : null;
       if (tags !== undefined) updateData.tags = Array.isArray(tags) ? tags.join(',') : tags;
       if (notes !== undefined) updateData.notes = notes;
 
@@ -295,6 +311,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
                 namaPanggilan: item.nama_panggilan || undefined,
                 tanggalLahir: item.tanggal_lahir ? new Date(item.tanggal_lahir) : undefined,
                 alamat: item.alamat || undefined,
+                kategori: item.kategori ? String(item.kategori).trim() : undefined,
                 tags: Array.isArray(item.tags) ? item.tags.join(',') : item.tags || undefined,
                 updatedAt: now,
               })
@@ -311,6 +328,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
               tanggalLahir: item.tanggal_lahir ? new Date(item.tanggal_lahir) : null,
               nomorWhatsapp: phone,
               alamat: item.alamat || null,
+              kategori: item.kategori ? String(item.kategori).trim() : null,
               tags: Array.isArray(item.tags) ? item.tags.join(',') : item.tags || null,
               createdAt: now,
               updatedAt: now,

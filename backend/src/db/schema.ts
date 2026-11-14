@@ -8,6 +8,7 @@ export const contacts = pgTable('contacts', {
   tanggalLahir: timestamp('tanggal_lahir'),
   nomorWhatsapp: text('nomor_whatsapp').notNull().unique(),
   alamat: text('alamat'),
+  kategori: text('kategori'),
   tags: text('tags'), // JSON string or comma-separated
   notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

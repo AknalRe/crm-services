@@ -1279,23 +1279,23 @@ export const Settings: React.FC<SettingsProps> = ({
                           </button>
                         </td>
                         <td className="py-2.5 pl-3 text-right">
-                          <div className="inline-flex items-center gap-1">
+                          <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">
                             <button
                               type="button"
                               onClick={() => handleStartEditAgent(ag)}
-                              className="p-1.5 rounded text-gray-500 hover:text-indigo-600 hover:bg-indigo-50"
+                              className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
                               title="Edit Agent"
                             >
-                              <Edit3 className="w-3.5 h-3.5" />
+                              <Edit3 className="w-3.5 h-3.5" strokeWidth={1.75} />
                             </button>
                             {!isSelf && (
                               <button
                                 type="button"
                                 onClick={() => setConfirmDeleteAgent(ag)}
-                                className="p-1.5 rounded text-gray-500 hover:text-red-600 hover:bg-red-50"
+                                className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 transition-colors"
                                 title="Hapus Agent"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
                               </button>
                             )}
                           </div>

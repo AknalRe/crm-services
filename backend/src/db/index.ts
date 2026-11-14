@@ -23,12 +23,15 @@ export async function initDb() {
         tanggal_lahir TIMESTAMP,
         nomor_whatsapp TEXT NOT NULL UNIQUE,
         alamat TEXT,
+        kategori TEXT,
         tags TEXT,
         notes TEXT,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+
+    await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS kategori TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS campaigns (
