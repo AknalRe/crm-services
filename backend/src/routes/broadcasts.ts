@@ -187,7 +187,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         },
       });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     }
   });
 
@@ -197,7 +197,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
       const result = await BroadcastService.cancelCampaign(req.params.id);
       return reply.send({ success: true, message: 'Kampanye berhasil dibatalkan', data: result });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     }
   });
 

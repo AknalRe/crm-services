@@ -1,4 +1,4 @@
-import { eq, inArray, and } from 'drizzle-orm';
+import { eq, inArray, and, gte, ne, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { contacts, campaigns, campaignRecipients } from '../db/schema';
 import { broadcastQueue } from './queue.service';
@@ -57,7 +57,7 @@ export class BroadcastService {
     } = dto;
 
     // Enforce active Reneo license
-    await licenseService.assertLicenseActive();
+    const lic = await licenseService.assertLicenseActive();
 
     // 1. Find target contacts
     let targetContacts: any[] = [];
@@ -79,6 +79,33 @@ export class BroadcastService {
 
     if (targetContacts.length === 0) {
       throw new Error('Tidak ada kontak yang dipilih atau ditemukan.');
+    }
+
+    // Enforce monthly broadcast quota when unlimitedBroadcast is disabled
+    if (!lic.features.unlimitedBroadcast && lic.features.maxBroadcastPerMonth > 0) {
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+
+      const countRows = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(campaignRecipients)
+        .innerJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
+        .where(
+          and(
+            gte(campaignRecipients.createdAt, monthStart),
+            ne(campaigns.status, 'CANCELLED')
+          )
+        );
+      const sentThisMonth = Number(countRows[0]?.count ?? 0);
+
+      if (sentThisMonth + targetContacts.length > lic.features.maxBroadcastPerMonth) {
+        const err = new Error(
+          `Kuota kirim broadcast bulan ini (${sentThisMonth.toLocaleString('id-ID')}/${lic.features.maxBroadcastPerMonth.toLocaleString('id-ID')}) tidak mencukupi untuk ${targetContacts.length.toLocaleString('id-ID')} penerima. Silakan upgrade paket lisensi Anda.`
+        ) as Error & { statusCode?: number };
+        err.statusCode = 403;
+        throw err;
+      }
     }
 
     // 2. Determine initial status & schedule

@@ -16,22 +16,32 @@ export interface LicenseInfo {
   licenseKey?: string;
   features: {
     unlimitedBroadcast: boolean;
+    maxBroadcastPerMonth: number;
     birthdayAutomation: boolean;
     liveChatCrm: boolean;
     multiSession: boolean;
     maxSessions: number;
     maxContacts: number;
+    maxTemplates: number;
+    maxUsers: number;
+    apiAccess: boolean;
+    supportPriority: string;
   };
 }
 
 function buildLockedFeatures(): LicenseInfo['features'] {
   return {
     unlimitedBroadcast: false,
+    maxBroadcastPerMonth: 0,
     birthdayAutomation: false,
     liveChatCrm: false,
     multiSession: false,
     maxSessions: 0,
     maxContacts: 0,
+    maxTemplates: 0,
+    maxUsers: 0,
+    apiAccess: false,
+    supportPriority: 'standard',
   };
 }
 
@@ -44,6 +54,11 @@ function resolveFeatures(raw: any, isExpired: boolean, planName?: string): Licen
 
   const unlimitedBroadcast =
     src.unlimitedBroadcast !== undefined ? Boolean(src.unlimitedBroadcast) : !isStarter;
+  const maxBroadcastPerMonth = unlimitedBroadcast
+    ? 0
+    : typeof src.maxBroadcastPerMonth === 'number' && src.maxBroadcastPerMonth >= 0
+    ? src.maxBroadcastPerMonth
+    : 500;
   const birthdayAutomation =
     src.birthdayBot !== undefined
       ? Boolean(src.birthdayBot)
@@ -67,21 +82,40 @@ function resolveFeatures(raw: any, isExpired: boolean, planName?: string): Licen
         : 5
       : 1;
   const maxContacts =
-    typeof src.maxContacts === 'number' && src.maxContacts > 0
+    typeof src.maxContacts === 'number' && src.maxContacts >= 0
       ? src.maxContacts
       : isStarter
       ? 1000
       : isEnterprise
       ? 50000
       : 10000;
+  const maxTemplates =
+    typeof src.maxTemplates === 'number' && src.maxTemplates >= 0 ? src.maxTemplates : 0;
+  const maxUsers =
+    typeof src.maxUsers === 'number' && src.maxUsers > 0 ? src.maxUsers : 1;
+  const apiAccess =
+    src.apiAccess !== undefined ? Boolean(src.apiAccess) : !isStarter;
+  const supportPriority =
+    typeof src.supportPriority === 'string' && src.supportPriority
+      ? src.supportPriority
+      : isEnterprise
+      ? 'vip'
+      : isStarter
+      ? 'standard'
+      : 'fast';
 
   return {
     unlimitedBroadcast,
+    maxBroadcastPerMonth,
     birthdayAutomation,
     liveChatCrm,
     multiSession,
     maxSessions,
     maxContacts,
+    maxTemplates,
+    maxUsers,
+    apiAccess,
+    supportPriority,
   };
 }
 
