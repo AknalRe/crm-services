@@ -26,6 +26,7 @@ import {
   UserCheck,
   Zap,
   Trash2,
+  ArrowLeft,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -534,9 +535,13 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   const activeLabels = getLabelList(selectedConversation);
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-132px)] flex flex-col md:flex-row">
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-116px)] sm:h-[calc(100vh-132px)] flex flex-col md:flex-row">
       {/* Left List */}
-      <div className="w-full md:w-80 border-r border-gray-200 flex flex-col shrink-0 bg-gray-50/50">
+      <div
+        className={`w-full md:w-72 lg:w-80 border-b md:border-b-0 md:border-r border-gray-200 flex-col shrink-0 bg-gray-50/50 ${
+          selectedConversation ? 'hidden md:flex' : 'flex flex-1 md:flex-none min-h-0'
+        }`}
+      >
         <div className="p-3 border-b border-gray-200 bg-white space-y-2">
           <div className="flex items-center gap-1.5">
             <div className="relative flex-1">
@@ -690,9 +695,21 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
 
       {/* Middle Chat Feed */}
       {selectedConversation ? (
-        <div className="flex-1 flex flex-col bg-gray-50 min-w-0">
-          <div className="h-14 bg-white border-b border-gray-200 px-4 flex items-center justify-between gap-2 shrink-0">
-            <div className="flex items-center gap-2.5 min-w-0">
+        <div
+          className={`flex-1 flex-col bg-gray-50 min-w-0 min-h-0 ${
+            showContactPanel ? 'hidden md:flex' : 'flex'
+          }`}
+        >
+          <div className="min-h-[3.5rem] bg-white border-b border-gray-200 px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={() => setSelectedConversation(null)}
+                title="Kembali ke Daftar Obrolan"
+                className="md:hidden p-1.5 -ml-1 rounded-md text-gray-600 hover:bg-gray-100 shrink-0"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
               <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0">
                 {selectedConversation.contact?.nama_lengkap?.slice(0, 2).toUpperCase() || 'WA'}
               </div>
@@ -720,7 +737,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center flex-wrap gap-1.5 shrink-0">
               {sessions.length > 0 && (
                 <select
                   value={selectedSession}
@@ -1159,7 +1176,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                 </div>
               )}
 
-            <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+            <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1210,7 +1227,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                 }
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                className={`flex-1 h-9 px-3 border rounded-md text-[13px] placeholder-gray-400 focus:outline-none ${
+                className={`flex-1 min-w-0 h-9 px-3 border rounded-md text-[13px] placeholder-gray-400 focus:outline-none ${
                   composerMode === 'NOTE'
                     ? 'bg-amber-50/70 border-amber-200 focus:border-amber-500'
                     : 'bg-gray-50 border-gray-200 focus:border-indigo-500'
@@ -1236,7 +1253,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-gray-50 text-gray-400">
+        <div className="hidden md:flex flex-1 flex-col items-center justify-center p-8 bg-gray-50 text-gray-400">
           <MessageSquare className="w-10 h-10 text-gray-300 mb-2" />
           <p className="text-xs text-gray-500">
             Pilih percakapan dari daftar di sebelah kiri untuk melihat pesan.
@@ -1246,7 +1263,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
 
       {/* Right Contact Profile (Collapsible) */}
       {showContactPanel && selectedConversation?.contact && (
-        <div className="w-full md:w-72 lg:w-80 border-l border-gray-200 bg-white p-4 flex flex-col shrink-0 overflow-y-auto">
+        <div className="w-full flex-1 md:flex-none md:w-72 lg:w-80 border-l border-gray-200 bg-white p-4 flex flex-col shrink-0 overflow-y-auto min-h-0">
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
               Detail Kontak

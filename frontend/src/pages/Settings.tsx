@@ -1218,7 +1218,7 @@ export const Settings: React.FC<SettingsProps> = ({
             <div className="text-xs text-gray-500 py-4 text-center">Belum ada data agent.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full min-w-[540px] text-left border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
                     <th className="py-2 pr-3 font-medium">Nama & Email</th>

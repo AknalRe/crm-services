@@ -76,7 +76,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             ) : (
               <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
             )}
-            <span className="tabular-nums">
+            <span className="tabular-nums truncate max-w-[120px] sm:max-w-none">
               {isLicenseActive
                 ? `${licenseInfo.plan} (${licenseInfo.daysLeft} hari)`
                 : 'Lisensi Kedaluwarsa'}
