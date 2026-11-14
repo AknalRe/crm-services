@@ -9,6 +9,7 @@ import {
   chatMessages,
 } from '../db/schema';
 import { wahaService } from './waha.service';
+import { liveEvents } from './events.service';
 import crypto from 'crypto';
 
 export interface SendMessageJobData {
@@ -188,6 +189,11 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
         })
         .where(and(eq(campaigns.id, campaignId), ne(campaigns.status, 'CANCELLED')));
       console.log(`[Queue Worker] Campaign ${campaignId} check completed.`);
+    }
+
+    liveEvents.emit('tracking:update', { campaignId, recipientId });
+    if (sendResult.success) {
+      liveEvents.emit('conversations:update', { campaignId, contactId });
     }
   },
   {

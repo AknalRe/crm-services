@@ -186,8 +186,8 @@ function AppShell() {
           isRefreshing={isRefreshing}
         />
 
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 overflow-y-auto p-5 lg:p-6">
+          <div className="w-full">
             {currentTab === 'dashboard' && <Dashboard onNavigate={setCurrentTab} />}
             {currentTab === 'contacts' && (
               <Contacts

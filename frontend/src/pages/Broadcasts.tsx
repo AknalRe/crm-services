@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import api from '../services/api';
+import { subscribeLiveEvent } from '../services/liveEvents';
 import { Campaign, Contact, CampaignRecipient, LicenseInfo, WahaSessionItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -90,6 +91,11 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
         setSelectedSession(res.activeSession || '');
       })
       .catch(() => {});
+
+    const unsub = subscribeLiveEvent('tracking:update', () => {
+      void loadCampaigns();
+    });
+    return unsub;
   }, [loadContactsAndTags, loadCampaigns]);
 
   useEffect(() => {
