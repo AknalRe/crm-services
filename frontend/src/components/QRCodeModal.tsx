@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
+import { subscribeLiveEvent } from '../services/liveEvents';
 import { WahaStatus } from '../types';
 import { Modal } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -97,13 +98,22 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
     }
     void fetchQr();
 
+    const unsubWaha = subscribeLiveEvent('waha:status', () => {
+      if (statusRef.current !== 'WORKING') {
+        void fetchQr();
+      }
+    });
+
     const timer = setInterval(() => {
       if (statusRef.current !== 'WORKING' && statusRef.current !== 'FAILED') {
         void fetchQr();
       }
-    }, 6000);
+    }, 8000);
 
-    return () => clearInterval(timer);
+    return () => {
+      unsubWaha();
+      clearInterval(timer);
+    };
   }, [isOpen, fetchQr]);
 
   return (

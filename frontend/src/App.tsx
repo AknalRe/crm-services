@@ -14,6 +14,7 @@ import Tracking from './pages/Tracking';
 import Conversations from './pages/Conversations';
 import Settings from './pages/Settings';
 import api from './services/api';
+import { subscribeLiveEvent } from './services/liveEvents';
 import { AuthStatus, WahaStatus, LicenseInfo } from './types';
 
 function AppShell() {
@@ -75,11 +76,21 @@ function AppShell() {
     if (!authStatus?.authenticated) return;
     fetchWahaStatus();
     fetchLicenseStatus();
+    const unsubWaha = subscribeLiveEvent('waha:status', () => {
+      void fetchWahaStatus();
+    });
+    const unsubLicense = subscribeLiveEvent('license:update', () => {
+      void fetchLicenseStatus();
+    });
     const interval = setInterval(() => {
       fetchWahaStatus();
       fetchLicenseStatus();
-    }, 15000);
-    return () => clearInterval(interval);
+    }, 60000);
+    return () => {
+      unsubWaha();
+      unsubLicense();
+      clearInterval(interval);
+    };
   }, [authStatus?.authenticated]);
 
   const handleStartBroadcastWithContacts = (contactIds: string[]) => {

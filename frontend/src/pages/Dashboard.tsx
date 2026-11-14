@@ -14,6 +14,7 @@ import StatCard from '../components/StatCard';
 import { Button } from '../components/ui/Button';
 import { LoadingState, ErrorState, EmptyState } from '../components/ui/StateBlocks';
 import api from '../services/api';
+import { subscribeLiveEvent } from '../services/liveEvents';
 import { DashboardStats } from '../types';
 
 interface DashboardProps {
@@ -39,8 +40,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 8000);
-    return () => clearInterval(interval);
+    const unsubTracking = subscribeLiveEvent('tracking:update', () => {
+      void loadData();
+    });
+    const unsubConv = subscribeLiveEvent('conversations:update', () => {
+      void loadData();
+    });
+    const unsubWaha = subscribeLiveEvent('waha:status', () => {
+      void loadData();
+    });
+    return () => {
+      unsubTracking();
+      unsubConv();
+      unsubWaha();
+    };
   }, [loadData]);
 
   if (loading && !stats) {

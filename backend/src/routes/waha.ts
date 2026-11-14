@@ -10,6 +10,7 @@ import {
 } from '../db/schema';
 import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
+import { liveEvents } from '../services/events.service';
 import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
 import crypto from 'crypto';
 
@@ -73,6 +74,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       }
 
       const result = await wahaService.createAndStartSession(clean, setActive);
+      liveEvents.emit('waha:status', { action: 'create', session: clean });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
@@ -85,6 +87,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const active = await wahaService.setActiveSession(req.body?.session || '');
+      liveEvents.emit('waha:status', { action: 'switch', session: active });
       return reply.send({ success: true, data: { activeSession: active } });
     } catch (error: any) {
       return reply.status(400).send({ success: false, error: error.message });
@@ -97,6 +100,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const result = await wahaService.deleteSession(req.params.name);
+      liveEvents.emit('waha:status', { action: 'delete', session: req.params.name });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -121,6 +125,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const result = await wahaService.startSession(req.body?.session);
+      liveEvents.emit('waha:status', { action: 'start', session: req.body?.session });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -133,6 +138,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const result = await wahaService.stopSession(req.body?.session);
+      liveEvents.emit('waha:status', { action: 'stop', session: req.body?.session });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -145,6 +151,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const result = await wahaService.logoutSession(req.body?.session);
+      liveEvents.emit('waha:status', { action: 'logout', session: req.body?.session });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -169,11 +176,19 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
   // WAHA Webhook Receiver
   fastify.post('/webhook', async (req: FastifyRequest<{
-    Body: { event: string; payload: any };
+    Body: { event: string; session?: string; payload: any };
   }>, reply: FastifyReply) => {
     try {
-      const { event, payload } = req.body || {};
+      const { event, session: webhookSession, payload } = req.body || {};
       console.log(`[WAHA Webhook] Received event: ${event}`);
+
+      if (event === 'session.status') {
+        liveEvents.emit('waha:status', {
+          action: 'webhook',
+          session: webhookSession || payload?.name,
+          status: payload?.status,
+        });
+      }
 
       // 1. Delivery & Read Receipts (message.ack)
       if (event === 'message.ack' && payload) {
@@ -252,6 +267,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               )
             );
         }
+        liveEvents.emit('tracking:update', { ack: ackValue, msgId });
+        liveEvents.emit('conversations:update', { ack: ackValue, msgId });
       }
 
       // 2. Incoming Messages (message)
@@ -328,6 +345,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           ackStatus: 2,
           createdAt: now,
         });
+
+        liveEvents.emit('conversations:update', { conversationId: convId });
+        liveEvents.emit('tracking:update', { conversationId: convId });
       }
 
       return reply.send({ success: true, message: 'Webhook processed' });

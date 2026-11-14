@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import api from '../services/api';
+import { subscribeLiveEvent } from '../services/liveEvents';
 import { Conversation, ChatMessage, LicenseInfo, WahaSessionItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
@@ -70,8 +71,10 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, onOpe
   useEffect(() => {
     if (!isLiveChatUnlocked) return;
     fetchConversations();
-    const interval = setInterval(fetchConversations, 10000);
-    return () => clearInterval(interval);
+    const unsub = subscribeLiveEvent('conversations:update', () => {
+      void fetchConversations();
+    });
+    return unsub;
   }, [fetchConversations, isLiveChatUnlocked]);
 
   useEffect(() => {
@@ -88,10 +91,10 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, onOpe
   useEffect(() => {
     if (isLiveChatUnlocked && selectedConversation) {
       fetchMessages(selectedConversation.id);
-      const msgInterval = setInterval(() => {
-        fetchMessages(selectedConversation.id);
-      }, 5000);
-      return () => clearInterval(msgInterval);
+      const unsub = subscribeLiveEvent('conversations:update', () => {
+        void fetchMessages(selectedConversation.id);
+      });
+      return unsub;
     }
   }, [selectedConversation?.id, fetchMessages, isLiveChatUnlocked]);
 

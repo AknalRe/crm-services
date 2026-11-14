@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { licenseService } from '../services/license.service';
+import { liveEvents } from '../services/events.service';
 
 export default async function licenseRouter(fastify: FastifyInstance) {
   // GET license status
@@ -16,6 +17,7 @@ export default async function licenseRouter(fastify: FastifyInstance) {
   fastify.post('/sync', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
       const license = await licenseService.syncWithReneo();
+      liveEvents.emit('license:update', { action: 'sync' });
       return reply.send({
         success: true,
         message: 'Status lisensi berhasil disinkronkan dengan Reneo',
@@ -37,6 +39,7 @@ export default async function licenseRouter(fastify: FastifyInstance) {
       }
 
       const updated = await licenseService.updateLicense({ plan, expiresAt, licenseKey });
+      liveEvents.emit('license:update', { action: 'update' });
       return reply.send({
         success: true,
         message: 'Lisensi berhasil diperbarui',
@@ -53,6 +56,7 @@ export default async function licenseRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const license = await licenseService.activateLicenseKey(req.body?.licenseKey || '');
+      liveEvents.emit('license:update', { action: 'activate' });
       return reply.send({ success: true, data: license, message: 'Lisensi berhasil diaktivasi.' });
     } catch (error: any) {
       return reply.status(400).send({ success: false, error: error.message });

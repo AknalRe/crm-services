@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import api from '../services/api';
+import { subscribeLiveEvent } from '../services/liveEvents';
 import { LicenseInfo, WahaSessionItem, WahaStatus } from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
@@ -84,7 +85,15 @@ export const Settings: React.FC<SettingsProps> = ({
 
   useEffect(() => {
     fetchSessions();
-  }, [fetchSessions, wahaStatus?.connected]);
+  }, [fetchSessions, wahaStatus?.connected, wahaStatus?.sessionStatus]);
+
+  useEffect(() => {
+    const unsub = subscribeLiveEvent('waha:status', () => {
+      onRefreshStatus();
+      void fetchSessions();
+    });
+    return unsub;
+  }, [fetchSessions, onRefreshStatus]);
 
   const handleSelectMode = async (mode: 'INTERNAL' | 'EXTERNAL') => {
     setConfigMode(mode);

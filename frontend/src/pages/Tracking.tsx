@@ -9,6 +9,7 @@ import {
   Phone,
 } from 'lucide-react';
 import api from '../services/api';
+import { subscribeLiveEvent } from '../services/liveEvents';
 import { CampaignRecipient } from '../types';
 import { Button } from '../components/ui/Button';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
@@ -41,8 +42,10 @@ export const Tracking: React.FC = () => {
 
   useEffect(() => {
     fetchTracking();
-    const interval = setInterval(fetchTracking, 6000);
-    return () => clearInterval(interval);
+    const unsub = subscribeLiveEvent('tracking:update', () => {
+      void fetchTracking();
+    });
+    return unsub;
   }, [fetchTracking]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
