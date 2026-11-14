@@ -441,6 +441,29 @@ export class LicenseService {
       throw new Error('Kunci lisensi tidak valid (minimal 8 karakter).');
     }
 
+    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    try {
+      const verifyRes = await axios.get(`${reneoUrl.replace(/\/+$/, '')}/api/v1/app-licenses/verify`, {
+        params: { key: cleanKey, catalogId: 'reneo-crm' },
+        timeout: 4000,
+      });
+      if (verifyRes.data) {
+        if (!verifyRes.data.valid) {
+          throw new Error(verifyRes.data.message || 'Kunci lisensi tidak valid atau bukan untuk aplikasi ini.');
+        }
+        await this.updateLicense({
+          plan: verifyRes.data.planName || 'Lisensi Aktif (Reneo CRM)',
+          expiresAt: verifyRes.data.expiresAt,
+          licenseKey: cleanKey,
+        });
+        return this.syncWithReneo();
+      }
+    } catch (err: any) {
+      if (err?.message && !err?.isAxiosError) {
+        throw err;
+      }
+    }
+
     const synced = await this.syncWithReneo();
     if (synced && !synced.isExpired && (!synced.licenseKey || synced.licenseKey === cleanKey)) {
       return synced;
