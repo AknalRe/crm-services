@@ -1,8 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, or, ilike, desc, sql } from 'drizzle-orm';
+import { and, eq, ne, or, ilike, desc, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { contacts } from '../db/schema';
 import { normalizePhoneNumber } from '../services/phone.utils';
+import { licenseService } from '../services/license.service';
 import crypto from 'crypto';
 
 export function formatContact(c: any) {
@@ -126,6 +127,18 @@ export default async function contactsRouter(fastify: FastifyInstance) {
 
       const normalizedPhone = normalizePhoneNumber(nomor_whatsapp);
 
+      // Enforce contact quota from active license
+      const lic = await licenseService.assertLicenseActive();
+      const countRes = await db.select({ count: sql<number>`count(*)` }).from(contacts);
+      const currentTotal = Number(countRes[0]?.count || 0);
+      if (lic.features.maxContacts > 0 && currentTotal >= lic.features.maxContacts) {
+        return reply.status(403).send({
+          success: false,
+          code: 'QUOTA_EXCEEDED',
+          error: `Batas maksimal ${lic.features.maxContacts} kontak untuk paket "${lic.plan}" telah tercapai.`,
+        });
+      }
+
       // Check if phone already exists
       const existing = await db
         .select()
@@ -190,7 +203,20 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       if (nama_lengkap) updateData.namaLengkap = nama_lengkap;
       if (nama_panggilan !== undefined) updateData.namaPanggilan = nama_panggilan;
       if (tanggal_lahir !== undefined) updateData.tanggalLahir = tanggal_lahir ? new Date(tanggal_lahir) : null;
-      if (nomor_whatsapp) updateData.nomorWhatsapp = normalizePhoneNumber(nomor_whatsapp);
+      if (nomor_whatsapp) {
+        const normalizedPhone = normalizePhoneNumber(nomor_whatsapp);
+        const dup = await db
+          .select({ id: contacts.id })
+          .from(contacts)
+          .where(and(eq(contacts.nomorWhatsapp, normalizedPhone), ne(contacts.id, req.params.id)));
+        if (dup.length > 0) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Nomor WhatsApp sudah terdaftar untuk kontak lain',
+          });
+        }
+        updateData.nomorWhatsapp = normalizedPhone;
+      }
       if (alamat !== undefined) updateData.alamat = alamat;
       if (tags !== undefined) updateData.tags = Array.isArray(tags) ? tags.join(',') : tags;
       if (notes !== undefined) updateData.notes = notes;
@@ -231,6 +257,10 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         return reply.status(400).send({ success: false, error: 'Data kontak kosong atau tidak valid' });
       }
 
+      const lic = await licenseService.assertLicenseActive();
+      const countRes = await db.select({ count: sql<number>`count(*)` }).from(contacts);
+      let currentTotal = Number(countRes[0]?.count || 0);
+
       let inserted = 0;
       let skipped = 0;
 
@@ -262,6 +292,10 @@ export default async function contactsRouter(fastify: FastifyInstance) {
               })
               .where(eq(contacts.id, existing[0].id));
           } else {
+            if (lic.features.maxContacts > 0 && currentTotal >= lic.features.maxContacts) {
+              skipped++;
+              continue;
+            }
             await db.insert(contacts).values({
               id: crypto.randomUUID(),
               namaLengkap: item.nama_lengkap,
@@ -273,6 +307,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
               createdAt: now,
               updatedAt: now,
             });
+            currentTotal++;
           }
           inserted++;
         } catch {

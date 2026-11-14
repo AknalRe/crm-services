@@ -15,6 +15,7 @@ export interface CreateCampaignDTO {
   batchSize?: number;
   contactIds?: string[];
   filterTags?: string[];
+  sessionName?: string;
 }
 
 export class BroadcastService {
@@ -52,6 +53,7 @@ export class BroadcastService {
       batchSize = 10,
       contactIds,
       filterTags,
+      sessionName,
     } = dto;
 
     // Enforce active Reneo license
@@ -154,6 +156,7 @@ export class BroadcastService {
           contactId: recipient.contactId,
           phone: recipient.phone,
           message: recipient.personalizedMessage,
+          sessionName,
         },
         {
           delay: totalDelay,

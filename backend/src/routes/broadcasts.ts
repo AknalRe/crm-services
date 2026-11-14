@@ -138,6 +138,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
       batchSize?: number;
       contactIds?: string[];
       filterTags?: string[];
+      sessionName?: string;
     };
   }>, reply: FastifyReply) => {
     try {
@@ -151,6 +152,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         batchSize,
         contactIds,
         filterTags,
+        sessionName,
       } = req.body;
 
       if (!title || !messageTemplate) {
@@ -170,6 +172,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         batchSize: batchSize ? Number(batchSize) : 10,
         contactIds: Array.isArray(contactIds) ? contactIds : undefined,
         filterTags: Array.isArray(filterTags) ? filterTags : undefined,
+        sessionName: sessionName?.trim() || undefined,
       });
 
       return reply.status(201).send({
@@ -234,6 +237,8 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         );
       }
 
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
       const rows = await db
         .select({
           recipient: campaignRecipients,
@@ -243,7 +248,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         .from(campaignRecipients)
         .leftJoin(contacts, eq(campaignRecipients.contactId, contacts.id))
         .leftJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
-        .where(conditions.length > 0 ? sql`${conditions[0]}` : undefined)
+        .where(whereClause)
         .orderBy(desc(campaignRecipients.updatedAt))
         .limit(limitNum)
         .offset(offset);
@@ -251,7 +256,9 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
       const countResult = await db
         .select({ count: sql<number>`count(*)` })
         .from(campaignRecipients)
-        .where(conditions.length > 0 ? sql`${conditions[0]}` : undefined);
+        .leftJoin(contacts, eq(campaignRecipients.contactId, contacts.id))
+        .leftJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
+        .where(whereClause);
 
       const total = Number(countResult[0]?.count || 0);
 

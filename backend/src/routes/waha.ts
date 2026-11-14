@@ -9,6 +9,7 @@ import {
   conversations,
 } from '../db/schema';
 import { wahaService } from '../services/waha.service';
+import { licenseService } from '../services/license.service';
 import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
 import crypto from 'crypto';
 
@@ -33,16 +34,48 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     }
   });
 
-  // POST create & start a new WAHA session
+  // POST create & start a new WAHA session (gated by multiSession / maxSessions license)
   fastify.post('/sessions', async (req: FastifyRequest<{
     Body: { name: string; setActive?: boolean };
   }>, reply: FastifyReply) => {
     try {
       const { name, setActive = true } = req.body || {};
-      const result = await wahaService.createAndStartSession(name, setActive);
+      const clean = (name || '').trim();
+      const lic = await licenseService.assertLicenseActive();
+
+      let existingCount = 0;
+      let alreadyExists = false;
+      try {
+        const listed = await wahaService.listSessions();
+        existingCount = listed.sessions.length;
+        alreadyExists = listed.sessions.some((s) => s.name === clean);
+      } catch {
+        // Ignore if WAHA hasn't returned sessions yet
+      }
+
+      if (!alreadyExists && existingCount >= 1) {
+        if (!lic.features.multiSession) {
+          return reply.status(403).send({
+            success: false,
+            code: 'FEATURE_LOCKED',
+            feature: 'multiSession',
+            error: `Fitur Multi-Sesi WhatsApp terkunci pada paket "${lic.plan}". Upgrade ke Pro Bulanan atau Enterprise untuk menambah sesi lebih dari 1.`,
+          });
+        }
+        if (existingCount >= lic.features.maxSessions) {
+          return reply.status(403).send({
+            success: false,
+            code: 'QUOTA_EXCEEDED',
+            feature: 'multiSession',
+            error: `Batas maksimal ${lic.features.maxSessions} sesi WhatsApp untuk paket "${lic.plan}" telah tercapai.`,
+          });
+        }
+      }
+
+      const result = await wahaService.createAndStartSession(clean, setActive);
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     }
   });
 
@@ -120,14 +153,14 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
   // POST test send message
   fastify.post('/send-test', async (req: FastifyRequest<{
-    Body: { phone: string; message: string };
+    Body: { phone: string; message: string; session?: string };
   }>, reply: FastifyReply) => {
     try {
-      const { phone, message } = req.body;
+      const { phone, message, session } = req.body;
       if (!phone || !message) {
         return reply.status(400).send({ success: false, error: 'Phone dan message wajib diisi' });
       }
-      const result = await wahaService.sendTextMessage(phone, message);
+      const result = await wahaService.sendTextMessage(phone, message, session?.trim() || undefined);
       return reply.send({ success: result.success, data: result });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

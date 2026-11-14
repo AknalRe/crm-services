@@ -4,6 +4,7 @@ import { db } from '../db';
 import { systemSettings, birthdaySettings } from '../db/schema';
 import { BirthdayService } from '../services/birthday.service';
 import { wahaService } from '../services/waha.service';
+import { licenseService } from '../services/license.service';
 
 export default async function settingsRouter(fastify: FastifyInstance) {
   // GET all settings
@@ -78,11 +79,20 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         .where(eq(birthdaySettings.id, 'default'));
 
       const celebrants = await BirthdayService.getBirthdayContacts();
+      const defaultSetting = {
+        id: 'default',
+        isEnabled: true,
+        sendTime: '08:00',
+        messageTemplate:
+          'Halo {nama_panggilan}! Selamat ulang tahun, semoga panjang umur, sehat selalu, dan sukses selalu.',
+        delaySeconds: 5,
+        lastRunDate: null,
+      };
 
       return reply.send({
         success: true,
         data: {
-          setting: list[0] || null,
+          setting: list[0] || defaultSetting,
           celebrants,
         },
       });
@@ -141,6 +151,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   // POST trigger birthday broadcast manually
   fastify.post('/birthday/trigger', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
+      await licenseService.assertFeature('birthdayAutomation');
       const result = await BirthdayService.runBirthdayBroadcast();
       return reply.send({
         success: true,
@@ -148,7 +159,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         data: result,
       });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     }
   });
 }

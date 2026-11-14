@@ -33,10 +33,13 @@ export const BirthdayAutomation: React.FC = () => {
     setLoading(true);
     try {
       const data = await api.getBirthdaySettings();
-      setIsEnabled(data.setting.isEnabled);
-      setSendTime(data.setting.sendTime);
-      setMessageTemplate(data.setting.messageTemplate);
-      setDelaySeconds(data.setting.delaySeconds || 5);
+      setIsEnabled(data.setting?.isEnabled ?? true);
+      setSendTime(data.setting?.sendTime || '08:00');
+      setMessageTemplate(
+        data.setting?.messageTemplate ||
+          'Halo {nama_panggilan}! Selamat ulang tahun, semoga panjang umur dan sehat selalu.'
+      );
+      setDelaySeconds(data.setting?.delaySeconds || 5);
       setCelebrantsToday(data.celebrants.today || []);
       setTotalRegistered(data.celebrants.totalRegistered || 0);
       setError(null);

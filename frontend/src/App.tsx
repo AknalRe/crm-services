@@ -160,6 +160,7 @@ function AppShell() {
           setCurrentTab(tab);
         }}
         wahaStatus={wahaStatus}
+        licenseInfo={licenseInfo}
         onOpenQrModal={() => setIsQrModalOpen(true)}
       />
 
@@ -178,17 +179,30 @@ function AppShell() {
           <div className="max-w-7xl mx-auto">
             {currentTab === 'dashboard' && <Dashboard onNavigate={setCurrentTab} />}
             {currentTab === 'contacts' && (
-              <Contacts onStartBroadcastWithContacts={handleStartBroadcastWithContacts} />
+              <Contacts
+                onStartBroadcastWithContacts={handleStartBroadcastWithContacts}
+                licenseInfo={licenseInfo}
+              />
             )}
             {currentTab === 'broadcasts' && (
-              <Broadcasts initialContactIds={preselectedContactIds} />
+              <Broadcasts
+                initialContactIds={preselectedContactIds}
+                licenseInfo={licenseInfo}
+              />
             )}
             {currentTab === 'birthday' && <BirthdayAutomation />}
             {currentTab === 'tracking' && <Tracking />}
-            {currentTab === 'conversations' && <Conversations />}
+            {currentTab === 'conversations' && (
+              <Conversations
+                licenseInfo={licenseInfo}
+                onOpenPlans={() => setIsPlansModalOpen(true)}
+              />
+            )}
             {currentTab === 'settings' && (
               <Settings
                 wahaStatus={wahaStatus}
+                licenseInfo={licenseInfo}
+                onOpenPlans={() => setIsPlansModalOpen(true)}
                 onRefreshStatus={fetchWahaStatus}
                 onOpenQr={(sessionName?: string) => {
                   setQrSessionName(sessionName);

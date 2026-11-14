@@ -17,6 +17,7 @@ export interface SendMessageJobData {
   contactId: string;
   phone: string;
   message: string;
+  sessionName?: string;
 }
 
 export const BROADCAST_QUEUE_NAME = 'whatsapp-broadcast';
@@ -40,7 +41,7 @@ export const broadcastQueue = new Queue<SendMessageJobData>(BROADCAST_QUEUE_NAME
 export const broadcastWorker = new Worker<SendMessageJobData>(
   BROADCAST_QUEUE_NAME,
   async (job: Job<SendMessageJobData>) => {
-    const { recipientId, campaignId, contactId, phone, message } = job.data;
+    const { recipientId, campaignId, contactId, phone, message, sessionName } = job.data;
     console.log(`[Queue Worker] Processing message for ${phone} (Campaign: ${campaignId}, Recipient: ${recipientId})`);
 
     // Ensure campaign isn't cancelled
@@ -65,7 +66,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
     }
 
     // Attempt to send via WAHA
-    const sendResult = await wahaService.sendTextMessage(phone, message);
+    const sendResult = await wahaService.sendTextMessage(phone, message, sessionName);
 
     if (sendResult.success) {
       const now = new Date();

@@ -78,6 +78,7 @@ export const api = {
     batchSize?: number;
     contactIds?: string[];
     filterTags?: string[];
+    sessionName?: string;
   }): Promise<any> => {
     const res = await client.post('/broadcasts', data);
     return res.data;
@@ -104,8 +105,8 @@ export const api = {
     const res = await client.get(`/conversations/${id}/messages`);
     return res.data.data;
   },
-  sendConversationMessage: async (id: string, body: string): Promise<ChatMessage> => {
-    const res = await client.post(`/conversations/${id}/messages`, { body });
+  sendConversationMessage: async (id: string, body: string, session?: string): Promise<ChatMessage> => {
+    const res = await client.post(`/conversations/${id}/messages`, { body, session });
     return res.data.data;
   },
 

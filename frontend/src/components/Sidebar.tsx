@@ -8,13 +8,15 @@ import {
   MessageCircle,
   Settings,
   Smartphone,
+  Lock,
 } from 'lucide-react';
-import { WahaStatus } from '../types';
+import { LicenseInfo, WahaStatus } from '../types';
 
 interface SidebarProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
   wahaStatus: WahaStatus | null;
+  licenseInfo?: LicenseInfo | null;
   onOpenQrModal: () => void;
 }
 
@@ -22,16 +24,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   setCurrentTab,
   wahaStatus,
+  licenseInfo,
   onOpenQrModal,
 }) => {
+  const isLiveChatUnlocked = Boolean(
+    licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
+  );
+
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'contacts', label: 'Kontak Pelanggan', icon: Users },
-    { id: 'broadcasts', label: 'Siaran WhatsApp', icon: Send },
-    { id: 'birthday', label: 'Ulang Tahun', icon: Cake },
-    { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck },
-    { id: 'conversations', label: 'Live Chat CRM', icon: MessageCircle },
-    { id: 'settings', label: 'Koneksi WAHA', icon: Settings },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, locked: false },
+    { id: 'contacts', label: 'Kontak Pelanggan', icon: Users, locked: false },
+    { id: 'broadcasts', label: 'Siaran WhatsApp', icon: Send, locked: false },
+    { id: 'birthday', label: 'Ulang Tahun', icon: Cake, locked: false },
+    { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck, locked: false },
+    { id: 'conversations', label: 'Live Chat CRM', icon: MessageCircle, locked: !isLiveChatUnlocked },
+    { id: 'settings', label: 'Koneksi WAHA', icon: Settings, locked: false },
   ];
 
   const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
@@ -73,7 +80,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   isActive ? 'text-indigo-400' : 'text-gray-400'
                 }`}
               />
-              <span className="truncate">{item.label}</span>
+              <span className="truncate flex-1 text-left">{item.label}</span>
+              {item.locked && (
+                <span
+                  title="Terkunci oleh lisensi — butuh paket Pro atau Enterprise"
+                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/60 text-amber-400 shrink-0"
+                >
+                  <Lock className="w-3 h-3" />
+                </span>
+              )}
             </button>
           );
         })}

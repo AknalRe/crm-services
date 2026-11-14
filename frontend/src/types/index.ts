@@ -162,6 +162,8 @@ export interface LicenseInfo {
     unlimitedBroadcast: boolean;
     birthdayAutomation: boolean;
     liveChatCrm: boolean;
+    multiSession: boolean;
+    maxSessions: number;
     maxContacts: number;
   };
 }
@@ -180,6 +182,8 @@ export interface LicensePlan {
     maxContacts?: number;
     birthdayBot?: boolean;
     liveChat?: boolean;
+    multiSession?: boolean;
+    maxSessions?: number;
     wahaSync?: boolean;
     [key: string]: any;
   };

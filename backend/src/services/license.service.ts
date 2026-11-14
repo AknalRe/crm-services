@@ -18,7 +18,70 @@ export interface LicenseInfo {
     unlimitedBroadcast: boolean;
     birthdayAutomation: boolean;
     liveChatCrm: boolean;
+    multiSession: boolean;
+    maxSessions: number;
     maxContacts: number;
+  };
+}
+
+function buildLockedFeatures(): LicenseInfo['features'] {
+  return {
+    unlimitedBroadcast: false,
+    birthdayAutomation: false,
+    liveChatCrm: false,
+    multiSession: false,
+    maxSessions: 0,
+    maxContacts: 0,
+  };
+}
+
+function resolveFeatures(raw: any, isExpired: boolean, planName?: string): LicenseInfo['features'] {
+  if (isExpired) return buildLockedFeatures();
+
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const isStarter = (planName || '').toLowerCase().includes('starter');
+  const isEnterprise = (planName || '').toLowerCase().includes('enterprise');
+
+  const unlimitedBroadcast =
+    src.unlimitedBroadcast !== undefined ? Boolean(src.unlimitedBroadcast) : !isStarter;
+  const birthdayAutomation =
+    src.birthdayBot !== undefined
+      ? Boolean(src.birthdayBot)
+      : src.birthdayAutomation !== undefined
+      ? Boolean(src.birthdayAutomation)
+      : true;
+  const liveChatCrm =
+    src.liveChat !== undefined
+      ? Boolean(src.liveChat)
+      : src.liveChatCrm !== undefined
+      ? Boolean(src.liveChatCrm)
+      : !isStarter;
+  const multiSession =
+    src.multiSession !== undefined ? Boolean(src.multiSession) : liveChatCrm || unlimitedBroadcast;
+  const maxSessions =
+    typeof src.maxSessions === 'number' && src.maxSessions > 0
+      ? src.maxSessions
+      : multiSession
+      ? isEnterprise
+        ? 25
+        : 5
+      : 1;
+  const maxContacts =
+    typeof src.maxContacts === 'number' && src.maxContacts > 0
+      ? src.maxContacts
+      : isStarter
+      ? 1000
+      : isEnterprise
+      ? 50000
+      : 10000;
+
+  return {
+    unlimitedBroadcast,
+    birthdayAutomation,
+    liveChatCrm,
+    multiSession,
+    maxSessions,
+    maxContacts,
   };
 }
 
@@ -71,7 +134,7 @@ export class LicenseService {
           if (res.data && res.data.ok && res.data.status === 'UNLICENSED') {
             await db
               .delete(systemSettings)
-              .where(inArray(systemSettings.key, ['license_key', 'license_plan', 'license_expires_at']));
+              .where(inArray(systemSettings.key, ['license_key', 'license_plan', 'license_expires_at', 'license_features']));
 
             this.cachedLicense = {
               status: 'UNLICENSED',
@@ -82,12 +145,7 @@ export class LicenseService {
               isExpired: true,
               managedByReneo: true,
               reneoBillingUrl: res.data.billingUrl || `${reneoUrl}/hosting`,
-              features: {
-                unlimitedBroadcast: false,
-                birthdayAutomation: false,
-                liveChatCrm: false,
-                maxContacts: 0,
-              },
+              features: buildLockedFeatures(),
             };
             this.lastCheckedAt = Date.now();
             return this.cachedLicense;
@@ -106,10 +164,29 @@ export class LicenseService {
             const now = new Date();
             const daysLeft = Math.max(0, Math.ceil((expDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
             const isExpired = expDate.getTime() < now.getTime();
+            const planName = data.plan || 'Pro Bulanan';
+            const features = resolveFeatures(data.features, isExpired, planName);
+
+            // Persist synced license metadata & features for offline fallback
+            const syncPairs = [
+              { key: 'license_plan', value: planName },
+              { key: 'license_expires_at', value: expDate.toISOString() },
+              { key: 'license_key', value: String(data.licenseKey) },
+              { key: 'license_features', value: JSON.stringify(features) },
+            ];
+            for (const pair of syncPairs) {
+              await db
+                .insert(systemSettings)
+                .values({ key: pair.key, value: pair.value, updatedAt: now })
+                .onConflictDoUpdate({
+                  target: systemSettings.key,
+                  set: { value: pair.value, updatedAt: now },
+                });
+            }
 
             this.cachedLicense = {
               status: isExpired ? 'EXPIRED' : data.status || 'ACTIVE',
-              plan: data.plan || 'Bulanan (Pro)',
+              plan: planName,
               period: data.period || 'monthly',
               expiresAt: data.expiresAt,
               daysLeft,
@@ -117,12 +194,7 @@ export class LicenseService {
               managedByReneo: true,
               reneoBillingUrl: data.billingUrl || `${reneoUrl}/hosting`,
               licenseKey: data.licenseKey,
-              features: {
-                unlimitedBroadcast: !isExpired,
-                birthdayAutomation: !isExpired,
-                liveChatCrm: !isExpired,
-                maxContacts: data.maxContacts || 10000,
-              },
+              features,
             };
             this.lastCheckedAt = Date.now();
             return this.cachedLicense;
@@ -137,6 +209,7 @@ export class LicenseService {
       const planSetting = settings.find((s) => s.key === 'license_plan');
       const expiresSetting = settings.find((s) => s.key === 'license_expires_at');
       const keySetting = settings.find((s) => s.key === 'license_key');
+      const featuresSetting = settings.find((s) => s.key === 'license_features');
 
       const now = new Date();
       if (!keySetting?.value || !expiresSetting?.value) {
@@ -149,12 +222,7 @@ export class LicenseService {
           isExpired: true,
           managedByReneo: true,
           reneoBillingUrl: `${reneoUrl}/hosting`,
-          features: {
-            unlimitedBroadcast: false,
-            birthdayAutomation: false,
-            liveChatCrm: false,
-            maxContacts: 0,
-          },
+          features: buildLockedFeatures(),
         };
         this.lastCheckedAt = Date.now();
         return this.cachedLicense;
@@ -164,6 +232,14 @@ export class LicenseService {
       const plan = planSetting?.value || 'Lisensi Aktif';
       const daysLeft = Math.max(0, Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
       const isExpired = expiresAt.getTime() < now.getTime();
+      let parsedRawFeatures: any = null;
+      if (featuresSetting?.value) {
+        try {
+          parsedRawFeatures = JSON.parse(featuresSetting.value);
+        } catch {
+          parsedRawFeatures = null;
+        }
+      }
 
       this.cachedLicense = {
         status: isExpired ? 'EXPIRED' : 'ACTIVE',
@@ -175,12 +251,7 @@ export class LicenseService {
         managedByReneo: true,
         reneoBillingUrl: `${reneoUrl}/hosting`,
         licenseKey: keySetting.value,
-        features: {
-          unlimitedBroadcast: !isExpired,
-          birthdayAutomation: !isExpired,
-          liveChatCrm: !isExpired,
-          maxContacts: 10000,
-        },
+        features: resolveFeatures(parsedRawFeatures, isExpired, plan),
       };
       this.lastCheckedAt = Date.now();
       return this.cachedLicense;
@@ -195,26 +266,51 @@ export class LicenseService {
         isExpired: true,
         managedByReneo: true,
         reneoBillingUrl: `${reneoUrl}/hosting`,
-        features: {
-          unlimitedBroadcast: false,
-          birthdayAutomation: false,
-          liveChatCrm: false,
-          maxContacts: 0,
-        },
+        features: buildLockedFeatures(),
       };
     }
   }
 
   /**
-   * Enforce active license before running broadcasts
+   * Enforce active license before running protected operations
    */
-  public async assertLicenseActive(): Promise<void> {
+  public async assertLicenseActive(): Promise<LicenseInfo> {
     const lic = await this.getLicense();
-    if (lic.isExpired || lic.status === 'EXPIRED') {
-      throw new Error(
-        `Lisensi CRM di Reneo telah berakhir (${lic.plan}). Silakan perpanjang pembayaran di panel Reneo untuk melanjutkan siaran.`
+    if (lic.isExpired || lic.status === 'EXPIRED' || lic.status === 'UNLICENSED') {
+      const err: any = new Error(
+        lic.status === 'UNLICENSED'
+          ? 'Lisensi CRM belum diaktivasi. Pilih atau aktivasi paket lisensi di panel Reneo terlebih dahulu.'
+          : `Lisensi CRM di Reneo telah berakhir (${lic.plan}). Silakan perpanjang pembayaran di panel Reneo untuk melanjutkan.`
       );
+      err.statusCode = 403;
+      throw err;
     }
+    return lic;
+  }
+
+  /**
+   * Enforce a specific licensed feature (e.g. liveChatCrm, multiSession)
+   */
+  public async assertFeature(
+    feature: 'liveChatCrm' | 'multiSession' | 'birthdayAutomation' | 'unlimitedBroadcast',
+    customMessage?: string
+  ): Promise<LicenseInfo> {
+    const lic = await this.assertLicenseActive();
+    if (!lic.features[feature]) {
+      const labels: Record<string, string> = {
+        liveChatCrm: 'Live Chat CRM (Percakapan)',
+        multiSession: 'Multi-Sesi WhatsApp',
+        birthdayAutomation: 'Otomasi Ulang Tahun',
+        unlimitedBroadcast: 'Siaran Tanpa Batas',
+      };
+      const err: any = new Error(
+        customMessage ||
+          `Fitur ${labels[feature] || feature} terkunci pada paket "${lic.plan}". Upgrade ke paket Pro Bulanan atau Enterprise untuk membukanya.`
+      );
+      err.statusCode = 403;
+      throw err;
+    }
+    return lic;
   }
 
   /**
@@ -310,6 +406,8 @@ export class LicenseService {
           maxContacts: 1000,
           birthdayBot: true,
           liveChat: false,
+          multiSession: false,
+          maxSessions: 1,
           wahaSync: true,
         },
       },
@@ -318,7 +416,7 @@ export class LicenseService {
         catalogId: 'reneo-crm',
         slug: 'pro-monthly',
         name: 'Pro Bulanan',
-        tagline: 'Fitur komprehensif lengkap: broadcast tanpa batas, bot ultah, dan Live Chat CRM.',
+        tagline: 'Fitur komprehensif lengkap: broadcast tanpa batas, bot ultah, multi-sesi, dan Live Chat CRM.',
         period: 'monthly',
         months: 1,
         priceAmount: 99000,
@@ -328,6 +426,8 @@ export class LicenseService {
           maxContacts: 10000,
           birthdayBot: true,
           liveChat: true,
+          multiSession: true,
+          maxSessions: 5,
           wahaSync: true,
         },
       },
@@ -336,7 +436,7 @@ export class LicenseService {
         catalogId: 'reneo-crm',
         slug: 'enterprise-annual',
         name: 'Enterprise Tahunan',
-        tagline: 'Paket tahunan super hemat (Diskon 17%): kapasitas kontak masif & support prioritas.',
+        tagline: 'Paket tahunan hemat 17%: kapasitas kontak masif, multi-sesi hingga 25 akun, & support prioritas.',
         period: 'annual',
         months: 12,
         priceAmount: 990000,
@@ -346,6 +446,8 @@ export class LicenseService {
           maxContacts: 50000,
           birthdayBot: true,
           liveChat: true,
+          multiSession: true,
+          maxSessions: 25,
           wahaSync: true,
         },
       },

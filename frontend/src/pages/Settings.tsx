@@ -14,23 +14,31 @@ import {
   Trash2,
 } from 'lucide-react';
 import api from '../services/api';
-import { WahaSessionItem, WahaStatus } from '../types';
+import { LicenseInfo, WahaSessionItem, WahaStatus } from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
 
 interface SettingsProps {
   wahaStatus: WahaStatus | null;
+  licenseInfo?: LicenseInfo | null;
+  onOpenPlans?: () => void;
   onRefreshStatus: () => void;
   onOpenQr: (sessionName?: string) => void;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
   wahaStatus,
+  licenseInfo,
+  onOpenPlans,
   onRefreshStatus,
   onOpenQr,
 }) => {
   const toast = useToast();
+  const isMultiSessionAllowed = Boolean(
+    licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.multiSession
+  );
+  const maxSessions = licenseInfo?.features?.maxSessions || 1;
   const [configMode, setConfigMode] = useState<'INTERNAL' | 'EXTERNAL'>('INTERNAL');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -50,6 +58,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const [sessionActionLoading, setSessionActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'stop' | 'logout' | null>(null);
+  const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
 
   const fetchSessions = useCallback(async () => {
     setSessionsLoading(true);
@@ -149,11 +158,14 @@ export const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const handleDeleteSession = async (targetName: string) => {
+  const handleConfirmDeleteSession = async () => {
+    if (!confirmDeleteSession) return;
+    const targetName = confirmDeleteSession;
     setSessionBusyName(targetName);
     try {
       await api.deleteWahaSession(targetName);
       toast.info(`Sesi "${targetName}" dihapus.`);
+      setConfirmDeleteSession(null);
       onRefreshStatus();
       fetchSessions();
     } catch (err: any) {
@@ -329,44 +341,81 @@ export const Settings: React.FC<SettingsProps> = ({
 
                 {/* Multi-Session Management */}
                 <div className="pt-3 border-t border-gray-200 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h4 className="text-xs font-semibold text-gray-900">Daftar Sesi WhatsApp (Multi-Sesi)</h4>
-                      <p className="text-[11px] text-gray-500">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-semibold text-gray-900">Daftar Sesi WhatsApp (Multi-Sesi)</h4>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-gray-100 text-gray-700 border border-gray-200 tabular-nums">
+                          {sessions.length}/{maxSessions} sesi
+                        </span>
+                        {!isMultiSessionAllowed && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                            <Lock className="w-2.5 h-2.5" />
+                            Terkunci (1 Sesi)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-0.5">
                         Tambahkan beberapa sesi dan pilih sesi aktif yang dipakai untuk pengiriman CRM.
                       </p>
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={fetchSessions}
-                      isLoading={sessionsLoading}
-                      leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-                    >
-                      Muat Ulang
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      {!isMultiSessionAllowed && onOpenPlans && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={onOpenPlans}
+                        >
+                          Upgrade Multi-Sesi
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={fetchSessions}
+                        isLoading={sessionsLoading}
+                        leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                      >
+                        Muat Ulang
+                      </Button>
+                    </div>
                   </div>
 
-                  <form onSubmit={handleCreateSession} className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="text"
-                      placeholder="Nama sesi baru (contoh: cs-1, sales-utama)"
-                      value={newSessionName}
-                      onChange={(e) => setNewSessionName(e.target.value)}
-                      className="flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                    />
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      size="md"
-                      isLoading={creatingSession}
-                      disabled={!newSessionName.trim()}
-                      leftIcon={<Plus className="w-4 h-4" />}
-                    >
-                      Tambah Sesi
-                    </Button>
-                  </form>
+                  {(!isMultiSessionAllowed && sessions.length >= 1) ? (
+                    <div className="p-3 rounded-md bg-amber-50/70 border border-amber-200 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        Paket <strong>{licenseInfo?.plan || 'Saat Ini'}</strong> hanya mendukung 1 sesi WhatsApp. Upgrade ke Pro Bulanan atau Enterprise untuk menambah sesi.
+                      </span>
+                      {onOpenPlans && (
+                        <Button type="button" variant="secondary" size="sm" onClick={onOpenPlans}>
+                          Lihat Paket
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <form onSubmit={handleCreateSession} className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nama sesi baru (contoh: cs-1, sales-utama)"
+                        value={newSessionName}
+                        onChange={(e) => setNewSessionName(e.target.value)}
+                        disabled={sessions.length >= maxSessions}
+                        className="flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                      />
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="md"
+                        isLoading={creatingSession}
+                        disabled={!newSessionName.trim() || sessions.length >= maxSessions}
+                        leftIcon={<Plus className="w-4 h-4" />}
+                      >
+                        Tambah Sesi
+                      </Button>
+                    </form>
+                  )}
 
                   <div className="divide-y divide-gray-200 border border-gray-200 rounded-md overflow-hidden">
                     {sessions.length === 0 ? (
@@ -380,6 +429,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         const isActive = item.name === session;
                         const isWorking = item.status === 'WORKING';
                         const isBusy = sessionBusyName === item.name;
+                        const accountLabel = item.me?.pushName || item.me?.id?.split('@')[0];
                         return (
                           <div
                             key={item.name}
@@ -387,10 +437,15 @@ export const Settings: React.FC<SettingsProps> = ({
                               isActive ? 'bg-indigo-50/40' : 'bg-white'
                             }`}
                           >
-                            <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="font-mono font-semibold text-gray-900 truncate">
                                 {item.name}
                               </span>
+                              {accountLabel && (
+                                <span className="text-[11px] text-gray-500 font-mono truncate">
+                                  ({accountLabel})
+                                </span>
+                              )}
                               <span
                                 className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${
                                   isWorking
@@ -440,7 +495,7 @@ export const Settings: React.FC<SettingsProps> = ({
                                   size="sm"
                                   disabled={isBusy}
                                   className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                                  onClick={() => handleDeleteSession(item.name)}
+                                  onClick={() => setConfirmDeleteSession(item.name)}
                                   aria-label={`Hapus sesi ${item.name}`}
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -680,6 +735,17 @@ export const Settings: React.FC<SettingsProps> = ({
             : 'Sesi WhatsApp akan dihentikan sementara dan pesan tidak dapat dikirim hingga sesi dijalankan kembali.'
         }
         confirmLabel={confirmAction === 'logout' ? 'Ya, Logout' : 'Ya, Hentikan'}
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={confirmDeleteSession !== null}
+        onClose={() => setConfirmDeleteSession(null)}
+        onConfirm={handleConfirmDeleteSession}
+        isLoading={sessionBusyName !== null}
+        title={`Hapus Sesi "${confirmDeleteSession}"?`}
+        description="Sesi WhatsApp ini akan dihapus dari server WAHA. Jika ini adalah sesi aktif, sistem akan mengalihkan sesi aktif ke sesi lain."
+        confirmLabel="Ya, Hapus Sesi"
         variant="danger"
       />
     </div>

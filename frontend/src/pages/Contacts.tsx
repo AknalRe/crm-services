@@ -12,7 +12,7 @@ import {
   Users,
 } from 'lucide-react';
 import api from '../services/api';
-import { Contact } from '../types';
+import { Contact, LicenseInfo } from '../types';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
@@ -21,9 +21,13 @@ import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBloc
 
 interface ContactsProps {
   onStartBroadcastWithContacts?: (contactIds: string[]) => void;
+  licenseInfo?: LicenseInfo | null;
 }
 
-export const Contacts: React.FC<ContactsProps> = ({ onStartBroadcastWithContacts }) => {
+export const Contacts: React.FC<ContactsProps> = ({
+  onStartBroadcastWithContacts,
+  licenseInfo,
+}) => {
   const toast = useToast();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
@@ -236,6 +240,11 @@ export const Contacts: React.FC<ContactsProps> = ({ onStartBroadcastWithContacts
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {licenseInfo && licenseInfo.features?.maxContacts > 0 && (
+            <span className="inline-flex items-center h-8 px-2.5 rounded text-xs font-mono font-medium bg-gray-50 text-gray-700 border border-gray-200 tabular-nums">
+              {contacts.length}/{licenseInfo.features.maxContacts.toLocaleString('id-ID')} kontak
+            </span>
+          )}
           {selectedIds.length > 0 && onStartBroadcastWithContacts && (
             <Button
               variant="primary"

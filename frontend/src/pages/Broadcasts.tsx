@@ -10,7 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import api from '../services/api';
-import { Campaign, Contact, CampaignRecipient } from '../types';
+import { Campaign, Contact, CampaignRecipient, LicenseInfo, WahaSessionItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
@@ -19,9 +19,10 @@ import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBloc
 
 interface BroadcastsProps {
   initialContactIds?: string[];
+  licenseInfo?: LicenseInfo | null;
 }
 
-export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds }) => {
+export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licenseInfo }) => {
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<'create' | 'history'>('create');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -29,6 +30,8 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds }) => 
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [allContacts, setAllContacts] = useState<Contact[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [wahaSessions, setWahaSessions] = useState<WahaSessionItem[]>([]);
+  const [selectedSession, setSelectedSession] = useState<string>('');
 
   const [title, setTitle] = useState('');
   const [broadcastType, setBroadcastType] = useState<'IMMEDIATE' | 'SCHEDULED'>('IMMEDIATE');
@@ -80,6 +83,13 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds }) => 
   useEffect(() => {
     loadContactsAndTags();
     loadCampaigns();
+    api
+      .getWahaSessions()
+      .then((res) => {
+        setWahaSessions(res.sessions || []);
+        setSelectedSession(res.activeSession || '');
+      })
+      .catch(() => {});
   }, [loadContactsAndTags, loadCampaigns]);
 
   useEffect(() => {
@@ -157,6 +167,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds }) => 
         batchSize,
         contactIds: recipientMode === 'MANUAL' ? selectedContactIds : undefined,
         filterTags: recipientMode === 'TAGS' && selectedTag ? [selectedTag] : undefined,
+        sessionName: selectedSession || undefined,
       });
 
       toast.success(
@@ -319,6 +330,25 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds }) => 
                     onChange={(e) => setScheduledAt(e.target.value)}
                     className="w-full sm:w-auto h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
                   />
+                </div>
+              )}
+
+              {licenseInfo?.features?.multiSession && wahaSessions.length > 1 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Sesi WhatsApp Pengirim
+                  </label>
+                  <select
+                    value={selectedSession}
+                    onChange={(e) => setSelectedSession(e.target.value)}
+                    className="w-full sm:w-72 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                  >
+                    {wahaSessions.map((s) => (
+                      <option key={s.name} value={s.name}>
+                        {s.name} ({s.status})
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
             </div>

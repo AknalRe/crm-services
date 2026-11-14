@@ -8,15 +8,25 @@ import {
   CheckCheck,
   Calendar,
   MapPin,
+  Lock,
+  ShieldCheck,
 } from 'lucide-react';
 import api from '../services/api';
-import { Conversation, ChatMessage } from '../types';
+import { Conversation, ChatMessage, LicenseInfo, WahaSessionItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
-export const Conversations: React.FC = () => {
+interface ConversationsProps {
+  licenseInfo?: LicenseInfo | null;
+  onOpenPlans?: () => void;
+}
+
+export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, onOpenPlans }) => {
   const toast = useToast();
+  const isLiveChatUnlocked = Boolean(
+    licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
+  );
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -26,9 +36,12 @@ export const Conversations: React.FC = () => {
   const [listError, setListError] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sessions, setSessions] = useState<WahaSessionItem[]>([]);
+  const [selectedSession, setSelectedSession] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const fetchConversations = useCallback(async () => {
+    if (!isLiveChatUnlocked) return;
     try {
       const data = await api.getConversations();
       setConversations(data);
@@ -39,9 +52,10 @@ export const Conversations: React.FC = () => {
     } finally {
       setLoadingList(false);
     }
-  }, []);
+  }, [isLiveChatUnlocked]);
 
   const fetchMessages = useCallback(async (convId: string) => {
+    if (!isLiveChatUnlocked) return;
     setLoadingMessages(true);
     try {
       const data = await api.getConversationMessages(convId);
@@ -51,23 +65,35 @@ export const Conversations: React.FC = () => {
     } finally {
       setLoadingMessages(false);
     }
-  }, []);
+  }, [isLiveChatUnlocked]);
 
   useEffect(() => {
+    if (!isLiveChatUnlocked) return;
     fetchConversations();
     const interval = setInterval(fetchConversations, 10000);
     return () => clearInterval(interval);
-  }, [fetchConversations]);
+  }, [fetchConversations, isLiveChatUnlocked]);
 
   useEffect(() => {
-    if (selectedConversation) {
+    if (!isLiveChatUnlocked) return;
+    api
+      .getWahaSessions()
+      .then((res) => {
+        setSessions(res.sessions || []);
+        setSelectedSession(res.activeSession || '');
+      })
+      .catch(() => {});
+  }, [isLiveChatUnlocked]);
+
+  useEffect(() => {
+    if (isLiveChatUnlocked && selectedConversation) {
       fetchMessages(selectedConversation.id);
       const msgInterval = setInterval(() => {
         fetchMessages(selectedConversation.id);
       }, 5000);
       return () => clearInterval(msgInterval);
     }
-  }, [selectedConversation?.id, fetchMessages]);
+  }, [selectedConversation?.id, fetchMessages, isLiveChatUnlocked]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -75,13 +101,17 @@ export const Conversations: React.FC = () => {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || !selectedConversation || sending) return;
+    if (!isLiveChatUnlocked || !inputText.trim() || !selectedConversation || sending) return;
 
     const text = inputText.trim();
     setSending(true);
 
     try {
-      const newMsg = await api.sendConversationMessage(selectedConversation.id, text);
+      const newMsg = await api.sendConversationMessage(
+        selectedConversation.id,
+        text,
+        selectedSession || undefined
+      );
       setInputText('');
       setMessages((prev) => [...prev, newMsg]);
       fetchConversations();
@@ -91,6 +121,36 @@ export const Conversations: React.FC = () => {
       setSending(false);
     }
   };
+
+  if (!isLiveChatUnlocked) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-8 max-w-xl mx-auto mt-8 text-center space-y-4">
+        <div className="w-11 h-11 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto">
+          <Lock className="w-5 h-5" />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-base font-semibold text-gray-900">
+            Menu Live Chat CRM Terkunci oleh Lisensi
+          </h3>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Paket Anda saat ini (<strong className="text-gray-800">{licenseInfo?.plan || 'Belum Diaktivasi'}</strong>) tidak menyertakan fitur percakapan langsung (Live Chat CRM). Upgrade ke paket <strong className="text-gray-800">Pro Bulanan</strong> atau <strong className="text-gray-800">Enterprise Tahunan</strong> untuk membuka percakapan pelanggan dan balasan multi-sesi.
+          </p>
+        </div>
+        {onOpenPlans && (
+          <div className="pt-2">
+            <Button
+              variant="primary"
+              size="md"
+              onClick={onOpenPlans}
+              leftIcon={<ShieldCheck className="w-4 h-4" />}
+            >
+              Lihat &amp; Upgrade Paket Lisensi
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const filteredConversations = conversations.filter((c) => {
     const q = search.toLowerCase();
@@ -180,8 +240,8 @@ export const Conversations: React.FC = () => {
 
       {/* Middle Chat Feed */}
       {selectedConversation ? (
-        <div className="flex-1 flex flex-col bg-[#efeae2] min-w-0">
-          <div className="h-14 bg-white border-b border-gray-200 px-4 flex items-center justify-between shrink-0">
+        <div className="flex-1 flex flex-col bg-gray-50 min-w-0">
+          <div className="h-14 bg-white border-b border-gray-200 px-4 flex items-center justify-between gap-3 shrink-0">
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0">
                 {selectedConversation.contact?.nama_lengkap?.slice(0, 2).toUpperCase() || 'WA'}
@@ -202,9 +262,25 @@ export const Conversations: React.FC = () => {
               </div>
             </div>
 
-            <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-200 font-medium">
-              {selectedConversation.contact?.tags || 'Pelanggan'}
-            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              {licenseInfo?.features?.multiSession && sessions.length > 1 && (
+                <select
+                  value={selectedSession}
+                  onChange={(e) => setSelectedSession(e.target.value)}
+                  title="Pilih sesi WAHA pengirim"
+                  className="h-7 px-2 bg-white border border-gray-200 rounded text-[11px] font-mono text-gray-700 focus:outline-none focus:border-indigo-500"
+                >
+                  {sessions.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} ({s.status})
+                    </option>
+                  ))}
+                </select>
+              )}
+              <span className="text-[11px] px-2 py-0.5 rounded bg-gray-100 text-gray-700 border border-gray-200 font-medium">
+                {selectedConversation.contact?.tags || 'Pelanggan'}
+              </span>
+            </div>
           </div>
 
           <div className="flex-1 p-4 overflow-y-auto space-y-2.5">
@@ -224,8 +300,10 @@ export const Conversations: React.FC = () => {
                     className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`max-w-[75%] rounded-lg px-3.5 py-2 text-xs shadow-sm leading-relaxed ${
-                        isOutbound ? 'bg-[#d9fdd3] text-gray-900' : 'bg-white text-gray-900'
+                      className={`max-w-[75%] rounded-lg px-3.5 py-2 text-xs border leading-relaxed ${
+                        isOutbound
+                          ? 'bg-indigo-50 border-indigo-200 text-gray-900'
+                          : 'bg-white border-gray-200 text-gray-900'
                       }`}
                     >
                       <div className="whitespace-pre-wrap">{msg.body}</div>

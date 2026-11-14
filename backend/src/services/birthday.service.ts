@@ -3,6 +3,15 @@ import { eq, isNotNull } from 'drizzle-orm';
 import { db } from '../db';
 import { birthdaySettings, contacts } from '../db/schema';
 import { BroadcastService } from './broadcast.service';
+import { licenseService } from './license.service';
+import { formatContact } from '../routes/contacts';
+
+function formatLocalDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export class BirthdayService {
   private static cronTask: cron.ScheduledTask | null = null;
@@ -45,9 +54,13 @@ export class BirthdayService {
     const currentHour = String(now.getHours()).padStart(2, '0');
     const currentMinute = String(now.getMinutes()).padStart(2, '0');
     const currentTimeStr = `${currentHour}:${currentMinute}`;
-    const todayDateStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
+    const todayDateStr = formatLocalDate(now);
 
     if (currentTimeStr === setting.sendTime && setting.lastRunDate !== todayDateStr) {
+      const lic = await licenseService.getLicense();
+      if (lic.isExpired || !lic.features.birthdayAutomation) {
+        return;
+      }
       console.log(`[BirthdayService] Triggering scheduled birthday greetings for ${todayDateStr} at ${currentTimeStr}`);
       await this.runBirthdayBroadcast(todayDateStr);
     }
@@ -68,7 +81,7 @@ export class BirthdayService {
     const now = targetDateStr ? new Date(targetDateStr) : new Date();
     const targetMonth = now.getMonth() + 1;
     const targetDay = now.getDate();
-    const dateLabel = now.toISOString().slice(0, 10);
+    const dateLabel = formatLocalDate(now);
 
     // Fetch all contacts with tanggal_lahir
     const allContacts = await db
@@ -135,7 +148,7 @@ export class BirthdayService {
     });
 
     return {
-      today: todayList,
+      today: todayList.map(formatContact),
       totalRegistered: allContacts.length,
     };
   }

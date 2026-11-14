@@ -255,22 +255,35 @@ export class WahaService {
   }
 
   /**
-   * Delete a session from WAHA
+   * Delete a session from WAHA and fallback active session if needed
    */
   public async deleteSession(sessionName: string): Promise<any> {
     const clean = sessionName.trim();
     if (!clean) {
       throw new Error('Nama sesi wajib diisi');
     }
-    const { client } = await this.getClient();
+    const { client, session: currentActive } = await this.getClient();
+    let result: any;
     try {
       const res = await client.delete(`/api/sessions/${encodeURIComponent(clean)}`);
-      return res.data;
+      result = res.data;
     } catch {
       await client.post('/api/sessions/stop', { name: clean }).catch(() => null);
       const res = await client.post('/api/sessions/logout', { name: clean }).catch(() => ({ data: { ok: true } }));
-      return res.data;
+      result = res.data;
     }
+
+    if (currentActive === clean) {
+      try {
+        const remaining = await this.listSessions();
+        const nextSession = remaining.sessions.find((s) => s.name !== clean)?.name || 'default';
+        await this.setActiveSession(nextSession);
+      } catch {
+        await this.setActiveSession('default').catch(() => null);
+      }
+    }
+
+    return result;
   }
 
   /**

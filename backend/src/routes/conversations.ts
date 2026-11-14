@@ -3,9 +3,24 @@ import { eq, desc, asc } from 'drizzle-orm';
 import { db } from '../db';
 import { conversations, chatMessages, contacts } from '../db/schema';
 import { wahaService } from '../services/waha.service';
+import { licenseService } from '../services/license.service';
 import crypto from 'crypto';
 
 export default async function conversationsRouter(fastify: FastifyInstance) {
+  // Enforce Live Chat CRM license on all conversation routes
+  fastify.addHook('preHandler', async (_req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await licenseService.assertFeature('liveChatCrm');
+    } catch (err: any) {
+      return reply.status(err.statusCode || 403).send({
+        success: false,
+        code: 'FEATURE_LOCKED',
+        feature: 'liveChatCrm',
+        error: err.message,
+      });
+    }
+  });
+
   // GET all conversations
   fastify.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -68,10 +83,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   // POST send reply message
   fastify.post('/:id/messages', async (req: FastifyRequest<{
     Params: { id: string };
-    Body: { body: string };
+    Body: { body: string; session?: string };
   }>, reply: FastifyReply) => {
     try {
-      const { body } = req.body;
+      const { body, session } = req.body;
       if (!body || !body.trim()) {
         return reply.status(400).send({ success: false, error: 'Pesan tidak boleh kosong' });
       }
@@ -92,7 +107,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const sendResult = await wahaService.sendTextMessage(
         conversation.contact.nomorWhatsapp,
-        body.trim()
+        body.trim(),
+        session?.trim() || undefined
       );
 
       const now = new Date();

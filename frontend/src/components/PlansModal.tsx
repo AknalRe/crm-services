@@ -290,6 +290,14 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                               <span>Live Chat CRM</span>
                             </div>
                           )}
+                          {(p.features?.multiSession ?? p.features?.liveChat) && (
+                            <div className="flex items-center gap-2">
+                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>
+                                Multi-Sesi WhatsApp (hingga {p.features?.maxSessions || (p.slug?.includes('enterprise') ? 25 : 5)} sesi)
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
