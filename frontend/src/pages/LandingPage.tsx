@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Link2,
   Maximize2,
+  Menu,
   Minus,
   Send,
   ShieldCheck,
@@ -23,22 +24,33 @@ interface LandingPageProps {
 
 const PANEL_URL = 'https://panel.reneo.my.id';
 
+const NAV_LINKS = [
+  { href: '#studi-kasus', label: 'Studi Kasus' },
+  { href: '#kanal', label: 'Kanal' },
+  { href: '#fitur', label: 'Fitur' },
+  { href: '#perbandingan', label: 'Perbandingan' },
+  { href: '#faq', label: 'FAQ' },
+];
+
 const USE_CASE_ROWS = [
   {
     segment: 'Toko Online & Reseller',
-    problem: 'Chat masuk tersebar di 3-4 HP admin. Pesanan sering terlewat atau dibalas ganda saat jam sibuk.',
+    problem:
+      'Chat masuk tersebar di 3-4 HP admin. Pesanan sering terlewat atau dibalas ganda saat jam sibuk.',
     solution:
       'Semua nomor WhatsApp (QR & Resmi) dan DM media sosial masuk ke satu kotak masuk dengan pembagian tugas per staf CS.',
   },
   {
     segment: 'Bisnis Aktif Iklan IG / FB / Threads',
-    problem: 'Komentar "harga?" atau "minat" di postingan iklan menumpuk dan tidak sempat di-DM satu per satu.',
+    problem:
+      'Komentar "harga?" atau "minat" di postingan iklan menumpuk dan tidak sempat di-DM satu per satu.',
     solution:
       'Balas komentar otomatis dan kirim pesan pembuka ke DM pelanggan secara langsung agar calon pembeli segera ditangani.',
   },
   {
     segment: 'Tim CS & Sales Berkembang',
-    problem: 'Saat staf CS keluar, riwayat chat dan data pelanggan ikut hilang bersama nomor HP lama.',
+    problem:
+      'Saat staf CS keluar, riwayat chat dan data pelanggan ikut hilang bersama nomor HP lama.',
     solution:
       'Data kontak, katalog produk, dan seluruh riwayat percakapan tersimpan di server Anda sendiri dengan akun login terpisah per staf.',
   },
@@ -153,7 +165,7 @@ const STEPS = [
   {
     num: '01',
     title: 'Masuk ke Panel Reneo CRM',
-    desc: 'Buka ruang kerja dan buat akun pemilik usaha Anda.',
+    desc: 'Buka ruang kerja dan buat akun pemilik usaha Anda dalam hitungan detik.',
   },
   {
     num: '02',
@@ -163,7 +175,7 @@ const STEPS = [
   {
     num: '03',
     title: 'Tambahkan Tim CS & Mulai Balas Chat',
-    desc: 'Buat akun untuk masing-masing staf dan atur pembagian chat masuk.',
+    desc: 'Buat akun untuk masing-masing staf dan atur pembagian chat masuk otomatis.',
   },
 ];
 
@@ -192,12 +204,13 @@ const FAQS = [
 
 export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLogin }) => {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans overflow-y-auto">
       {/* Header */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <ReneoCrmLogo className="w-8 h-8 shrink-0" />
             <div className="min-w-0">
@@ -210,35 +223,59 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             </div>
           </div>
 
-          <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-slate-600">
-            <a href="#studi-kasus" className="hover:text-slate-900 transition-colors whitespace-nowrap">
-              Studi Kasus
-            </a>
-            <a href="#fitur" className="hover:text-slate-900 transition-colors whitespace-nowrap">
-              Kanal &amp; Fitur
-            </a>
-            <a href="#perbandingan" className="hover:text-slate-900 transition-colors whitespace-nowrap">
-              Perbandingan
-            </a>
-            <a href="#faq" className="hover:text-slate-900 transition-colors whitespace-nowrap">
-              FAQ
-            </a>
+          <nav className="hidden md:flex items-center gap-5 text-xs font-medium text-slate-600">
+            {NAV_LINKS.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="hover:text-slate-900 transition-colors whitespace-nowrap"
+              >
+                {link.label}
+              </a>
+            ))}
           </nav>
 
-          <button
-            type="button"
-            onClick={onEnterLogin}
-            className="h-8 px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
-          >
-            <span>{initialized ? 'Buka Panel CRM' : 'Setup Panel CRM'}</span>
-            <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onEnterLogin}
+              className="h-8 px-3 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+            >
+              <span>{initialized ? 'Buka CRM' : 'Setup CRM'}</span>
+              <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((prev) => !prev)}
+              aria-label="Menu navigasi"
+              aria-expanded={mobileMenuOpen}
+              className="md:hidden h-8 w-8 rounded-lg border border-slate-200 inline-flex items-center justify-center text-slate-600 hover:bg-slate-50"
+            >
+              {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
+
+        {/* Mobile Nav Drawer */}
+        {mobileMenuOpen && (
+          <nav className="md:hidden border-t border-slate-200 bg-white px-4 py-2.5 flex flex-col gap-1">
+            {NAV_LINKS.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className="py-2 text-xs font-medium text-slate-700 hover:text-slate-900"
+              >
+                {link.label}
+              </a>
+            ))}
+          </nav>
+        )}
       </header>
 
       {/* Hero */}
       <section className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 lg:py-14 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-14 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
           <div className="lg:col-span-6 space-y-5">
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-tight">
               Satu Panel Kerja untuk Semua Chat Pelanggan &amp; Tim CS Usaha Anda
@@ -250,43 +287,42 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
               Asisten AI, siaran terjadwal, dan laporan kecepatan balas tim.
             </p>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5">
               <button
                 type="button"
                 onClick={onEnterLogin}
-                className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+                className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
               >
-                <span>{initialized ? 'Masuk ke Panel Reneo CRM' : 'Mulai Setup Panel CRM'}</span>
+                <span>{initialized ? 'Masuk ke Ruang Kerja CRM' : 'Mulai Setup CRM'}</span>
                 <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
               </button>
               <a
                 href={PANEL_URL}
-                className="h-10 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-mono font-medium inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+                className="h-10 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-mono font-medium inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
               >
                 panel.reneo.my.id
               </a>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-200">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 pt-4 border-t border-slate-200">
+              <div className="py-2 sm:py-0 sm:pr-4">
                 <div className="text-sm font-bold text-slate-900">6 Kanal Pesan</div>
                 <div className="text-xs text-slate-500">WA, WA Bisnis, IG, FB, Threads, TG</div>
               </div>
-              <div className="border-l border-slate-200 pl-4">
+              <div className="py-2 sm:py-0 sm:px-4">
                 <div className="text-sm font-bold text-slate-900">Multi-Staf CS</div>
                 <div className="text-xs text-slate-500">Bagi chat &amp; pantau respon</div>
               </div>
-              <div className="border-l border-slate-200 pl-4">
+              <div className="py-2 sm:py-0 sm:pl-4">
                 <div className="text-sm font-bold text-slate-900">Server Sendiri</div>
                 <div className="text-xs text-slate-500">Data kontak milik usaha Anda</div>
               </div>
             </div>
           </div>
 
-          {/* Workstation Window Preview (Reneo Chrome, no macOS dots) */}
+          {/* Workstation Window Preview */}
           <div className="lg:col-span-6">
             <div className="border border-slate-300 rounded-xl bg-white overflow-hidden">
-              {/* Window Titlebar */}
               <div className="h-10 px-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <ReneoCrmLogo className="w-4 h-4 shrink-0" />
@@ -294,27 +330,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                     Reneo CRM · Kotak Masuk Terpadu
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="hidden sm:inline-block text-[11px] font-mono text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded">
-                    /app/reneo-crm/
+                <div className="flex items-center gap-1 text-slate-500 shrink-0">
+                  <span className="w-6 h-6 inline-flex items-center justify-center rounded">
+                    <Minus className="w-3.5 h-3.5" strokeWidth={1.75} />
                   </span>
-                  <div className="flex items-center gap-1 text-slate-500">
-                    <span className="w-6 h-6 inline-flex items-center justify-center rounded hover:bg-slate-200/70">
-                      <Minus className="w-3.5 h-3.5" strokeWidth={1.75} />
-                    </span>
-                    <span className="w-6 h-6 inline-flex items-center justify-center rounded hover:bg-slate-200/70">
-                      <Maximize2 className="w-3 h-3" strokeWidth={1.75} />
-                    </span>
-                    <span className="w-6 h-6 inline-flex items-center justify-center rounded hover:bg-slate-200/70">
-                      <X className="w-3.5 h-3.5" strokeWidth={1.75} />
-                    </span>
-                  </div>
+                  <span className="w-6 h-6 inline-flex items-center justify-center rounded">
+                    <Maximize2 className="w-3 h-3" strokeWidth={1.75} />
+                  </span>
+                  <span className="w-6 h-6 inline-flex items-center justify-center rounded">
+                    <X className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  </span>
                 </div>
               </div>
 
-              {/* Split Workspace Body */}
               <div className="grid grid-cols-1 sm:grid-cols-12 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 text-xs">
-                {/* Left Thread List */}
                 <div className="sm:col-span-5 divide-y divide-slate-100 bg-slate-50/50">
                   <div className="px-3 py-2.5 bg-white">
                     <div className="flex items-center justify-between gap-2">
@@ -342,21 +371,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                       DM otomatis terkirim dari komentar postingan.
                     </div>
                   </div>
-
-                  <div className="px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-slate-800">Budi Santoso</span>
-                      <span className="text-[10px] font-mono text-slate-700 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
-                        WhatsApp
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 truncate mt-1">
-                      Terima kasih, barang sudah sampai.
-                    </div>
-                  </div>
                 </div>
 
-                {/* Right Active Conversation + Order Summary */}
                 <div className="sm:col-span-7 p-3.5 space-y-3 bg-white flex flex-col justify-between">
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -394,33 +410,225 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
         </div>
       </section>
 
-      {/* Case & Solution Matrix (No nested cards) */}
-      <section id="studi-kasus" className="max-w-6xl mx-auto px-4 sm:px-6 py-10 space-y-5">
-        <div className="space-y-1">
+      {/* Section 1: Studi Kasus (Focused single topic) */}
+      <section id="studi-kasus" className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
+        <div className="space-y-1 max-w-2xl">
           <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-            Masalah Operasional di Lapangan &amp; Penyelesaiannya
+            Masalah di Lapangan &amp; Penyelesaiannya
           </h2>
           <p className="text-xs sm:text-sm text-slate-600">
             Dirancang untuk kendala nyata pemilik toko online, tim CS, dan pengelola iklan media sosial.
           </p>
         </div>
 
-        <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[640px]">
+        {/* Mobile stacked cards */}
+        <div className="space-y-3 md:hidden">
+          {USE_CASE_ROWS.map((row) => (
+            <div
+              key={row.segment}
+              className="border border-slate-200 rounded-xl bg-white overflow-hidden divide-y divide-slate-200 text-xs"
+            >
+              <div className="px-3.5 py-2.5 bg-slate-50 font-semibold text-slate-900">
+                {row.segment}
+              </div>
+              <div className="px-3.5 py-2.5 space-y-1">
+                <div className="text-[11px] font-semibold text-slate-500">Kendala</div>
+                <p className="text-slate-600 leading-relaxed">{row.problem}</p>
+              </div>
+              <div className="px-3.5 py-2.5 space-y-1 bg-blue-50/35">
+                <div className="text-[11px] font-semibold text-[#1d4ed8]">Penanganan di Reneo CRM</div>
+                <p className="text-slate-800 leading-relaxed">{row.solution}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-hidden">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700">
+                <th className="py-2.5 px-4 w-[24%]">Jenis Usaha</th>
+                <th className="py-2.5 px-4 w-[38%]">Kendala Sebelum Memakai CRM</th>
+                <th className="py-2.5 px-4 w-[38%]">Penanganan di Reneo CRM</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 text-xs">
+              {USE_CASE_ROWS.map((row) => (
+                <tr key={row.segment} className="align-top">
+                  <td className="py-3 px-4 font-semibold text-slate-900">{row.segment}</td>
+                  <td className="py-3 px-4 text-slate-600 leading-relaxed">{row.problem}</td>
+                  <td className="py-3 px-4 text-slate-800 leading-relaxed">{row.solution}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Section 2: 6 Kanal Terhubung (Own dedicated section) */}
+      <section id="kanal" className="bg-white border-y border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
+          <div className="space-y-1 max-w-2xl">
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900">
+              6 Kanal Komunikasi dalam Satu Kotak Masuk
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600">
+              Hubungkan seluruh nomor WhatsApp dan akun media sosial usaha Anda tanpa biaya tambahan per pesan dari panel.
+            </p>
+          </div>
+
+          <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-200 bg-white">
+            {CHANNEL_ROWS.map((ch) => (
+              <div
+                key={ch.name}
+                className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-4"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-xs sm:text-sm font-semibold text-slate-900">{ch.name}</span>
+                  <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
+                    {ch.mode}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 sm:text-right">{ch.detail}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Section 3: Keunggulan Fitur (Own dedicated section) */}
+      <section id="fitur" className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
+        <div className="space-y-1 max-w-2xl">
+          <h2 className="text-lg sm:text-xl font-bold text-slate-900">
+            Keunggulan Fitur Harian Tim CS &amp; Sales
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-600">
+            Alat bantu kerja dari chat pertama masuk hingga transaksi selesai.
+          </p>
+        </div>
+
+        <div className="border border-slate-200 rounded-xl bg-white overflow-hidden grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 divide-slate-200">
+          {FEATURE_ITEMS.map((feat, idx) => {
+            const Icon = feat.icon;
+            return (
+              <div
+                key={feat.title}
+                className={`p-4 flex items-start gap-3 ${
+                  idx % 2 === 1 ? 'md:border-l md:border-slate-200' : ''
+                } ${idx >= 2 ? 'md:border-t md:border-slate-200' : ''}`}
+              >
+                <Icon className="w-4 h-4 text-[#2563eb] shrink-0 mt-0.5" strokeWidth={1.75} />
+                <div className="space-y-1">
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-900">{feat.title}</h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">{feat.desc}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Section 4: Perbandingan (Responsive mobile cards + desktop table) */}
+      <section id="perbandingan" className="bg-white border-y border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
+          <div className="space-y-1 max-w-2xl">
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900">
+              Perbandingan: Cara Manual vs CRM Berlangganan vs Reneo CRM
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600">
+              Perbandingan langsung dari sisi biaya operasional, keamanan data pelanggan, dan kendali tim.
+            </p>
+          </div>
+
+          {/* Mobile stacked cards */}
+          <div className="space-y-3 md:hidden">
+            {COMPARISON_ROWS.map((row) => (
+              <div
+                key={row.aspect}
+                className="border border-slate-200 rounded-xl bg-white overflow-hidden"
+              >
+                <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-900">
+                  {row.aspect}
+                </div>
+                <dl className="divide-y divide-slate-200 text-xs">
+                  <div className="px-3.5 py-2 flex items-start justify-between gap-3">
+                    <dt className="text-slate-500 font-medium shrink-0">Manual (Banyak HP)</dt>
+                    <dd className="flex items-start gap-1.5 text-right text-slate-600">
+                      {row.manual.ok ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
+                      ) : (
+                        <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
+                      )}
+                      <span>{row.manual.text}</span>
+                    </dd>
+                  </div>
+                  <div className="px-3.5 py-2 flex items-start justify-between gap-3">
+                    <dt className="text-slate-500 font-medium shrink-0">CRM Cloud Lainnya</dt>
+                    <dd className="flex items-start gap-1.5 text-right text-slate-600">
+                      {row.saas.ok ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
+                      ) : (
+                        <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
+                      )}
+                      <span>{row.saas.text}</span>
+                    </dd>
+                  </div>
+                  <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 bg-blue-50/40">
+                    <dt className="text-[#1d4ed8] font-semibold shrink-0">Reneo CRM</dt>
+                    <dd className="flex items-start gap-1.5 text-right font-medium text-slate-900">
+                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
+                      <span>{row.reneo.text}</span>
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-hidden">
+            <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700">
-                  <th className="py-2.5 px-3.5 w-[24%]">Jenis Usaha</th>
-                  <th className="py-2.5 px-3.5 w-[38%]">Kendala Sebelum Memakai CRM</th>
-                  <th className="py-2.5 px-3.5 w-[38%]">Penanganan di Reneo CRM</th>
+                  <th className="py-2.5 px-3.5 w-[31%]">Kebutuhan Usaha</th>
+                  <th className="py-2.5 px-3.5 w-[23%]">Kelola Manual (Banyak HP)</th>
+                  <th className="py-2.5 px-3.5 w-[23%]">CRM Cloud Lainnya</th>
+                  <th className="py-2.5 px-3.5 w-[23%] bg-blue-50/70 text-[#1d4ed8] border-l border-blue-100">
+                    Reneo CRM
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-xs">
-                {USE_CASE_ROWS.map((row) => (
-                  <tr key={row.segment} className="align-top">
-                    <td className="py-3 px-3.5 font-semibold text-slate-900">{row.segment}</td>
-                    <td className="py-3 px-3.5 text-slate-600 leading-relaxed">{row.problem}</td>
-                    <td className="py-3 px-3.5 text-slate-800 leading-relaxed">{row.solution}</td>
+                {COMPARISON_ROWS.map((row) => (
+                  <tr key={row.aspect} className="align-top">
+                    <td className="py-2.5 px-3.5 font-medium text-slate-900">{row.aspect}</td>
+                    <td className="py-2.5 px-3.5 text-slate-600">
+                      <div className="flex items-start gap-2">
+                        {row.manual.ok ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
+                        ) : (
+                          <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
+                        )}
+                        <span>{row.manual.text}</span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3.5 text-slate-600">
+                      <div className="flex items-start gap-2">
+                        {row.saas.ok ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
+                        ) : (
+                          <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
+                        )}
+                        <span>{row.saas.text}</span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3.5 bg-blue-50/35 border-l border-blue-100 text-slate-900 font-medium">
+                      <div className="flex items-start gap-2">
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
+                        <span>{row.reneo.text}</span>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -429,206 +637,87 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
         </div>
       </section>
 
-      {/* Channels & Features (Asymmetric 2-column, no identical icon card grid) */}
-      <section id="fitur" className="bg-white border-y border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left: 6 Channels table */}
-          <div className="lg:col-span-5 space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold text-slate-900">6 Kanal dalam Satu Kotak Masuk</h2>
-              <p className="text-xs text-slate-600">
-                Hubungkan nomor WhatsApp dan akun media sosial usaha Anda tanpa biaya per pesan dari panel.
-              </p>
-            </div>
-
-            <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-200">
-              {CHANNEL_ROWS.map((ch) => (
-                <div key={ch.name} className="px-3.5 py-2.5 space-y-0.5 bg-white">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-slate-900">{ch.name}</span>
-                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
-                      {ch.mode}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600">{ch.detail}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Right: Feature specification list */}
-          <div className="lg:col-span-7 space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold text-slate-900">Keunggulan Fitur Harian Tim CS &amp; Sales</h2>
-              <p className="text-xs text-slate-600">
-                Alat bantu kerja dari chat pertama masuk hingga transaksi selesai.
-              </p>
-            </div>
-
-            <div className="border border-slate-200 rounded-xl divide-y divide-slate-200 bg-[#f8fafc]">
-              {FEATURE_ITEMS.map((feat) => {
-                const Icon = feat.icon;
-                return (
-                  <div key={feat.title} className="px-4 py-3 flex items-start gap-3">
-                    <Icon className="w-4 h-4 text-[#2563eb] shrink-0 mt-0.5" strokeWidth={1.75} />
-                    <div className="space-y-0.5">
-                      <h3 className="text-xs font-semibold text-slate-900">{feat.title}</h3>
-                      <p className="text-xs text-slate-600 leading-relaxed">{feat.desc}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Comparison Table */}
-      <section id="perbandingan" className="max-w-6xl mx-auto px-4 sm:px-6 py-10 space-y-5">
-        <div className="space-y-1">
+      {/* Section 5: Alur Mulai (Own dedicated section) */}
+      <section className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
+        <div className="space-y-1 max-w-2xl">
           <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-            Perbandingan: Cara Manual vs CRM Berlangganan vs Reneo CRM
+            Mulai Beroperasi dalam 3 Langkah
           </h2>
           <p className="text-xs sm:text-sm text-slate-600">
-            Perbandingan langsung dari sisi biaya operasional, keamanan data pelanggan, dan kendali tim.
+            Aplikasi sudah terpasang di server Anda—tinggal masuk dan sambungkan kanal.
           </p>
         </div>
 
-        <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white">
-          <table className="w-full text-left border-collapse min-w-[680px]">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700">
-                <th className="py-2.5 px-3.5 w-[31%]">Kebutuhan Usaha</th>
-                <th className="py-2.5 px-3.5 w-[23%]">Kelola Manual (Banyak HP)</th>
-                <th className="py-2.5 px-3.5 w-[23%]">CRM Cloud Lainnya</th>
-                <th className="py-2.5 px-3.5 w-[23%] bg-blue-50/70 text-[#1d4ed8] border-l border-blue-100">
-                  Reneo CRM
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 text-xs">
-              {COMPARISON_ROWS.map((row) => (
-                <tr key={row.aspect}>
-                  <td className="py-2.5 px-3.5 font-medium text-slate-900">{row.aspect}</td>
-                  <td className="py-2.5 px-3.5 text-slate-600">
-                    <div className="flex items-start gap-2">
-                      {row.manual.ok ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                      ) : (
-                        <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
-                      )}
-                      <span>{row.manual.text}</span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 px-3.5 text-slate-600">
-                    <div className="flex items-start gap-2">
-                      {row.saas.ok ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                      ) : (
-                        <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
-                      )}
-                      <span>{row.saas.text}</span>
-                    </div>
-                  </td>
-                  <td className="py-2.5 px-3.5 bg-blue-50/35 border-l border-blue-100 text-slate-900 font-medium">
-                    <div className="flex items-start gap-2">
-                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                      <span>{row.reneo.text}</span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ol className="grid grid-cols-1 md:grid-cols-3 border border-slate-200 rounded-xl bg-white divide-y md:divide-y-0 md:divide-x divide-slate-200 overflow-hidden">
+          {STEPS.map((step) => (
+            <li key={step.num} className="p-4 space-y-1.5">
+              <div className="font-mono text-xs font-bold text-[#2563eb]">LANGKAH {step.num}</div>
+              <h3 className="text-sm font-semibold text-slate-900">{step.title}</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">{step.desc}</p>
+            </li>
+          ))}
+        </ol>
       </section>
 
-      {/* Onboarding Steps + FAQ */}
+      {/* Section 6: FAQ (Own dedicated section) */}
       <section id="faq" className="bg-white border-y border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left: 3 Steps */}
-          <div className="lg:col-span-4 space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold text-slate-900">Alur Mulai</h2>
-              <p className="text-xs text-slate-600">
-                Aplikasi sudah terpasang di server Anda—tinggal masuk dan sambungkan kanal.
-              </p>
-            </div>
-
-            <div className="border border-slate-200 rounded-xl divide-y divide-slate-200 bg-[#f8fafc]">
-              {STEPS.map((step) => (
-                <div key={step.num} className="px-4 py-3 flex items-start gap-3">
-                  <span className="font-mono text-xs font-bold text-[#2563eb] mt-0.5">
-                    {step.num}
-                  </span>
-                  <div className="space-y-0.5">
-                    <div className="text-xs font-semibold text-slate-900">{step.title}</div>
-                    <p className="text-xs text-slate-600 leading-relaxed">{step.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
+          <div className="space-y-1 max-w-2xl">
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900">Pertanyaan Umum</h2>
+            <p className="text-xs sm:text-sm text-slate-600">
+              Jawaban singkat sebelum tim Anda mulai memakai Reneo CRM.
+            </p>
           </div>
 
-          {/* Right: Interactive FAQ */}
-          <div className="lg:col-span-8 space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-lg font-bold text-slate-900">Pertanyaan Umum</h2>
-              <p className="text-xs text-slate-600">
-                Jawaban singkat sebelum tim Anda mulai memakai Reneo CRM.
-              </p>
-            </div>
-
-            <div className="border border-slate-200 rounded-xl divide-y divide-slate-200 overflow-hidden bg-white">
-              {FAQS.map((item, idx) => {
-                const isOpen = openFaqIndex === idx;
-                return (
-                  <div key={item.q}>
-                    <button
-                      type="button"
-                      onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
-                      aria-expanded={isOpen}
-                      className="w-full px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors"
-                    >
-                      <span className="text-xs sm:text-sm font-semibold text-slate-900">{item.q}</span>
-                      <ChevronDown
-                        className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${
-                          isOpen ? 'rotate-180' : ''
-                        }`}
-                        strokeWidth={1.75}
-                      />
-                    </button>
-                    {isOpen && (
-                      <div className="px-4 pb-3.5 text-xs text-slate-600 leading-relaxed">
-                        {item.a}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          <div className="max-w-3xl border border-slate-200 rounded-xl divide-y divide-slate-200 overflow-hidden bg-white">
+            {FAQS.map((item, idx) => {
+              const isOpen = openFaqIndex === idx;
+              return (
+                <div key={item.q}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
+                    aria-expanded={isOpen}
+                    className="w-full px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors"
+                  >
+                    <span className="text-xs sm:text-sm font-semibold text-slate-900">{item.q}</span>
+                    <ChevronDown
+                      className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${
+                        isOpen ? 'rotate-180' : ''
+                      }`}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                  {isOpen && (
+                    <div className="px-4 pb-3.5 text-xs text-slate-600 leading-relaxed">
+                      {item.a}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
 
       {/* Final Closing CTA */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+      <section className="max-w-5xl mx-auto px-4 sm:px-6 py-12">
         <div className="bg-[#0B2A57] text-white rounded-xl p-6 sm:p-7 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="flex items-start gap-4 max-w-2xl">
+          <div className="flex items-start gap-3.5 max-w-2xl">
             <ReneoCrmLogo className="w-10 h-10 shrink-0" />
             <div className="space-y-2.5">
-              <h2 className="text-lg font-bold">
-                Siap Mengelola Semua Chat Pelanggan di Panel Reneo CRM?
+              <h2 className="text-base sm:text-lg font-bold">
+                Siap Mengelola Semua Chat Pelanggan di Reneo CRM?
               </h2>
               <p className="text-xs sm:text-sm text-blue-100 leading-relaxed">
-                Masuk ke panel di{' '}
+                Masuk ke ruang kerja CRM Anda atau kelola server dari{' '}
                 <a
                   href={PANEL_URL}
                   className="font-mono underline underline-offset-2 text-white hover:text-blue-200"
                 >
                   panel.reneo.my.id
-                </a>{' '}
-                untuk menghubungkan WhatsApp, Instagram, Facebook, Threads, dan Telegram usaha Anda.
+                </a>
+                .
               </p>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-blue-100">
                 <span className="inline-flex items-center gap-1.5">
@@ -643,22 +732,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={onEnterLogin}
-              className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
-            >
-              <span>{initialized ? 'Masuk ke Panel Reneo CRM' : 'Mulai Setup Panel CRM'}</span>
-              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onEnterLogin}
+            className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap w-full lg:w-auto shrink-0"
+          >
+            <span>{initialized ? 'Masuk ke Ruang Kerja CRM' : 'Mulai Setup CRM'}</span>
+            <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+          </button>
         </div>
       </section>
 
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <ReneoCrmLogo className="w-5 h-5 shrink-0" />
             <span>Reneo CRM</span>
@@ -672,7 +759,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             onClick={onEnterLogin}
             className="text-[#2563eb] hover:text-[#1d4ed8] font-medium"
           >
-            {initialized ? 'Masuk ke Panel CRM' : 'Setup Awal CRM'}
+            {initialized ? 'Masuk ke Ruang Kerja CRM' : 'Setup Awal CRM'}
           </button>
         </div>
       </footer>
