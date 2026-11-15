@@ -2,7 +2,9 @@ type LiveEventType =
   | 'waha:status'
   | 'tracking:update'
   | 'conversations:update'
-  | 'license:update';
+  | 'license:update'
+  | 'sla:breach'
+  | 'csat:low';
 
 type LiveListener = (payload: any) => void;
 
@@ -22,6 +24,8 @@ function ensureConnected() {
     'tracking:update',
     'conversations:update',
     'license:update',
+    'sla:breach',
+    'csat:low',
   ];
 
   eventTypes.forEach((eventType) => {

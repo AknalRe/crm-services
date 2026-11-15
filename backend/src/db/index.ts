@@ -200,6 +200,34 @@ export async function initDb() {
       );
     `;
 
+    await sql`
+      CREATE TABLE IF NOT EXISTS auto_reply_rules (
+        id TEXT PRIMARY KEY,
+        keyword TEXT NOT NULL,
+        match_type TEXT NOT NULL DEFAULT 'CONTAINS',
+        reply_text TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        priority INTEGER NOT NULL DEFAULT 10,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS products (
+        id TEXT PRIMARY KEY,
+        sku TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        category TEXT,
+        price INTEGER NOT NULL DEFAULT 0,
+        unit TEXT NOT NULL DEFAULT 'pcs',
+        description TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
     // Ensure default birthday row exists
     await sql`
       INSERT INTO birthday_settings (id, is_enabled, send_time, message_template, delay_seconds, updated_at)

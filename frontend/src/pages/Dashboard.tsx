@@ -13,9 +13,11 @@ import {
   Star,
   ShieldCheck,
   Smartphone,
+  Download,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { Button } from '../components/ui/Button';
+import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, ErrorState, EmptyState } from '../components/ui/StateBlocks';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -37,9 +39,23 @@ function formatDurationShort(seconds: number | null | undefined): string {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
+  const toast = useToast();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportingType, setExportingType] = useState<'agents' | 'conversations' | 'broadcasts' | null>(null);
+
+  const handleExport = async (type: 'agents' | 'conversations' | 'broadcasts') => {
+    setExportingType(type);
+    try {
+      await api.downloadDashboardExport(type);
+      toast.success('Laporan CSV berhasil diunduh');
+    } catch {
+      toast.error('Gagal mengunduh laporan CSV');
+    } finally {
+      setExportingType(null);
+    }
+  };
 
   const loadData = useCallback(async () => {
     try {
@@ -142,7 +158,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => void handleExport('conversations')}
+              disabled={exportingType !== null}
+              title="Ekspor Laporan Percakapan & SLA (CSV)"
+              className="h-9 px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5 text-gray-500" />
+              <span>CSV Chat</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleExport('agents')}
+              disabled={exportingType !== null}
+              title="Ekspor Laporan Performa Agent (CSV)"
+              className="h-9 px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+            >
+              <span>Agent</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleExport('broadcasts')}
+              disabled={exportingType !== null}
+              title="Ekspor Laporan Broadcast (CSV)"
+              className="h-9 px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+            >
+              <span>Broadcast</span>
+            </button>
+          </div>
           <Button
             variant="secondary"
             size="md"

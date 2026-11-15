@@ -359,6 +359,88 @@ export const api = {
     const res = await client.post(`/license/order/${publicId}/pay`, { paymentMethod });
     return res.data;
   },
+
+  // Automation, Routing & SLA Escalation
+  getAutomationSettings: async (): Promise<{
+    config: import('../types').AutomationConfig;
+    rules: import('../types').AutoReplyRule[];
+  }> => {
+    const res = await client.get('/settings/automation');
+    return res.data.data;
+  },
+  saveAutomationSettings: async (
+    data: Partial<import('../types').AutomationConfig>
+  ): Promise<void> => {
+    await client.post('/settings/automation', data);
+  },
+  createAutoReplyRule: async (data: {
+    keyword: string;
+    matchType?: 'CONTAINS' | 'EXACT' | 'STARTS_WITH';
+    replyText: string;
+    priority?: number;
+  }): Promise<import('../types').AutoReplyRule> => {
+    const res = await client.post('/settings/auto-replies', data);
+    return res.data.data;
+  },
+  updateAutoReplyRule: async (
+    id: string,
+    data: Partial<import('../types').AutoReplyRule>
+  ): Promise<import('../types').AutoReplyRule> => {
+    const res = await client.patch(`/settings/auto-replies/${id}`, data);
+    return res.data.data;
+  },
+  deleteAutoReplyRule: async (id: string): Promise<void> => {
+    await client.delete(`/settings/auto-replies/${id}`);
+  },
+
+  // Product Catalog (Quick Quote)
+  getProducts: async (activeOnly = false): Promise<import('../types').ProductItem[]> => {
+    const res = await client.get('/products', { params: activeOnly ? { activeOnly: 'true' } : undefined });
+    return res.data.data || [];
+  },
+  createProduct: async (data: {
+    sku?: string;
+    name: string;
+    category?: string;
+    price: number;
+    unit?: string;
+    description?: string;
+  }): Promise<import('../types').ProductItem> => {
+    const res = await client.post('/products', data);
+    return res.data.data;
+  },
+  updateProduct: async (
+    id: string,
+    data: Partial<import('../types').ProductItem>
+  ): Promise<import('../types').ProductItem> => {
+    const res = await client.patch(`/products/${id}`, data);
+    return res.data.data;
+  },
+  deleteProduct: async (id: string): Promise<void> => {
+    await client.delete(`/products/${id}`);
+  },
+
+  // Reports Export
+  downloadDashboardExport: async (type: 'agents' | 'conversations' | 'broadcasts'): Promise<void> => {
+    const res = await client.get('/dashboard/export', {
+      params: { type },
+      responseType: 'blob',
+    });
+    const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download =
+      type === 'agents'
+        ? 'laporan-performa-agent-crm.csv'
+        : type === 'broadcasts'
+        ? 'laporan-broadcast-crm.csv'
+        : 'laporan-percakapan-crm.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };
 
 export default api;

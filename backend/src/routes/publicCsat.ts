@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { conversations, contacts, csatResponses } from '../db/schema';
 import { liveEvents } from '../services/events.service';
+import { notifyAlertWebhook } from '../services/automation.service';
 
 export default async function publicCsatRouter(fastify: FastifyInstance) {
   // GET CSAT details by public token (no panel auth required)
@@ -122,6 +123,14 @@ export default async function publicCsatRouter(fastify: FastifyInstance) {
 
       liveEvents.emit('conversations:update', { conversationId: convId, csatRating: rating });
       liveEvents.emit('tracking:update', { conversationId: convId, csatRating: rating });
+      if (rating <= 2) {
+        liveEvents.emit('csat:low', { conversationId: convId, rating, feedback });
+        void notifyAlertWebhook('low_csat', {
+          conversationId: convId,
+          rating,
+          feedback,
+        });
+      }
 
       return reply.send({
         success: true,

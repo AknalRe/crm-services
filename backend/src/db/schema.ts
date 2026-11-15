@@ -168,6 +168,30 @@ export const csatResponses = pgTable('csat_responses', {
   submittedAt: timestamp('submitted_at'),
 });
 
+export const autoReplyRules = pgTable('auto_reply_rules', {
+  id: text('id').primaryKey(),
+  keyword: text('keyword').notNull(),
+  matchType: text('match_type').default('CONTAINS').notNull(), // CONTAINS | EXACT | STARTS_WITH
+  replyText: text('reply_text').notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  priority: integer('priority').default(10).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const products = pgTable('products', {
+  id: text('id').primaryKey(),
+  sku: text('sku').notNull().unique(),
+  name: text('name').notNull(),
+  category: text('category'),
+  price: integer('price').default(0).notNull(),
+  unit: text('unit').default('pcs').notNull(),
+  description: text('description'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // Relations
 export const contactsRelations = relations(contacts, ({ many, one }) => ({
   recipients: many(campaignRecipients),

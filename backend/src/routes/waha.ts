@@ -12,6 +12,7 @@ import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
+import { handleInboundAutomation } from '../services/automation.service';
 import crypto from 'crypto';
 
 function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: string[] } {
@@ -434,6 +435,17 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
         liveEvents.emit('conversations:update', { conversationId: convId });
         liveEvents.emit('tracking:update', { conversationId: convId });
+
+        if (body) {
+          void handleInboundAutomation({
+            conversationId: convId,
+            contact,
+            assignedAgentId: existingConv?.assignedAgentId || null,
+            inboundBody: body,
+            sessionName: inboundSession || existingConv?.wahaSession || null,
+            isNewConversation: !existingConv,
+          });
+        }
       }
 
       return reply.send({ success: true, message: 'Webhook processed' });

@@ -28,6 +28,8 @@ import {
   Trash2,
   ArrowLeft,
   ChevronDown,
+  Package,
+  AlertTriangle,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -38,6 +40,7 @@ import {
   Conversation,
   ChatMessage,
   LicenseInfo,
+  ProductItem,
   WahaSessionItem,
 } from '../types';
 import { Button } from '../components/ui/Button';
@@ -103,9 +106,19 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   const [selectedSession, setSelectedSession] = useState<string>('');
   const [showContactPanel, setShowContactPanel] = useState<boolean>(readContactPanelPref);
 
-  // Composer enhancements: Internal note mode, Emoji picker, File attachment
+  // Composer enhancements: Internal note mode, Emoji picker, Product Quick Quote, File attachment
   const [composerMode, setComposerMode] = useState<'REPLY' | 'NOTE'>('REPLY');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [slaTargetMinutes, setSlaTargetMinutes] = useState<number>(15);
+  const [productsList, setProductsList] = useState<ProductItem[]>([]);
+  const [showProductPicker, setShowProductPicker] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [newProdSku, setNewProdSku] = useState('');
+  const [newProdName, setNewProdName] = useState('');
+  const [newProdPrice, setNewProdPrice] = useState('');
+  const [newProdUnit, setNewProdUnit] = useState('pcs');
+  const [savingProduct, setSavingProduct] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState<{
     base64: string;
     mimetype: string;
@@ -182,6 +195,30 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
         setSelectedSession(res.activeSession || '');
       })
       .catch(() => {});
+    api
+      .getCrmSettings()
+      .then((res) => {
+        if (res?.slaTargetMinutes) {
+          setSlaTargetMinutes(res.slaTargetMinutes);
+        }
+      })
+      .catch(() => {});
+    api
+      .getProducts(true)
+      .then((items) => setProductsList(items || []))
+      .catch(() => {});
+
+    const unsubSla = subscribeLiveEvent('sla:breach', (data: any) => {
+      toast.error(`SLA terlewat (${data?.waitingMinutes || '?'} mnt belum dibalas)`);
+      void fetchConversations();
+    });
+    const unsubCsat = subscribeLiveEvent('csat:low', (data: any) => {
+      toast.error(`Peringatan: Rating CSAT rendah (${data?.rating || '?'}/5)`);
+    });
+    return () => {
+      unsubSla();
+      unsubCsat();
+    };
   }, [isLiveChatUnlocked]);
 
   useEffect(() => {
@@ -351,6 +388,44 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
     } catch {
       toast.error('Gagal menghapus template');
     }
+  };
+
+  const handleCreateQuickProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProdName.trim()) return;
+    setSavingProduct(true);
+    try {
+      const created = await api.createProduct({
+        sku: newProdSku.trim() || undefined,
+        name: newProdName.trim(),
+        price: Number(newProdPrice) || 0,
+        unit: newProdUnit.trim() || 'pcs',
+      });
+      setProductsList((prev) => [...prev, created]);
+      setNewProdSku('');
+      setNewProdName('');
+      setNewProdPrice('');
+      setNewProdUnit('pcs');
+      setShowAddProduct(false);
+      toast.success('Produk ditambahkan ke katalog');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menambahkan produk');
+    } finally {
+      setSavingProduct(false);
+    }
+  };
+
+  const insertProductQuote = (prod: ProductItem) => {
+    const formattedPrice = new Intl.NumberFormat('id-ID').format(prod.price || 0);
+    const quote = [
+      `*${prod.name}* (${prod.sku})`,
+      `Harga: Rp ${formattedPrice} / ${prod.unit || 'pcs'}`,
+      prod.description ? prod.description : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    setInputText((prev) => (prev ? `${prev}\n${quote}` : quote));
+    setShowProductPicker(false);
   };
 
   const handleOpenNewChatModal = async () => {
@@ -661,6 +736,19 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                     </p>
 
                     <div className="flex items-center flex-wrap gap-1 mt-1.5">
+                      {conv.status === 'OPEN' &&
+                        !conv.firstResponseAt &&
+                        conv.firstInboundAt &&
+                        Date.now() - new Date(conv.firstInboundAt).getTime() >
+                          slaTargetMinutes * 60_000 && (
+                          <span
+                            title={`Belum dibalas melebihi target SLA ${slaTargetMinutes} menit`}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-red-50 text-red-700 border border-red-200"
+                          >
+                            <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                            SLA Terlewat
+                          </span>
+                        )}
                       {conv.wahaSession && (
                         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
                           {conv.wahaSession}
@@ -1017,6 +1105,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                     setComposerMode('NOTE');
                     setPendingAttachment(null);
                     setShowCannedPicker(false);
+                    setShowProductPicker(false);
                   }}
                   className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
                     composerMode === 'NOTE'
@@ -1216,7 +1305,139 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                 </div>
               )}
 
-            <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              {showProductPicker && (
+                <div className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 sm:w-96 max-w-[calc(100vw-2.5rem)] space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-900 inline-flex items-center gap-1.5 whitespace-nowrap truncate">
+                      <Package className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Katalog Produk (Quick Quote)</span>
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddProduct((v) => !v)}
+                        className="h-6 px-2 rounded border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-medium text-indigo-700 inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+                      >
+                        {!showAddProduct && <Plus className="w-3 h-3 shrink-0" />}
+                        <span>{showAddProduct ? 'Tutup' : 'Tambah'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowProductPicker(false)}
+                        title="Tutup Katalog Produk"
+                        className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {showAddProduct && (
+                    <form onSubmit={handleCreateQuickProduct} className="p-2 rounded bg-gray-50 border border-gray-200 space-y-1.5">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <input
+                          type="text"
+                          placeholder="SKU (opsional)"
+                          value={newProdSku}
+                          onChange={(e) => setNewProdSku(e.target.value)}
+                          className="px-2 py-1 bg-white border border-gray-300 rounded text-[11px] font-mono"
+                        />
+                        <input
+                          type="text"
+                          required
+                          placeholder="Nama produk"
+                          value={newProdName}
+                          onChange={(e) => setNewProdName(e.target.value)}
+                          className="px-2 py-1 bg-white border border-gray-300 rounded text-[11px]"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <input
+                          type="number"
+                          min={0}
+                          required
+                          placeholder="Harga (Rp)"
+                          value={newProdPrice}
+                          onChange={(e) => setNewProdPrice(e.target.value)}
+                          className="px-2 py-1 bg-white border border-gray-300 rounded text-[11px] font-mono"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Satuan (pcs/paket)"
+                          value={newProdUnit}
+                          onChange={(e) => setNewProdUnit(e.target.value)}
+                          className="px-2 py-1 bg-white border border-gray-300 rounded text-[11px]"
+                        />
+                      </div>
+                      <Button type="submit" size="sm" variant="primary" isLoading={savingProduct} className="w-full">
+                        Simpan Produk
+                      </Button>
+                    </form>
+                  )}
+
+                  <input
+                    type="text"
+                    placeholder="Cari nama atau SKU produk..."
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="w-full h-7 px-2.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                  />
+
+                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-100">
+                    {productsList.filter((p) => {
+                      const q = productSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        p.name.toLowerCase().includes(q) ||
+                        p.sku.toLowerCase().includes(q) ||
+                        (p.category || '').toLowerCase().includes(q)
+                      );
+                    }).length === 0 ? (
+                      <div className="py-4 text-center text-[11px] text-gray-500">
+                        Belum ada produk di katalog.
+                      </div>
+                    ) : (
+                      productsList
+                        .filter((p) => {
+                          const q = productSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          return (
+                            p.name.toLowerCase().includes(q) ||
+                            p.sku.toLowerCase().includes(q) ||
+                            (p.category || '').toLowerCase().includes(q)
+                          );
+                        })
+                        .map((prod) => (
+                          <button
+                            key={prod.id}
+                            type="button"
+                            onClick={() => insertProductQuote(prod)}
+                            className="w-full text-left py-1.5 px-1.5 hover:bg-indigo-50/70 rounded transition-colors flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-1 py-0.5 rounded bg-gray-100 text-gray-600 font-mono text-[10px]">
+                                  {prod.sku}
+                                </span>
+                                <span className="text-[11px] font-medium text-gray-900 truncate">
+                                  {prod.name}
+                                </span>
+                              </div>
+                              {prod.description && (
+                                <p className="text-[10px] text-gray-500 truncate mt-0.5">{prod.description}</p>
+                              )}
+                            </div>
+                            <span className="text-[11px] font-mono font-semibold text-indigo-700 whitespace-nowrap shrink-0">
+                              Rp {new Intl.NumberFormat('id-ID').format(prod.price || 0)}
+                            </span>
+                          </button>
+                        ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1229,6 +1450,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                 onClick={() => {
                   setShowEmojiPicker((v) => !v);
                   setShowCannedPicker(false);
+                  setShowProductPicker(false);
                 }}
                 title="Sisipkan Emotikon"
                 className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
@@ -1242,11 +1464,24 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                     onClick={() => {
                       setShowCannedPicker((v) => !v);
                       setShowEmojiPicker(false);
+                      setShowProductPicker(false);
                     }}
                     title="Balasan Cepat (Canned Responses)"
                     className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-amber-600 inline-flex items-center justify-center shrink-0"
                   >
                     <Zap className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProductPicker((v) => !v);
+                      setShowCannedPicker(false);
+                      setShowEmojiPicker(false);
+                    }}
+                    title="Sisipkan Katalog Produk (Quick Quote)"
+                    className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
+                  >
+                    <Package className="w-4 h-4" />
                   </button>
                   <button
                     type="button"

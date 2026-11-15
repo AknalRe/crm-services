@@ -342,4 +342,40 @@ export interface LicenseOrder {
   paidAt?: string;
 }
 
+export interface ProductItem {
+  id: string;
+  sku: string;
+  name: string;
+  category?: string | null;
+  price: number;
+  unit: string;
+  description?: string | null;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AutoReplyRule {
+  id: string;
+  keyword: string;
+  matchType: 'CONTAINS' | 'EXACT' | 'STARTS_WITH';
+  replyText: string;
+  isActive: boolean;
+  priority: number;
+  createdAt?: string;
+}
+
+export interface AutomationConfig {
+  autoAssignMode: 'NONE' | 'ROUND_ROBIN' | 'LEAST_BUSY';
+  welcomeEnabled: boolean;
+  welcomeMessage: string;
+  offhoursEnabled: boolean;
+  businessHoursStart: string;
+  businessHoursEnd: string;
+  businessDays: string;
+  offhoursMessage: string;
+  slaEscalationEnabled: boolean;
+  slaAlertWebhookUrl: string;
+}
+
 

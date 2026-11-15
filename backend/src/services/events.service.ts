@@ -4,7 +4,9 @@ export type LiveEventType =
   | 'waha:status'
   | 'tracking:update'
   | 'conversations:update'
-  | 'license:update';
+  | 'license:update'
+  | 'sla:breach'
+  | 'csat:low';
 
 export interface LiveEventPayload {
   type: LiveEventType;

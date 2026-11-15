@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
+import { AutomationProductsSettings } from '../components/AutomationProductsSettings';
 import {
   AgentItem,
   AgentQuota,
@@ -1309,6 +1310,8 @@ export const Settings: React.FC<SettingsProps> = ({
           )}
         </div>
       )}
+
+      <AutomationProductsSettings />
 
       <ConfirmModal
         isOpen={confirmAction !== null}
