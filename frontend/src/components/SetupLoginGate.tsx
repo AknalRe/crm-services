@@ -27,7 +27,7 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
       const res = initialized
         ? await api.loginAuth({ email: email.trim(), password })
         : await api.setupAuth({ name: name.trim(), email: email.trim(), password });
-      toast.success(initialized ? 'Berhasil masuk ke CRM WhatsApp.' : 'Akun admin CRM berhasil dibuat.');
+      toast.success(initialized ? 'Berhasil masuk ke Reneo CRM.' : 'Akun admin CRM berhasil dibuat.');
       onAuthenticated(res.user);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal memproses autentikasi.');
@@ -49,12 +49,12 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
           </div>
           <div>
             <h1 className="text-base font-semibold text-gray-900">
-              {initialized ? 'Masuk ke Reneo CRM WhatsApp' : 'Setup Awal Akun Reneo CRM'}
+              {initialized ? 'Masuk ke Reneo CRM' : 'Setup Awal Akun Reneo CRM'}
             </h1>
             <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
               {initialized
                 ? 'Masukkan email dan kata sandi akun admin CRM Anda untuk melanjutkan.'
-                : 'Buat akun admin pertama untuk mengelola kontak, siaran WhatsApp, dan aktivasi lisensi.'}
+                : 'Buat akun admin pertama untuk mengelola kontak, kampanye, dan Live Chat Omnichannel.'}
             </p>
           </div>
         </div>

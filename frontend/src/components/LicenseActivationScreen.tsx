@@ -66,7 +66,7 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
             </div>
             <div>
               <h1 className="text-base font-semibold text-gray-900">
-                Aktivasi Lisensi Reneo CRM WhatsApp
+                Aktivasi Lisensi Reneo CRM
               </h1>
               <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
                 {licenseInfo.status === 'EXPIRED'

@@ -116,6 +116,10 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         string,
         { session: string; count: number; resolvedCount: number; csatSum: number; csatCount: number }
       >();
+      const channelMap = new Map<
+        string,
+        { channel: string; count: number; resolvedCount: number; csatSum: number; csatCount: number }
+      >();
       const agentMap = new Map<
         string,
         {
@@ -156,6 +160,22 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         if (st === 'RESOLVED') resolvedCount++;
         else if (st === 'PENDING') pendingCount++;
         else openCount++;
+
+        const ch = (c.channel || 'WHATSAPP').toUpperCase();
+        const chEntry = channelMap.get(ch) || {
+          channel: ch,
+          count: 0,
+          resolvedCount: 0,
+          csatSum: 0,
+          csatCount: 0,
+        };
+        chEntry.count += 1;
+        if (st === 'RESOLVED') chEntry.resolvedCount += 1;
+        if (c.csatRating) {
+          chEntry.csatSum += c.csatRating;
+          chEntry.csatCount += 1;
+        }
+        channelMap.set(ch, chEntry);
 
         if (c.firstInboundAt && c.firstResponseAt) {
           const frtSec = Math.max(
@@ -292,6 +312,12 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           count: s.count,
           resolvedCount: s.resolvedCount,
           avgCsat: s.csatCount > 0 ? Number((s.csatSum / s.csatCount).toFixed(2)) : null,
+        })),
+        byChannel: Array.from(channelMap.values()).map((ch) => ({
+          channel: ch.channel,
+          count: ch.count,
+          resolvedCount: ch.resolvedCount,
+          avgCsat: ch.csatCount > 0 ? Number((ch.csatSum / ch.csatCount).toFixed(2)) : null,
         })),
         byAgent: Array.from(agentMap.values()).map((a) => ({
           agentName: a.agentName,

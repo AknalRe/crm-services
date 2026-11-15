@@ -17,19 +17,18 @@ import {
   Bot,
   Star,
   Plug,
+  CalendarClock,
 } from 'lucide-react';
-import { AuthStatus, LicenseInfo, SettingsSection, WahaStatus } from '../types';
+import { AuthStatus, LicenseInfo, SettingsSection } from '../types';
 
 interface SidebarProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
   settingsSection?: SettingsSection;
   onSelectSettingsSection?: (section: SettingsSection) => void;
-  wahaStatus: WahaStatus | null;
   licenseInfo?: LicenseInfo | null;
   user?: AuthStatus['user'] | null;
   onLogout?: () => void;
-  onOpenQrModal: () => void;
   isOpen?: boolean;
   onClose?: () => void;
 }
@@ -39,11 +38,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setCurrentTab,
   settingsSection = 'whatsapp',
   onSelectSettingsSection,
-  wahaStatus,
   licenseInfo,
   user,
   onLogout,
-  onOpenQrModal,
   isOpen = false,
   onClose,
 }) => {
@@ -95,7 +92,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       title: 'Kampanye & Otomatisasi',
       items: [
-        { id: 'broadcasts', label: 'Siaran WhatsApp', icon: Send, locked: false },
+        { id: 'broadcasts', label: 'Siaran & Kampanye', icon: Send, locked: false, perm: 'broadcasts' },
+        { id: 'posts', label: 'Jadwal Postingan', icon: CalendarClock, locked: false, perm: 'broadcasts' },
         { id: 'birthday', label: 'Ulang Tahun', icon: Cake, locked: false },
         { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck, locked: false },
       ],
@@ -124,8 +122,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onClose?.();
   };
 
-  const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
-
   return (
     <>
       {isOpen && (
@@ -146,9 +142,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <MessageCircle className="w-5 h-5 text-indigo-400 shrink-0" />
             <div className="min-w-0">
               <h1 className="font-semibold text-sm text-white tracking-tight truncate">
-                CRM WhatsApp
+                Reneo CRM
               </h1>
-              <p className="text-[11px] text-gray-400 truncate">Reneo Business Suite</p>
+              <p className="text-[11px] text-gray-400 truncate">Omnichannel Suite</p>
             </div>
           </div>
           {onClose && (
@@ -166,7 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Navigation Links */}
       <nav className="flex-1 px-3 py-3 space-y-4 overflow-y-auto">
         {menuGroups.map((group) => {
-          const visibleItems = group.items.filter((item) => isItemAllowed(item.id));
+          const visibleItems = group.items.filter((item: any) => isItemAllowed(item.perm || item.id));
           if (visibleItems.length === 0) return null;
           return (
             <div key={group.title} className="space-y-0.5">
@@ -320,9 +316,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </nav>
 
-      {/* WAHA Status & User Card */}
-      <div className="p-3 border-t border-[#1E2438] space-y-2">
-        {user && (
+      {/* User Card */}
+      {user && (
+        <div className="p-3 border-t border-[#1E2438]">
           <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-[#181D2D] border border-[#242B42]">
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-medium text-white truncate">{user.name}</p>
@@ -348,48 +344,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
           </div>
-        )}
-        <div className="bg-[#181D2D] rounded-md p-3 border border-[#242B42]">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] font-medium text-gray-400">Status WAHA</span>
-            <span
-              className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                isConnected
-                  ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
-                  : 'bg-amber-950/60 text-amber-400 border border-amber-800/60'
-              }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  isConnected ? 'bg-emerald-400' : 'bg-amber-400'
-                }`}
-              />
-              {isConnected ? 'Terhubung' : 'Terputus'}
-            </span>
-          </div>
-
-          <p className="text-[11px] text-gray-400 font-mono truncate mb-1">
-            {wahaStatus?.activeSession || wahaStatus?.config?.session || 'default'} •{' '}
-            {wahaStatus?.sessionStatus || 'CHECKING'}
-          </p>
-          {(wahaStatus?.totalSessions ?? 0) > 1 && (
-            <p className="text-[10px] text-gray-400 mb-2">
-              {wahaStatus?.connectedSessions ?? 0}/{wahaStatus?.totalSessions ?? 0} sesi aktif
-            </p>
-          )}
-
-          {!isConnected && (
-            <button
-              type="button"
-              onClick={onOpenQrModal}
-              className="w-full h-8 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-md flex items-center justify-center gap-1.5 transition-colors"
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Scan QR WhatsApp</span>
-            </button>
-          )}
         </div>
-      </div>
+      )}
     </aside>
     </>
   );

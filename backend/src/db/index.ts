@@ -58,6 +58,11 @@ export async function initDb() {
       );
     `;
 
+    await sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
+    await sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
+    await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
+    await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
+
     await sql`
       CREATE TABLE IF NOT EXISTS campaign_recipients (
         id TEXT PRIMARY KEY,
@@ -286,6 +291,24 @@ export async function initDb() {
         unit TEXT NOT NULL DEFAULT 'pcs',
         description TEXT,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS scheduled_posts (
+        id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        channel_account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        caption TEXT NOT NULL,
+        media_url TEXT,
+        target_chat_id TEXT,
+        status TEXT NOT NULL DEFAULT 'SCHEDULED',
+        scheduled_at TIMESTAMP NOT NULL,
+        published_at TIMESTAMP,
+        external_post_id TEXT,
+        error_message TEXT,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );

@@ -82,6 +82,8 @@ export const api = {
     batchSize?: number;
     contactIds?: string[];
     filterTags?: string[];
+    channel?: import('../types').OmnichannelType;
+    channelAccountId?: string | null;
     sessionName?: string;
   }): Promise<any> => {
     const res = await client.post('/broadcasts', data);
@@ -90,6 +92,10 @@ export const api = {
   cancelCampaign: async (id: string): Promise<any> => {
     const res = await client.post(`/broadcasts/${id}/cancel`);
     return res.data;
+  },
+  retryFailedCampaign: async (id: string): Promise<{ retriedCount: number }> => {
+    const res = await client.post(`/broadcasts/${id}/retry-failed`);
+    return res.data.data;
   },
   deleteCampaign: async (id: string): Promise<any> => {
     const res = await client.delete(`/broadcasts/${id}`);
@@ -501,6 +507,18 @@ export const api = {
     return res.data.data;
   },
 
+  addContactIdentity: async (
+    contactId: string,
+    data: { channel: string; externalId: string; handle?: string }
+  ): Promise<import('../types').ContactIdentityItem> => {
+    const res = await client.post(`/contacts/${contactId}/identities`, data);
+    return res.data.data;
+  },
+
+  deleteContactIdentity: async (contactId: string, identityId: string): Promise<void> => {
+    await client.delete(`/contacts/${contactId}/identities/${identityId}`);
+  },
+
   getWebhookDeliveries: async (): Promise<import('../types').WebhookDeliveryItem[]> => {
     const res = await client.get('/settings/webhook-deliveries');
     return res.data.data || [];
@@ -508,6 +526,46 @@ export const api = {
 
   testAlertWebhook: async (): Promise<{ delivered: boolean; httpStatus?: number; error?: string }> => {
     const res = await client.post('/settings/webhook-deliveries/test');
+    return res.data.data;
+  },
+
+  getScheduledPosts: async (): Promise<import('../types').ScheduledPostItem[]> => {
+    const res = await client.get('/posts');
+    return res.data.data || [];
+  },
+
+  createScheduledPost: async (data: {
+    channel: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+    channelAccountId: string;
+    caption: string;
+    mediaUrl?: string | null;
+    targetChatId?: string | null;
+    scheduledAt?: string | null;
+    publishNow?: boolean;
+  }): Promise<import('../types').ScheduledPostItem> => {
+    const res = await client.post('/posts', data);
+    return res.data.data;
+  },
+
+  publishScheduledPostNow: async (id: string): Promise<import('../types').ScheduledPostItem> => {
+    const res = await client.post(`/posts/${id}/publish-now`);
+    return res.data.data;
+  },
+
+  cancelScheduledPost: async (id: string): Promise<void> => {
+    await client.post(`/posts/${id}/cancel`);
+  },
+
+  deleteScheduledPost: async (id: string): Promise<void> => {
+    await client.delete(`/posts/${id}`);
+  },
+
+  uploadMedia: async (data: {
+    fileName: string;
+    mimeType: string;
+    base64: string;
+  }): Promise<{ filename: string; relativeUrl: string; url: string }> => {
+    const res = await client.post('/media/upload', data);
     return res.data.data;
   },
 };

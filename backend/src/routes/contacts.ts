@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, ne, or, ilike, desc, sql, isNull } from 'drizzle-orm';
+import { and, eq, ne, or, ilike, desc, sql, isNull, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import {
   contacts,
@@ -93,9 +93,31 @@ export default async function contactsRouter(fastify: FastifyInstance) {
 
       const total = Number(totalResult[0]?.count || 0);
 
+      const contactIds = allContacts.map((c) => c.id);
+      const identitiesMap = new Map<string, any[]>();
+      if (contactIds.length > 0) {
+        const idRows = await db
+          .select()
+          .from(contactIdentities)
+          .where(inArray(contactIdentities.contactId, contactIds));
+        for (const idRow of idRows) {
+          const list = identitiesMap.get(idRow.contactId) || [];
+          list.push({
+            id: idRow.id,
+            channel: idRow.channel,
+            externalId: idRow.externalId,
+            handle: idRow.handle,
+          });
+          identitiesMap.set(idRow.contactId, list);
+        }
+      }
+
       return reply.send({
         success: true,
-        data: allContacts.map(formatContact),
+        data: allContacts.map((c) => ({
+          ...formatContact(c),
+          identities: identitiesMap.get(c.id) || [],
+        })),
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -452,4 +474,75 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
+
+  // POST add omnichannel identity to contact
+  fastify.post<{
+    Params: { id: string };
+    Body: { channel?: string; externalId?: string; handle?: string };
+  }>('/:id/identities', async (req, reply) => {
+    try {
+      const contactId = req.params.id;
+      const channel = String(req.body?.channel || '').trim().toUpperCase();
+      const externalId = String(req.body?.externalId || '').trim();
+      const handle = req.body?.handle ? String(req.body.handle).trim() : null;
+      if (!channel || !externalId) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Channel dan External ID wajib diisi',
+        });
+      }
+      const existing = await db
+        .select()
+        .from(contactIdentities)
+        .where(
+          and(
+            eq(contactIdentities.contactId, contactId),
+            eq(contactIdentities.channel, channel),
+            eq(contactIdentities.externalId, externalId)
+          )
+        );
+      if (existing.length > 0) {
+        const [updated] = await db
+          .update(contactIdentities)
+          .set({ handle: handle ?? existing[0].handle })
+          .where(eq(contactIdentities.id, existing[0].id))
+          .returning();
+        return reply.send({ success: true, data: updated });
+      }
+      const [inserted] = await db
+        .insert(contactIdentities)
+        .values({
+          id: crypto.randomUUID(),
+          contactId,
+          channel,
+          externalId,
+          handle,
+          createdAt: new Date(),
+        })
+        .returning();
+      return reply.status(201).send({ success: true, data: inserted });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // DELETE omnichannel identity from contact
+  fastify.delete<{ Params: { id: string; identityId: string } }>(
+    '/:id/identities/:identityId',
+    async (req, reply) => {
+      try {
+        await db
+          .delete(contactIdentities)
+          .where(
+            and(
+              eq(contactIdentities.id, req.params.identityId),
+              eq(contactIdentities.contactId, req.params.id)
+            )
+          );
+        return reply.send({ success: true });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
 }

@@ -4,7 +4,8 @@ type LiveEventType =
   | 'conversations:update'
   | 'license:update'
   | 'sla:breach'
-  | 'csat:low';
+  | 'csat:low'
+  | 'posts:update';
 
 type LiveListener = (payload: any) => void;
 

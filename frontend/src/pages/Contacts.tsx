@@ -46,6 +46,10 @@ export const Contacts: React.FC<ContactsProps> = ({
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
+  const [newIdChannel, setNewIdChannel] = useState<'TELEGRAM' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS'>('TELEGRAM');
+  const [newIdExternal, setNewIdExternal] = useState('');
+  const [newIdHandle, setNewIdHandle] = useState('');
+  const [savingIdentity, setSavingIdentity] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -536,15 +540,41 @@ export const Contacts: React.FC<ContactsProps> = ({
                       </td>
 
                       <td className="py-3 px-4">
-                        <a
-                          href={`https://wa.me/${contact.nomor_whatsapp}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 font-mono text-indigo-600 hover:text-indigo-700 hover:underline"
-                        >
-                          <Phone className="w-3 h-3 text-gray-400" />
-                          <span>+{contact.nomor_whatsapp}</span>
-                        </a>
+                        <div className="space-y-1">
+                          {contact.nomor_whatsapp ? (
+                            <a
+                              href={`https://wa.me/${contact.nomor_whatsapp}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 font-mono text-indigo-600 hover:text-indigo-700 hover:underline"
+                            >
+                              <Phone className="w-3 h-3 text-gray-400" />
+                              <span>+{contact.nomor_whatsapp}</span>
+                            </a>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">Tanpa WA</span>
+                          )}
+                          {contact.identities && contact.identities.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {contact.identities.map((idItem) => (
+                                <span
+                                  key={idItem.id}
+                                  title={`${idItem.channel}: ${idItem.externalId}`}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-100 text-gray-700 border border-gray-200"
+                                >
+                                  {idItem.channel === 'INSTAGRAM'
+                                    ? 'IG'
+                                    : idItem.channel === 'FACEBOOK'
+                                    ? 'FB'
+                                    : idItem.channel === 'TELEGRAM'
+                                    ? 'TG'
+                                    : idItem.channel}
+                                  : {idItem.handle || idItem.externalId}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       <td className="py-3 px-4">
@@ -793,6 +823,115 @@ export const Contacts: React.FC<ContactsProps> = ({
               />
             </div>
           </div>
+
+          {editingContact && (
+            <div className="pt-3 border-t border-gray-200 space-y-2.5">
+              <label className="block text-xs font-semibold text-gray-800">
+                Identitas Kanal Omnichannel
+              </label>
+              {editingContact.identities && editingContact.identities.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {editingContact.identities.map((idItem) => (
+                    <span
+                      key={idItem.id}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-700"
+                    >
+                      <span className="font-semibold text-indigo-700">{idItem.channel}</span>
+                      <span>{idItem.handle || idItem.externalId}</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await api.deleteContactIdentity(editingContact.id, idItem.id);
+                            setEditingContact((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    identities: (prev.identities || []).filter(
+                                      (x) => x.id !== idItem.id
+                                    ),
+                                  }
+                                : null
+                            );
+                            fetchContacts();
+                          } catch {
+                            toast.error('Gagal menghapus identitas kanal');
+                          }
+                        }}
+                        className="text-gray-400 hover:text-red-600 ml-0.5"
+                        title="Hapus identitas"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-gray-400">
+                  Belum ada identitas Telegram / Instagram / Facebook / Threads tertaut.
+                </p>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                <select
+                  value={newIdChannel}
+                  onChange={(e) => setNewIdChannel(e.target.value as any)}
+                  className="sm:col-span-3 h-8 px-2 bg-white border border-gray-200 rounded text-xs"
+                >
+                  <option value="TELEGRAM">Telegram</option>
+                  <option value="INSTAGRAM">Instagram</option>
+                  <option value="FACEBOOK">Facebook</option>
+                  <option value="THREADS">Threads</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="External ID / Chat ID"
+                  value={newIdExternal}
+                  onChange={(e) => setNewIdExternal(e.target.value)}
+                  className="sm:col-span-4 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs font-mono"
+                />
+                <input
+                  type="text"
+                  placeholder="@handle (opsional)"
+                  value={newIdHandle}
+                  onChange={(e) => setNewIdHandle(e.target.value)}
+                  className="sm:col-span-3 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={savingIdentity || !newIdExternal.trim()}
+                  onClick={async () => {
+                    if (!newIdExternal.trim()) return;
+                    setSavingIdentity(true);
+                    try {
+                      const created = await api.addContactIdentity(editingContact.id, {
+                        channel: newIdChannel,
+                        externalId: newIdExternal.trim(),
+                        handle: newIdHandle.trim() || undefined,
+                      });
+                      setEditingContact((prev) =>
+                        prev
+                          ? { ...prev, identities: [...(prev.identities || []), created] }
+                          : null
+                      );
+                      setNewIdExternal('');
+                      setNewIdHandle('');
+                      fetchContacts();
+                      toast.success('Identitas kanal ditambahkan');
+                    } catch (err: any) {
+                      toast.error(err.response?.data?.error || 'Gagal menambah identitas');
+                    } finally {
+                      setSavingIdentity(false);
+                    }
+                  }}
+                  className="sm:col-span-2 h-8"
+                >
+                  Tambah
+                </Button>
+              </div>
+            </div>
+          )}
         </form>
       </Modal>
 

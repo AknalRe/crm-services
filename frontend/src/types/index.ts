@@ -1,3 +1,10 @@
+export interface ContactIdentityItem {
+  id: string;
+  channel: OmnichannelType | string;
+  externalId: string;
+  handle?: string | null;
+}
+
 export interface Contact {
   id: string;
   nama_lengkap: string;
@@ -8,6 +15,7 @@ export interface Contact {
   kategori?: string | null;
   tags?: string | null;
   notes?: string | null;
+  identities?: ContactIdentityItem[];
   createdAt: string;
   updatedAt: string;
 }
@@ -17,6 +25,8 @@ export interface Campaign {
   title: string;
   messageTemplate: string;
   type: 'IMMEDIATE' | 'SCHEDULED' | 'BIRTHDAY';
+  channel?: OmnichannelType;
+  channelAccountId?: string | null;
   status: 'DRAFT' | 'SCHEDULED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
   scheduledAt?: string | null;
   delaySeconds: number;
@@ -178,6 +188,12 @@ export interface ConversationAnalytics {
     resolvedCount: number;
     avgCsat: number | null;
   }>;
+  byChannel?: Array<{
+    channel: string;
+    count: number;
+    resolvedCount: number;
+    avgCsat: number | null;
+  }>;
   byAgent?: Array<{
     agentName: string;
     count: number;
@@ -249,6 +265,8 @@ export interface BirthdaySetting {
   sendTime: string;
   messageTemplate: string;
   delaySeconds: number;
+  channel?: OmnichannelType;
+  channelAccountId?: string | null;
   wahaSession?: string | null;
   lastRunDate?: string | null;
 }
@@ -424,5 +442,22 @@ export type SettingsSection =
   | 'automation'
   | 'crm_products'
   | 'agents';
+
+export interface ScheduledPostItem {
+  id: string;
+  channel: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+  channelAccountId: string;
+  accountName?: string | null;
+  accountExternalId?: string | null;
+  caption: string;
+  mediaUrl?: string | null;
+  targetChatId?: string | null;
+  status: 'SCHEDULED' | 'PUBLISHING' | 'PUBLISHED' | 'FAILED' | 'CANCELLED';
+  scheduledAt: string;
+  publishedAt?: string | null;
+  externalPostId?: string | null;
+  errorMessage?: string | null;
+  createdAt: string;
+}
 
 

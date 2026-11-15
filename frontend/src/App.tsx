@@ -9,6 +9,7 @@ import { ToastProvider } from './components/ui/ToastProvider';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Broadcasts from './pages/Broadcasts';
+import ScheduledPosts from './pages/ScheduledPosts';
 import BirthdayAutomation from './pages/BirthdayAutomation';
 import Tracking from './pages/Tracking';
 import Conversations from './pages/Conversations';
@@ -23,6 +24,7 @@ const VALID_TABS = new Set([
   'dashboard',
   'contacts',
   'broadcasts',
+  'posts',
   'birthday',
   'tracking',
   'conversations',
@@ -203,7 +205,9 @@ function AppShell() {
       case 'contacts':
         return 'Data Kontak Pelanggan';
       case 'broadcasts':
-        return 'Siaran WhatsApp';
+        return 'Siaran & Kampanye';
+      case 'posts':
+        return 'Jadwal Postingan Kanal';
       case 'birthday':
         return 'Ucapan Ulang Tahun Otomatis';
       case 'tracking':
@@ -226,7 +230,7 @@ function AppShell() {
             return 'Pengaturan & Kanal';
         }
       default:
-        return 'CRM WhatsApp Services';
+        return 'Reneo CRM Omnichannel';
     }
   };
 
@@ -283,7 +287,6 @@ function AppShell() {
         }}
         settingsSection={settingsSection}
         onSelectSettingsSection={setSettingsSection}
-        wahaStatus={wahaStatus}
         licenseInfo={licenseInfo}
         user={authStatus?.user}
         onLogout={async () => {
@@ -294,7 +297,6 @@ function AppShell() {
           }
           setAuthStatus({ initialized: true, authenticated: false, user: null });
         }}
-        onOpenQrModal={() => setIsQrModalOpen(true)}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
       />
@@ -302,10 +304,8 @@ function AppShell() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Navbar
           title={getPageTitle()}
-          wahaStatus={wahaStatus}
           licenseInfo={licenseInfo}
           onRefresh={handleGlobalRefresh}
-          onOpenQr={() => setIsQrModalOpen(true)}
           onOpenPlans={() => setIsPlansModalOpen(true)}
           onMenuClick={() => setIsSidebarOpen(true)}
           isRefreshing={isRefreshing}
@@ -326,6 +326,7 @@ function AppShell() {
                 licenseInfo={licenseInfo}
               />
             )}
+            {currentTab === 'posts' && <ScheduledPosts />}
             {currentTab === 'birthday' && <BirthdayAutomation />}
             {currentTab === 'tracking' && <Tracking />}
             {currentTab === 'conversations' && (

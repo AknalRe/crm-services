@@ -11,7 +11,15 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { Campaign, Contact, CampaignRecipient, LicenseInfo, WahaSessionItem } from '../types';
+import {
+  Campaign,
+  ChannelAccount,
+  Contact,
+  CampaignRecipient,
+  LicenseInfo,
+  OmnichannelType,
+  WahaSessionItem,
+} from '../types';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
@@ -33,6 +41,9 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [wahaSessions, setWahaSessions] = useState<WahaSessionItem[]>([]);
   const [selectedSession, setSelectedSession] = useState<string>('');
+  const [channel, setChannel] = useState<OmnichannelType>('WHATSAPP');
+  const [channelAccounts, setChannelAccounts] = useState<ChannelAccount[]>([]);
+  const [channelAccountId, setChannelAccountId] = useState<string>('');
 
   const [title, setTitle] = useState('');
   const [broadcastType, setBroadcastType] = useState<'IMMEDIATE' | 'SCHEDULED'>('IMMEDIATE');
@@ -54,6 +65,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const loadContactsAndTags = useCallback(async () => {
     try {
@@ -90,6 +102,10 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
         setWahaSessions(res.sessions || []);
         setSelectedSession(res.activeSession || '');
       })
+      .catch(() => {});
+    api
+      .getChannels()
+      .then((list) => setChannelAccounts(list || []))
       .catch(() => {});
 
     const unsub = subscribeLiveEvent('tracking:update', () => {
@@ -173,7 +189,9 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
         batchSize,
         contactIds: recipientMode === 'MANUAL' ? selectedContactIds : undefined,
         filterTags: recipientMode === 'TAGS' && selectedTag ? [selectedTag] : undefined,
-        sessionName: selectedSession || undefined,
+        channel,
+        channelAccountId: channel === 'WHATSAPP' ? null : channelAccountId || null,
+        sessionName: channel === 'WHATSAPP' ? selectedSession || undefined : undefined,
       });
 
       toast.success(
@@ -339,24 +357,77 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                 </div>
               )}
 
-              {licenseInfo?.features?.multiSession && wahaSessions.length > 1 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Sesi WhatsApp Pengirim
+                    Channel Pengirim
                   </label>
                   <select
-                    value={selectedSession}
-                    onChange={(e) => setSelectedSession(e.target.value)}
-                    className="w-full sm:w-72 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                    value={channel}
+                    onChange={(e) => {
+                      const nextCh = e.target.value as OmnichannelType;
+                      setChannel(nextCh);
+                      const matching = channelAccounts.filter(
+                        (a) => a.channel === nextCh && a.isActive
+                      );
+                      setChannelAccountId(matching[0]?.id || '');
+                    }}
+                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
                   >
-                    {wahaSessions.map((s) => (
-                      <option key={s.name} value={s.name}>
-                        {s.name} ({s.status})
-                      </option>
-                    ))}
+                    <option value="WHATSAPP">WhatsApp (WAHA)</option>
+                    <option value="TELEGRAM">Telegram Bot</option>
+                    <option value="INSTAGRAM">Instagram DM</option>
+                    <option value="FACEBOOK">Facebook Messenger</option>
+                    <option value="THREADS">Threads</option>
                   </select>
                 </div>
-              )}
+
+                {channel === 'WHATSAPP' && licenseInfo?.features?.multiSession && wahaSessions.length > 1 && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Sesi WhatsApp Pengirim
+                    </label>
+                    <select
+                      value={selectedSession}
+                      onChange={(e) => setSelectedSession(e.target.value)}
+                      className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                    >
+                      {wahaSessions.map((s) => (
+                        <option key={s.name} value={s.name}>
+                          {s.name} ({s.status})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {channel !== 'WHATSAPP' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Akun Kanal Pengirim
+                    </label>
+                    {channelAccounts.filter((a) => a.channel === channel && a.isActive).length === 0 ? (
+                      <div className="h-9 px-3 flex items-center bg-amber-50 border border-amber-200 rounded-md text-[11px] text-amber-800">
+                        Belum ada akun {channel} aktif di Integrasi &amp; Kanal → Omnichannel.
+                      </div>
+                    ) : (
+                      <select
+                        value={channelAccountId}
+                        onChange={(e) => setChannelAccountId(e.target.value)}
+                        className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
+                      >
+                        {channelAccounts
+                          .filter((a) => a.channel === channel && a.isActive)
+                          .map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.name} ({a.accountId})
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* 2. Target Recipients */}
@@ -493,7 +564,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                 value={messageTemplate}
                 onChange={(e) => setMessageTemplate(e.target.value)}
                 className="w-full p-3 bg-white border border-gray-200 rounded-md text-[13px] leading-relaxed focus:outline-none focus:border-indigo-500"
-                placeholder="Tulis pesan siaran WhatsApp Anda..."
+                placeholder="Tulis pesan siaran Anda..."
               />
             </div>
           </div>
@@ -650,6 +721,9 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="font-semibold text-gray-900 text-sm">{camp.title}</h4>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              {camp.channel || 'WHATSAPP'}
+                            </span>
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-700 border border-gray-200">
                               {camp.type}
                             </span>
@@ -690,6 +764,32 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                               onClick={() => setCancelTargetId(camp.id)}
                             >
                               Batalkan
+                            </Button>
+                          )}
+
+                          {camp.failedCount > 0 && camp.status !== 'PROCESSING' && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              isLoading={retryingId === camp.id}
+                              onClick={async () => {
+                                setRetryingId(camp.id);
+                                try {
+                                  const res = await api.retryFailedCampaign(camp.id);
+                                  toast.success(
+                                    `${res.retriedCount} penerima gagal dimasukkan kembali ke antrean.`
+                                  );
+                                  loadCampaigns();
+                                } catch (err: any) {
+                                  toast.error(
+                                    err.response?.data?.error || 'Gagal mengulang pengiriman'
+                                  );
+                                } finally {
+                                  setRetryingId(null);
+                                }
+                              }}
+                            >
+                              Ulangi Gagal ({camp.failedCount})
                             </Button>
                           )}
 

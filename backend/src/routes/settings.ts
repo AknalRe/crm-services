@@ -105,6 +105,8 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         messageTemplate:
           'Halo {nama_panggilan}! Selamat ulang tahun, semoga panjang umur, sehat selalu, dan sukses selalu.',
         delaySeconds: 5,
+        channel: 'WHATSAPP',
+        channelAccountId: null,
         wahaSession: null,
         lastRunDate: null,
       };
@@ -128,11 +130,13 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       sendTime?: string;
       messageTemplate?: string;
       delaySeconds?: number;
+      channel?: 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+      channelAccountId?: string | null;
       wahaSession?: string | null;
     };
   }>('/birthday', { preHandler: requirePermission('birthday') }, async (req, reply: FastifyReply) => {
     try {
-      const { isEnabled, sendTime, messageTemplate, delaySeconds, wahaSession } = req.body;
+      const { isEnabled, sendTime, messageTemplate, delaySeconds, channel, channelAccountId, wahaSession } = req.body;
       const now = new Date();
 
       const updateData: any = { updatedAt: now };
@@ -140,6 +144,11 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       if (sendTime) updateData.sendTime = sendTime;
       if (messageTemplate) updateData.messageTemplate = messageTemplate;
       if (delaySeconds) updateData.delaySeconds = Number(delaySeconds);
+      if (channel !== undefined) updateData.channel = channel || 'WHATSAPP';
+      if (channelAccountId !== undefined) {
+        updateData.channelAccountId =
+          channelAccountId && channelAccountId.trim() ? channelAccountId.trim() : null;
+      }
       if (wahaSession !== undefined) {
         updateData.wahaSession = wahaSession && wahaSession.trim() ? wahaSession.trim() : null;
       }
@@ -154,6 +163,9 @@ export default async function settingsRouter(fastify: FastifyInstance) {
             messageTemplate ||
             'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!',
           delaySeconds: delaySeconds ? Number(delaySeconds) : 5,
+          channel: channel || 'WHATSAPP',
+          channelAccountId:
+            channelAccountId && channelAccountId.trim() ? channelAccountId.trim() : null,
           wahaSession: wahaSession && wahaSession.trim() ? wahaSession.trim() : null,
           updatedAt: now,
         })

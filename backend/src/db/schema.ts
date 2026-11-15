@@ -20,6 +20,8 @@ export const campaigns = pgTable('campaigns', {
   title: text('title').notNull(),
   messageTemplate: text('message_template').notNull(),
   type: text('type').default('IMMEDIATE').notNull(), // IMMEDIATE, SCHEDULED, BIRTHDAY
+  channel: text('channel').default('WHATSAPP').notNull(), // WHATSAPP, INSTAGRAM, FACEBOOK, THREADS, TELEGRAM
+  channelAccountId: text('channel_account_id'),
   status: text('status').default('DRAFT').notNull(), // DRAFT, SCHEDULED, PROCESSING, COMPLETED, FAILED, CANCELLED
   scheduledAt: timestamp('scheduled_at'),
   delaySeconds: integer('delay_seconds').default(5).notNull(),
@@ -123,6 +125,8 @@ export const birthdaySettings = pgTable('birthday_settings', {
     )
     .notNull(),
   delaySeconds: integer('delay_seconds').default(5).notNull(),
+  channel: text('channel').default('WHATSAPP').notNull(),
+  channelAccountId: text('channel_account_id'),
   wahaSession: text('waha_session'),
   lastRunDate: text('last_run_date'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -277,6 +281,24 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
   }),
   messages: many(chatMessages),
 }));
+
+export const scheduledPosts = pgTable('scheduled_posts', {
+  id: text('id').primaryKey(),
+  channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM
+  channelAccountId: text('channel_account_id')
+    .references(() => channelAccounts.id, { onDelete: 'cascade' })
+    .notNull(),
+  caption: text('caption').notNull(),
+  mediaUrl: text('media_url'),
+  targetChatId: text('target_chat_id'),
+  status: text('status').default('SCHEDULED').notNull(), // SCHEDULED | PUBLISHING | PUBLISHED | FAILED | CANCELLED
+  scheduledAt: timestamp('scheduled_at').notNull(),
+  publishedAt: timestamp('published_at'),
+  externalPostId: text('external_post_id'),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
 
 export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
   conversation: one(conversations, {

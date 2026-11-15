@@ -1,14 +1,17 @@
 import { eq, inArray, and, gte, ne, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { contacts, campaigns, campaignRecipients } from '../db/schema';
+import { contacts, campaigns, campaignRecipients, contactIdentities } from '../db/schema';
 import { broadcastQueue } from './queue.service';
 import { licenseService } from './license.service';
+import { OmnichannelType } from './channel.service';
 import crypto from 'crypto';
 
 export interface CreateCampaignDTO {
   title: string;
   messageTemplate: string;
   type?: 'IMMEDIATE' | 'SCHEDULED' | 'BIRTHDAY';
+  channel?: OmnichannelType;
+  channelAccountId?: string | null;
   scheduledAt?: string | null;
   delaySeconds?: number;
   intervalSeconds?: number;
@@ -47,6 +50,8 @@ export class BroadcastService {
       title,
       messageTemplate,
       type = 'IMMEDIATE',
+      channel = 'WHATSAPP',
+      channelAccountId = null,
       scheduledAt,
       delaySeconds = 5,
       intervalSeconds = 30,
@@ -55,6 +60,11 @@ export class BroadcastService {
       filterTags,
       sessionName,
     } = dto;
+
+    const normalizedChannel = (channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
+    if (normalizedChannel !== 'WHATSAPP' && !channelAccountId) {
+      throw new Error(`Pilih akun kanal ${normalizedChannel} terlebih dahulu untuk mengirim siaran.`);
+    }
 
     // Enforce active Reneo license
     const lic = await licenseService.assertLicenseActive();
@@ -79,6 +89,31 @@ export class BroadcastService {
 
     if (targetContacts.length === 0) {
       throw new Error('Tidak ada kontak yang dipilih atau ditemukan.');
+    }
+
+    // Filter contacts compatible with selected channel
+    const identityByContact = new Map<string, string>();
+    if (normalizedChannel !== 'WHATSAPP') {
+      const idRows = await db
+        .select()
+        .from(contactIdentities)
+        .where(eq(contactIdentities.channel, normalizedChannel));
+      for (const row of idRows) {
+        if (!identityByContact.has(row.contactId)) {
+          identityByContact.set(row.contactId, row.handle || row.externalId);
+        }
+      }
+      targetContacts = targetContacts.filter((c) => identityByContact.has(c.id));
+      if (targetContacts.length === 0) {
+        throw new Error(
+          `Tidak ada kontak terpilih yang memiliki akun/identitas ${normalizedChannel}.`
+        );
+      }
+    } else {
+      targetContacts = targetContacts.filter((c) => Boolean(c.nomorWhatsapp));
+      if (targetContacts.length === 0) {
+        throw new Error('Tidak ada kontak terpilih yang memiliki nomor WhatsApp.');
+      }
     }
 
     // Enforce monthly broadcast quota when unlimitedBroadcast is disabled
@@ -124,6 +159,8 @@ export class BroadcastService {
         title,
         messageTemplate,
         type,
+        channel: normalizedChannel,
+        channelAccountId: normalizedChannel === 'WHATSAPP' ? null : channelAccountId,
         status,
         scheduledAt: scheduleDate,
         delaySeconds,
@@ -148,8 +185,14 @@ export class BroadcastService {
       id: crypto.randomUUID(),
       campaignId: createdCampaign.id,
       contactId: c.id,
-      phone: c.nomorWhatsapp,
-      personalizedMessage: this.personalizeMessage(messageTemplate, c),
+      phone:
+        normalizedChannel === 'WHATSAPP'
+          ? c.nomorWhatsapp || ''
+          : identityByContact.get(c.id) || c.nomorWhatsapp || c.namaLengkap,
+      personalizedMessage: this.personalizeMessage(messageTemplate, {
+        ...c,
+        nomorWhatsapp: c.nomorWhatsapp || identityByContact.get(c.id) || '',
+      }),
       status: 'PENDING',
       ackStatus: 0,
       createdAt: now,
@@ -184,6 +227,8 @@ export class BroadcastService {
           phone: recipient.phone,
           message: recipient.personalizedMessage,
           sessionName,
+          channel: normalizedChannel,
+          channelAccountId: normalizedChannel === 'WHATSAPP' ? null : channelAccountId,
         },
         {
           delay: totalDelay,
@@ -233,5 +278,91 @@ export class BroadcastService {
       );
 
     return { success: true };
+  }
+
+  /**
+   * Retry all FAILED recipients in a campaign
+   */
+  public static async retryFailedRecipients(campaignId: string) {
+    const campList = await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId));
+
+    if (campList.length === 0) throw new Error('Kampanye tidak ditemukan');
+    const campaign = campList[0];
+
+    const failedRecipients = await db
+      .select()
+      .from(campaignRecipients)
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaignId),
+          eq(campaignRecipients.status, 'FAILED')
+        )
+      );
+
+    if (failedRecipients.length === 0) {
+      throw new Error('Tidak ada penerima berstatus gagal pada kampanye ini.');
+    }
+
+    const now = new Date();
+    const targetChannel = ((campaign.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+    const delaySeconds = campaign.delaySeconds || 5;
+    const intervalSeconds = campaign.intervalSeconds || 30;
+    const batchSize = campaign.batchSize || 10;
+
+    await db
+      .update(campaignRecipients)
+      .set({
+        status: 'PENDING',
+        ackStatus: 0,
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaignId),
+          eq(campaignRecipients.status, 'FAILED')
+        )
+      );
+
+    await db
+      .update(campaigns)
+      .set({
+        status: 'PROCESSING',
+        failedCount: 0,
+        completedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(campaigns.id, campaignId));
+
+    for (let i = 0; i < failedRecipients.length; i++) {
+      const recipient = failedRecipients[i];
+      const batchNumber = Math.floor(i / batchSize);
+      const totalDelay =
+        i * (delaySeconds * 1000) +
+        batchNumber * (intervalSeconds * 1000) +
+        Math.floor(Math.random() * 1200);
+
+      await broadcastQueue.add(
+        'send-message',
+        {
+          recipientId: recipient.id,
+          campaignId: campaign.id,
+          contactId: recipient.contactId,
+          phone: recipient.phone,
+          message: recipient.personalizedMessage,
+          channel: targetChannel,
+          channelAccountId: campaign.channelAccountId || null,
+        },
+        {
+          delay: totalDelay,
+          jobId: `retry_${recipient.id}_${Date.now()}`,
+        }
+      );
+    }
+
+    return { retriedCount: failedRecipients.length };
   }
 }

@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { Contact, WahaSessionItem } from '../types';
+import { ChannelAccount, Contact, OmnichannelType, WahaSessionItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
@@ -29,6 +29,9 @@ export const BirthdayAutomation: React.FC = () => {
   const [sendTime, setSendTime] = useState('08:00');
   const [messageTemplate, setMessageTemplate] = useState('');
   const [delaySeconds, setDelaySeconds] = useState(5);
+  const [channel, setChannel] = useState<OmnichannelType>('WHATSAPP');
+  const [channelAccounts, setChannelAccounts] = useState<ChannelAccount[]>([]);
+  const [channelAccountId, setChannelAccountId] = useState('');
   const [wahaSession, setWahaSession] = useState('');
   const [wahaSessions, setWahaSessions] = useState<WahaSessionItem[]>([]);
   const [activeWahaSession, setActiveWahaSession] = useState('');
@@ -54,6 +57,8 @@ export const BirthdayAutomation: React.FC = () => {
           'Halo {nama_panggilan}! Selamat ulang tahun, semoga panjang umur dan sehat selalu.'
       );
       setDelaySeconds(data.setting?.delaySeconds || 5);
+      setChannel((data.setting?.channel as OmnichannelType) || 'WHATSAPP');
+      setChannelAccountId(data.setting?.channelAccountId || '');
       setWahaSession(data.setting?.wahaSession || '');
       setCelebrantsToday(data.celebrants.today || []);
       setTotalRegistered(data.celebrants.totalRegistered || 0);
@@ -68,6 +73,10 @@ export const BirthdayAutomation: React.FC = () => {
   useEffect(() => {
     loadBirthdayData();
     loadWahaSessions();
+    api
+      .getChannels()
+      .then((list) => setChannelAccounts(list || []))
+      .catch(() => {});
     const unsubWaha = subscribeLiveEvent('waha:status', () => {
       void loadWahaSessions();
     });
@@ -86,6 +95,8 @@ export const BirthdayAutomation: React.FC = () => {
         sendTime,
         messageTemplate,
         delaySeconds,
+        channel,
+        channelAccountId: channel === 'WHATSAPP' ? null : channelAccountId || null,
         wahaSession: wahaSession.trim() || null,
       });
       toast.success('Pengaturan ucapan ulang tahun berhasil disimpan.');
@@ -227,29 +238,79 @@ export const BirthdayAutomation: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                Sesi WhatsApp Pengirim
-              </label>
-              <select
-                value={wahaSession}
-                onChange={(e) => setWahaSession(e.target.value)}
-                className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-              >
-                <option value="">
-                  {activeWahaSession
-                    ? `Sesi aktif bawaan (${activeWahaSession})`
-                    : 'Sesi aktif bawaan'}
-                </option>
-                {wahaSessions.map((sess) => (
-                  <option key={sess.name} value={sess.name}>
-                    {sess.name} ({sess.status})
-                  </option>
-                ))}
-              </select>
-              <span className="text-[11px] text-gray-400 mt-1 block">
-                Pilih sesi WhatsApp khusus untuk mengirim ucapan ulang tahun otomatis
-              </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Channel Pengirim Ucapan
+                </label>
+                <select
+                  value={channel}
+                  onChange={(e) => {
+                    const nextCh = e.target.value as OmnichannelType;
+                    setChannel(nextCh);
+                    const matching = channelAccounts.filter(
+                      (a) => a.channel === nextCh && a.isActive
+                    );
+                    setChannelAccountId(matching[0]?.id || '');
+                  }}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="WHATSAPP">WhatsApp (WAHA)</option>
+                  <option value="TELEGRAM">Telegram Bot</option>
+                  <option value="INSTAGRAM">Instagram DM</option>
+                  <option value="FACEBOOK">Facebook Messenger</option>
+                  <option value="THREADS">Threads</option>
+                </select>
+              </div>
+
+              {channel === 'WHATSAPP' ? (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Sesi WhatsApp Pengirim
+                  </label>
+                  <select
+                    value={wahaSession}
+                    onChange={(e) => setWahaSession(e.target.value)}
+                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">
+                      {activeWahaSession
+                        ? `Sesi aktif bawaan (${activeWahaSession})`
+                        : 'Sesi aktif bawaan'}
+                    </option>
+                    {wahaSessions.map((sess) => (
+                      <option key={sess.name} value={sess.name}>
+                        {sess.name} ({sess.status})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Akun Kanal Pengirim
+                  </label>
+                  {channelAccounts.filter((a) => a.channel === channel && a.isActive).length === 0 ? (
+                    <div className="h-9 px-3 flex items-center bg-amber-50 border border-amber-200 rounded-md text-[11px] text-amber-800">
+                      Belum ada akun {channel} aktif di Integrasi &amp; Kanal → Omnichannel.
+                    </div>
+                  ) : (
+                    <select
+                      value={channelAccountId}
+                      onChange={(e) => setChannelAccountId(e.target.value)}
+                      className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
+                    >
+                      {channelAccounts
+                        .filter((a) => a.channel === channel && a.isActive)
+                        .map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({a.accountId})
+                          </option>
+                        ))}
+                    </select>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>

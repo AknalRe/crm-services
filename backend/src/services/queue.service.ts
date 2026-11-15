@@ -9,6 +9,7 @@ import {
   chatMessages,
 } from '../db/schema';
 import { wahaService } from './waha.service';
+import { sendOutboundChannelMessage, OmnichannelType } from './channel.service';
 import { liveEvents } from './events.service';
 import crypto from 'crypto';
 
@@ -19,6 +20,8 @@ export interface SendMessageJobData {
   phone: string;
   message: string;
   sessionName?: string;
+  channel?: OmnichannelType;
+  channelAccountId?: string | null;
 }
 
 export const BROADCAST_QUEUE_NAME = 'whatsapp-broadcast';
@@ -42,8 +45,18 @@ export const broadcastQueue = new Queue<SendMessageJobData>(BROADCAST_QUEUE_NAME
 export const broadcastWorker = new Worker<SendMessageJobData>(
   BROADCAST_QUEUE_NAME,
   async (job: Job<SendMessageJobData>) => {
-    const { recipientId, campaignId, contactId, phone, message, sessionName } = job.data;
-    console.log(`[Queue Worker] Processing message for ${phone} (Campaign: ${campaignId}, Recipient: ${recipientId})`);
+    const {
+      recipientId,
+      campaignId,
+      contactId,
+      phone,
+      message,
+      sessionName,
+      channel = 'WHATSAPP',
+      channelAccountId = null,
+    } = job.data;
+    const targetChannel = (channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
+    console.log(`[Queue Worker] Processing ${targetChannel} message for ${phone} (Campaign: ${campaignId}, Recipient: ${recipientId})`);
 
     // Ensure campaign isn't cancelled
     const campaignList = await db
@@ -66,8 +79,29 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
       return;
     }
 
-    // Attempt to send via WAHA
-    const sendResult = await wahaService.sendTextMessage(phone, message, sessionName);
+    // Attempt to send via selected channel
+    let sendResult: { success: boolean; messageId?: string; error?: string };
+    if (targetChannel !== 'WHATSAPP') {
+      try {
+        const ext = await sendOutboundChannelMessage({
+          channel: targetChannel,
+          channelAccountId,
+          contactId,
+          text: message,
+        });
+        sendResult = {
+          success: true,
+          messageId: ext.externalMessageId ? `${targetChannel}_${ext.externalMessageId}` : undefined,
+        };
+      } catch (err: any) {
+        sendResult = {
+          success: false,
+          error: err?.message || `Gagal mengirim pesan via ${targetChannel}`,
+        };
+      }
+    } else {
+      sendResult = await wahaService.sendTextMessage(phone, message, sessionName);
+    }
 
     if (sendResult.success) {
       const now = new Date();
@@ -104,7 +138,12 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
         const convList = await db
           .select()
           .from(conversations)
-          .where(eq(conversations.contactId, contactId));
+          .where(
+            and(
+              eq(conversations.contactId, contactId),
+              eq(conversations.channel, targetChannel)
+            )
+          );
 
         let convId = convList[0]?.id;
 
@@ -113,7 +152,9 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           await db.insert(conversations).values({
             id: convId,
             contactId,
-            wahaSession: sessionName || null,
+            channel: targetChannel,
+            channelAccountId: targetChannel === 'WHATSAPP' ? null : channelAccountId,
+            wahaSession: targetChannel === 'WHATSAPP' ? sessionName || null : null,
             lastMessage: message,
             lastMessageAt: now,
             unreadCount: 0,
@@ -124,7 +165,8 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           await db
             .update(conversations)
             .set({
-              wahaSession: sessionName || undefined,
+              wahaSession: targetChannel === 'WHATSAPP' ? sessionName || undefined : undefined,
+              channelAccountId: targetChannel === 'WHATSAPP' ? undefined : channelAccountId || undefined,
               lastMessage: message,
               lastMessageAt: now,
               updatedAt: now,
@@ -138,7 +180,9 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           contactId,
           direction: 'OUTBOUND',
           messageType: 'TEXT',
-          wahaSession: sessionName || null,
+          channel: targetChannel,
+          externalMessageId: sendResult.messageId || null,
+          wahaSession: targetChannel === 'WHATSAPP' ? sessionName || null : null,
           body: message,
           wahaMessageId: sendResult.messageId,
           status: 'SENT',

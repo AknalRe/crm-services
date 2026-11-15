@@ -4,6 +4,7 @@ import { db } from '../db';
 import { birthdaySettings, contacts } from '../db/schema';
 import { BroadcastService } from './broadcast.service';
 import { licenseService } from './license.service';
+import { OmnichannelType } from './channel.service';
 import { formatContact } from '../routes/contacts';
 
 function formatLocalDate(d: Date): string {
@@ -110,6 +111,8 @@ export class BirthdayService {
       title: `Ucapan Ulang Tahun (${dateLabel})`,
       messageTemplate: setting.messageTemplate,
       type: 'BIRTHDAY',
+      channel: ((setting.channel || 'WHATSAPP').toUpperCase() as OmnichannelType),
+      channelAccountId: setting.channelAccountId || null,
       delaySeconds: setting.delaySeconds || 5,
       intervalSeconds: 15,
       batchSize: 5,

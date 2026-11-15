@@ -16,7 +16,10 @@ import publicCsatRouter from './routes/publicCsat';
 import agentsRouter from './routes/agents';
 import productsRouter from './routes/products';
 import channelsRouter from './routes/channels';
+import postsRouter from './routes/posts';
+import mediaRouter from './routes/media';
 import { BirthdayService } from './services/birthday.service';
+import { PostService } from './services/post.service';
 import { startSlaMonitor } from './services/automation.service';
 import './services/queue.service'; // Start BullMQ worker
 
@@ -56,6 +59,8 @@ async function main() {
   await fastify.register(agentsRouter, { prefix: '/api/agents' });
   await fastify.register(productsRouter, { prefix: '/api/products' });
   await fastify.register(channelsRouter, { prefix: '/api/channels' });
+  await fastify.register(postsRouter, { prefix: '/api/posts' });
+  await fastify.register(mediaRouter, { prefix: '/api/media' });
 
   // Initialize DB Schema (PostgreSQL)
   try {
@@ -67,6 +72,7 @@ async function main() {
   // Start background cron jobs (Birthday automatic scheduler + SLA monitor)
   try {
     await BirthdayService.initScheduler();
+    await PostService.initPostScheduler();
     startSlaMonitor();
   } catch (err) {
     fastify.log.error('[BirthdayService] Failed to initialize scheduler: ' + err);

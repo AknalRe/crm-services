@@ -40,7 +40,7 @@ import { useToast } from '../components/ui/ToastProvider';
 const PERMISSION_OPTIONS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'contacts', label: 'Kontak Pelanggan' },
-  { id: 'broadcasts', label: 'Siaran WhatsApp' },
+  { id: 'broadcasts', label: 'Siaran & Kampanye' },
   { id: 'birthday', label: 'Ulang Tahun' },
   { id: 'tracking', label: 'Pelacakan Status' },
   { id: 'conversations', label: 'Live Chat CRM' },

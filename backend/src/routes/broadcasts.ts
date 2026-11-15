@@ -12,6 +12,8 @@ export function formatCampaign(c: any) {
     title: c.title,
     messageTemplate: c.messageTemplate,
     type: c.type,
+    channel: c.channel || 'WHATSAPP',
+    channelAccountId: c.channelAccountId || null,
     status: c.status,
     scheduledAt: c.scheduledAt,
     delaySeconds: c.delaySeconds,
@@ -140,6 +142,8 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
       title: string;
       messageTemplate: string;
       type?: 'IMMEDIATE' | 'SCHEDULED' | 'BIRTHDAY';
+      channel?: 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+      channelAccountId?: string | null;
       scheduledAt?: string | null;
       delaySeconds?: number;
       intervalSeconds?: number;
@@ -154,6 +158,8 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         title,
         messageTemplate,
         type,
+        channel,
+        channelAccountId,
         scheduledAt,
         delaySeconds,
         intervalSeconds,
@@ -174,6 +180,8 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         title,
         messageTemplate,
         type: type || 'IMMEDIATE',
+        channel: channel || 'WHATSAPP',
+        channelAccountId: channelAccountId || null,
         scheduledAt,
         delaySeconds: delaySeconds ? Number(delaySeconds) : 5,
         intervalSeconds: intervalSeconds ? Number(intervalSeconds) : 30,
@@ -204,6 +212,20 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
     try {
       const result = await BroadcastService.cancelCampaign(req.params.id);
       return reply.send({ success: true, message: 'Kampanye berhasil dibatalkan', data: result });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST retry failed recipients
+  fastify.post('/:id/retry-failed', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    try {
+      const result = await BroadcastService.retryFailedRecipients(req.params.id);
+      return reply.send({
+        success: true,
+        message: `${result.retriedCount} penerima gagal dimasukkan kembali ke antrean`,
+        data: result,
+      });
     } catch (error: any) {
       return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     }
