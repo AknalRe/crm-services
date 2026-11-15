@@ -21,7 +21,7 @@ interface LandingPageProps {
   onEnterLogin: () => void;
 }
 
-const PANEL_URL = 'https://panel.reneo.my.id/app/reneo-crm/';
+const PANEL_URL = 'https://panel.reneo.my.id';
 
 const USE_CASE_ROWS = [
   {
@@ -205,7 +205,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 Reneo CRM
               </div>
               <div className="text-[11px] font-mono text-slate-500 leading-tight truncate">
-                panel.reneo.my.id/app/reneo-crm/
+                panel.reneo.my.id
               </div>
             </div>
           </div>
@@ -263,7 +263,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 href={PANEL_URL}
                 className="h-10 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-mono font-medium inline-flex items-center gap-2 transition-colors whitespace-nowrap"
               >
-                panel.reneo.my.id/app/reneo-crm/
+                panel.reneo.my.id
               </a>
             </div>
 
@@ -626,7 +626,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                   href={PANEL_URL}
                   className="font-mono underline underline-offset-2 text-white hover:text-blue-200"
                 >
-                  panel.reneo.my.id/app/reneo-crm/
+                  panel.reneo.my.id
                 </a>{' '}
                 untuk menghubungkan WhatsApp, Instagram, Facebook, Threads, dan Telegram usaha Anda.
               </p>
@@ -664,7 +664,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             <span>Reneo CRM</span>
             <span className="text-slate-300">·</span>
             <a href={PANEL_URL} className="font-mono hover:text-slate-800 transition-colors">
-              panel.reneo.my.id/app/reneo-crm/
+              panel.reneo.my.id
             </a>
           </div>
           <button
