@@ -207,8 +207,37 @@ export interface CannedResponse {
   id: string;
   shortCode: string;
   title: string;
+  category?: string;
   content: string;
+  isActive?: boolean;
   createdAt?: string;
+  updatedAt?: string;
+}
+
+export type CrmLabelScope = 'CONVERSATION_LABEL' | 'CONTACT_CATEGORY';
+export type CrmLabelColor = 'slate' | 'indigo' | 'emerald' | 'amber' | 'rose' | 'sky' | 'violet';
+
+export interface CrmLabelItem {
+  id: string;
+  scope: CrmLabelScope;
+  name: string;
+  color: CrmLabelColor;
+  description?: string | null;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MessageTemplateItem {
+  id: string;
+  name: string;
+  category: string;
+  channel: 'ALL' | OmnichannelType;
+  content: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DashboardStats {
@@ -444,8 +473,12 @@ export interface WebhookDeliveryItem {
 export type SettingsSection =
   | 'whatsapp'
   | 'omnichannel'
+  | 'quick_replies'
+  | 'products'
+  | 'labels'
+  | 'templates'
   | 'automation'
-  | 'crm_products'
+  | 'sla_csat'
   | 'agents';
 
 export interface ScheduledPostItem {

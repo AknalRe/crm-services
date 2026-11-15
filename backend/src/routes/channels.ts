@@ -1,12 +1,13 @@
 import crypto from 'crypto';
 import axios from 'axios';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { config } from '../config';
 import { db } from '../db';
-import { channelAccounts, channelConnectLinks } from '../db/schema';
+import { channelAccounts, channelConnectLinks, socialComments } from '../db/schema';
 import { licenseService } from '../services/license.service';
 import { requirePermission } from './auth';
+import { applyCommentAutomations } from './comments';
 import {
   OmnichannelType,
   upsertInboundChannelMessage,
@@ -67,7 +68,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       if (!ALLOWED_CHANNELS.has(channel)) {
         return reply.status(400).send({
           success: false,
-          error: 'Channel harus salah satu dari INSTAGRAM, FACEBOOK, THREADS, atau TELEGRAM',
+          error: 'Channel harus salah satu dari INSTAGRAM, FACEBOOK, THREADS, TELEGRAM, atau WHATSAPP_CLOUD',
         });
       }
       const name = String(req.body?.name || '').trim();
@@ -271,17 +272,66 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           const senderId = String(val.from?.id || val.user_id || '');
           if (!text || !senderId || senderId === account.accountId) continue;
 
+          const extCommentId = String(val.id || val.comment_id || '');
+
           await upsertInboundChannelMessage({
             channel: channelGuess,
             channelAccountId: account.id,
             externalSenderId: senderId,
             senderName: val.from?.name || val.from?.username || null,
             senderHandle: val.from?.username || val.username || null,
-            externalMessageId: val.id || val.comment_id || null,
+            externalMessageId: extCommentId || null,
             externalThreadId: val.id || val.media?.id || null,
             contextTitle: ch.field ? `Interaksi ${ch.field}` : undefined,
             body: text,
           });
+
+          if (
+            objectType !== 'whatsapp_business_account' &&
+            (ch.field === 'comments' || val.item === 'comment')
+          ) {
+            const existingComment = extCommentId
+              ? (
+                  await db
+                    .select({ id: socialComments.id })
+                    .from(socialComments)
+                    .where(
+                      and(
+                        eq(socialComments.channelAccountId, account.id),
+                        eq(socialComments.externalCommentId, extCommentId)
+                      )
+                    )
+                    .limit(1)
+                )[0]
+              : undefined;
+
+            if (!existingComment) {
+              const postId =
+                String(val.media?.id || val.post_id || val.parent_id || '').trim() || null;
+              const authorName = val.from?.name || val.from?.username || null;
+              const authorHandle = val.from?.username || val.username || null;
+              const [insertedComment] = await db
+                .insert(socialComments)
+                .values({
+                  id: crypto.randomUUID(),
+                  channel: channelGuess,
+                  channelAccountId: account.id,
+                  postId,
+                  postCaption: null,
+                  externalCommentId: extCommentId || `webhook-${crypto.randomUUID()}`,
+                  authorName,
+                  authorHandle,
+                  content: text,
+                  status: 'UNREPLIED',
+                  createdAt: new Date(),
+                })
+                .returning();
+
+              if (insertedComment) {
+                await applyCommentAutomations(account, insertedComment);
+              }
+            }
+          }
         }
       }
 
@@ -443,31 +493,57 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       }
 
       const now = new Date();
-      const verifyToken = `reneo_${crypto.randomBytes(8).toString('hex')}`;
-      const [created] = await db
-        .insert(channelAccounts)
-        .values({
-          id: crypto.randomUUID(),
-          channel: link.channel,
-          name,
-          accountId,
-          accessToken,
-          verifyToken,
-          isActive: true,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+      const existingAccRows = await db
+        .select()
+        .from(channelAccounts)
+        .where(
+          and(
+            eq(channelAccounts.channel, link.channel),
+            eq(channelAccounts.accountId, accountId)
+          )
+        );
+
+      let savedAccount: typeof channelAccounts.$inferSelect;
+      if (existingAccRows[0]) {
+        const [updatedAcc] = await db
+          .update(channelAccounts)
+          .set({
+            name,
+            accessToken,
+            isActive: true,
+            updatedAt: now,
+          })
+          .where(eq(channelAccounts.id, existingAccRows[0].id))
+          .returning();
+        savedAccount = updatedAcc;
+      } else {
+        const verifyToken = `reneo_${crypto.randomBytes(8).toString('hex')}`;
+        const [createdAcc] = await db
+          .insert(channelAccounts)
+          .values({
+            id: crypto.randomUUID(),
+            channel: link.channel,
+            name,
+            accountId,
+            accessToken,
+            verifyToken,
+            isActive: true,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+        savedAccount = createdAcc;
+      }
 
       await db
         .update(channelConnectLinks)
-        .set({ usedAt: now, createdChannelAccountId: created.id })
+        .set({ usedAt: now, createdChannelAccountId: savedAccount.id })
         .where(eq(channelConnectLinks.id, link.id));
 
       return reply.status(201).send({
         success: true,
         message: `Akun ${link.channel} berhasil terhubung!`,
-        data: maskChannelAccount(created),
+        data: maskChannelAccount(savedAccount),
       });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

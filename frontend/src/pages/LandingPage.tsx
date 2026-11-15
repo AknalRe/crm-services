@@ -166,18 +166,18 @@ const COMPARISON_ROWS = [
 const STEPS = [
   {
     num: '01',
-    title: 'Masuk ke Panel Reneo CRM',
-    desc: 'Buka ruang kerja dan buat akun pemilik usaha Anda dalam hitungan detik.',
+    title: 'Pilih Hosting Siap Pakai atau Server Sendiri',
+    desc: 'Beli paket Hosting + Reneo CRM dalam satu tagihan agar langsung aktif, atau pasang aplikasi CRM ini di server Linux milik Anda sendiri.',
   },
   {
     num: '02',
-    title: 'Sambungkan WhatsApp & Media Sosial',
-    desc: 'Scan QR WhatsApp atau tautkan akun WA Bisnis, IG, FB, Threads, dan Telegram.',
+    title: 'Setup Akun & Aktifkan Lisensi (Trial 7 Hari)',
+    desc: 'Buka alamat CRM Anda, buat akun pemilik usaha pertama, lalu aktifkan Trial 7 Hari gratis atau pilih paket lisensi yang sesuai.',
   },
   {
     num: '03',
-    title: 'Tambahkan Tim CS & Mulai Balas Chat',
-    desc: 'Buat akun untuk masing-masing staf dan atur pembagian chat masuk otomatis.',
+    title: 'Sambungkan Kanal & Tim CS',
+    desc: 'Scan QR WhatsApp atau tautkan WA Bisnis, IG, FB, Threads, dan Telegram, lalu buat akun staf CS agar chat terbagi otomatis.',
   },
 ];
 
@@ -187,8 +187,12 @@ const FAQS = [
     a: 'Bisa. Anda dapat menggabungkan beberapa nomor WhatsApp lewat scan QR sekaligus menyambungkan nomor WhatsApp Bisnis resmi dari Meta di satu kotak masuk.',
   },
   {
+    q: 'Apakah ada biaya tambahan per pesan saat mengirim broadcast atau membalas chat?',
+    a: 'Tidak ada biaya tambahan per pesan dari panel Reneo. Nomor WhatsApp yang terhubung via scan QR (WAHA) tidak dikenakan biaya per percakapan Meta. Jika Anda memakai WhatsApp Cloud API resmi Meta, biaya percakapan mengikuti tarif langsung dari Meta Business.',
+  },
+  {
     q: 'Apakah data kontak dan riwayat chat pelanggan aman?',
-    a: 'Aman. Seluruh data pelanggan, katalog produk, dan riwayat percakapan tersimpan langsung di server milik Anda sendiri, tidak bercampur dengan pengguna lain.',
+    a: 'Aman. Seluruh data pelanggan, katalog produk, dan riwayat percakapan tersimpan langsung di server/container milik Anda sendiri, terpisah per domain dan tidak bercampur dengan pengguna lain.',
   },
   {
     q: 'Apakah staf CS atau Sales bisa punya akun login masing-masing?',
@@ -207,20 +211,24 @@ const FAQS = [
 export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLogin }) => {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const currentHost =
+    typeof window !== 'undefined' && window.location.host
+      ? window.location.host
+      : 'panel.reneo.my.id';
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans overflow-y-auto">
+    <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-[#f8fafc] text-slate-900 font-sans overflow-y-auto">
       {/* Header */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             <ReneoCrmLogo className="w-8 h-8 shrink-0" />
             <div className="min-w-0">
               <div className="text-sm font-bold text-slate-900 leading-tight truncate">
                 Reneo CRM
               </div>
               <div className="text-[11px] font-mono text-slate-500 leading-tight truncate">
-                panel.reneo.my.id
+                {currentHost}
               </div>
             </div>
           </div>
@@ -237,20 +245,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             ))}
           </nav>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
               onClick={onEnterLogin}
-              className="h-8 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium inline-flex items-center transition-colors whitespace-nowrap"
+              className="h-8 px-2.5 sm:px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium inline-flex items-center transition-colors whitespace-nowrap"
             >
-              {initialized ? 'Masuk CRM' : 'Setup CRM'}
+              <span>{initialized ? 'Masuk' : 'Setup'}</span>
+              <span className="hidden sm:inline">&nbsp;CRM</span>
             </button>
             <a
               href={PANEL_ORDER_URL}
               target="_top"
-              className="h-8 px-3 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              className="h-8 px-2.5 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
-              <span>Beli Hosting + CRM</span>
+              <span className="sm:hidden">Beli Paket</span>
+              <span className="hidden sm:inline">Beli Hosting + CRM</span>
               <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
             </a>
             <button
@@ -267,7 +277,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
 
         {/* Mobile Nav Drawer */}
         {mobileMenuOpen && (
-          <nav className="md:hidden border-t border-slate-200 bg-white px-4 py-2.5 flex flex-col gap-1">
+          <nav className="md:hidden border-t border-slate-200 bg-white px-4 py-3 flex flex-col gap-1">
             {NAV_LINKS.map((link) => (
               <a
                 key={link.href}
@@ -278,6 +288,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 {link.label}
               </a>
             ))}
+            <div className="pt-2 mt-1 border-t border-slate-100 flex flex-col gap-2">
+              <a
+                href={PANEL_ORDER_URL}
+                target="_top"
+                className="h-9 px-3 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5"
+              >
+                <span>Beli Hosting + CRM &amp; Lisensi</span>
+                <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onEnterLogin();
+                }}
+                className="h-9 px-3 rounded-lg border border-slate-200 text-slate-700 text-xs font-medium inline-flex items-center justify-center"
+              >
+                {initialized ? 'Masuk ke Ruang Kerja CRM' : 'Lanjutkan Setup CRM'}
+              </button>
+            </div>
           </nav>
         )}
       </header>
@@ -301,27 +331,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 <a
                   href={PANEL_ORDER_URL}
                   target="_top"
-                  className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+                  className="min-h-[40px] py-2 px-4 sm:px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 text-center transition-colors"
                 >
                   <span>Beli Hosting + CRM &amp; Lisensi</span>
-                  <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+                  <ArrowRight className="w-4 h-4 shrink-0" strokeWidth={1.75} />
                 </a>
                 <a
                   href={PANEL_INSTALL_URL}
                   target="_top"
-                  className="h-10 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+                  className="min-h-[40px] py-2 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm font-semibold inline-flex items-center justify-center gap-2 text-center transition-colors"
                 >
                   Pasang di Server Sendiri
                 </a>
               </div>
-              <div className="text-xs text-slate-500">
-                Bisa langsung beli paket Hosting + Reneo CRM siap pakai dalam 1 tagihan, atau{' '}
+              <div className="text-xs text-slate-500 leading-relaxed">
+                Pilih paket <strong className="font-semibold text-slate-700">Hosting + Reneo CRM siap pakai</strong> dalam 1 tagihan atau pasang di VPS sendiri. Sudah punya ruang kerja?{' '}
                 <button
                   type="button"
                   onClick={onEnterLogin}
                   className="font-semibold text-[#2563eb] hover:underline"
                 >
-                  {initialized ? 'masuk ke ruang kerja CRM' : 'lanjutkan setup CRM'}
+                  {initialized ? 'Masuk ke CRM' : 'Lanjutkan Setup CRM'}
                 </button>
                 .
               </div>
@@ -369,9 +399,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
               <div className="grid grid-cols-1 sm:grid-cols-12 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 text-xs">
                 <div className="sm:col-span-5 divide-y divide-slate-100 bg-slate-50/50">
                   <div className="px-3 py-2.5 bg-white">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-semibold text-slate-900">Siti Aminah</span>
-                      <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0">
                         WA Bisnis
                       </span>
                     </div>
@@ -384,9 +414,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                   </div>
 
                   <div className="px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-semibold text-slate-800">@tokoresmi.id</span>
-                      <span className="text-[10px] font-mono text-pink-700 bg-pink-50 border border-pink-200 px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] font-mono text-pink-700 bg-pink-50 border border-pink-200 px-1.5 py-0.5 rounded shrink-0">
                         Instagram
                       </span>
                     </div>
@@ -398,12 +428,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
 
                 <div className="sm:col-span-7 p-3.5 space-y-3 bg-white flex flex-col justify-between">
                   <div className="space-y-2.5">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <div>
+                    <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-100 pb-2">
+                      <div className="min-w-0">
                         <div className="font-semibold text-slate-900">Siti Aminah</div>
                         <div className="text-[11px] font-mono text-slate-500">+62 812-3456-7890</div>
                       </div>
-                      <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                      <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded shrink-0">
                         Aktif
                       </span>
                     </div>
@@ -417,14 +447,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                     </div>
                   </div>
 
-                  <div className="border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 flex items-center justify-between gap-2">
-                    <div>
+                  <div className="border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="min-w-0">
                       <div className="text-[11px] font-semibold text-slate-800">
-                        Draft Tagihan #INV-1042
+                        Quick Quote · Katalog Produk
                       </div>
-                      <div className="text-[10px] text-slate-500">Paket Bundling 3 pcs</div>
+                      <div className="text-[10px] text-slate-500 truncate">Paket Bundling (3 pcs)</div>
                     </div>
-                    <span className="font-mono text-xs font-bold text-slate-900">Rp 245.000</span>
+                    <span className="font-mono text-xs font-bold text-slate-900 shrink-0">Rp 245.000</span>
                   </div>
                 </div>
               </div>
@@ -467,8 +497,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
         </div>
 
         {/* Desktop table */}
-        <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-hidden">
-          <table className="w-full text-left border-collapse">
+        <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-x-auto">
+          <table className="w-full min-w-[680px] text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700">
                 <th className="py-2.5 px-4 w-[24%]">Jenis Usaha</th>
@@ -507,7 +537,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 key={ch.name}
                 className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-4"
               >
-                <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
                   <span className="text-xs sm:text-sm font-semibold text-slate-900">{ch.name}</span>
                   <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
                     {ch.mode}
@@ -575,9 +605,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                   {row.aspect}
                 </div>
                 <dl className="divide-y divide-slate-200 text-xs">
-                  <div className="px-3.5 py-2 flex items-start justify-between gap-3">
+                  <div className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-3">
                     <dt className="text-slate-500 font-medium shrink-0">Manual (Banyak HP)</dt>
-                    <dd className="flex items-start gap-1.5 text-right text-slate-600">
+                    <dd className="flex items-start gap-1.5 sm:text-right text-slate-600">
                       {row.manual.ok ? (
                         <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
                       ) : (
@@ -586,9 +616,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                       <span>{row.manual.text}</span>
                     </dd>
                   </div>
-                  <div className="px-3.5 py-2 flex items-start justify-between gap-3">
+                  <div className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-3">
                     <dt className="text-slate-500 font-medium shrink-0">CRM Cloud Lainnya</dt>
-                    <dd className="flex items-start gap-1.5 text-right text-slate-600">
+                    <dd className="flex items-start gap-1.5 sm:text-right text-slate-600">
                       {row.saas.ok ? (
                         <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
                       ) : (
@@ -597,9 +627,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                       <span>{row.saas.text}</span>
                     </dd>
                   </div>
-                  <div className="px-3.5 py-2.5 flex items-start justify-between gap-3 bg-blue-50/40">
+                  <div className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-3 bg-blue-50/40">
                     <dt className="text-[#1d4ed8] font-semibold shrink-0">Reneo CRM</dt>
-                    <dd className="flex items-start gap-1.5 text-right font-medium text-slate-900">
+                    <dd className="flex items-start gap-1.5 sm:text-right font-medium text-slate-900">
                       <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
                       <span>{row.reneo.text}</span>
                     </dd>
@@ -610,8 +640,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
           </div>
 
           {/* Desktop table */}
-          <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-hidden">
-            <table className="w-full text-left border-collapse">
+          <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700">
                   <th className="py-2.5 px-3.5 w-[31%]">Kebutuhan Usaha</th>
@@ -667,7 +697,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             Mulai Beroperasi dalam 3 Langkah
           </h2>
           <p className="text-xs sm:text-sm text-slate-600">
-            Aplikasi sudah terpasang di server Anda—tinggal masuk dan sambungkan kanal.
+            Dua jalur aktivasi—langsung terima beres dengan hosting Reneo atau pasang di server sendiri.
           </p>
         </div>
 
@@ -760,15 +790,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             <a
               href={PANEL_ORDER_URL}
               target="_top"
-              className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+              className="min-h-[40px] py-2 px-4 sm:px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 text-center transition-colors"
             >
               <span>Beli Hosting + CRM &amp; Lisensi</span>
-              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+              <ArrowRight className="w-4 h-4 shrink-0" strokeWidth={1.75} />
             </a>
             <a
               href={PANEL_INSTALL_URL}
               target="_top"
-              className="h-10 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-semibold inline-flex items-center justify-center transition-colors whitespace-nowrap"
+              className="min-h-[40px] py-2 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-semibold inline-flex items-center justify-center text-center transition-colors"
             >
               Pasang di Server Sendiri
             </a>
@@ -779,9 +809,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
             <ReneoCrmLogo className="w-5 h-5 shrink-0" />
             <span>Reneo CRM</span>
+            {currentHost !== 'panel.reneo.my.id' && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span className="font-mono text-slate-700">{currentHost}</span>
+              </>
+            )}
             <span className="text-slate-300">·</span>
             <a href={PANEL_URL} target="_top" className="font-mono hover:text-slate-800 transition-colors">
               panel.reneo.my.id

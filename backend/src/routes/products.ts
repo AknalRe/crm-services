@@ -93,8 +93,20 @@ export default async function productsRouter(fastify: FastifyInstance) {
       }
 
       const patch: Record<string, any> = { updatedAt: new Date() };
-      if (req.body?.name !== undefined) patch.name = String(req.body.name).trim();
-      if (req.body?.sku !== undefined) patch.sku = String(req.body.sku).trim();
+      if (req.body?.name !== undefined) {
+        const cleanName = String(req.body.name).trim();
+        if (!cleanName) {
+          return reply.status(400).send({ success: false, error: 'Nama produk tidak boleh kosong' });
+        }
+        patch.name = cleanName;
+      }
+      if (req.body?.sku !== undefined) {
+        const cleanSku = String(req.body.sku).trim();
+        if (!cleanSku) {
+          return reply.status(400).send({ success: false, error: 'Kode SKU tidak boleh kosong' });
+        }
+        patch.sku = cleanSku;
+      }
       if (req.body?.category !== undefined) patch.category = String(req.body.category).trim() || null;
       if (req.body?.price !== undefined) patch.price = Math.max(0, Math.round(Number(req.body.price) || 0));
       if (req.body?.unit !== undefined) patch.unit = String(req.body.unit).trim() || 'pcs';
@@ -109,6 +121,9 @@ export default async function productsRouter(fastify: FastifyInstance) {
 
       return reply.send({ success: true, data: updated });
     } catch (error: any) {
+      if (String(error.message || '').toLowerCase().includes('unique')) {
+        return reply.status(400).send({ success: false, error: 'Kode SKU sudah digunakan produk lain' });
+      }
       return reply.status(500).send({ success: false, error: error.message });
     }
   });

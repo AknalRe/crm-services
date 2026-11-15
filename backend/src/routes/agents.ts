@@ -156,17 +156,18 @@ export default async function agentsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // PATCH update agent (role, permissions, isActive, name, password)
-  fastify.patch('/:id', async (req: FastifyRequest<{
+  // PATCH update agent (role, permissions, isActive, name, email, password)
+  fastify.patch<{
     Params: { id: string };
     Body: {
       name?: string;
+      email?: string;
       role?: 'ADMIN' | 'AGENT';
       permissions?: string[];
       isActive?: boolean;
       password?: string;
     };
-  }>, reply: FastifyReply) => {
+  }>('/:id', async (req, reply) => {
     try {
       const rows = await db.select().from(crmAgents).where(eq(crmAgents.id, req.params.id));
       const target = rows[0];
@@ -181,11 +182,58 @@ export default async function agentsRouter(fastify: FastifyInstance) {
 
       const nextRole: 'ADMIN' | 'AGENT' =
         req.body?.role === 'ADMIN' ? 'ADMIN' : req.body?.role === 'AGENT' ? 'AGENT' : target.role === 'ADMIN' ? 'ADMIN' : 'AGENT';
+
+      if (currentUser?.id === target.id && target.role === 'ADMIN' && nextRole !== 'ADMIN') {
+        return reply.status(400).send({
+          success: false,
+          error: 'Tidak dapat menurunkan peran akun Admin yang sedang digunakan.',
+        });
+      }
+
+      const willRemainActiveAdmin =
+        nextRole === 'ADMIN' && (req.body?.isActive !== undefined ? Boolean(req.body.isActive) : target.isActive);
+      if (target.role === 'ADMIN' && !willRemainActiveAdmin) {
+        const all = await db.select().from(crmAgents);
+        const otherAdmins = all.filter((a) => a.id !== target.id && a.role === 'ADMIN' && a.isActive);
+        if (otherAdmins.length === 0) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Minimal harus ada 1 akun Admin aktif.',
+          });
+        }
+      }
+
+      if (req.body?.password !== undefined && req.body.password !== '' && req.body.password.length < 6) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Password baru minimal harus 6 karakter.',
+        });
+      }
+
       const updateData: any = {
         role: nextRole,
         updatedAt: new Date(),
       };
-      if (req.body?.name && req.body.name.trim()) updateData.name = req.body.name.trim();
+      if (req.body?.name !== undefined) {
+        const cleanName = req.body.name.trim();
+        if (!cleanName) {
+          return reply.status(400).send({ success: false, error: 'Nama agent tidak boleh kosong.' });
+        }
+        updateData.name = cleanName;
+      }
+      if (req.body?.email !== undefined) {
+        const cleanEmail = req.body.email.trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+          return reply.status(400).send({ success: false, error: 'Format email tidak valid.' });
+        }
+        if (cleanEmail !== target.email.toLowerCase()) {
+          const dupRows = await db.select().from(crmAgents).where(eq(crmAgents.email, cleanEmail));
+          if (dupRows.some((r) => r.id !== target.id)) {
+            return reply.status(409).send({ success: false, error: 'Email sudah digunakan oleh agent lain.' });
+          }
+          updateData.email = cleanEmail;
+        }
+      }
       if (req.body?.isActive !== undefined) updateData.isActive = Boolean(req.body.isActive);
       if (req.body?.password && req.body.password.length >= 6) {
         updateData.passwordHash = hashPassword(req.body.password);

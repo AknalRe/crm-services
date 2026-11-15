@@ -27,7 +27,7 @@ export class WahaService {
   private static instance: WahaService;
   private webhookSyncAt = new Map<string, number>();
 
-  private constructor() {}
+  private constructor() { }
 
   public static getInstance(): WahaService {
     if (!WahaService.instance) {
@@ -112,7 +112,7 @@ export class WahaService {
       const rawApiKey = keySetting?.value || '';
       return {
         baseUrl: urlSetting?.value || '',
-        apiKey: rawApiKey,
+        apiKey: maskSecret ? (rawApiKey ? '••••••••' : '') : rawApiKey,
         session: sessionSetting?.value || config.waha.session || 'default',
         mode: 'EXTERNAL',
         internalLocked: false,
@@ -346,7 +346,7 @@ export class WahaService {
             .put(`/api/sessions/${encodeURIComponent(targetSession)}`, {
               config: { webhooks: webhookConfigs },
             })
-            .catch(() => {});
+            .catch(() => { });
         }
         try {
           const startRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/start`);
@@ -356,7 +356,7 @@ export class WahaService {
             const restartRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/restart`);
             return restartRes.data;
           } catch {
-            await client.post('/api/sessions/stop', { name: targetSession }).catch(() => {});
+            await client.post('/api/sessions/stop', { name: targetSession }).catch(() => { });
             const legacyRes = await client.post('/api/sessions/start', {
               name: targetSession,
               config: { webhooks: webhookConfigs },
@@ -515,7 +515,7 @@ export class WahaService {
       }
 
       if (currentStatus === 'STOPPED' || currentStatus === 'NOT_FOUND' || currentStatus === 'UNKNOWN') {
-        await this.startSession(targetSession).catch(() => {});
+        await this.startSession(targetSession).catch(() => { });
         try {
           const sRes = await client.get(`/api/sessions/${encodeURIComponent(targetSession)}`);
           currentStatus = sRes.data?.status || 'STARTING';
@@ -566,8 +566,11 @@ export class WahaService {
     sessionName?: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
-      const { client, session } = await this.getClient();
-      const targetSession = sessionName || session;
+      const { client, session, ownerPrefix } = await this.getClient();
+      const targetSession = sessionName
+        ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
+        : session;
+      this.assertOwnedSession(targetSession, ownerPrefix);
       const chatId = toWahaChatId(phone);
 
       const response = await client.post('/api/sendText', {
@@ -606,8 +609,11 @@ export class WahaService {
     sessionName?: string
   ): Promise<{ success: boolean; messageId?: string; sessionUsed?: string; error?: string }> {
     try {
-      const { client, session } = await this.getClient();
-      const targetSession = sessionName || session;
+      const { client, session, ownerPrefix } = await this.getClient();
+      const targetSession = sessionName
+        ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
+        : session;
+      this.assertOwnedSession(targetSession, ownerPrefix);
       const chatId = toWahaChatId(phone);
       const isImage = file.mimetype.startsWith('image/');
       const endpoint = isImage ? '/api/sendImage' : '/api/sendFile';

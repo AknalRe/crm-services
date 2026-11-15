@@ -60,13 +60,17 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       ];
 
       if (mode === 'EXTERNAL') {
-        if (!baseUrl || !baseUrl.trim()) {
-          return reply.status(400).send({ success: false, error: 'Base URL WAHA wajib diisi untuk mode eksternal' });
+        const cleanUrl = (baseUrl || '').trim();
+        if (!cleanUrl || !/^https?:\/\//i.test(cleanUrl)) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Base URL WAHA wajib diisi dan diawali http:// atau https:// untuk mode eksternal',
+          });
         }
-        pairs.push(
-          { key: 'waha_base_url', value: baseUrl.trim() },
-          { key: 'waha_api_key', value: (apiKey || '').trim() },
-        );
+        pairs.push({ key: 'waha_base_url', value: cleanUrl });
+        if (apiKey !== undefined && apiKey !== '••••••••') {
+          pairs.push({ key: 'waha_api_key', value: apiKey.trim() });
+        }
       }
 
       if (session && session.trim()) {
@@ -171,12 +175,29 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         multiSenders,
       } = req.body;
       const now = new Date();
+      if (sendTime !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(sendTime).trim())) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Format jam kirim ulang tahun tidak valid (gunakan HH:mm)',
+        });
+      }
+
+      const normalizedDelay =
+        delaySeconds !== undefined && Number.isFinite(Number(delaySeconds))
+          ? Math.max(0, Math.min(300, Math.round(Number(delaySeconds))))
+          : undefined;
 
       const updateData: any = { updatedAt: now };
       if (isEnabled !== undefined) updateData.isEnabled = Boolean(isEnabled);
-      if (sendTime) updateData.sendTime = sendTime;
-      if (messageTemplate) updateData.messageTemplate = messageTemplate;
-      if (delaySeconds) updateData.delaySeconds = Number(delaySeconds);
+      if (sendTime) updateData.sendTime = String(sendTime).trim();
+      if (messageTemplate !== undefined) {
+        const cleanTpl = String(messageTemplate).trim();
+        if (!cleanTpl) {
+          return reply.status(400).send({ success: false, error: 'Template pesan ucapan tidak boleh kosong' });
+        }
+        updateData.messageTemplate = cleanTpl;
+      }
+      if (normalizedDelay !== undefined) updateData.delaySeconds = normalizedDelay;
       if (channel !== undefined) updateData.channel = channel || 'WHATSAPP';
       if (channelAccountId !== undefined) {
         updateData.channelAccountId =
@@ -191,11 +212,11 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         .values({
           id: 'default',
           isEnabled: isEnabled !== undefined ? Boolean(isEnabled) : true,
-          sendTime: sendTime || '08:00',
+          sendTime: sendTime ? String(sendTime).trim() : '08:00',
           messageTemplate:
-            messageTemplate ||
+            (messageTemplate && String(messageTemplate).trim()) ||
             'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!',
-          delaySeconds: delaySeconds ? Number(delaySeconds) : 5,
+          delaySeconds: normalizedDelay ?? 5,
           channel: channel || 'WHATSAPP',
           channelAccountId:
             channelAccountId && channelAccountId.trim() ? channelAccountId.trim() : null,
@@ -373,31 +394,69 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   }>('/automation', { preHandler: requirePermission('settings') }, async (req, reply) => {
     try {
       const b = req.body || {};
-      const autoAssignMode =
-        b.autoAssignMode === 'ROUND_ROBIN' || b.autoAssignMode === 'LEAST_BUSY'
-          ? b.autoAssignMode
-          : 'NONE';
-      const webhookUrl = String(b.slaAlertWebhookUrl || '').trim();
-      if (webhookUrl && !/^https?:\/\//i.test(webhookUrl)) {
-        return reply.status(400).send({
-          success: false,
-          error: 'URL Webhook Eskalasi SLA harus diawali http:// atau https://',
-        });
+      const now = new Date();
+      const pairs: Array<[string, string]> = [];
+
+      if (b.autoAssignMode !== undefined) {
+        const autoAssignMode =
+          b.autoAssignMode === 'ROUND_ROBIN' || b.autoAssignMode === 'LEAST_BUSY'
+            ? b.autoAssignMode
+            : 'NONE';
+        pairs.push(['auto_assign_mode', autoAssignMode]);
       }
 
-      const now = new Date();
-      const pairs: Array<[string, string]> = [
-        ['auto_assign_mode', autoAssignMode],
-        ['welcome_enabled', b.welcomeEnabled ? 'true' : 'false'],
-        ['welcome_message', String(b.welcomeMessage || '').trim()],
-        ['offhours_enabled', b.offhoursEnabled ? 'true' : 'false'],
-        ['business_hours_start', String(b.businessHoursStart || '08:00').trim() || '08:00'],
-        ['business_hours_end', String(b.businessHoursEnd || '17:00').trim() || '17:00'],
-        ['business_days', String(b.businessDays || '1,2,3,4,5').trim() || '1,2,3,4,5'],
-        ['offhours_message', String(b.offhoursMessage || '').trim()],
-        ['sla_escalation_enabled', b.slaEscalationEnabled === false ? 'false' : 'true'],
-        ['sla_alert_webhook_url', webhookUrl],
-      ];
+      if (b.slaAlertWebhookUrl !== undefined) {
+        const webhookUrl = String(b.slaAlertWebhookUrl || '').trim();
+        if (webhookUrl && !/^https?:\/\//i.test(webhookUrl)) {
+          return reply.status(400).send({
+            success: false,
+            error: 'URL Webhook Eskalasi SLA harus diawali http:// atau https://',
+          });
+        }
+        pairs.push(['sla_alert_webhook_url', webhookUrl]);
+      }
+
+      if (b.slaEscalationEnabled !== undefined) {
+        pairs.push(['sla_escalation_enabled', b.slaEscalationEnabled === false ? 'false' : 'true']);
+      }
+
+      if (b.welcomeEnabled !== undefined) {
+        pairs.push(['welcome_enabled', b.welcomeEnabled ? 'true' : 'false']);
+      }
+      if (b.welcomeMessage !== undefined) {
+        pairs.push(['welcome_message', String(b.welcomeMessage || '').trim()]);
+      }
+      if (b.offhoursEnabled !== undefined) {
+        pairs.push(['offhours_enabled', b.offhoursEnabled ? 'true' : 'false']);
+      }
+      if (b.businessHoursStart !== undefined || b.businessHoursEnd !== undefined) {
+        const startHour = String(b.businessHoursStart || '08:00').trim() || '08:00';
+        const endHour = String(b.businessHoursEnd || '17:00').trim() || '17:00';
+        if (
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(startHour) ||
+          !/^([01]\d|2[0-3]):[0-5]\d$/.test(endHour)
+        ) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Format jam operasional harus HH:mm (contoh 08:00 - 17:00)',
+          });
+        }
+        if (b.businessHoursStart !== undefined) pairs.push(['business_hours_start', startHour]);
+        if (b.businessHoursEnd !== undefined) pairs.push(['business_hours_end', endHour]);
+      }
+      if (b.businessDays !== undefined) {
+        const cleanDays = String(b.businessDays || '')
+          .split(',')
+          .map((d) => Number.parseInt(d.trim(), 10))
+          .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+        pairs.push([
+          'business_days',
+          Array.from(new Set(cleanDays)).sort().join(',') || '1,2,3,4,5',
+        ]);
+      }
+      if (b.offhoursMessage !== undefined) {
+        pairs.push(['offhours_message', String(b.offhoursMessage || '').trim()]);
+      }
 
       for (const [key, value] of pairs) {
         await db
@@ -457,14 +516,34 @@ export default async function settingsRouter(fastify: FastifyInstance) {
 
   fastify.patch<{
     Params: { id: string };
-    Body: { isActive?: boolean; keyword?: string; matchType?: string; replyText?: string };
+    Body: { isActive?: boolean; keyword?: string; matchType?: string; replyText?: string; priority?: number };
   }>('/auto-replies/:id', { preHandler: requirePermission('settings') }, async (req, reply) => {
     try {
       const patch: Record<string, any> = { updatedAt: new Date() };
       if (req.body?.isActive !== undefined) patch.isActive = Boolean(req.body.isActive);
-      if (req.body?.keyword !== undefined) patch.keyword = String(req.body.keyword).trim();
-      if (req.body?.replyText !== undefined) patch.replyText = String(req.body.replyText).trim();
-      if (req.body?.matchType !== undefined) patch.matchType = req.body.matchType;
+      if (req.body?.keyword !== undefined) {
+        const cleanKw = String(req.body.keyword).trim();
+        if (!cleanKw) {
+          return reply.status(400).send({ success: false, error: 'Kata kunci tidak boleh kosong' });
+        }
+        patch.keyword = cleanKw;
+      }
+      if (req.body?.replyText !== undefined) {
+        const cleanReply = String(req.body.replyText).trim();
+        if (!cleanReply) {
+          return reply.status(400).send({ success: false, error: 'Balasan otomatis tidak boleh kosong' });
+        }
+        patch.replyText = cleanReply;
+      }
+      if (req.body?.matchType !== undefined) {
+        patch.matchType =
+          req.body.matchType === 'EXACT' || req.body.matchType === 'STARTS_WITH'
+            ? req.body.matchType
+            : 'CONTAINS';
+      }
+      if (req.body?.priority !== undefined && Number.isFinite(Number(req.body.priority))) {
+        patch.priority = Math.round(Number(req.body.priority));
+      }
 
       const [updated] = await db
         .update(autoReplyRules)

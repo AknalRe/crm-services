@@ -24,6 +24,7 @@ import commentsRouter from './routes/comments';
 import feedRouter from './routes/feed';
 import automationsRouter from './routes/automations';
 import aiAgentRouter from './routes/aiAgent';
+import masterDataRouter from './routes/masterData';
 import { BirthdayService } from './services/birthday.service';
 import { PostService } from './services/post.service';
 import { startSlaMonitor } from './services/automation.service';
@@ -143,6 +144,7 @@ async function main() {
   await fastify.register(feedRouter, { prefix: '/api/feed' });
   await fastify.register(automationsRouter, { prefix: '/api/automations' });
   await fastify.register(aiAgentRouter, { prefix: '/api/ai-agent' });
+  await fastify.register(masterDataRouter, { prefix: '/api/master' });
 
   // Initialize DB Schema (PostgreSQL)
   try {

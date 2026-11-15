@@ -10,6 +10,7 @@ import {
   conversations,
 } from '../db/schema';
 import { liveEvents } from './events.service';
+import { handleInboundAutomation } from './automation.service';
 
 export type OmnichannelType =
   | 'WHATSAPP'
@@ -191,6 +192,22 @@ export async function upsertInboundChannelMessage(params: {
   });
 
   liveEvents.emit('conversations:update', { conversationId, channel });
+
+  if (body) {
+    const contactRows = await db.select().from(contacts).where(eq(contacts.id, contactId));
+    const contactRecord = contactRows[0] || { id: contactId, namaLengkap: senderName || 'Pelanggan' };
+    void handleInboundAutomation({
+      conversationId,
+      contact: contactRecord,
+      assignedAgentId: existing?.assignedAgentId || null,
+      inboundBody: body,
+      channel,
+      channelAccountId,
+      externalThreadId: externalThreadId || existing?.externalThreadId || null,
+      isNewConversation: !existing,
+    });
+  }
+
   return { conversationId, contactId };
 }
 

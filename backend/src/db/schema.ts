@@ -154,7 +154,9 @@ export const cannedResponses = pgTable('canned_responses', {
   id: text('id').primaryKey(),
   shortCode: text('short_code').notNull().unique(),
   title: text('title').notNull(),
+  category: text('category').default('Umum').notNull(),
   content: text('content').notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -349,6 +351,29 @@ export const aiKnowledgeItems = pgTable('ai_knowledge_items', {
   category: text('category').default('FAQ').notNull(), // FAQ | CATALOG | POLICY | WEB
   content: text('content').notNull(),
   sourceUrl: text('source_url'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const crmLabels = pgTable('crm_labels', {
+  id: text('id').primaryKey(),
+  scope: text('scope').default('CONVERSATION_LABEL').notNull(), // CONVERSATION_LABEL | CONTACT_CATEGORY
+  name: text('name').notNull(),
+  color: text('color').default('slate').notNull(),
+  description: text('description'),
+  sortOrder: integer('sort_order').default(10).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const messageTemplates = pgTable('message_templates', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  category: text('category').default('Umum').notNull(),
+  channel: text('channel').default('ALL').notNull(),
+  content: text('content').notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

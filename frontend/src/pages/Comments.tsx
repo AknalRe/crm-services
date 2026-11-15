@@ -116,7 +116,7 @@ export const Comments: React.FC = () => {
         </Button>
       </div>
 
-      <div className="flex items-center gap-4 border-b border-gray-200">
+      <div className="flex items-center gap-4 border-b border-gray-200 overflow-x-auto">
         {(
           [
             { id: 'PENDING', label: 'Perlu dibalas' },
@@ -219,7 +219,7 @@ export const Comments: React.FC = () => {
                       onChange={(e) =>
                         setReplyDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))
                       }
-                      className="flex-1 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs focus:outline-none focus:border-indigo-500"
+                      className="flex-1 min-w-0 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs focus:outline-none focus:border-indigo-500"
                     />
                     <Button
                       type="button"

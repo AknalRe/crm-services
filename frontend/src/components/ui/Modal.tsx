@@ -37,7 +37,7 @@ export const Modal: React.FC<ModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 backdrop-blur-[1px]"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-slate-900/45 backdrop-blur-[1px]"
       onClick={() => {
         if (!isLoading) onClose();
       }}
@@ -45,10 +45,10 @@ export const Modal: React.FC<ModalProps> = ({
       aria-modal="true"
     >
       <div
-        className={`w-full ${maxWidthClass} bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden flex flex-col max-h-[90vh]`}
+        className={`w-full ${maxWidthClass} bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden flex flex-col max-h-[92dvh]`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-gray-200 bg-white">
+        <div className="flex items-start justify-between gap-3 sm:gap-4 px-4 sm:px-5 py-3.5 sm:py-4 border-b border-gray-200 bg-white">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-gray-900 leading-tight">{title}</h3>
             {subtitle && (
@@ -59,17 +59,17 @@ export const Modal: React.FC<ModalProps> = ({
             type="button"
             disabled={isLoading}
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100 transition-colors disabled:opacity-40"
+            className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-100 transition-colors disabled:opacity-40 shrink-0"
             aria-label="Tutup dialog"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="px-5 py-4 overflow-y-auto flex-1">{children}</div>
+        <div className="px-4 sm:px-5 py-4 overflow-y-auto flex-1">{children}</div>
 
         {footer && (
-          <div className="px-5 py-3.5 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-2.5">
+          <div className="px-4 sm:px-5 py-3.5 border-t border-gray-200 bg-gray-50 flex flex-wrap items-center justify-end gap-2 sm:gap-2.5">
             {footer}
           </div>
         )}

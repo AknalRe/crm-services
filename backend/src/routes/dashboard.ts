@@ -90,14 +90,22 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           ? Math.round((readRecipients / (deliveredRecipients + readRecipients)) * 100)
           : 0;
 
-      // Check today's birthdays
-      const now = new Date();
-      const currentMonth = now.getMonth() + 1;
-      const currentDay = now.getDate();
+      // Check today's birthdays in Asia/Jakarta (WIB)
+      const wibParts = Object.fromEntries(
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Jakarta',
+          month: '2-digit',
+          day: '2-digit',
+        })
+          .formatToParts(new Date())
+          .map((p) => [p.type, p.value])
+      );
+      const currentMonth = Number.parseInt(wibParts.month, 10);
+      const currentDay = Number.parseInt(wibParts.day, 10);
       const birthdayTodayCount = birthdayContactsList.filter((c) => {
         if (!c.tanggalLahir) return false;
         const bDate = new Date(c.tanggalLahir);
-        return bDate.getMonth() + 1 === currentMonth && bDate.getDate() === currentDay;
+        return bDate.getUTCMonth() + 1 === currentMonth && bDate.getUTCDate() === currentDay;
       }).length;
 
       // Chatwoot-style Conversation, SLA & CSAT Analytics

@@ -84,7 +84,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
     async (req, reply) => {
       try {
         const filename = String(req.params.filename || '').trim();
-        if (!/^[a-zA-Z0-9._-]+$/.test(filename)) {
+        if (!/^[a-zA-Z0-9._-]+$/.test(filename) || filename === '.' || filename === '..') {
           return reply.status(400).send({ success: false, error: 'Invalid filename' });
         }
         const filePath = path.join(UPLOADS_DIR, filename);
@@ -104,7 +104,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
     async (req: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
       try {
         const filename = String(req.params.filename || '').trim();
-        if (!/^[a-zA-Z0-9._-]+$/.test(filename)) {
+        if (!/^[a-zA-Z0-9._-]+$/.test(filename) || filename === '.' || filename === '..') {
           return reply.status(400).send({ success: false, error: 'Invalid filename' });
         }
         const filePath = path.join(UPLOADS_DIR, filename);

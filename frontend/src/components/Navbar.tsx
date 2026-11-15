@@ -24,12 +24,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="h-14 bg-white border-b border-gray-200 px-3 sm:px-6 flex items-center justify-between gap-2 sticky top-0 z-20 shrink-0">
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
         {onMenuClick && (
           <button
             type="button"
             onClick={onMenuClick}
-            className="lg:hidden p-1.5 -ml-1 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+            className="lg:hidden p-1.5 -ml-1 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 shrink-0"
             aria-label="Buka Menu"
           >
             <Menu className="w-5 h-5" />

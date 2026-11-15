@@ -299,16 +299,27 @@ export const api = {
     const res = await client.get('/conversations/agents');
     return res.data.data;
   },
-  getCannedResponses: async (): Promise<CannedResponse[]> => {
-    const res = await client.get('/conversations/canned');
+  getCannedResponses: async (activeOnly = false): Promise<CannedResponse[]> => {
+    const res = await client.get('/conversations/canned', {
+      params: activeOnly ? { activeOnly: 'true' } : undefined,
+    });
     return res.data.data;
   },
   createCannedResponse: async (data: {
     shortCode: string;
     title: string;
+    category?: string;
     content: string;
+    isActive?: boolean;
   }): Promise<CannedResponse> => {
     const res = await client.post('/conversations/canned', data);
+    return res.data.data;
+  },
+  updateCannedResponse: async (
+    id: string,
+    data: Partial<{ shortCode: string; title: string; category: string; content: string; isActive: boolean }>
+  ): Promise<CannedResponse> => {
+    const res = await client.patch(`/conversations/canned/${id}`, data);
     return res.data.data;
   },
   deleteCannedResponse: async (id: string): Promise<void> => {
@@ -782,6 +793,129 @@ export const api = {
   }> => {
     const res = await client.get('/channels/oauth/config');
     return res.data.data;
+  },
+
+  // Master Data: Balasan Cepat, Label & Kategori, Template Siaran
+  getMasterQuickReplies: async (params?: {
+    activeOnly?: boolean;
+    category?: string;
+    search?: string;
+  }): Promise<CannedResponse[]> => {
+    const res = await client.get('/master/quick-replies', {
+      params: {
+        activeOnly: params?.activeOnly ? 'true' : undefined,
+        category: params?.category,
+        search: params?.search,
+      },
+    });
+    return res.data.data || [];
+  },
+  createMasterQuickReply: async (data: {
+    shortCode: string;
+    title: string;
+    category?: string;
+    content: string;
+    isActive?: boolean;
+  }): Promise<CannedResponse> => {
+    const res = await client.post('/master/quick-replies', data);
+    return res.data.data;
+  },
+  updateMasterQuickReply: async (
+    id: string,
+    data: Partial<{
+      shortCode: string;
+      title: string;
+      category: string;
+      content: string;
+      isActive: boolean;
+    }>
+  ): Promise<CannedResponse> => {
+    const res = await client.patch(`/master/quick-replies/${id}`, data);
+    return res.data.data;
+  },
+  deleteMasterQuickReply: async (id: string): Promise<void> => {
+    await client.delete(`/master/quick-replies/${id}`);
+  },
+
+  getMasterLabels: async (
+    scope?: import('../types').CrmLabelScope,
+    activeOnly = false
+  ): Promise<import('../types').CrmLabelItem[]> => {
+    const res = await client.get('/master/labels', {
+      params: {
+        scope,
+        activeOnly: activeOnly ? 'true' : undefined,
+      },
+    });
+    return res.data.data || [];
+  },
+  createMasterLabel: async (data: {
+    scope: import('../types').CrmLabelScope;
+    name: string;
+    color?: import('../types').CrmLabelColor;
+    description?: string | null;
+    sortOrder?: number;
+    isActive?: boolean;
+  }): Promise<import('../types').CrmLabelItem> => {
+    const res = await client.post('/master/labels', data);
+    return res.data.data;
+  },
+  updateMasterLabel: async (
+    id: string,
+    data: Partial<{
+      name: string;
+      color: import('../types').CrmLabelColor;
+      description: string | null;
+      sortOrder: number;
+      isActive: boolean;
+    }>
+  ): Promise<import('../types').CrmLabelItem> => {
+    const res = await client.patch(`/master/labels/${id}`, data);
+    return res.data.data;
+  },
+  deleteMasterLabel: async (id: string): Promise<void> => {
+    await client.delete(`/master/labels/${id}`);
+  },
+
+  getMessageTemplates: async (params?: {
+    activeOnly?: boolean;
+    channel?: string;
+    category?: string;
+  }): Promise<import('../types').MessageTemplateItem[]> => {
+    const res = await client.get('/master/templates', {
+      params: {
+        activeOnly: params?.activeOnly ? 'true' : undefined,
+        channel: params?.channel,
+        category: params?.category,
+      },
+    });
+    return res.data.data || [];
+  },
+  createMessageTemplate: async (data: {
+    name: string;
+    category?: string;
+    channel?: string;
+    content: string;
+    isActive?: boolean;
+  }): Promise<import('../types').MessageTemplateItem> => {
+    const res = await client.post('/master/templates', data);
+    return res.data.data;
+  },
+  updateMessageTemplate: async (
+    id: string,
+    data: Partial<{
+      name: string;
+      category: string;
+      channel: string;
+      content: string;
+      isActive: boolean;
+    }>
+  ): Promise<import('../types').MessageTemplateItem> => {
+    const res = await client.patch(`/master/templates/${id}`, data);
+    return res.data.data;
+  },
+  deleteMessageTemplate: async (id: string): Promise<void> => {
+    await client.delete(`/master/templates/${id}`);
   },
 };
 

@@ -77,9 +77,21 @@ export default async function automationsRouter(fastify: FastifyInstance) {
   }>('/:id', async (req, reply) => {
     try {
       const updateData: any = { updatedAt: new Date() };
-      if (req.body?.name !== undefined) updateData.name = String(req.body.name).trim();
+      if (req.body?.name !== undefined) {
+        const cleanName = String(req.body.name).trim();
+        if (!cleanName) {
+          return reply.status(400).send({ success: false, error: 'Nama aturan tidak boleh kosong' });
+        }
+        updateData.name = cleanName;
+      }
       if (req.body?.channel !== undefined) updateData.channel = String(req.body.channel).toUpperCase();
-      if (req.body?.keyword !== undefined) updateData.keyword = String(req.body.keyword).trim();
+      if (req.body?.keyword !== undefined) {
+        const cleanKeyword = String(req.body.keyword).trim();
+        if (!cleanKeyword) {
+          return reply.status(400).send({ success: false, error: 'Kata kunci tidak boleh kosong' });
+        }
+        updateData.keyword = cleanKeyword;
+      }
       if (req.body?.matchType !== undefined) {
         updateData.matchType = String(req.body.matchType).toUpperCase() === 'EXACT' ? 'EXACT' : 'CONTAINS';
       }
@@ -97,6 +109,9 @@ export default async function automationsRouter(fastify: FastifyInstance) {
         .set(updateData)
         .where(eq(commentAutomations.id, req.params.id))
         .returning();
+      if (!updated) {
+        return reply.status(404).send({ success: false, error: 'Aturan otomasi tidak ditemukan' });
+      }
       return reply.send({ success: true, data: updated });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

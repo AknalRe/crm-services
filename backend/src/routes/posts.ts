@@ -70,6 +70,17 @@ export default async function postsRouter(fastify: FastifyInstance) {
         });
       }
 
+      const [account] = await db
+        .select()
+        .from(channelAccounts)
+        .where(eq(channelAccounts.id, channelAccountId));
+      if (!account || !account.isActive || account.channel !== channel) {
+        return reply.status(400).send({
+          success: false,
+          error: `Akun kanal ${channel} tidak ditemukan atau sedang nonaktif.`,
+        });
+      }
+
       const now = new Date();
       const scheduledAt =
         publishNow || !req.body?.scheduledAt ? now : new Date(req.body.scheduledAt);
@@ -128,6 +139,9 @@ export default async function postsRouter(fastify: FastifyInstance) {
         .set({ status: 'CANCELLED', updatedAt: new Date() })
         .where(eq(scheduledPosts.id, req.params.id))
         .returning();
+      if (!updated) {
+        return reply.status(404).send({ success: false, error: 'Jadwal postingan tidak ditemukan' });
+      }
       return reply.send({ success: true, data: updated });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

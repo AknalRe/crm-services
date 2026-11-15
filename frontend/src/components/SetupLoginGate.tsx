@@ -3,6 +3,7 @@ import { Lock, UserPlus, LogIn, ArrowLeft } from 'lucide-react';
 import api from '../services/api';
 import { Button } from './ui/Button';
 import { useToast } from './ui/ToastProvider';
+import { ReneoCrmLogo } from './ReneoCrmLogo';
 
 interface SetupLoginGateProps {
   initialized: boolean;
@@ -38,9 +39,22 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
     }
   };
 
+  const currentHost =
+    typeof window !== 'undefined' && window.location.host
+      ? window.location.host
+      : 'panel.reneo.my.id';
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-lg border border-gray-200 p-6 space-y-5">
+    <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-gray-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-lg border border-gray-200 p-5 sm:p-6 space-y-5">
+        <div className="flex items-center justify-between gap-2 pb-3 border-b border-gray-100">
+          <div className="flex items-center gap-2 min-w-0">
+            <ReneoCrmLogo className="w-6 h-6 shrink-0" />
+            <span className="text-xs font-semibold text-gray-800 truncate">Reneo CRM</span>
+          </div>
+          <span className="text-[11px] font-mono text-gray-500 truncate">{currentHost}</span>
+        </div>
+
         <div className="flex items-start gap-3">
           <div className="h-10 w-10 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center shrink-0">
             {initialized ? (
@@ -49,14 +63,14 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
               <UserPlus className="w-5 h-5 text-indigo-600" />
             )}
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-base font-semibold text-gray-900">
               {initialized ? 'Masuk ke Reneo CRM' : 'Setup Awal Akun Reneo CRM'}
             </h1>
             <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
               {initialized
-                ? 'Masukkan email dan kata sandi akun admin CRM Anda untuk melanjutkan.'
-                : 'Buat akun admin pertama untuk mengelola kontak, kampanye, dan Live Chat Omnichannel.'}
+                ? 'Masukkan email dan kata sandi akun admin atau staf CRM Anda untuk membuka ruang kerja.'
+                : 'Buat akun pemilik/admin pertama untuk workspace CRM ini (terpisah dari akun login panel server).'}
             </p>
           </div>
         </div>

@@ -245,7 +245,38 @@ export async function initDb() {
         id TEXT PRIMARY KEY,
         short_code TEXT NOT NULL UNIQUE,
         title TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Umum',
         content TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+    await sql`ALTER TABLE canned_responses ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Umum';`;
+    await sql`ALTER TABLE canned_responses ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;`;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS crm_labels (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL DEFAULT 'CONVERSATION_LABEL',
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT 'slate',
+        description TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 10,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS message_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'Umum',
+        channel TEXT NOT NULL DEFAULT 'ALL',
+        content TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
@@ -380,6 +411,41 @@ export async function initDb() {
       VALUES ('default', TRUE, '08:00', 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!', 5, NOW())
       ON CONFLICT (id) DO NOTHING;
     `;
+
+    // One-time idempotent seed for Master Labels & Contact Categories
+    const seededRows = await sql`
+      SELECT value FROM system_settings WHERE key = 'master_labels_seeded' LIMIT 1;
+    `;
+    if (!seededRows[0]) {
+      const existingLabels = await sql`SELECT COUNT(*)::int AS cnt FROM crm_labels;`;
+      if ((existingLabels[0]?.cnt || 0) === 0) {
+        const defaultLabels = [
+          { id: 'lbl-conv-vip', scope: 'CONVERSATION_LABEL', name: 'VIP', color: 'amber', sort: 1 },
+          { id: 'lbl-conv-followup', scope: 'CONVERSATION_LABEL', name: 'Follow Up', color: 'indigo', sort: 2 },
+          { id: 'lbl-conv-komplain', scope: 'CONVERSATION_LABEL', name: 'Komplain', color: 'rose', sort: 3 },
+          { id: 'lbl-conv-lunas', scope: 'CONVERSATION_LABEL', name: 'Lunas', color: 'emerald', sort: 4 },
+          { id: 'lbl-conv-prospek', scope: 'CONVERSATION_LABEL', name: 'Prospek', color: 'sky', sort: 5 },
+          { id: 'cat-cnt-umum', scope: 'CONTACT_CATEGORY', name: 'Umum', color: 'slate', sort: 1 },
+          { id: 'cat-cnt-vip', scope: 'CONTACT_CATEGORY', name: 'VIP', color: 'amber', sort: 2 },
+          { id: 'cat-cnt-prospek', scope: 'CONTACT_CATEGORY', name: 'Prospek', color: 'sky', sort: 3 },
+          { id: 'cat-cnt-tetap', scope: 'CONTACT_CATEGORY', name: 'Pelanggan Tetap', color: 'emerald', sort: 4 },
+          { id: 'cat-cnt-korporat', scope: 'CONTACT_CATEGORY', name: 'Korporat', color: 'indigo', sort: 5 },
+          { id: 'cat-cnt-partner', scope: 'CONTACT_CATEGORY', name: 'Partner', color: 'violet', sort: 6 },
+        ];
+        for (const item of defaultLabels) {
+          await sql`
+            INSERT INTO crm_labels (id, scope, name, color, sort_order, is_active, created_at, updated_at)
+            VALUES (${item.id}, ${item.scope}, ${item.name}, ${item.color}, ${item.sort}, TRUE, NOW(), NOW())
+            ON CONFLICT (id) DO NOTHING;
+          `;
+        }
+      }
+      await sql`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('master_labels_seeded', 'true', NOW())
+        ON CONFLICT (key) DO NOTHING;
+      `;
+    }
 
     console.log('[Drizzle ORM] PostgreSQL Database schema initialized successfully.');
   } catch (err: any) {

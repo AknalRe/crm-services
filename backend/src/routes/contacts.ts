@@ -255,7 +255,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
 
       return reply.status(201).send({ success: true, data: formatContact(newContact[0]) });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 
@@ -411,7 +411,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         skipped,
       });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 

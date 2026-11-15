@@ -617,56 +617,60 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-gray-500">
-                    {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((d) => (
-                      <div key={d} className="py-1">{d}</div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-7 gap-1">
-                    {activeCells.map((cellDate, idx) => {
-                      if (!cellDate) {
-                        return <div key={`empty-${idx}`} className="min-h-[68px] rounded bg-gray-50/50" />;
-                      }
-                      const dayPosts = filteredPosts.filter((p) => {
-                        const pd = new Date(p.scheduledAt);
-                        return (
-                          pd.getFullYear() === cellDate.getFullYear() &&
-                          pd.getMonth() === cellDate.getMonth() &&
-                          pd.getDate() === cellDate.getDate()
-                        );
-                      });
-                      const visiblePosts = calendarGranularity === 'week' ? dayPosts : dayPosts.slice(0, 2);
-                      return (
-                        <div
-                          key={cellDate.toISOString()}
-                          className={`${calendarGranularity === 'week' ? 'min-h-[160px]' : 'min-h-[68px]'} p-1.5 rounded border border-gray-200 bg-white flex flex-col gap-1`}
-                        >
-                          <span className="text-[10px] font-mono font-semibold text-gray-500">
-                            {cellDate.getDate()}
-                          </span>
-                          {visiblePosts.map((dp) => (
-                            <button
-                              key={dp.id}
-                              type="button"
-                              onClick={() => setViewMode('list')}
-                              title={`${dp.channel}: ${dp.caption}`}
-                              className={`w-full text-left px-1 py-0.5 rounded text-[9px] font-medium truncate border ${
-                                POST_CHANNEL_META[dp.channel]?.badgeCls || 'bg-gray-100 text-gray-700'
-                              }`}
+                  <div className="overflow-x-auto pb-1">
+                    <div className="min-w-[560px] space-y-1">
+                      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-gray-500">
+                        {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((d) => (
+                          <div key={d} className="py-1">{d}</div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {activeCells.map((cellDate, idx) => {
+                          if (!cellDate) {
+                            return <div key={`empty-${idx}`} className="min-h-[68px] rounded bg-gray-50/50" />;
+                          }
+                          const dayPosts = filteredPosts.filter((p) => {
+                            const pd = new Date(p.scheduledAt);
+                            return (
+                              pd.getFullYear() === cellDate.getFullYear() &&
+                              pd.getMonth() === cellDate.getMonth() &&
+                              pd.getDate() === cellDate.getDate()
+                            );
+                          });
+                          const visiblePosts = calendarGranularity === 'week' ? dayPosts : dayPosts.slice(0, 2);
+                          return (
+                            <div
+                              key={cellDate.toISOString()}
+                              className={`${calendarGranularity === 'week' ? 'min-h-[160px]' : 'min-h-[68px]'} p-1.5 rounded border border-gray-200 bg-white flex flex-col gap-1`}
                             >
-                              {new Date(dp.scheduledAt).toLocaleTimeString('id-ID', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}{' '}
-                              {dp.channel.slice(0, 2)}
-                            </button>
-                          ))}
-                          {calendarGranularity === 'month' && dayPosts.length > 2 && (
-                            <span className="text-[9px] text-gray-400">+{dayPosts.length - 2} lagi</span>
-                          )}
-                        </div>
-                      );
-                    })}
+                              <span className="text-[10px] font-mono font-semibold text-gray-500">
+                                {cellDate.getDate()}
+                              </span>
+                              {visiblePosts.map((dp) => (
+                                <button
+                                  key={dp.id}
+                                  type="button"
+                                  onClick={() => setViewMode('list')}
+                                  title={`${dp.channel}: ${dp.caption}`}
+                                  className={`w-full text-left px-1 py-0.5 rounded text-[9px] font-medium truncate border ${
+                                    POST_CHANNEL_META[dp.channel]?.badgeCls || 'bg-gray-100 text-gray-700'
+                                  }`}
+                                >
+                                  {new Date(dp.scheduledAt).toLocaleTimeString('id-ID', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}{' '}
+                                  {dp.channel.slice(0, 2)}
+                                </button>
+                              ))}
+                              {calendarGranularity === 'month' && dayPosts.length > 2 && (
+                                <span className="text-[9px] text-gray-400">+{dayPosts.length - 2} lagi</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, CreditCard, RefreshCw } from 'lucide-react';
+import { KeyRound, CreditCard, RefreshCw, LogOut, ArrowLeft } from 'lucide-react';
 import api from '../services/api';
 import { LicenseInfo } from '../types';
 import { Button } from './ui/Button';
@@ -10,6 +10,8 @@ interface LicenseActivationScreenProps {
   user: { name: string; email: string } | null;
   onLicenseUpdated: () => void;
   onOpenPlans: () => void;
+  onLogout?: () => void;
+  onBackToLanding?: () => void;
 }
 
 export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = ({
@@ -17,6 +19,8 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
   user,
   onLicenseUpdated,
   onOpenPlans,
+  onLogout,
+  onBackToLanding,
 }) => {
   const toast = useToast();
   const [licenseKey, setLicenseKey] = useState('');
@@ -57,29 +61,56 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl bg-white rounded-lg border border-gray-200 p-6 space-y-5">
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 pb-4">
+    <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-gray-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl bg-white rounded-lg border border-gray-200 p-5 sm:p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-gray-200 pb-4">
           <div className="flex items-start gap-3">
             <div className="h-10 w-10 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
               <KeyRound className="w-5 h-5 text-amber-600" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-base font-semibold text-gray-900">
                 Aktivasi Lisensi Reneo CRM
               </h1>
               <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
                 {licenseInfo.status === 'EXPIRED'
                   ? 'Masa aktif lisensi CRM Anda telah berakhir. Perpanjang atau masukkan kunci lisensi baru untuk melanjutkan.'
-                  : 'Akun CRM Anda sudah siap. Pilih paket lisensi yang tersedia dan lakukan pembayaran, atau masukkan kunci lisensi yang sudah Anda terima.'}
+                  : 'Akun CRM Anda sudah siap. Pilih paket lisensi (tersedia Trial 7 Hari) dan lakukan pembayaran, atau masukkan kunci lisensi yang sudah Anda terima.'}
               </p>
               {user && (
-                <p className="text-[11px] text-gray-500 mt-1">
+                <p className="text-[11px] text-gray-500 mt-1 break-all">
                   Akun terdaftar: <span className="font-medium text-gray-800">{user.name}</span> ({user.email})
                 </p>
               )}
             </div>
           </div>
+
+          {(onBackToLanding || onLogout) && (
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              {onBackToLanding && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onBackToLanding}
+                  leftIcon={<ArrowLeft className="w-3.5 h-3.5" />}
+                >
+                  Landing
+                </Button>
+              )}
+              {onLogout && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={onLogout}
+                  leftIcon={<LogOut className="w-3.5 h-3.5" />}
+                >
+                  Keluar
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

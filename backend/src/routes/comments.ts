@@ -1,10 +1,124 @@
 import crypto from 'crypto';
 import axios from 'axios';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
-import { channelAccounts, socialComments } from '../db/schema';
+import { channelAccounts, commentAutomations, socialComments } from '../db/schema';
 import { requirePermission } from './auth';
+
+async function sendCommentReplyApi(
+  acc: typeof channelAccounts.$inferSelect,
+  comment: typeof socialComments.$inferSelect,
+  replyText: string
+): Promise<void> {
+  if (!acc.accessToken || !comment.externalCommentId) return;
+  if (comment.channel === 'INSTAGRAM') {
+    await axios.post(
+      `https://graph.facebook.com/v20.0/${comment.externalCommentId}/replies`,
+      { message: replyText },
+      { headers: { Authorization: `Bearer ${acc.accessToken}` }, timeout: 10000 }
+    );
+  } else if (comment.channel === 'FACEBOOK') {
+    await axios.post(
+      `https://graph.facebook.com/v20.0/${comment.externalCommentId}/comments`,
+      { message: replyText },
+      { headers: { Authorization: `Bearer ${acc.accessToken}` }, timeout: 10000 }
+    );
+  } else if (comment.channel === 'THREADS' && comment.postId) {
+    const containerRes = await axios.post(
+      `https://graph.threads.net/v1.0/${acc.accountId}/threads`,
+      null,
+      {
+        params: {
+          media_type: 'TEXT',
+          text: replyText,
+          reply_to_id: comment.externalCommentId,
+          access_token: acc.accessToken,
+        },
+        timeout: 10000,
+      }
+    );
+    if (containerRes.data?.id) {
+      await axios.post(
+        `https://graph.threads.net/v1.0/${acc.accountId}/threads_publish`,
+        null,
+        { params: { creation_id: containerRes.data.id, access_token: acc.accessToken }, timeout: 10000 }
+      );
+    }
+  }
+}
+
+export async function applyCommentAutomations(
+  acc: typeof channelAccounts.$inferSelect,
+  comment: typeof socialComments.$inferSelect
+): Promise<void> {
+  try {
+    const rules = await db
+      .select()
+      .from(commentAutomations)
+      .where(eq(commentAutomations.isActive, true));
+
+    const contentLower = String(comment.content || '').trim().toLowerCase();
+    if (!contentLower) return;
+
+    const matched = rules.find((rule) => {
+      if (rule.channel !== 'ALL' && rule.channel !== comment.channel) return false;
+      const kw = String(rule.keyword || '').trim().toLowerCase();
+      if (!kw) return false;
+      return rule.matchType === 'EXACT' ? contentLower === kw : contentLower.includes(kw);
+    });
+    if (!matched) return;
+
+    let executed = false;
+
+    if (matched.replyComment) {
+      try {
+        await sendCommentReplyApi(acc, comment, matched.replyComment);
+        await db
+          .update(socialComments)
+          .set({ replyText: matched.replyComment, repliedAt: new Date(), status: 'DONE' })
+          .where(eq(socialComments.id, comment.id));
+        executed = true;
+      } catch (err: any) {
+        console.warn('[CommentAutomation] Public reply failed:', err?.response?.data || err?.message);
+      }
+    }
+
+    if (
+      matched.sendDm &&
+      matched.dmText &&
+      acc.accessToken &&
+      comment.externalCommentId &&
+      (comment.channel === 'INSTAGRAM' || comment.channel === 'FACEBOOK')
+    ) {
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v20.0/${acc.accountId}/messages`,
+          {
+            recipient: { comment_id: comment.externalCommentId },
+            message: { text: matched.dmText },
+          },
+          { headers: { Authorization: `Bearer ${acc.accessToken}` }, timeout: 10000 }
+        );
+        executed = true;
+      } catch (err: any) {
+        console.warn('[CommentAutomation] Private reply DM failed:', err?.response?.data || err?.message);
+      }
+    }
+
+    if (executed) {
+      await db
+        .update(commentAutomations)
+        .set({
+          triggerCount: sql`${commentAutomations.triggerCount} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(commentAutomations.id, matched.id));
+    }
+  } catch (err: any) {
+    console.warn('[CommentAutomation] Unexpected error:', err?.message);
+  }
+}
 
 export default async function commentsRouter(fastify: FastifyInstance) {
   fastify.addHook('preHandler', requirePermission('conversations'));
@@ -81,19 +195,25 @@ export default async function commentsRouter(fastify: FastifyInstance) {
                   .from(socialComments)
                   .where(eq(socialComments.externalCommentId, String(c.id)));
                 if (existing.length === 0) {
-                  await db.insert(socialComments).values({
-                    id: crypto.randomUUID(),
-                    channel: 'INSTAGRAM',
-                    channelAccountId: acc.id,
-                    postId: String(m.id),
-                    postCaption: m.caption ? String(m.caption).slice(0, 160) : null,
-                    externalCommentId: String(c.id),
-                    authorName: String(c.username || 'Instagram User'),
-                    authorHandle: c.username ? `@${c.username}` : null,
-                    content: String(c.text || ''),
-                    status: 'PENDING',
-                    createdAt: c.timestamp ? new Date(c.timestamp) : new Date(),
-                  });
+                  const [insertedComment] = await db
+                    .insert(socialComments)
+                    .values({
+                      id: crypto.randomUUID(),
+                      channel: 'INSTAGRAM',
+                      channelAccountId: acc.id,
+                      postId: String(m.id),
+                      postCaption: m.caption ? String(m.caption).slice(0, 160) : null,
+                      externalCommentId: String(c.id),
+                      authorName: String(c.username || 'Instagram User'),
+                      authorHandle: c.username ? `@${c.username}` : null,
+                      content: String(c.text || ''),
+                      status: 'PENDING',
+                      createdAt: c.timestamp ? new Date(c.timestamp) : new Date(),
+                    })
+                    .returning();
+                  if (insertedComment) {
+                    await applyCommentAutomations(acc, insertedComment);
+                  }
                   synced++;
                 }
               }
@@ -116,19 +236,25 @@ export default async function commentsRouter(fastify: FastifyInstance) {
                   .from(socialComments)
                   .where(eq(socialComments.externalCommentId, String(c.id)));
                 if (existing.length === 0) {
-                  await db.insert(socialComments).values({
-                    id: crypto.randomUUID(),
-                    channel: 'FACEBOOK',
-                    channelAccountId: acc.id,
-                    postId: String(p.id),
-                    postCaption: p.message ? String(p.message).slice(0, 160) : null,
-                    externalCommentId: String(c.id),
-                    authorName: String(c.from?.name || 'Facebook User'),
-                    authorHandle: null,
-                    content: String(c.message || ''),
-                    status: 'PENDING',
-                    createdAt: c.created_time ? new Date(c.created_time) : new Date(),
-                  });
+                  const [insertedComment] = await db
+                    .insert(socialComments)
+                    .values({
+                      id: crypto.randomUUID(),
+                      channel: 'FACEBOOK',
+                      channelAccountId: acc.id,
+                      postId: String(p.id),
+                      postCaption: p.message ? String(p.message).slice(0, 160) : null,
+                      externalCommentId: String(c.id),
+                      authorName: String(c.from?.name || 'Facebook User'),
+                      authorHandle: null,
+                      content: String(c.message || ''),
+                      status: 'PENDING',
+                      createdAt: c.created_time ? new Date(c.created_time) : new Date(),
+                    })
+                    .returning();
+                  if (insertedComment) {
+                    await applyCommentAutomations(acc, insertedComment);
+                  }
                   synced++;
                 }
               }
@@ -157,19 +283,25 @@ export default async function commentsRouter(fastify: FastifyInstance) {
                   .from(socialComments)
                   .where(eq(socialComments.externalCommentId, String(r.id)));
                 if (existing.length === 0) {
-                  await db.insert(socialComments).values({
-                    id: crypto.randomUUID(),
-                    channel: 'THREADS',
-                    channelAccountId: acc.id,
-                    postId: String(p.id),
-                    postCaption: p.text ? String(p.text).slice(0, 160) : null,
-                    externalCommentId: String(r.id),
-                    authorName: String(r.username || 'Threads User'),
-                    authorHandle: r.username ? `@${r.username}` : null,
-                    content: String(r.text || ''),
-                    status: 'PENDING',
-                    createdAt: r.timestamp ? new Date(r.timestamp) : new Date(),
-                  });
+                  const [insertedComment] = await db
+                    .insert(socialComments)
+                    .values({
+                      id: crypto.randomUUID(),
+                      channel: 'THREADS',
+                      channelAccountId: acc.id,
+                      postId: String(p.id),
+                      postCaption: p.text ? String(p.text).slice(0, 160) : null,
+                      externalCommentId: String(r.id),
+                      authorName: String(r.username || 'Threads User'),
+                      authorHandle: r.username ? `@${r.username}` : null,
+                      content: String(r.text || ''),
+                      status: 'PENDING',
+                      createdAt: r.timestamp ? new Date(r.timestamp) : new Date(),
+                    })
+                    .returning();
+                  if (insertedComment) {
+                    await applyCommentAutomations(acc, insertedComment);
+                  }
                   synced++;
                 }
               }
@@ -216,41 +348,8 @@ export default async function commentsRouter(fastify: FastifyInstance) {
         .from(channelAccounts)
         .where(eq(channelAccounts.id, comment.channelAccountId));
 
-      if (acc?.accessToken && comment.externalCommentId) {
-        if (comment.channel === 'INSTAGRAM') {
-          await axios.post(
-            `https://graph.facebook.com/v20.0/${comment.externalCommentId}/replies`,
-            { message: replyText },
-            { headers: { Authorization: `Bearer ${acc.accessToken}` }, timeout: 10000 }
-          );
-        } else if (comment.channel === 'FACEBOOK') {
-          await axios.post(
-            `https://graph.facebook.com/v20.0/${comment.externalCommentId}/comments`,
-            { message: replyText },
-            { headers: { Authorization: `Bearer ${acc.accessToken}` }, timeout: 10000 }
-          );
-        } else if (comment.channel === 'THREADS' && comment.postId) {
-          const containerRes = await axios.post(
-            `https://graph.threads.net/v1.0/${acc.accountId}/threads`,
-            null,
-            {
-              params: {
-                media_type: 'TEXT',
-                text: replyText,
-                reply_to_id: comment.externalCommentId,
-                access_token: acc.accessToken,
-              },
-              timeout: 10000,
-            }
-          );
-          if (containerRes.data?.id) {
-            await axios.post(
-              `https://graph.threads.net/v1.0/${acc.accountId}/threads_publish`,
-              null,
-              { params: { creation_id: containerRes.data.id, access_token: acc.accessToken }, timeout: 10000 }
-            );
-          }
-        }
+      if (acc) {
+        await sendCommentReplyApi(acc, comment, replyText);
       }
 
       const [updated] = await db
@@ -279,6 +378,9 @@ export default async function commentsRouter(fastify: FastifyInstance) {
         .set({ status: status === 'PENDING' ? 'PENDING' : 'DONE' })
         .where(eq(socialComments.id, req.params.id))
         .returning();
+      if (!updated) {
+        return reply.status(404).send({ success: false, error: 'Komentar tidak ditemukan' });
+      }
       return reply.send({ success: true, data: updated });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

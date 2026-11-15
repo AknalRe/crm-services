@@ -32,13 +32,20 @@ export class PostService {
       .where(and(eq(scheduledPosts.status, 'SCHEDULED'), lte(scheduledPosts.scheduledAt, now)));
 
     for (const post of duePosts) {
-      await this.publishChannelPost(post.id);
+      try {
+        await this.publishChannelPost(post.id);
+      } catch (err: any) {
+        console.error(`[PostService] Failed due post ${post.id}:`, err?.message || err);
+      }
     }
   }
 
   public static async publishChannelPost(postId: string) {
     const [post] = await db.select().from(scheduledPosts).where(eq(scheduledPosts.id, postId));
     if (!post) throw new Error('Jadwal postingan tidak ditemukan');
+    if (post.status === 'PUBLISHED') throw new Error('Postingan ini sudah pernah diterbitkan');
+    if (post.status === 'PUBLISHING') throw new Error('Postingan sedang dalam proses penerbitan');
+    if (post.status === 'CANCELLED') throw new Error('Postingan sudah dibatalkan');
 
     const [account] = await db
       .select()

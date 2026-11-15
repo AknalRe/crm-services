@@ -1,8 +1,14 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { liveEvents, LiveEventPayload } from '../services/events.service';
+import { getCurrentAuthUser } from './auth';
 
 export default async function eventsRouter(fastify: FastifyInstance) {
   fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
+    const authUser = await getCurrentAuthUser(req);
+    if (!authUser) {
+      return reply.status(401).send({ success: false, error: 'Sesi login diperlukan' });
+    }
+
     reply.hijack();
 
     const raw = reply.raw;

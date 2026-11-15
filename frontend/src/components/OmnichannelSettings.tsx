@@ -336,13 +336,13 @@ export const OmnichannelSettings: React.FC = () => {
               Bagikan tautan aman sekali pakai agar klien bisa menghubungkan akun {channel} mereka sendiri.
             </p>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 shrink-0 w-full sm:w-auto">
             <input
               type="text"
               placeholder="Label klien (opsional)"
               value={linkLabel}
               onChange={(e) => setLinkLabel(e.target.value)}
-              className="h-8 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs w-40"
+              className="h-8 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs w-full sm:w-44"
             />
             <Button
               type="button"
@@ -366,7 +366,7 @@ export const OmnichannelSettings: React.FC = () => {
                   : `/connect-channel?token=${lk.token}`;
               const expired = new Date(lk.expiresAt).getTime() < Date.now();
               return (
-                <div key={lk.id} className="px-3 py-2 flex items-center justify-between gap-2 text-xs">
+                <div key={lk.id} className="px-3 py-2 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 text-xs">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold text-[10px]">

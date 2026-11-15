@@ -59,6 +59,8 @@ function signToken(email: string, secret: string): string {
   return `${payload}.${sig}`;
 }
 
+const TOKEN_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 function verifyToken(token: string, secret: string): { email: string } | null {
   const parts = token.split('.');
   if (parts.length !== 2) return null;
@@ -68,7 +70,12 @@ function verifyToken(token: string, secret: string): { email: string } | null {
   if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
   try {
     const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return parsed?.email ? { email: String(parsed.email) } : null;
+    if (!parsed?.email) return null;
+    const iat = Number(parsed.iat || 0);
+    if (iat > 0 && Date.now() - iat > TOKEN_MAX_AGE_MS) {
+      return null;
+    }
+    return { email: String(parsed.email) };
   } catch {
     return null;
   }
@@ -220,8 +227,8 @@ export default async function authRouter(fastify: FastifyInstance) {
       const name = String(req.body?.name || '').trim();
       const email = String(req.body?.email || '').trim().toLowerCase();
       const password = String(req.body?.password || '');
-      if (!name || !email || password.length < 6) {
-        return reply.status(400).send({ success: false, error: 'Nama, email, dan password (min. 6 karakter) wajib diisi.' });
+      if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 6) {
+        return reply.status(400).send({ success: false, error: 'Nama, email valid, dan password (min. 6 karakter) wajib diisi.' });
       }
 
       const passHash = hashPassword(password);

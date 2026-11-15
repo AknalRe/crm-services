@@ -13,8 +13,6 @@ import {
   Check,
   Trash2,
   Users,
-  Clock,
-  Star,
   Edit3,
   UserPlus,
   Bot,
@@ -22,7 +20,9 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { AutomationProductsSettings } from '../components/AutomationProductsSettings';
+import { AutomationSettings } from '../components/AutomationSettings';
+import { MasterDataSettings, MasterDataSection } from '../components/MasterDataSettings';
+import { SlaRoutingCsatSettings } from '../components/SlaRoutingCsatSettings';
 import { OmnichannelSettings } from '../components/OmnichannelSettings';
 import {
   AgentItem,
@@ -44,7 +44,7 @@ const PERMISSION_OPTIONS = [
   { id: 'birthday', label: 'Ulang Tahun' },
   { id: 'tracking', label: 'Pelacakan Status' },
   { id: 'conversations', label: 'Live Chat CRM' },
-  { id: 'settings', label: 'Pengaturan & Kanal' },
+  { id: 'settings', label: 'Master Data & Pengaturan' },
 ];
 
 interface SettingsProps {
@@ -94,15 +94,6 @@ export const Settings: React.FC<SettingsProps> = ({
   const [confirmAction, setConfirmAction] = useState<'stop' | 'logout' | null>(null);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
 
-  // CRM CSAT Template & SLA state
-  const [csatTemplate, setCsatTemplate] = useState(
-    'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}'
-  );
-  const [csatAutoOnResolve, setCsatAutoOnResolve] = useState(false);
-  const [slaTargetMinutes, setSlaTargetMinutes] = useState(15);
-  const [csatBaseUrl, setCsatBaseUrl] = useState('');
-  const [savingCrm, setSavingCrm] = useState(false);
-
   // Multi-Agent state (ADMIN only)
   const isAdmin = !currentUser || currentUser.role !== 'AGENT';
   const [agents, setAgents] = useState<AgentItem[]>([]);
@@ -124,20 +115,6 @@ export const Settings: React.FC<SettingsProps> = ({
     onSectionChange?.(sec);
   };
 
-  const fetchCrmSettings = useCallback(async () => {
-    try {
-      const crm = await api.getCrmSettings();
-      if (crm) {
-        setCsatTemplate(crm.csatTemplate);
-        setCsatAutoOnResolve(Boolean(crm.csatAutoOnResolve));
-        setSlaTargetMinutes(crm.slaTargetMinutes || 15);
-        setCsatBaseUrl(crm.csatBaseUrl || '');
-      }
-    } catch {
-      // keep defaults
-    }
-  }, []);
-
   const fetchAgents = useCallback(async () => {
     if (!isAdmin) return;
     setAgentsLoading(true);
@@ -153,27 +130,8 @@ export const Settings: React.FC<SettingsProps> = ({
   }, [isAdmin]);
 
   useEffect(() => {
-    void fetchCrmSettings();
     void fetchAgents();
-  }, [fetchCrmSettings, fetchAgents]);
-
-  const handleSaveCrmSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingCrm(true);
-    try {
-      await api.updateCrmSettings({
-        csatTemplate,
-        csatAutoOnResolve,
-        slaTargetMinutes: Math.max(1, Math.min(1440, Number(slaTargetMinutes) || 15)),
-        csatBaseUrl: csatBaseUrl.trim().replace(/\/+$/, ''),
-      });
-      toast.success('Pengaturan CSAT & SLA berhasil disimpan.');
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Gagal menyimpan pengaturan CSAT & SLA.');
-    } finally {
-      setSavingCrm(false);
-    }
-  };
+  }, [fetchAgents]);
 
   const resetAgentForm = () => {
     setEditingAgentId(null);
@@ -939,137 +897,17 @@ export const Settings: React.FC<SettingsProps> = ({
       </div>
       )}
 
-      {/* Pengaturan CSAT Template & SLA */}
-      {settingsTab === 'crm_products' && (
-      <div className="space-y-5">
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-4 border-b border-gray-100">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <Star className="w-4 h-4 text-amber-500" />
-              <span>Pengaturan CSAT Template & Target SLA</span>
-            </h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Atur template pesan penilaian pelanggan (CSAT) dan target waktu respon pertama (SLA) untuk analitik Dashboard.
-            </p>
-          </div>
-        </div>
-
-        <form onSubmit={handleSaveCrmSettings} className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className="lg:col-span-2 space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-xs font-medium text-gray-700">Template Pesan CTA CSAT</label>
-              <div className="flex flex-wrap gap-1.5">
-                {['{nama_panggilan}', '{nama_lengkap}', '{link_csat}'].map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => setCsatTemplate((prev) => `${prev}${prev.endsWith(' ') || prev.endsWith('\n') ? '' : ' '}${chip}`)}
-                    className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-mono hover:bg-indigo-100"
-                  >
-                    + {chip}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <textarea
-              rows={4}
-              value={csatTemplate}
-              onChange={(e) => setCsatTemplate(e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-              placeholder="Halo {nama_panggilan}, mohon isi penilaian layanan melalui {link_csat}"
-            />
-            <label className="inline-flex items-center gap-2 text-xs text-gray-700 cursor-pointer pt-1">
-              <input
-                type="checkbox"
-                checked={csatAutoOnResolve}
-                onChange={(e) => setCsatAutoOnResolve(e.target.checked)}
-                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              <span>Kirim link CSAT otomatis saat percakapan diakhiri (Resolved)</span>
-            </label>
-
-            <div className="pt-2">
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <label className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-gray-500" />
-                  <span>URL Publik CSAT (Domain / Cloudflare Tunnel)</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCsatBaseUrl(
-                      `${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}`
-                    )
-                  }
-                  className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
-                >
-                  Gunakan URL Saat Ini
-                </button>
-              </div>
-              <input
-                type="url"
-                value={csatBaseUrl}
-                onChange={(e) => setCsatBaseUrl(e.target.value)}
-                placeholder="https://crm.domain.com atau https://panel.domain.com/app/reneo-crm"
-                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Opsional. Jika diisi, tautan CSAT akan memakai domain/tunnel ini (berguna saat admin membuka panel dari localhost/IP lokal). Contoh hasil:{' '}
-                <code className="font-mono text-gray-600">
-                  {(csatBaseUrl.trim().replace(/\/+$/, '') || `${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}`).replace(/\/csat$/i, '')}/csat?token=...
-                </code>
-              </p>
-              {licenseInfo?.publicUrls && licenseInfo.publicUrls.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  <span className="text-[11px] text-gray-500">Tunnel terdeteksi:</span>
-                  {licenseInfo.publicUrls.map((u) => (
-                    <button
-                      key={u}
-                      type="button"
-                      onClick={() => setCsatBaseUrl(u)}
-                      className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-mono hover:bg-emerald-100"
-                    >
-                      {u}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-gray-500" />
-                <span>Target SLA Respon Pertama (Menit)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                value={slaTargetMinutes}
-                onChange={(e) => setSlaTargetMinutes(Number(e.target.value) || 15)}
-                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-md text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Digunakan untuk menghitung tingkat kepatuhan SLA di Dashboard (1 - 1440 menit).
-              </p>
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <Button type="submit" variant="primary" size="md" isLoading={savingCrm}>
-                Simpan Pengaturan CSAT &amp; SLA
-              </Button>
-            </div>
-          </div>
-        </form>
-      </div>
-      <AutomationProductsSettings section="products" />
-      </div>
+      {/* Pengaturan SLA, Routing Agent & Survei CSAT */}
+      {settingsTab === 'sla_csat' && (
+        <SlaRoutingCsatSettings licenseInfo={licenseInfo} />
       )}
 
       {/* Manajemen Multi-Agent & Hak Akses (ADMIN only) */}
+      {settingsTab === 'agents' && !isAdmin && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-5 text-xs text-amber-800">
+          Halaman Manajemen Multi-Agent &amp; Hak Akses hanya tersedia untuk pengguna dengan peran ADMIN.
+        </div>
+      )}
       {settingsTab === 'agents' && isAdmin && (
         <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100">
@@ -1116,7 +954,7 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
 
           {agentQuota && !agentQuota.multiAgent && (
-            <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center justify-between gap-3">
+            <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800 flex flex-wrap items-center justify-between gap-3">
               <span>
                 Paket <strong>{agentQuota.plan}</strong> hanya mendukung 1 akun admin utama. Upgrade ke paket Pro (maks 5 agent) atau Enterprise (maks 25 agent) untuk menambah agent dengan pembatasan akses.
               </span>
@@ -1337,7 +1175,13 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
       )}
 
-      {settingsTab === 'automation' && <AutomationProductsSettings section="automation" />}
+      {(settingsTab === 'quick_replies' ||
+        settingsTab === 'products' ||
+        settingsTab === 'labels' ||
+        settingsTab === 'templates') && (
+        <MasterDataSettings section={settingsTab as MasterDataSection} />
+      )}
+      {settingsTab === 'automation' && <AutomationSettings />}
       {settingsTab === 'omnichannel' && <OmnichannelSettings />}
 
       <ConfirmModal

@@ -145,6 +145,15 @@ export class LicenseService {
 
   private constructor() {}
 
+  private getReneoHeaders(): Record<string, string> {
+    const token = (config.reneo.appToken || process.env.RENEO_APP_TOKEN || '').trim();
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (token) {
+      headers['X-Reneo-App-Token'] = token;
+    }
+    return headers;
+  }
+
   public static getInstance(): LicenseService {
     if (!LicenseService.instance) {
       LicenseService.instance = new LicenseService();
@@ -168,18 +177,14 @@ export class LicenseService {
    * Synchronize license status with Reneo Homeserver Desktop
    */
   public async syncWithReneo(): Promise<LicenseInfo> {
-    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
-    const appToken = process.env.RENEO_APP_TOKEN || '';
+    const reneoUrl = config.reneo.panelUrl || process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
 
     try {
       // 1. Try checking with Reneo panel endpoint if reachable
       if (reneoUrl) {
         try {
           const res = await axios.get(`${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/license/reneo-crm`, {
-            headers: {
-              'X-Reneo-App-Token': appToken,
-              Accept: 'application/json',
-            },
+            headers: this.getReneoHeaders(),
             timeout: 5000,
           });
 
@@ -441,40 +446,60 @@ export class LicenseService {
       throw new Error('Kunci lisensi tidak valid (minimal 8 karakter).');
     }
 
-    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    const reneoUrl = config.reneo.panelUrl || process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
     try {
       const verifyRes = await axios.get(`${reneoUrl.replace(/\/+$/, '')}/api/v1/app-licenses/verify`, {
         params: { key: cleanKey, catalogId: 'reneo-crm' },
-        timeout: 4000,
+        headers: this.getReneoHeaders(),
+        timeout: 5000,
       });
-      if (verifyRes.data) {
-        if (!verifyRes.data.valid) {
-          throw new Error(verifyRes.data.message || 'Kunci lisensi tidak valid atau bukan untuk aplikasi ini.');
-        }
-        await this.updateLicense({
-          plan: verifyRes.data.planName || 'Lisensi Aktif (Reneo CRM)',
-          expiresAt: verifyRes.data.expiresAt,
-          licenseKey: cleanKey,
-        });
-        return this.syncWithReneo();
+      if (!verifyRes.data || !verifyRes.data.valid) {
+        const err: any = new Error(
+          verifyRes.data?.message || 'Kunci lisensi tidak valid, sudah berakhir, atau bukan untuk Reneo CRM.'
+        );
+        err.statusCode = 400;
+        throw err;
       }
+
+      const now = new Date();
+      const features = resolveFeatures(verifyRes.data.features, false, verifyRes.data.planName);
+      const pairs = [
+        { key: 'license_plan', value: verifyRes.data.planName || 'Lisensi Aktif (Reneo CRM)' },
+        { key: 'license_expires_at', value: verifyRes.data.expiresAt },
+        { key: 'license_key', value: cleanKey },
+        { key: 'license_features', value: JSON.stringify(features) },
+      ];
+      for (const pair of pairs) {
+        if (!pair.value) continue;
+        await db
+          .insert(systemSettings)
+          .values({ key: pair.key, value: String(pair.value), updatedAt: now })
+          .onConflictDoUpdate({
+            target: systemSettings.key,
+            set: { value: String(pair.value), updatedAt: now },
+          });
+      }
+      this.cachedLicense = null;
+      const synced = await this.syncWithReneo();
+      return synced.status !== 'UNLICENSED' ? synced : this.getLicense();
     } catch (err: any) {
+      if (err?.response?.data?.message || err?.response?.data?.error) {
+        const e: any = new Error(err.response.data.message || err.response.data.error);
+        e.statusCode = err.response.status >= 400 && err.response.status < 500 ? err.response.status : 400;
+        throw e;
+      }
+      if (err?.statusCode) {
+        throw err;
+      }
       if (err?.message && !err?.isAxiosError) {
         throw err;
       }
+      const e: any = new Error(
+        'Tidak dapat memverifikasi kunci lisensi ke panel Reneo. Pastikan server panel Reneo aktif dan terhubung.'
+      );
+      e.statusCode = 502;
+      throw e;
     }
-
-    const synced = await this.syncWithReneo();
-    if (synced && !synced.isExpired && (!synced.licenseKey || synced.licenseKey === cleanKey)) {
-      return synced;
-    }
-
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    return this.updateLicense({
-      plan: synced?.plan && synced.plan !== 'Belum Diaktivasi' ? synced.plan : 'Lisensi Aktif (Reneo CRM)',
-      expiresAt: synced?.expiresAt && !synced.isExpired ? synced.expiresAt : expiresAt,
-      licenseKey: cleanKey,
-    });
   }
 
   /**
@@ -512,6 +537,8 @@ export class LicenseService {
           liveChat: false,
           multiSession: false,
           maxSessions: 1,
+          multiAgent: false,
+          maxAgents: 1,
           wahaSync: true,
         },
       },
@@ -533,6 +560,8 @@ export class LicenseService {
           liveChat: true,
           multiSession: true,
           maxSessions: 5,
+          multiAgent: true,
+          maxAgents: 5,
           wahaSync: true,
         },
       },
@@ -554,6 +583,8 @@ export class LicenseService {
           liveChat: true,
           multiSession: true,
           maxSessions: 25,
+          multiAgent: true,
+          maxAgents: 25,
           wahaSync: true,
         },
       },
@@ -561,16 +592,16 @@ export class LicenseService {
   }
 
   /**
-   * Start a 7-day trial for any plan tier via Reneo (with local fallback if offline)
+   * Start a 7-day trial for any plan tier via Reneo (with one-time offline dev fallback only if panel unreachable)
    */
   public async startTrial(planSlug: string): Promise<LicenseInfo> {
-    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    const reneoUrl = config.reneo.panelUrl || process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
     const slug = (planSlug || 'pro-monthly').trim();
     try {
       const res = await axios.post(
         `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/trial`,
         { catalogId: 'reneo-crm', planSlug: slug },
-        { timeout: 6000 }
+        { headers: this.getReneoHeaders(), timeout: 6000 }
       );
       if (res.data?.ok) {
         this.cachedLicense = null;
@@ -583,7 +614,16 @@ export class LicenseService {
         e.statusCode = err.response.status;
         throw e;
       }
-      // Reneo offline: fallback to local trial activation
+      // Check if trial or license already used locally before offline fallback
+      const existingRows = await db
+        .select()
+        .from(systemSettings)
+        .where(inArray(systemSettings.key, ['license_key']));
+      if (existingRows[0]?.value) {
+        const e: any = new Error('Aplikasi ini sudah pernah menggunakan sesi lisensi/trial sebelumnya.');
+        e.statusCode = 409;
+        throw e;
+      }
     }
 
     const plans = await this.getPlans();
@@ -645,7 +685,7 @@ export class LicenseService {
         buyerPhone: payload.buyerPhone,
         paymentMethod: payload.paymentMethod || 'transfer',
       },
-      { timeout: 6000 }
+      { headers: this.getReneoHeaders(), timeout: 6000 }
     );
     return res.data;
   }
@@ -654,10 +694,10 @@ export class LicenseService {
    * Get invoice order status & payment instructions from Reneo
    */
   public async getOrder(publicId: string) {
-    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    const reneoUrl = config.reneo.panelUrl || process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
     const res = await axios.get(
       `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/orders/${publicId}`,
-      { timeout: 5000 }
+      { headers: this.getReneoHeaders(), timeout: 5000 }
     );
     return res.data;
   }
@@ -666,11 +706,11 @@ export class LicenseService {
    * Pay/settle the invoice order in Reneo
    */
   public async payOrder(publicId: string, paymentMethod = 'saldo') {
-    const reneoUrl = process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
+    const reneoUrl = config.reneo.panelUrl || process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000';
     const res = await axios.post(
       `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/orders/${publicId}/pay`,
       { paymentMethod },
-      { timeout: 6000 }
+      { headers: this.getReneoHeaders(), timeout: 6000 }
     );
     this.cachedLicense = null;
     await this.syncWithReneo();

@@ -13,6 +13,7 @@ import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
 import { handleInboundAutomation } from '../services/automation.service';
+import { requirePermission } from './auth';
 import crypto from 'crypto';
 
 function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: string[] } {
@@ -71,8 +72,11 @@ function normalizeWahaAck(payload: any): number | null {
 }
 
 export default async function wahaRouter(fastify: FastifyInstance) {
+  const requireWahaRead = requirePermission('settings', 'conversations', 'broadcasts');
+  const requireWahaManage = requirePermission('settings');
+
   // GET WAHA server & session status
-  fastify.get('/status', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/status', { preHandler: requireWahaRead }, async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
       const status = await wahaService.getStatus();
       return reply.send({ success: true, data: status });
@@ -82,7 +86,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // GET all WAHA sessions
-  fastify.get('/sessions', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/sessions', { preHandler: requireWahaRead }, async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
       const data = await wahaService.listSessions();
       return reply.send({ success: true, data });
@@ -92,9 +96,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST create & start a new WAHA session (gated by multiSession / maxSessions license)
-  fastify.post('/sessions', async (req: FastifyRequest<{
+  fastify.post<{
     Body: { name: string; setActive?: boolean };
-  }>, reply: FastifyReply) => {
+  }>('/sessions', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
       const { name, setActive = true } = req.body || {};
       const clean = (name || '').trim();
@@ -138,9 +142,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST switch active WAHA session
-  fastify.post('/sessions/active', async (req: FastifyRequest<{
+  fastify.post<{
     Body: { session: string };
-  }>, reply: FastifyReply) => {
+  }>('/sessions/active', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
       const active = await wahaService.setActiveSession(req.body?.session || '');
       liveEvents.emit('waha:status', { action: 'switch', session: active });
@@ -151,9 +155,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // DELETE remove a WAHA session
-  fastify.delete('/sessions/:name', async (req: FastifyRequest<{
+  fastify.delete<{
     Params: { name: string };
-  }>, reply: FastifyReply) => {
+  }>('/sessions/:name', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
       const result = await wahaService.deleteSession(req.params.name);
       liveEvents.emit('waha:status', { action: 'delete', session: req.params.name });
@@ -164,9 +168,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // GET QR code
-  fastify.get('/qr', async (req: FastifyRequest<{
+  fastify.get<{
     Querystring: { session?: string };
-  }>, reply: FastifyReply) => {
+  }>('/qr', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
       const qrData = await wahaService.getQrCode(req.query?.session);
       return reply.send({ success: true, data: qrData });
@@ -176,9 +180,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST start session
-  fastify.post('/session/start', async (req: FastifyRequest<{
-    Body?: { session?: string };
-  }>, reply: FastifyReply) => {
+  fastify.post<{
+    Body: { session?: string } | undefined;
+  }>('/session/start', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
       const result = await wahaService.startSession(req.body?.session);
       liveEvents.emit('waha:status', { action: 'start', session: req.body?.session });
@@ -189,9 +193,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST stop session
-  fastify.post('/session/stop', async (req: FastifyRequest<{
-    Body?: { session?: string };
-  }>, reply: FastifyReply) => {
+  fastify.post<{
+    Body: { session?: string } | undefined;
+  }>('/session/stop', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
       const result = await wahaService.stopSession(req.body?.session);
       liveEvents.emit('waha:status', { action: 'stop', session: req.body?.session });
@@ -202,9 +206,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST logout session
-  fastify.post('/session/logout', async (req: FastifyRequest<{
-    Body?: { session?: string };
-  }>, reply: FastifyReply) => {
+  fastify.post<{
+    Body: { session?: string } | undefined;
+  }>('/session/logout', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
       const result = await wahaService.logoutSession(req.body?.session);
       liveEvents.emit('waha:status', { action: 'logout', session: req.body?.session });
@@ -215,9 +219,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // POST test send message
-  fastify.post('/send-test', async (req: FastifyRequest<{
+  fastify.post<{
     Body: { phone: string; message: string; session?: string };
-  }>, reply: FastifyReply) => {
+  }>('/send-test', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
       const { phone, message, session } = req.body;
       if (!phone || !message) {
@@ -377,11 +381,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           contact = insertedContacts[0];
         }
 
-        // Upsert Conversation
+        // Upsert WhatsApp Conversation
         const convList = await db
           .select()
           .from(conversations)
-          .where(eq(conversations.contactId, contact.id));
+          .where(and(eq(conversations.contactId, contact.id), eq(conversations.channel, 'WHATSAPP')));
 
         const existingConv = convList[0];
         let convId = existingConv?.id;

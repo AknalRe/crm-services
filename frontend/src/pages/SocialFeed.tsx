@@ -109,7 +109,7 @@ export const SocialFeed: React.FC = () => {
         <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
           {items.map((item) => (
             <div key={item.id} className="p-4 space-y-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-gray-900">
                     @{item.username || 'threads_user'}
@@ -152,7 +152,7 @@ export const SocialFeed: React.FC = () => {
                     placeholder="Tulis balasan Anda..."
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
-                    className="flex-1 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs focus:outline-none focus:border-indigo-500"
+                    className="flex-1 min-w-0 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs focus:outline-none focus:border-indigo-500"
                   />
                   <Button
                     type="button"

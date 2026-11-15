@@ -361,7 +361,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       {/* Chatwoot-style Conversation, SLA & CSAT Analytics */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
                 <MessageSquare className="w-4 h-4 text-indigo-600" />
@@ -375,7 +375,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <button
               type="button"
               onClick={() => onNavigate('conversations')}
-              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-0.5"
+              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-0.5 shrink-0"
             >
               Buka Live Chat <ArrowUpRight className="w-3.5 h-3.5" />
             </button>
@@ -412,7 +412,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             </div>
             <div className="p-3 rounded-md bg-indigo-50/70 border border-indigo-200">
               <span className="text-[11px] text-indigo-700 block">Status Percakapan</span>
-              <div className="flex items-center gap-2 mt-1 text-[11px] font-semibold tabular-nums">
+              <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-semibold tabular-nums">
                 <span className="text-blue-700">{convAnalytics.openCount} Open</span>
                 <span className="text-amber-700">{convAnalytics.pendingCount} Wait</span>
                 <span className="text-emerald-700">{convAnalytics.resolvedCount} Done</span>
@@ -692,7 +692,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       />
                     </div>
 
-                    <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500 tabular-nums">
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500 tabular-nums">
                       <span>
                         Total: <strong className="text-gray-900">{camp.totalCount}</strong> kontak
                       </span>

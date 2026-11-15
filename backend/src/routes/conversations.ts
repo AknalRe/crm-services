@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eq, desc, asc } from 'drizzle-orm';
+import { and, eq, desc, asc } from 'drizzle-orm';
 import axios from 'axios';
 import { db } from '../db';
 import { conversations, chatMessages, contacts, crmAgents, cannedResponses, csatResponses } from '../db/schema';
@@ -14,6 +14,27 @@ const VALID_STATUSES = new Set(['OPEN', 'PENDING', 'RESOLVED']);
 const DEFAULT_CSAT_TEMPLATE =
   'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}';
 
+function resolveRequestAppBaseUrl(req: FastifyRequest): string {
+  const referer = String(req.headers.referer || '').trim();
+  if (referer) {
+    try {
+      const u = new URL(referer);
+      if (u.protocol === 'http:' || u.protocol === 'https:') {
+        const appMatch = u.pathname.match(/^(\/app\/[^/]+)/i);
+        return `${u.origin}${appMatch ? appMatch[1] : ''}`;
+      }
+    } catch {
+      // ignore invalid referer
+    }
+  }
+  const fwdHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const host = fwdHost || String(req.headers.host || '').trim();
+  if (!host) return '';
+  const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const proto = fwdProto || (req.protocol === 'https' ? 'https' : 'http');
+  return `${proto}://${host}`;
+}
+
 async function sendCsatCtaForConversation(
   conv: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
@@ -26,7 +47,7 @@ async function sendCsatCtaForConversation(
   const base = configuredBase || runtimeBase;
   const csatUrl = base
     ? `${base.replace(/\/csat$/i, '')}/csat?token=${token}`
-    : `/app/reneo-crm/csat?token=${token}`;
+    : `/csat?token=${token}`;
   const template = (opts.customMessage || '').trim() || settings.csat_template || DEFAULT_CSAT_TEMPLATE;
   const namaPanggilan = contact.namaPanggilan || contact.namaLengkap;
   const ctaBody = template
@@ -149,18 +170,28 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET/POST/DELETE canned responses (quick replies)
-  fastify.get('/canned', async (_req: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const list = await db.select().from(cannedResponses).orderBy(asc(cannedResponses.shortCode));
-      return reply.send({ success: true, data: list });
-    } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+  // GET/POST/PATCH/DELETE canned responses (quick replies)
+  fastify.get<{ Querystring: { activeOnly?: string } }>(
+    '/canned',
+    async (req, reply: FastifyReply) => {
+      try {
+        const activeOnly = req.query?.activeOnly === 'true';
+        const list = activeOnly
+          ? await db
+              .select()
+              .from(cannedResponses)
+              .where(eq(cannedResponses.isActive, true))
+              .orderBy(asc(cannedResponses.shortCode))
+          : await db.select().from(cannedResponses).orderBy(asc(cannedResponses.shortCode));
+        return reply.send({ success: true, data: list });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
     }
-  });
+  );
 
   fastify.post('/canned', async (req: FastifyRequest<{
-    Body: { shortCode?: string; title?: string; content?: string };
+    Body: { shortCode?: string; title?: string; category?: string; content?: string; isActive?: boolean };
   }>, reply: FastifyReply) => {
     try {
       const shortCode = String(req.body?.shortCode || '')
@@ -169,6 +200,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .replace(/^\/+/, '')
         .replace(/\s+/g, '-');
       const title = String(req.body?.title || '').trim();
+      const category = String(req.body?.category || 'Umum').trim() || 'Umum';
       const content = String(req.body?.content || '').trim();
       if (!shortCode || !title || !content) {
         return reply.status(400).send({ success: false, error: 'shortCode, title, dan content wajib diisi' });
@@ -180,13 +212,73 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           id: crypto.randomUUID(),
           shortCode,
           title,
+          category,
           content,
+          isActive: req.body?.isActive !== false,
           createdAt: now,
           updatedAt: now,
         })
         .returning();
       return reply.status(201).send({ success: true, data: inserted[0] });
     } catch (error: any) {
+      if (String(error.message || '').toLowerCase().includes('unique')) {
+        return reply.status(400).send({ success: false, error: 'Kode singkat sudah digunakan' });
+      }
+      return reply.status(400).send({ success: false, error: error.message });
+    }
+  });
+
+  fastify.patch('/canned/:cannedId', async (req: FastifyRequest<{
+    Params: { cannedId: string };
+    Body: { shortCode?: string; title?: string; category?: string; content?: string; isActive?: boolean };
+  }>, reply: FastifyReply) => {
+    try {
+      const patch: Record<string, any> = { updatedAt: new Date() };
+      if (req.body?.shortCode !== undefined) {
+        const cleanCode = String(req.body.shortCode)
+          .trim()
+          .toLowerCase()
+          .replace(/^\/+/, '')
+          .replace(/\s+/g, '-');
+        if (!cleanCode) {
+          return reply.status(400).send({ success: false, error: 'Kode singkat tidak boleh kosong' });
+        }
+        patch.shortCode = cleanCode;
+      }
+      if (req.body?.title !== undefined) {
+        const cleanTitle = String(req.body.title).trim();
+        if (!cleanTitle) {
+          return reply.status(400).send({ success: false, error: 'Judul tidak boleh kosong' });
+        }
+        patch.title = cleanTitle;
+      }
+      if (req.body?.category !== undefined) {
+        patch.category = String(req.body.category).trim() || 'Umum';
+      }
+      if (req.body?.content !== undefined) {
+        const cleanContent = String(req.body.content).trim();
+        if (!cleanContent) {
+          return reply.status(400).send({ success: false, error: 'Isi balasan tidak boleh kosong' });
+        }
+        patch.content = cleanContent;
+      }
+      if (req.body?.isActive !== undefined) {
+        patch.isActive = Boolean(req.body.isActive);
+      }
+
+      const [updated] = await db
+        .update(cannedResponses)
+        .set(patch)
+        .where(eq(cannedResponses.id, req.params.cannedId))
+        .returning();
+      if (!updated) {
+        return reply.status(404).send({ success: false, error: 'Template balasan cepat tidak ditemukan' });
+      }
+      return reply.send({ success: true, data: updated });
+    } catch (error: any) {
+      if (String(error.message || '').toLowerCase().includes('unique')) {
+        return reply.status(400).send({ success: false, error: 'Kode singkat sudah digunakan' });
+      }
       return reply.status(400).send({ success: false, error: error.message });
     }
   });
@@ -195,7 +287,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Params: { cannedId: string };
   }>, reply: FastifyReply) => {
     try {
-      await db.delete(cannedResponses).where(eq(cannedResponses.id, req.params.cannedId));
+      const deleted = await db
+        .delete(cannedResponses)
+        .where(eq(cannedResponses.id, req.params.cannedId))
+        .returning();
+      if (!deleted[0]) {
+        return reply.status(404).send({ success: false, error: 'Template balasan cepat tidak ditemukan' });
+      }
       return reply.send({ success: true });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -212,11 +310,25 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         return reply.status(400).send({ success: false, error: 'Invalid media url' });
       }
       const wahaCfg = await wahaService.getConfig(true);
+      let targetUrl: URL;
+      let wahaOrigin = '';
+      try {
+        targetUrl = new URL(rawUrl);
+        wahaOrigin = new URL(wahaCfg.baseUrl).origin;
+      } catch {
+        return reply.status(400).send({ success: false, error: 'URL media tidak valid' });
+      }
+      if (!wahaOrigin || targetUrl.origin !== wahaOrigin) {
+        return reply.status(403).send({
+          success: false,
+          error: 'Hanya media dari server WAHA terkonfigurasi yang diizinkan melalui proxy',
+        });
+      }
       const headers: Record<string, string> = {};
       if (wahaCfg.apiKey) {
         headers['X-Api-Key'] = wahaCfg.apiKey;
       }
-      const upstream = await axios.get(rawUrl, {
+      const upstream = await axios.get(targetUrl.toString(), {
         headers,
         responseType: 'arraybuffer',
         timeout: 15000,
@@ -337,7 +449,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const existingRows = await db
         .select()
         .from(conversations)
-        .where(eq(conversations.contactId, contact.id))
+        .where(and(eq(conversations.contactId, contact.id), eq(conversations.channel, 'WHATSAPP')))
         .orderBy(desc(conversations.updatedAt));
 
       const now = new Date();
@@ -460,6 +572,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       liveEvents.emit('tracking:update', { conversationId: existing.id });
 
       let csatSent = false;
+      let csatError: string | undefined;
       const transitioningToResolved =
         convUpdate.status === 'RESOLVED' && existing.status !== 'RESOLVED';
       if (transitioningToResolved) {
@@ -473,17 +586,22 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             .from(contacts)
             .where(eq(contacts.id, existing.contactId));
           if (contactRows[0]) {
-            const refreshedConv = { ...existing, ...convUpdate };
-            await sendCsatCtaForConversation(refreshedConv, contactRows[0], {
-              baseUrl: req.body?.baseUrl,
-              triggerType: 'AUTO_RESOLVE',
-            });
-            csatSent = true;
+            try {
+              const refreshedConv = { ...existing, ...convUpdate };
+              await sendCsatCtaForConversation(refreshedConv, contactRows[0], {
+                baseUrl: req.body?.baseUrl || resolveRequestAppBaseUrl(req),
+                triggerType: 'AUTO_RESOLVE',
+              });
+              csatSent = true;
+            } catch (err: any) {
+              csatError = err?.message || 'Gagal mengirim tautan CSAT otomatis';
+              console.warn('[Conversations] Auto-CSAT send skipped:', csatError);
+            }
           }
         }
       }
 
-      return reply.send({ success: true, data: { csatSent } });
+      return reply.send({ success: true, data: { csatSent, csatError } });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }
@@ -561,7 +679,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const result = await sendCsatCtaForConversation(row.conv, row.contact, {
         session: req.body?.session,
-        baseUrl: req.body?.baseUrl,
+        baseUrl: req.body?.baseUrl || resolveRequestAppBaseUrl(req),
         customMessage: req.body?.customMessage,
       });
 

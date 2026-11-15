@@ -19,11 +19,31 @@ export interface BirthdayMultiSenders {
   channelAccountIds: string[];
 }
 
-function formatLocalDate(d: Date): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function getJakartaParts(d = new Date()): {
+  dateStr: string;
+  timeStr: string;
+  month: number;
+  day: number;
+} {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(d).map((p) => [p.type, p.value]));
+  const hour = parts.hour === '24' ? '00' : parts.hour;
+  const month = Number.parseInt(parts.month, 10);
+  const day = Number.parseInt(parts.day, 10);
+  return {
+    dateStr: `${parts.year}-${parts.month}-${parts.day}`,
+    timeStr: `${hour}:${parts.minute}`,
+    month,
+    day,
+  };
 }
 
 export class BirthdayService {
@@ -63,11 +83,9 @@ export class BirthdayService {
     const setting = list[0];
     if (!setting || !setting.isEnabled) return;
 
-    const now = new Date();
-    const currentHour = String(now.getHours()).padStart(2, '0');
-    const currentMinute = String(now.getMinutes()).padStart(2, '0');
-    const currentTimeStr = `${currentHour}:${currentMinute}`;
-    const todayDateStr = formatLocalDate(now);
+    const jakarta = getJakartaParts();
+    const currentTimeStr = jakarta.timeStr;
+    const todayDateStr = jakarta.dateStr;
 
     if (currentTimeStr === setting.sendTime && setting.lastRunDate !== todayDateStr) {
       const lic = await licenseService.getLicense();
@@ -91,10 +109,20 @@ export class BirthdayService {
     const setting = list[0];
     if (!setting) throw new Error('Pengaturan ulang tahun belum dikonfigurasi.');
 
-    const now = targetDateStr ? new Date(targetDateStr) : new Date();
-    const targetMonth = now.getMonth() + 1;
-    const targetDay = now.getDate();
-    const dateLabel = formatLocalDate(now);
+    let targetMonth: number;
+    let targetDay: number;
+    let dateLabel: string;
+    if (targetDateStr && /^\d{4}-\d{2}-\d{2}$/.test(targetDateStr)) {
+      const [y, m, d] = targetDateStr.split('-').map((n) => Number.parseInt(n, 10));
+      targetMonth = m;
+      targetDay = d;
+      dateLabel = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    } else {
+      const jakarta = getJakartaParts(targetDateStr ? new Date(targetDateStr) : new Date());
+      targetMonth = jakarta.month;
+      targetDay = jakarta.day;
+      dateLabel = jakarta.dateStr;
+    }
 
     // Fetch all contacts with tanggal_lahir
     const allContacts = await db
@@ -105,7 +133,7 @@ export class BirthdayService {
     const birthdayContacts = allContacts.filter((contact) => {
       if (!contact.tanggalLahir) return false;
       const bDate = new Date(contact.tanggalLahir);
-      return bDate.getMonth() + 1 === targetMonth && bDate.getDate() === targetDay;
+      return bDate.getUTCMonth() + 1 === targetMonth && bDate.getUTCDate() === targetDay;
     });
 
     if (birthdayContacts.length === 0) {

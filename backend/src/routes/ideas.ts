@@ -112,7 +112,13 @@ export default async function ideasRouter(fastify: FastifyInstance) {
   }>('/:id', async (req, reply) => {
     try {
       const updateData: any = { updatedAt: new Date() };
-      if (req.body?.title !== undefined) updateData.title = String(req.body.title).trim();
+      if (req.body?.title !== undefined) {
+        const cleanTitle = String(req.body.title).trim();
+        if (!cleanTitle) {
+          return reply.status(400).send({ success: false, error: 'Judul ide tidak boleh kosong' });
+        }
+        updateData.title = cleanTitle;
+      }
       if (req.body?.notes !== undefined) {
         updateData.notes = req.body.notes ? String(req.body.notes).trim() : null;
       }
@@ -124,6 +130,9 @@ export default async function ideasRouter(fastify: FastifyInstance) {
         .set(updateData)
         .where(eq(contentIdeas.id, req.params.id))
         .returning();
+      if (!updated) {
+        return reply.status(404).send({ success: false, error: 'Ide konten tidak ditemukan' });
+      }
       return reply.send({ success: true, data: updated });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

@@ -66,6 +66,10 @@ export class BroadcastService {
       throw new Error(`Pilih akun kanal ${normalizedChannel} terlebih dahulu untuk mengirim siaran.`);
     }
 
+    const safeDelaySeconds = Math.max(0, Number.isFinite(Number(delaySeconds)) ? Number(delaySeconds) : 5);
+    const safeIntervalSeconds = Math.max(0, Number.isFinite(Number(intervalSeconds)) ? Number(intervalSeconds) : 30);
+    const safeBatchSize = Math.max(1, Math.floor(Number(batchSize) || 10));
+
     // Enforce active Reneo license
     const lic = await licenseService.assertLicenseActive();
 
@@ -144,10 +148,29 @@ export class BroadcastService {
     }
 
     // 2. Determine initial status & schedule
-    const isScheduled =
-      type === 'SCHEDULED' && scheduledAt && new Date(scheduledAt).getTime() > Date.now();
+    let isScheduled = false;
+    let scheduleDate: Date | null = null;
+    if (type === 'SCHEDULED') {
+      if (!scheduledAt) {
+        const err: any = new Error('Tanggal dan waktu jadwal wajib diisi untuk siaran terjadwal.');
+        err.statusCode = 400;
+        throw err;
+      }
+      const parsed = new Date(scheduledAt);
+      if (Number.isNaN(parsed.getTime())) {
+        const err: any = new Error('Format tanggal jadwal tidak valid.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (parsed.getTime() < Date.now() - 60_000) {
+        const err: any = new Error('Waktu jadwal siaran sudah terlewat. Pilih waktu di masa mendatang.');
+        err.statusCode = 400;
+        throw err;
+      }
+      isScheduled = true;
+      scheduleDate = parsed;
+    }
     const status = isScheduled ? 'SCHEDULED' : 'PROCESSING';
-    const scheduleDate = isScheduled ? new Date(scheduledAt) : null;
     const campaignId = crypto.randomUUID();
     const now = new Date();
 
@@ -163,9 +186,9 @@ export class BroadcastService {
         channelAccountId: normalizedChannel === 'WHATSAPP' ? null : channelAccountId,
         status,
         scheduledAt: scheduleDate,
-        delaySeconds,
-        intervalSeconds,
-        batchSize,
+        delaySeconds: safeDelaySeconds,
+        intervalSeconds: safeIntervalSeconds,
+        batchSize: safeBatchSize,
         filterTags: filterTags ? filterTags.join(',') : 'ALL',
         totalCount: targetContacts.length,
         sentCount: 0,
@@ -211,9 +234,9 @@ export class BroadcastService {
     for (let i = 0; i < insertedRecipients.length; i++) {
       const recipient = insertedRecipients[i];
 
-      const batchNumber = Math.floor(i / batchSize);
-      const delayForBatch = batchNumber * (intervalSeconds * 1000);
-      const delayForSingle = i * (delaySeconds * 1000);
+      const batchNumber = Math.floor(i / safeBatchSize);
+      const delayForBatch = batchNumber * (safeIntervalSeconds * 1000);
+      const delayForSingle = i * (safeDelaySeconds * 1000);
       const jitter = Math.floor(Math.random() * 1500); // 0-1.5s human-like jitter
 
       const totalDelay = baseInitialDelay + delayForSingle + delayForBatch + jitter;
@@ -306,11 +329,13 @@ export class BroadcastService {
       throw new Error('Tidak ada penerima berstatus gagal pada kampanye ini.');
     }
 
+    await licenseService.assertLicenseActive();
+
     const now = new Date();
     const targetChannel = ((campaign.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
-    const delaySeconds = campaign.delaySeconds || 5;
-    const intervalSeconds = campaign.intervalSeconds || 30;
-    const batchSize = campaign.batchSize || 10;
+    const delaySeconds = Math.max(0, Number(campaign.delaySeconds ?? 5) || 0);
+    const intervalSeconds = Math.max(0, Number(campaign.intervalSeconds ?? 30) || 0);
+    const batchSize = Math.max(1, Number(campaign.batchSize ?? 10) || 10);
 
     await db
       .update(campaignRecipients)

@@ -163,7 +163,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
       subtitle="Tautkan akun WhatsApp Anda ke server WAHA CRM"
       maxWidthClass="max-w-md"
       footer={
-        <div className="w-full flex items-center justify-between">
+        <div className="w-full flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-2 text-xs text-gray-600">
             <span
               className={`w-2 h-2 rounded-full ${
@@ -174,7 +174,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
               Status: <strong className="font-mono text-gray-900">{status}</strong>
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="secondary"
               size="sm"
@@ -193,7 +193,7 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
     >
       <div className="space-y-3">
         {sessions.length > 0 && (
-          <div className="flex items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
             <label htmlFor="qr-session-select" className="text-xs font-medium text-gray-600 shrink-0">
               Sesi WhatsApp:
             </label>

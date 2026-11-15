@@ -15,7 +15,7 @@ import {
   ChevronRight,
   Globe,
   Bot,
-  Star,
+  Sliders,
   Plug,
   CalendarClock,
   Lightbulb,
@@ -24,6 +24,10 @@ import {
   MessageSquare,
   Radio,
   Zap,
+  Database,
+  Package,
+  Tag,
+  FileText,
 } from 'lucide-react';
 import { AuthStatus, LicenseInfo, SettingsSection } from '../types';
 import { ReneoCrmLogo } from './ReneoCrmLogo';
@@ -59,17 +63,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isIntegrationsActive =
     currentTab === 'settings' &&
     (settingsSection === 'whatsapp' || settingsSection === 'omnichannel');
+  const isMasterDataActive =
+    currentTab === 'settings' &&
+    (settingsSection === 'quick_replies' ||
+      settingsSection === 'products' ||
+      settingsSection === 'labels' ||
+      settingsSection === 'templates');
   const isSystemSettingsActive =
     currentTab === 'settings' &&
     (settingsSection === 'automation' ||
-      settingsSection === 'crm_products' ||
+      settingsSection === 'sla_csat' ||
       settingsSection === 'agents');
 
   const [openDropdowns, setOpenDropdowns] = useState<{
     integrations: boolean;
+    master: boolean;
     settings: boolean;
   }>({
     integrations: true,
+    master: isMasterDataActive,
     settings: isSystemSettingsActive,
   });
 
@@ -77,10 +89,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (isIntegrationsActive) {
       setOpenDropdowns((prev) => ({ ...prev, integrations: true }));
     }
+    if (isMasterDataActive) {
+      setOpenDropdowns((prev) => ({ ...prev, master: true }));
+    }
     if (isSystemSettingsActive) {
       setOpenDropdowns((prev) => ({ ...prev, settings: true }));
     }
-  }, [isIntegrationsActive, isSystemSettingsActive]);
+  }, [isIntegrationsActive, isMasterDataActive, isSystemSettingsActive]);
 
   const menuGroups = [
     {
@@ -90,25 +105,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ],
     },
     {
-      title: 'Publikasi',
+      title: 'Inbox & Sosial',
       items: [
-        { id: 'posts', label: 'Posts', icon: CalendarClock, locked: false, perm: 'broadcasts' },
-        { id: 'ideas', label: 'Ideas', icon: Lightbulb, locked: false, perm: 'broadcasts' },
-        { id: 'media', label: 'Media', icon: ImageIcon, locked: false, perm: 'broadcasts' },
+        { id: 'conversations', label: 'Inbox CRM', icon: MessageCircle, locked: !isLiveChatUnlocked },
+        { id: 'comments', label: 'Komentar', icon: MessageSquare, locked: false, perm: 'conversations' },
+        { id: 'feed', label: 'Feed Sosial', icon: Radio, locked: false, perm: 'conversations' },
       ],
     },
     {
-      title: 'Interaksi & CRM',
+      title: 'Pelanggan & Siaran',
       items: [
-        { id: 'comments', label: 'Comments', icon: MessageSquare, locked: false },
-        { id: 'conversations', label: 'Inbox CRM', icon: MessageCircle, locked: !isLiveChatUnlocked },
-        { id: 'feed', label: 'Feed', icon: Radio, locked: false },
-        { id: 'automations', label: 'Automations', icon: Zap, locked: false, perm: 'settings' },
-        { id: 'ai-agent', label: 'Agent AI', icon: Bot, locked: false, perm: 'settings' },
         { id: 'contacts', label: 'Kontak', icon: Users, locked: false },
-        { id: 'broadcasts', label: 'Siaran', icon: Send, locked: false, perm: 'broadcasts' },
+        { id: 'broadcasts', label: 'Siaran & Kampanye', icon: Send, locked: false, perm: 'broadcasts' },
         { id: 'birthday', label: 'Ulang Tahun', icon: Cake, locked: false },
-        { id: 'tracking', label: 'Pelacakan', icon: CheckCheck, locked: false },
+        { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck, locked: false },
+      ],
+    },
+    {
+      title: 'Publikasi Konten',
+      items: [
+        { id: 'posts', label: 'Jadwal Post', icon: CalendarClock, locked: false, perm: 'broadcasts' },
+        { id: 'ideas', label: 'Ide Konten', icon: Lightbulb, locked: false, perm: 'broadcasts' },
+        { id: 'media', label: 'Pustaka Media', icon: ImageIcon, locked: false, perm: 'broadcasts' },
+      ],
+    },
+    {
+      title: 'Otomasi & AI',
+      items: [
+        { id: 'automations', label: 'Otomasi Komentar', icon: Zap, locked: false, perm: 'settings' },
+        { id: 'ai-agent', label: 'Agent AI & KB', icon: Bot, locked: false, perm: 'settings' },
       ],
     },
   ];
@@ -118,10 +143,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'omnichannel', label: 'Omnichannel', icon: Globe },
   ];
 
+  const masterDataSubItems: { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { id: 'quick_replies', label: 'Balasan Cepat', icon: Zap },
+    { id: 'products', label: 'Katalog Produk', icon: Package },
+    { id: 'labels', label: 'Label & Kategori', icon: Tag },
+    { id: 'templates', label: 'Template Siaran', icon: FileText },
+  ];
+
   const settingsSubItems: { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'automation', label: 'Otomatisasi & Bot', icon: Bot },
-    { id: 'crm_products', label: 'CSAT, SLA & Produk', icon: Star },
-    ...(isAdmin ? [{ id: 'agents' as const, label: 'Tim & Akses', icon: Users }] : []),
+    { id: 'automation', label: 'Auto-Reply & Jam Kerja', icon: Bot },
+    { id: 'sla_csat', label: 'SLA, Routing & CSAT', icon: Sliders },
+    ...(isAdmin ? [{ id: 'agents' as const, label: 'Tim & Hak Akses', icon: Users }] : []),
   ];
 
   const isItemAllowed = (id: string) => {
@@ -145,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-60 bg-[#121622] text-gray-200 flex flex-col h-screen shrink-0 border-r border-[#1E2438] select-none transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 w-60 bg-[#121622] text-gray-200 flex flex-col h-screen supports-[height:100dvh]:h-dvh shrink-0 border-r border-[#1E2438] select-none transition-transform duration-200 lg:static lg:translate-x-0 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -289,7 +321,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
 
-            {/* Dropdown: Pengaturan */}
+            {/* Dropdown: Master Data */}
+            <div>
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenDropdowns((prev) => ({ ...prev, master: !prev.master }))
+                }
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] font-medium transition-colors ${
+                  isMasterDataActive
+                    ? 'bg-[#1E2438] text-white'
+                    : 'text-gray-400 hover:bg-[#1E2438]/60 hover:text-gray-100'
+                }`}
+              >
+                <Database
+                  className={`w-4 h-4 shrink-0 ${
+                    isMasterDataActive ? 'text-indigo-400' : 'text-gray-400'
+                  }`}
+                />
+                <span className="truncate flex-1 text-left">Master Data</span>
+                {openDropdowns.master ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                )}
+              </button>
+              {openDropdowns.master && (
+                <div className="mt-0.5 ml-3 pl-2.5 border-l border-[#242B42] space-y-0.5">
+                  {masterDataSubItems.map((sub) => {
+                    const SubIcon = sub.icon;
+                    const active = currentTab === 'settings' && settingsSection === sub.id;
+                    return (
+                      <button
+                        key={sub.id}
+                        type="button"
+                        onClick={() => handleOpenSettingsSub(sub.id)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                          active
+                            ? 'bg-indigo-600/20 text-indigo-300'
+                            : 'text-gray-400 hover:bg-[#1E2438]/50 hover:text-gray-200'
+                        }`}
+                      >
+                        <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate text-left">{sub.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Dropdown: Pengaturan CRM */}
             <div>
               <button
                 type="button"
@@ -307,7 +389,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     isSystemSettingsActive ? 'text-indigo-400' : 'text-gray-400'
                   }`}
                 />
-                <span className="truncate flex-1 text-left">Pengaturan</span>
+                <span className="truncate flex-1 text-left">Pengaturan CRM</span>
                 {openDropdowns.settings ? (
                   <ChevronDown className="w-3.5 h-3.5 text-gray-500 shrink-0" />
                 ) : (

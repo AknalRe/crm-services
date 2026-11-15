@@ -47,26 +47,34 @@ const VALID_TABS = new Set([
 const VALID_SETTINGS_SECTIONS = new Set<SettingsSection>([
   'whatsapp',
   'omnichannel',
+  'quick_replies',
+  'products',
+  'labels',
+  'templates',
   'automation',
-  'crm_products',
+  'sla_csat',
   'agents',
 ]);
+
+function normalizeSettingsSection(raw: string): SettingsSection {
+  if (raw === 'crm_products') return 'sla_csat';
+  return VALID_SETTINGS_SECTIONS.has(raw as SettingsSection) ? (raw as SettingsSection) : 'whatsapp';
+}
 
 function getInitialLocation(): { tab: string; settingsSection: SettingsSection } {
   if (typeof window === 'undefined') return { tab: 'dashboard', settingsSection: 'whatsapp' };
   const rawHash = window.location.hash.replace(/^#/, '').trim();
   if (rawHash.startsWith('settings/')) {
-    const sub = rawHash.slice('settings/'.length) as SettingsSection;
     return {
       tab: 'settings',
-      settingsSection: VALID_SETTINGS_SECTIONS.has(sub) ? sub : 'whatsapp',
+      settingsSection: normalizeSettingsSection(rawHash.slice('settings/'.length)),
     };
   }
   if (VALID_TABS.has(rawHash)) {
     let savedSub: SettingsSection = 'whatsapp';
     try {
-      const s = localStorage.getItem('crm_settings_section') as SettingsSection;
-      if (VALID_SETTINGS_SECTIONS.has(s)) savedSub = s;
+      const s = localStorage.getItem('crm_settings_section') || '';
+      savedSub = normalizeSettingsSection(s);
     } catch {
       // ignore
     }
@@ -74,10 +82,10 @@ function getInitialLocation(): { tab: string; settingsSection: SettingsSection }
   }
   try {
     const savedTab = localStorage.getItem('crm_current_tab') || '';
-    const savedSub = localStorage.getItem('crm_settings_section') as SettingsSection;
+    const savedSub = localStorage.getItem('crm_settings_section') || '';
     return {
       tab: VALID_TABS.has(savedTab) ? savedTab : 'dashboard',
-      settingsSection: VALID_SETTINGS_SECTIONS.has(savedSub) ? savedSub : 'whatsapp',
+      settingsSection: normalizeSettingsSection(savedSub),
     };
   } catch {
     return { tab: 'dashboard', settingsSection: 'whatsapp' };
@@ -210,13 +218,36 @@ function AppShell() {
 
   useEffect(() => {
     const user = authStatus?.user;
-    if (!user || user.role === 'ADMIN' || !Array.isArray(user.permissions) || user.permissions.length === 0) {
+    if (!user || user.role === 'ADMIN') {
       return;
     }
-    if (!user.permissions.includes(currentTab)) {
+    if (settingsSection === 'agents') {
+      setSettingsSection('whatsapp');
+    }
+    if (!Array.isArray(user.permissions) || user.permissions.length === 0) {
+      return;
+    }
+    const TAB_REQUIRED_PERMISSION: Record<string, string> = {
+      dashboard: 'dashboard',
+      contacts: 'contacts',
+      broadcasts: 'broadcasts',
+      posts: 'broadcasts',
+      ideas: 'broadcasts',
+      media: 'broadcasts',
+      birthday: 'birthday',
+      tracking: 'tracking',
+      conversations: 'conversations',
+      comments: 'conversations',
+      feed: 'conversations',
+      settings: 'settings',
+      automations: 'settings',
+      'ai-agent': 'settings',
+    };
+    const requiredPerm = TAB_REQUIRED_PERMISSION[currentTab] ?? currentTab;
+    if (!user.permissions.includes(requiredPerm)) {
       setCurrentTab(user.permissions[0]);
     }
-  }, [authStatus?.user, currentTab]);
+  }, [authStatus?.user, currentTab, settingsSection]);
 
   const handleStartBroadcastWithContacts = (contactIds: string[]) => {
     setPreselectedContactIds(contactIds);
@@ -249,21 +280,29 @@ function AppShell() {
             return 'Integrasi WhatsApp (WAHA)';
           case 'omnichannel':
             return 'Integrasi Omnichannel';
+          case 'quick_replies':
+            return 'Master Balasan Cepat';
+          case 'products':
+            return 'Master Katalog Produk';
+          case 'labels':
+            return 'Master Label & Kategori';
+          case 'templates':
+            return 'Master Template Siaran';
           case 'automation':
-            return 'Otomatisasi & Bot';
-          case 'crm_products':
-            return 'CSAT, SLA & Produk';
+            return 'Auto-Reply & Jam Kerja';
+          case 'sla_csat':
+            return 'SLA, Routing & CSAT';
           case 'agents':
             return 'Tim & Hak Akses';
           default:
-            return 'Pengaturan & Kanal';
+            return 'Pengaturan & Konfigurasi';
         }
       case 'comments':
-        return 'Comments';
+        return 'Komentar Sosial Media';
       case 'feed':
-        return 'Feed Threads';
+        return 'Feed Sosial Media';
       case 'automations':
-        return 'Automations Komentar & DM';
+        return 'Otomasi Komentar & DM';
       case 'ai-agent':
         return 'Agent AI & Knowledge Base';
       default:
@@ -323,6 +362,21 @@ function AppShell() {
           user={authStatus.user ?? null}
           onLicenseUpdated={fetchLicenseStatus}
           onOpenPlans={() => setIsPlansModalOpen(true)}
+          onBackToLanding={() => {
+            if (typeof window !== 'undefined' && window.location.hash === '#login') {
+              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            }
+            window.location.hash = '';
+            window.location.href = '/';
+          }}
+          onLogout={async () => {
+            try {
+              await api.logoutAuth();
+            } catch {
+              // ignore
+            }
+            setAuthStatus({ initialized: true, authenticated: false, user: null });
+          }}
         />
         <PlansModal
           isOpen={isPlansModalOpen}
@@ -336,7 +390,7 @@ function AppShell() {
   }
 
   return (
-    <div className="flex h-screen bg-[#F5F6FA] text-gray-900 overflow-hidden font-sans">
+    <div className="flex h-screen supports-[height:100dvh]:h-dvh bg-[#F5F6FA] text-gray-900 overflow-hidden font-sans">
       <Sidebar
         currentTab={currentTab}
         setCurrentTab={(tab) => {
@@ -417,6 +471,10 @@ function AppShell() {
                 licenseInfo={licenseInfo}
                 currentUser={authStatus?.user}
                 onOpenPlans={() => setIsPlansModalOpen(true)}
+                onOpenSettings={(sec) => {
+                  setSettingsSection(sec);
+                  setCurrentTab('settings');
+                }}
               />
             )}
             {currentTab === 'settings' && (

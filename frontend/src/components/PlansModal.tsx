@@ -149,7 +149,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
       <div className="text-xs text-gray-500">
         Paket Terpilih:{' '}
         <strong className="text-gray-900">
-          {plans.find((p) => p.slug === selectedPlanSlug)?.name || 'Pro Bulanan'}
+          {plans.find((p) => p.slug === selectedPlanSlug)?.name || '-'}
         </strong>
       </div>
       <div className="flex items-center gap-2">
@@ -314,6 +314,14 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                               </span>
                             </div>
                           )}
+                          <div className="flex items-center gap-2">
+                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>
+                              {p.features?.multiAgent
+                                ? `Multi-Staf CS (hingga ${p.features?.maxAgents || (p.slug?.includes('enterprise') ? 25 : 5)} akun)`
+                                : '1 Akun Admin / CS'}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -418,7 +426,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                     Penerbit
                   </span>
                   <h4 className="font-semibold text-gray-900 text-sm">Reneo Platform</h4>
-                  <p className="text-gray-500 text-[11px]">PT Reneo Teknologi Indonesia</p>
+                  <p className="text-gray-500 text-[11px]">Gateway Pembayaran Panel Reneo</p>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] uppercase font-semibold text-gray-400 tracking-wider">

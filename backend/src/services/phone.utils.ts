@@ -21,7 +21,14 @@ export function normalizePhoneNumber(phone: string): string {
 }
 
 export function toWahaChatId(phone: string): string {
-  const normalized = normalizePhoneNumber(phone);
+  const trimmed = (phone || '').trim();
+  if (/^[^@\s]+@s\.whatsapp\.net$/i.test(trimmed)) {
+    return trimmed.replace(/@s\.whatsapp\.net$/i, '@c.us');
+  }
+  if (/^[^@\s]+@(c\.us|lid|g\.us|broadcast)$/i.test(trimmed)) {
+    return trimmed;
+  }
+  const normalized = normalizePhoneNumber(trimmed);
   if (!normalized.endsWith('@c.us')) {
     return `${normalized}@c.us`;
   }

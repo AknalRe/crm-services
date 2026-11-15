@@ -29,7 +29,7 @@ interface ContactsProps {
   licenseInfo?: LicenseInfo | null;
 }
 
-const CONTACT_CATEGORIES = ['Umum', 'VIP', 'Prospek', 'Pelanggan Tetap', 'Korporat', 'Partner'];
+const DEFAULT_CONTACT_CATEGORIES = ['Umum', 'VIP', 'Prospek', 'Pelanggan Tetap', 'Korporat', 'Partner'];
 
 export const Contacts: React.FC<ContactsProps> = ({
   onStartBroadcastWithContacts,
@@ -37,6 +37,7 @@ export const Contacts: React.FC<ContactsProps> = ({
 }) => {
   const toast = useToast();
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [masterCategories, setMasterCategories] = useState<string[]>(DEFAULT_CONTACT_CATEGORIES);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -94,6 +95,17 @@ export const Contacts: React.FC<ContactsProps> = ({
     fetchContacts();
   }, [fetchContacts]);
 
+  useEffect(() => {
+    api
+      .getMasterLabels('CONTACT_CATEGORY', true)
+      .then((list) => {
+        if (list && list.length > 0) {
+          setMasterCategories(list.map((l) => l.name));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     fetchContacts();
@@ -109,7 +121,7 @@ export const Contacts: React.FC<ContactsProps> = ({
 
   const availableCategories = Array.from(
     new Set([
-      ...CONTACT_CATEGORIES,
+      ...masterCategories,
       ...contacts.map((c) => (c.kategori || '').trim()).filter(Boolean),
     ])
   );
@@ -399,8 +411,8 @@ export const Contacts: React.FC<ContactsProps> = ({
     <div className="space-y-5">
       {/* Action Header */}
       <div className="bg-white rounded-lg border border-gray-200 p-4 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
-        <div className="flex flex-1 items-center gap-2 flex-wrap sm:flex-nowrap">
-          <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-[200px] max-w-md">
+        <div className="flex flex-1 flex-col sm:flex-row sm:items-center gap-2 min-w-0">
+          <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-0 sm:min-w-[200px] lg:max-w-md">
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -411,33 +423,35 @@ export const Contacts: React.FC<ContactsProps> = ({
             />
           </form>
 
-          <select
-            value={selectedKategori}
-            onChange={(e) => setSelectedKategori(e.target.value)}
-            title="Filter Kelompok / Kategori Kontak"
-            className="h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500"
-          >
-            <option value="ALL">Semua Kelompok</option>
-            {availableCategories.map((cat) => (
-              <option key={cat} value={cat}>
-                Kelompok: {cat}
-              </option>
-            ))}
-            <option value="UNGROUPED">Tanpa Kelompok</option>
-          </select>
+          <div className="grid grid-cols-2 sm:flex items-center gap-2">
+            <select
+              value={selectedKategori}
+              onChange={(e) => setSelectedKategori(e.target.value)}
+              title="Filter Kelompok / Kategori Kontak"
+              className="w-full sm:w-auto max-w-full h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
+            >
+              <option value="ALL">Semua Kelompok</option>
+              {availableCategories.map((cat) => (
+                <option key={cat} value={cat}>
+                  Kelompok: {cat}
+                </option>
+              ))}
+              <option value="UNGROUPED">Tanpa Kelompok</option>
+            </select>
 
-          <select
-            value={selectedTag}
-            onChange={(e) => setSelectedTag(e.target.value)}
-            className="h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500"
-          >
-            <option value="ALL">Semua Tag</option>
-            {availableTags.map((tag) => (
-              <option key={tag} value={tag}>
-                Tag: {tag}
-              </option>
-            ))}
-          </select>
+            <select
+              value={selectedTag}
+              onChange={(e) => setSelectedTag(e.target.value)}
+              className="w-full sm:w-auto max-w-full h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
+            >
+              <option value="ALL">Semua Tag</option>
+              {availableTags.map((tag) => (
+                <option key={tag} value={tag}>
+                  Tag: {tag}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -787,7 +801,7 @@ export const Contacts: React.FC<ContactsProps> = ({
               Kategori / Kelompok Kontak
             </label>
             <div className="flex flex-wrap gap-1.5 mb-2">
-              {CONTACT_CATEGORIES.map((cat) => (
+              {masterCategories.map((cat) => (
                 <button
                   key={cat}
                   type="button"

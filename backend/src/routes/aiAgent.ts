@@ -17,7 +17,7 @@ interface AiAgentConfig {
   apiKey?: string;
 }
 
-const DEFAULT_CONFIG: AiAgentConfig = {
+export const DEFAULT_CONFIG: AiAgentConfig = {
   enabled: false,
   name: 'Asisten CRM',
   persona: 'Ramah, ringkas, profesional, dan selalu merujuk pada Knowledge Base perusahaan.',
@@ -27,6 +27,102 @@ const DEFAULT_CONFIG: AiAgentConfig = {
   model: 'gpt-4o-mini',
   apiKey: '',
 };
+
+export async function getAiAgentConfig(): Promise<AiAgentConfig> {
+  const [configRow] = await db
+    .select()
+    .from(systemSettings)
+    .where(eq(systemSettings.key, 'ai_agent_config'));
+  let cfg = { ...DEFAULT_CONFIG };
+  if (configRow?.value) {
+    try {
+      cfg = { ...DEFAULT_CONFIG, ...JSON.parse(configRow.value) };
+    } catch {
+      // fallback to defaults
+    }
+  }
+  return cfg;
+}
+
+export async function generateAiAgentReply(message: string): Promise<{
+  config: AiAgentConfig;
+  reply: string;
+  source: 'OPENAI' | 'GEMINI' | 'LOCAL_KB';
+  matchedKb: boolean;
+}> {
+  const cfg = await getAiAgentConfig();
+  const kbItems = await db
+    .select()
+    .from(aiKnowledgeItems)
+    .where(eq(aiKnowledgeItems.isActive, true));
+
+  const kbContext = kbItems
+    .map((k) => `[${k.category}] ${k.title}: ${k.content}`)
+    .join('\n\n');
+
+  const systemPrompt = `Nama Anda ${cfg.name}. Persona: ${cfg.persona}\n\nKnowledge Base:\n${kbContext || 'Belum ada knowledge base.'}`;
+
+  if (cfg.provider === 'OPENAI' && cfg.apiKey) {
+    const res = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: cfg.model || 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message },
+        ],
+        temperature: 0.4,
+      },
+      { headers: { Authorization: `Bearer ${cfg.apiKey}` }, timeout: 15000 }
+    );
+    const reply = String(res.data?.choices?.[0]?.message?.content || '').trim();
+    return { config: cfg, reply, source: 'OPENAI', matchedKb: true };
+  }
+
+  if (cfg.provider === 'GEMINI' && cfg.apiKey) {
+    const modelName = (cfg.model || 'gemini-2.0-flash').replace(/^models\//, '');
+    const res = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent`,
+      {
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: message }] }],
+        generationConfig: { temperature: 0.4 },
+      },
+      { headers: { 'x-goog-api-key': cfg.apiKey }, timeout: 15000 }
+    );
+    const parts = res.data?.candidates?.[0]?.content?.parts;
+    const reply = Array.isArray(parts)
+      ? parts.map((p: any) => p?.text || '').join('').trim()
+      : '';
+    return { config: cfg, reply, source: 'GEMINI', matchedKb: true };
+  }
+
+  const tokens = message
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length > 2);
+  let bestItem = null;
+  let bestScore = 0;
+  for (const item of kbItems) {
+    const haystack = `${item.title} ${item.content}`.toLowerCase();
+    const score = tokens.reduce((acc, tok) => (haystack.includes(tok) ? acc + 1 : acc), 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = item;
+    }
+  }
+
+  const replyText = bestItem
+    ? `Halo! Berdasarkan ${bestItem.title} (${bestItem.category}): ${bestItem.content}`
+    : `Halo, saya ${cfg.name}. Terima kasih sudah menghubungi kami! Tim kami akan segera membantu pertanyaan Anda terkait "${message}".`;
+
+  return {
+    config: cfg,
+    reply: replyText,
+    source: 'LOCAL_KB',
+    matchedKb: Boolean(bestItem),
+  };
+}
 
 export default async function aiAgentRouter(fastify: FastifyInstance) {
   fastify.addHook('preHandler', requirePermission('settings'));
@@ -191,73 +287,10 @@ export default async function aiAgentRouter(fastify: FastifyInstance) {
         return reply.status(400).send({ success: false, error: 'Pesan uji wajib diisi' });
       }
 
-      const [configRow] = await db
-        .select()
-        .from(systemSettings)
-        .where(eq(systemSettings.key, 'ai_agent_config'));
-      let config = { ...DEFAULT_CONFIG };
-      if (configRow?.value) {
-        try {
-          config = { ...DEFAULT_CONFIG, ...JSON.parse(configRow.value) };
-        } catch {
-          // fallback
-        }
-      }
-
-      const kbItems = await db
-        .select()
-        .from(aiKnowledgeItems)
-        .where(eq(aiKnowledgeItems.isActive, true));
-
-      const kbContext = kbItems
-        .map((k) => `[${k.category}] ${k.title}: ${k.content}`)
-        .join('\n\n');
-
-      if (config.provider === 'OPENAI' && config.apiKey) {
-        const res = await axios.post(
-          'https://api.openai.com/v1/chat/completions',
-          {
-            model: config.model || 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: `Nama Anda ${config.name}. Persona: ${config.persona}\n\nKnowledge Base:\n${kbContext || 'Belum ada knowledge base.'}`,
-              },
-              { role: 'user', content: message },
-            ],
-            temperature: 0.4,
-          },
-          { headers: { Authorization: `Bearer ${config.apiKey}` }, timeout: 15000 }
-        );
-        return reply.send({
-          success: true,
-          data: { reply: res.data?.choices?.[0]?.message?.content || '', source: 'OPENAI' },
-        });
-      }
-
-      // Deterministic Knowledge Base matcher fallback
-      const tokens = message
-        .toLowerCase()
-        .split(/\s+/)
-        .filter((t) => t.length > 2);
-      let bestItem = null;
-      let bestScore = 0;
-      for (const item of kbItems) {
-        const haystack = `${item.title} ${item.content}`.toLowerCase();
-        const score = tokens.reduce((acc, tok) => (haystack.includes(tok) ? acc + 1 : acc), 0);
-        if (score > bestScore) {
-          bestScore = score;
-          bestItem = item;
-        }
-      }
-
-      const replyText = bestItem
-        ? `Halo! Berdasarkan ${bestItem.title} (${bestItem.category}): ${bestItem.content}`
-        : `Halo, saya ${config.name}. Terima kasih sudah menghubungi kami! Tim kami akan segera membantu pertanyaan Anda terkait "${message}".`;
-
+      const result = await generateAiAgentReply(message);
       return reply.send({
         success: true,
-        data: { reply: replyText, source: 'LOCAL_KB' },
+        data: { reply: result.reply, source: result.source },
       });
     } catch (error: any) {
       return reply.status(400).send({

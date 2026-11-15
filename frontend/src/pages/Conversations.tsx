@@ -42,11 +42,13 @@ import {
   Contact,
   Conversation,
   ChatMessage,
+  CrmLabelItem,
   LicenseInfo,
   OmnichannelType,
   ProductItem,
   WahaSessionItem,
 } from '../types';
+import { LABEL_COLOR_MAP } from '../components/MasterDataSettings';
 
 const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls: string }> = {
   WHATSAPP: { label: 'WhatsApp', short: 'WA', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -73,6 +75,7 @@ interface ConversationsProps {
   licenseInfo?: LicenseInfo | null;
   currentUser?: AuthStatus['user'] | null;
   onOpenPlans?: () => void;
+  onOpenSettings?: (section: 'quick_replies' | 'products' | 'labels') => void;
 }
 
 const CONTACT_PANEL_KEY = 'crm_livechat_contact_panel';
@@ -97,8 +100,17 @@ function readContactPanelPref(): boolean {
   }
 }
 
-export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, currentUser, onOpenPlans }) => {
+export const Conversations: React.FC<ConversationsProps> = ({
+  licenseInfo,
+  currentUser,
+  onOpenPlans,
+  onOpenSettings,
+}) => {
   const toast = useToast();
+  const canManageMaster =
+    !currentUser ||
+    currentUser.role === 'ADMIN' ||
+    (Array.isArray(currentUser.permissions) && currentUser.permissions.includes('settings'));
   const isLiveChatUnlocked = Boolean(
     licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
   );
@@ -346,6 +358,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   >([]);
   const [assigneeFilter, setAssigneeFilter] = useState<'ALL' | 'MINE' | 'UNASSIGNED'>('ALL');
   const [cannedList, setCannedList] = useState<CannedResponse[]>([]);
+  const [masterLabels, setMasterLabels] = useState<CrmLabelItem[]>([]);
   const [showCannedPicker, setShowCannedPicker] = useState(false);
   const [showAddCanned, setShowAddCanned] = useState(false);
   const [newCannedShort, setNewCannedShort] = useState('');
@@ -353,15 +366,28 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   const [newCannedContent, setNewCannedContent] = useState('');
   const [savingCanned, setSavingCanned] = useState(false);
 
+  const applyCannedVariables = (raw: string): string => {
+    const fullName = selectedConversation?.contact?.nama_lengkap || '';
+    const nickName =
+      selectedConversation?.contact?.nama_panggilan ||
+      (fullName ? fullName.split(' ')[0] : '') ||
+      'Kak';
+    return raw
+      .replace(/\{nama_panggilan\}/gi, nickName)
+      .replace(/\{nama_lengkap\}/gi, fullName || nickName);
+  };
+
   const fetchAgentsAndCanned = useCallback(async () => {
     if (!isLiveChatUnlocked) return;
     try {
-      const [agentsData, cannedData] = await Promise.all([
+      const [agentsData, cannedData, labelsData] = await Promise.all([
         api.getAssignableAgents().catch(() => []),
-        api.getCannedResponses().catch(() => []),
+        api.getCannedResponses(true).catch(() => []),
+        api.getMasterLabels('CONVERSATION_LABEL', true).catch(() => []),
       ]);
       setAssignableAgents(agentsData || []);
       setCannedList(cannedData || []);
+      setMasterLabels(labelsData || []);
     } catch {
       // ignore
     }
@@ -676,7 +702,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   const activeLabels = getLabelList(selectedConversation);
 
   return (
-    <div className="relative bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-84px)] sm:h-[calc(100vh-100px)] lg:h-[calc(100vh-108px)] flex flex-col md:flex-row">
+    <div className="relative bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-84px)] supports-[height:100dvh]:h-[calc(100dvh-84px)] sm:h-[calc(100vh-100px)] sm:supports-[height:100dvh]:h-[calc(100dvh-100px)] lg:h-[calc(100vh-108px)] lg:supports-[height:100dvh]:h-[calc(100dvh-108px)] flex flex-col md:flex-row">
       {/* Left List */}
       <div
         className={`w-full md:w-64 lg:w-72 xl:w-80 border-b md:border-b-0 md:border-r border-gray-200 flex-col shrink-0 bg-gray-50/50 ${
@@ -1322,6 +1348,18 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                       <span>Balasan Cepat</span>
                     </span>
                     <div className="flex items-center gap-1.5 shrink-0">
+                      {canManageMaster && onOpenSettings && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCannedPicker(false);
+                            onOpenSettings('quick_replies');
+                          }}
+                          className="h-6 px-2 rounded border border-gray-200 bg-white hover:bg-gray-50 text-[11px] font-medium text-gray-600 inline-flex items-center whitespace-nowrap shrink-0 transition-colors"
+                        >
+                          Kelola
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setShowAddCanned((v) => !v)}
@@ -1386,15 +1424,21 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                         <button
                           type="button"
                           onClick={() => {
-                            setInputText((prev) => (prev ? `${prev} ${item.content}` : item.content));
+                            const filled = applyCannedVariables(item.content);
+                            setInputText((prev) => (prev ? `${prev} ${filled}` : filled));
                             setShowCannedPicker(false);
                           }}
                           className="text-left flex-1 min-w-0 hover:bg-gray-50 rounded p-1"
                         >
                           <div className="flex items-center gap-1.5">
-                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px]">
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
                               /{item.shortCode}
                             </span>
+                            {item.category && (
+                              <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] shrink-0">
+                                {item.category}
+                              </span>
+                            )}
                             <span className="text-[11px] font-medium text-gray-800 truncate">
                               {item.title}
                             </span>
@@ -1439,13 +1483,18 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => setInputText(item.content)}
+                        onClick={() => setInputText(applyCannedVariables(item.content))}
                         className="w-full text-left px-2 py-1.5 hover:bg-indigo-50 rounded transition-colors"
                       >
                         <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px]">
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
                             /{item.shortCode}
                           </span>
+                          {item.category && (
+                            <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] shrink-0">
+                              {item.category}
+                            </span>
+                          )}
                           <span className="text-[11px] font-medium text-gray-800 truncate">
                             {item.title}
                           </span>
@@ -1773,39 +1822,58 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
 
             {/* Labels Editor */}
             <div className="pt-2 border-t border-gray-100 space-y-2">
-              <span className="flex items-center gap-1 text-[11px] text-gray-500 font-medium">
-                <Tag className="w-3 h-3" />
-                Label Percakapan
-              </span>
-              <div className="flex flex-wrap gap-1">
-                {activeLabels.map((lbl) => (
-                  <span
-                    key={lbl}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
-                  >
-                    {lbl}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleLabel(lbl)}
-                      className="hover:text-indigo-900"
-                    >
-                      <X className="w-2.5 h-2.5" />
-                    </button>
-                  </span>
-                ))}
-                {PRESET_LABELS.filter(
-                  (p) => !activeLabels.some((a) => a.toLowerCase() === p.toLowerCase())
-                ).map((preset) => (
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1 text-[11px] text-gray-500 font-medium">
+                  <Tag className="w-3 h-3" />
+                  Label Percakapan
+                </span>
+                {canManageMaster && onOpenSettings && (
                   <button
-                    key={preset}
                     type="button"
-                    onClick={() => handleToggleLabel(preset)}
-                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-gray-50 hover:bg-gray-100 text-gray-600 border border-dashed border-gray-300"
+                    onClick={() => onOpenSettings('labels')}
+                    className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap"
                   >
-                    <Plus className="w-2.5 h-2.5" />
-                    {preset}
+                    Kelola
                   </button>
-                ))}
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {activeLabels.map((lbl) => {
+                  const matched = masterLabels.find(
+                    (m) => m.name.toLowerCase() === lbl.toLowerCase()
+                  );
+                  const badgeCls =
+                    (matched && LABEL_COLOR_MAP[matched.color]?.badge) ||
+                    'bg-indigo-50 text-indigo-700 border-indigo-200';
+                  return (
+                    <span
+                      key={lbl}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${badgeCls}`}
+                    >
+                      {lbl}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleLabel(lbl)}
+                        className="opacity-75 hover:opacity-100"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </span>
+                  );
+                })}
+                {(masterLabels.length > 0 ? masterLabels.map((m) => m.name) : PRESET_LABELS)
+                  .filter((p) => !activeLabels.some((a) => a.toLowerCase() === p.toLowerCase()))
+                  .map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handleToggleLabel(preset)}
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-gray-50 hover:bg-gray-100 text-gray-600 border border-dashed border-gray-300"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                      {preset}
+                    </button>
+                  ))}
               </div>
               <form onSubmit={handleAddCustomLabel} className="flex gap-1.5">
                 <input

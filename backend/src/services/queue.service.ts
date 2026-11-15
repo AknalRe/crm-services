@@ -75,7 +75,17 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           errorMessage: 'Campaign was cancelled by user',
           updatedAt: new Date(),
         })
-        .where(eq(campaignRecipients.id, recipientId));
+        .where(and(eq(campaignRecipients.id, recipientId), eq(campaignRecipients.status, 'PENDING')));
+      return;
+    }
+
+    // Idempotency guard: only send if recipient is still PENDING
+    const recRows = await db
+      .select({ status: campaignRecipients.status })
+      .from(campaignRecipients)
+      .where(eq(campaignRecipients.id, recipientId));
+    if (!recRows[0] || recRows[0].status !== 'PENDING') {
+      console.log(`[Queue Worker] Recipient ${recipientId} is already processed (${recRows[0]?.status || 'missing'}). Skipping duplicate send.`);
       return;
     }
 
@@ -228,15 +238,24 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
     const remaining = Number(pendingList[0]?.count || 0);
 
     if (remaining === 0) {
+      const updatedCamp = await db
+        .select({ sentCount: campaigns.sentCount, failedCount: campaigns.failedCount })
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId));
+      const cStats = updatedCamp[0];
+      const finalStatus =
+        cStats && Number(cStats.sentCount || 0) === 0 && Number(cStats.failedCount || 0) > 0
+          ? 'FAILED'
+          : 'COMPLETED';
       await db
         .update(campaigns)
         .set({
-          status: 'COMPLETED',
+          status: finalStatus,
           completedAt: new Date(),
           updatedAt: new Date(),
         })
         .where(and(eq(campaigns.id, campaignId), ne(campaigns.status, 'CANCELLED')));
-      console.log(`[Queue Worker] Campaign ${campaignId} check completed.`);
+      console.log(`[Queue Worker] Campaign ${campaignId} finished with status ${finalStatus}.`);
     }
 
     liveEvents.emit('tracking:update', { campaignId, recipientId });

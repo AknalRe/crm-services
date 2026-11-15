@@ -17,6 +17,7 @@ import {
   Contact,
   CampaignRecipient,
   LicenseInfo,
+  MessageTemplateItem,
   OmnichannelType,
   WahaSessionItem,
 } from '../types';
@@ -44,6 +45,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
   const [channel, setChannel] = useState<OmnichannelType>('WHATSAPP');
   const [channelAccounts, setChannelAccounts] = useState<ChannelAccount[]>([]);
   const [channelAccountId, setChannelAccountId] = useState<string>('');
+  const [messageTemplates, setMessageTemplates] = useState<MessageTemplateItem[]>([]);
 
   const [title, setTitle] = useState('');
   const [broadcastType, setBroadcastType] = useState<'IMMEDIATE' | 'SCHEDULED'>('IMMEDIATE');
@@ -106,6 +108,10 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
     api
       .getChannels()
       .then((list) => setChannelAccounts(list || []))
+      .catch(() => {});
+    api
+      .getMessageTemplates({ activeOnly: true })
+      .then((tpls) => setMessageTemplates(tpls || []))
       .catch(() => {});
 
     const unsub = subscribeLiveEvent('tracking:update', () => {
@@ -558,6 +564,35 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                 </div>
               </div>
 
+              {messageTemplates.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-md bg-gray-50 border border-gray-200">
+                  <label className="text-[11px] font-medium text-gray-600 shrink-0">
+                    Pakai Master Template:
+                  </label>
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const tpl = messageTemplates.find((t) => t.id === e.target.value);
+                      if (tpl) {
+                        setMessageTemplate(tpl.content);
+                        if (!title.trim()) setTitle(tpl.name);
+                        e.target.value = '';
+                      }
+                    }}
+                    className="flex-1 min-w-0 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">-- Pilih template siaran tersimpan --</option>
+                    {messageTemplates
+                      .filter((t) => t.channel === 'ALL' || t.channel === channel)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          [{t.category}] {t.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+
               <textarea
                 rows={5}
                 required
@@ -865,8 +900,8 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
         ) : selectedCampaign.recipients.length === 0 ? (
           <EmptyState title="Tidak ada penerima" description="Kampanye ini belum memiliki daftar penerima." />
         ) : (
-          <div className="border border-gray-200 rounded-md overflow-hidden">
-            <table className="w-full text-left text-xs">
+          <div className="border border-gray-200 rounded-md overflow-x-auto">
+            <table className="w-full min-w-[480px] text-left text-xs">
               <thead className="bg-gray-50 text-gray-500 font-semibold border-b border-gray-200">
                 <tr>
                   <th className="py-2.5 px-3">Pelanggan</th>

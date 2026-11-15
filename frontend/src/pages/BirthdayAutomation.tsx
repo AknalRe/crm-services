@@ -59,7 +59,7 @@ export const BirthdayAutomation: React.FC = () => {
         data.setting?.messageTemplate ||
           'Halo {nama_panggilan}! Selamat ulang tahun, semoga panjang umur dan sehat selalu.'
       );
-      setDelaySeconds(data.setting?.delaySeconds || 5);
+      setDelaySeconds(data.setting?.delaySeconds ?? 5);
       setChannel((data.setting?.channel as OmnichannelType) || 'WHATSAPP');
       setChannelAccountId(data.setting?.channelAccountId || '');
       setWahaSession(data.setting?.wahaSession || '');
@@ -236,7 +236,7 @@ export const BirthdayAutomation: React.FC = () => {
                   <Sliders className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="number"
-                    min="3"
+                    min="0"
                     max="30"
                     value={delaySeconds}
                     onChange={(e) => setDelaySeconds(parseInt(e.target.value, 10) || 5)}
@@ -448,7 +448,7 @@ export const BirthdayAutomation: React.FC = () => {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
                 <label className="block text-xs font-medium text-gray-700">
                   Template Pesan Ucapan
                 </label>
@@ -493,7 +493,7 @@ export const BirthdayAutomation: React.FC = () => {
           </form>
 
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+            <div className="px-4 sm:px-5 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="font-semibold text-gray-900 text-sm">
                   Daftar Pelanggan Ulang Tahun Hari Ini
@@ -526,7 +526,7 @@ export const BirthdayAutomation: React.FC = () => {
                 celebrantsToday.map((contact) => (
                   <div
                     key={contact.id}
-                    className="px-5 py-3.5 flex items-center justify-between hover:bg-gray-50"
+                    className="px-4 sm:px-5 py-3.5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 hover:bg-gray-50"
                   >
                     <div>
                       <div className="font-semibold text-gray-900 text-xs">

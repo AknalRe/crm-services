@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import axios from 'axios';
-import { asc, eq, and, isNull, isNotNull } from 'drizzle-orm';
+import { asc, eq, and, isNull, isNotNull, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   autoReplyRules,
@@ -11,7 +11,9 @@ import {
   webhookDeliveries,
 } from '../db/schema';
 import { getSettingMap } from '../routes/auth';
+import { generateAiAgentReply } from '../routes/aiAgent';
 import { wahaService } from './waha.service';
+import { OmnichannelType, sendOutboundChannelMessage } from './channel.service';
 import { liveEvents } from './events.service';
 
 const offHoursCooldown = new Map<string, number>();
@@ -62,14 +64,42 @@ function isWithinBusinessHours(settings: Record<string, string>, now = new Date(
 async function sendAutoReplyMessage(params: {
   conversationId: string;
   contactId: string;
-  phone: string;
+  channel: OmnichannelType;
+  channelAccountId?: string | null;
+  externalThreadId?: string | null;
+  phone?: string | null;
   sessionName?: string | null;
   text: string;
 }): Promise<void> {
-  const { conversationId, contactId, phone, sessionName, text } = params;
+  const {
+    conversationId,
+    contactId,
+    channel,
+    channelAccountId,
+    externalThreadId,
+    phone,
+    sessionName,
+    text,
+  } = params;
   const now = new Date();
-  const sendRes = await wahaService.sendTextMessage(phone, text, sessionName || undefined);
-  const msgId = sendRes?.messageId || `auto_${crypto.randomUUID()}`;
+  let msgId = `auto_${crypto.randomUUID()}`;
+
+  if (channel === 'WHATSAPP') {
+    if (!phone) return;
+    const sendRes = await wahaService.sendTextMessage(phone, text, sessionName || undefined);
+    msgId = sendRes?.messageId || msgId;
+  } else {
+    const out = await sendOutboundChannelMessage({
+      channel,
+      channelAccountId,
+      contactId,
+      externalThreadId,
+      text,
+    });
+    if (out.externalMessageId) {
+      msgId = out.externalMessageId;
+    }
+  }
 
   await db.insert(chatMessages).values({
     id: crypto.randomUUID(),
@@ -77,9 +107,11 @@ async function sendAutoReplyMessage(params: {
     contactId,
     direction: 'OUTBOUND',
     messageType: 'TEXT',
-    wahaSession: sessionName || null,
+    channel,
+    externalMessageId: channel === 'WHATSAPP' ? null : msgId,
+    wahaSession: channel === 'WHATSAPP' ? sessionName || null : null,
     body: text,
-    wahaMessageId: msgId,
+    wahaMessageId: channel === 'WHATSAPP' ? msgId : null,
     status: 'SENT',
     ackStatus: 1,
     sentAt: now,
@@ -91,12 +123,12 @@ async function sendAutoReplyMessage(params: {
     .set({
       lastMessage: text,
       lastMessageAt: now,
-      firstResponseAt: now,
+      firstResponseAt: sql`COALESCE(${conversations.firstResponseAt}, ${now})`,
       updatedAt: now,
     })
     .where(eq(conversations.id, conversationId));
 
-  liveEvents.emit('conversations:update', { conversationId });
+  liveEvents.emit('conversations:update', { conversationId, channel });
 }
 
 export async function notifyAlertWebhook(
@@ -161,6 +193,9 @@ export async function handleInboundAutomation(params: {
   };
   assignedAgentId?: string | null;
   inboundBody: string;
+  channel?: OmnichannelType;
+  channelAccountId?: string | null;
+  externalThreadId?: string | null;
   sessionName?: string | null;
   isNewConversation: boolean;
 }): Promise<void> {
@@ -169,6 +204,9 @@ export async function handleInboundAutomation(params: {
     contact,
     assignedAgentId,
     inboundBody,
+    channel = 'WHATSAPP',
+    channelAccountId = null,
+    externalThreadId = null,
     sessionName,
     isNewConversation,
   } = params;
@@ -236,8 +274,19 @@ export async function handleInboundAutomation(params: {
       }
     }
 
-    // 2. Keyword Auto-Reply Rules (WhatsApp)
-    if (!contact.nomorWhatsapp) return;
+    const replyBase = {
+      conversationId,
+      contactId: contact.id,
+      channel,
+      channelAccountId,
+      externalThreadId,
+      phone: contact.nomorWhatsapp,
+      sessionName,
+    };
+
+    if (channel === 'WHATSAPP' && !contact.nomorWhatsapp) return;
+
+    // 2. Keyword Auto-Reply Rules (WhatsApp & Omnichannel)
     const trimmedBody = (inboundBody || '').trim().toLowerCase();
     if (trimmedBody) {
       const rules = await db
@@ -256,10 +305,7 @@ export async function handleInboundAutomation(params: {
 
         if (matched) {
           await sendAutoReplyMessage({
-            conversationId,
-            contactId: contact.id,
-            phone: contact.nomorWhatsapp,
-            sessionName,
+            ...replyBase,
             text: formatPersonalization(rule.replyText, contact),
           });
           return;
@@ -270,16 +316,29 @@ export async function handleInboundAutomation(params: {
     // 3. Welcome Message for new conversations
     if (isNewConversation && settings.welcome_enabled === 'true' && settings.welcome_message?.trim()) {
       await sendAutoReplyMessage({
-        conversationId,
-        contactId: contact.id,
-        phone: contact.nomorWhatsapp,
-        sessionName,
+        ...replyBase,
         text: formatPersonalization(settings.welcome_message.trim(), contact),
       });
       return;
     }
 
-    // 4. Off-Hours Auto-Reply (throttled per conversation)
+    // 4. AI Agent DM Auto-Reply (if enabled + autoReplyDm)
+    if (inboundBody.trim()) {
+      try {
+        const aiResult = await generateAiAgentReply(inboundBody.trim());
+        if (aiResult.config.enabled && aiResult.config.autoReplyDm && aiResult.reply) {
+          await sendAutoReplyMessage({
+            ...replyBase,
+            text: aiResult.reply,
+          });
+          return;
+        }
+      } catch (aiErr: any) {
+        console.warn('[AutomationService] AI auto-reply skipped:', aiErr.message);
+      }
+    }
+
+    // 5. Off-Hours Auto-Reply (throttled per conversation)
     if (
       settings.offhours_enabled === 'true' &&
       settings.offhours_message?.trim() &&
@@ -289,10 +348,7 @@ export async function handleInboundAutomation(params: {
       if (Date.now() - lastSent > OFF_HOURS_COOLDOWN_MS) {
         offHoursCooldown.set(conversationId, Date.now());
         await sendAutoReplyMessage({
-          conversationId,
-          contactId: contact.id,
-          phone: contact.nomorWhatsapp,
-          sessionName,
+          ...replyBase,
           text: formatPersonalization(settings.offhours_message.trim(), contact),
         });
       }
