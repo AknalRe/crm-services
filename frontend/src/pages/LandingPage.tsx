@@ -23,7 +23,8 @@ interface LandingPageProps {
 }
 
 const PANEL_URL = 'https://panel.reneo.my.id';
-const PANEL_ORDER_URL = 'https://panel.reneo.my.id/order';
+const PANEL_INSTALL_URL = 'https://panel.reneo.my.id/install';
+const PANEL_ORDER_URL = 'https://panel.reneo.my.id/order?addon=reneo-crm';
 
 const NAV_LINKS = [
   { href: '#studi-kasus', label: 'Studi Kasus' },
@@ -245,10 +246,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
               {initialized ? 'Masuk CRM' : 'Setup CRM'}
             </button>
             <a
-              href={PANEL_URL}
+              href={PANEL_ORDER_URL}
               className="h-8 px-3 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
-              <span>Pasang di Panel</span>
+              <span>Beli Hosting + CRM</span>
               <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
             </a>
             <button
@@ -297,28 +298,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             <div className="space-y-2.5">
               <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5">
                 <a
-                  href={PANEL_URL}
+                  href={PANEL_ORDER_URL}
                   className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
                 >
-                  <span>Pasang Panel &amp; CRM</span>
+                  <span>Beli Hosting + CRM &amp; Lisensi</span>
                   <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                 </a>
                 <a
-                  href={PANEL_ORDER_URL}
+                  href={PANEL_INSTALL_URL}
                   className="h-10 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
                 >
-                  Beli Hosting &amp; Lisensi
+                  Pasang di Server Sendiri
                 </a>
               </div>
               <div className="text-xs text-slate-500">
-                Sudah terpasang di server ini?{' '}
+                Bisa langsung beli paket Hosting + Reneo CRM siap pakai dalam 1 tagihan, atau{' '}
                 <button
                   type="button"
                   onClick={onEnterLogin}
                   className="font-semibold text-[#2563eb] hover:underline"
                 >
-                  {initialized ? 'Masuk ke Ruang Kerja CRM' : 'Lanjutkan Setup CRM'}
+                  {initialized ? 'masuk ke ruang kerja CRM' : 'lanjutkan setup CRM'}
                 </button>
+                .
               </div>
             </div>
 
@@ -752,17 +754,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 w-full lg:w-auto">
             <a
-              href={PANEL_URL}
+              href={PANEL_ORDER_URL}
               className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
             >
-              <span>Pasang Panel &amp; CRM</span>
+              <span>Beli Hosting + CRM &amp; Lisensi</span>
               <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
             </a>
             <a
-              href={PANEL_ORDER_URL}
+              href={PANEL_INSTALL_URL}
               className="h-10 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-semibold inline-flex items-center justify-center transition-colors whitespace-nowrap"
             >
-              Beli Hosting &amp; Lisensi
+              Pasang di Server Sendiri
             </a>
           </div>
         </div>
