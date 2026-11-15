@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, UserPlus, LogIn } from 'lucide-react';
+import { Lock, UserPlus, LogIn, ArrowLeft } from 'lucide-react';
 import api from '../services/api';
 import { Button } from './ui/Button';
 import { useToast } from './ui/ToastProvider';
@@ -7,11 +7,13 @@ import { useToast } from './ui/ToastProvider';
 interface SetupLoginGateProps {
   initialized: boolean;
   onAuthenticated: (user: { name: string; email: string }) => void;
+  onBackToLanding?: () => void;
 }
 
 export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
   initialized,
   onAuthenticated,
+  onBackToLanding,
 }) => {
   const toast = useToast();
   const [name, setName] = useState('');
@@ -115,6 +117,19 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
             {initialized ? 'Masuk ke CRM' : 'Simpan & Lanjutkan'}
           </Button>
         </form>
+
+        {onBackToLanding && (
+          <div className="pt-2 border-t border-gray-100 text-center">
+            <button
+              type="button"
+              onClick={onBackToLanding}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Kembali ke Halaman Utama</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

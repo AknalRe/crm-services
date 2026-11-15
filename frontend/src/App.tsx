@@ -22,6 +22,7 @@ import Conversations from './pages/Conversations';
 import Settings from './pages/Settings';
 import PublicCsatPage from './pages/PublicCsatPage';
 import PublicChannelConnectPage from './pages/PublicChannelConnectPage';
+import LandingPage from './pages/LandingPage';
 import api from './services/api';
 import { subscribeLiveEvent } from './services/liveEvents';
 import { AuthStatus, WahaStatus, LicenseInfo, SettingsSection } from './types';
@@ -92,6 +93,13 @@ function AppShell() {
     initialLoc.settingsSection
   );
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showLoginGate, setShowLoginGate] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.location.hash === '#login' ||
+      new URLSearchParams(window.location.search).get('login') === '1'
+    );
+  });
 
   const syncHash = (tab: string, section: SettingsSection) => {
     if (typeof window === 'undefined') return;
@@ -272,16 +280,37 @@ function AppShell() {
   }
 
   if (!authStatus?.authenticated) {
+    if (!showLoginGate) {
+      return (
+        <LandingPage
+          initialized={Boolean(authStatus?.initialized)}
+          onEnterLogin={() => {
+            setShowLoginGate(true);
+            if (typeof window !== 'undefined') {
+              window.history.replaceState(null, '', '#login');
+            }
+          }}
+        />
+      );
+    }
+
     return (
       <SetupLoginGate
         initialized={Boolean(authStatus?.initialized)}
-        onAuthenticated={(user) =>
+        onAuthenticated={(user) => {
+          setShowLoginGate(false);
           setAuthStatus({
             initialized: true,
             authenticated: true,
             user,
-          })
-        }
+          });
+        }}
+        onBackToLanding={() => {
+          setShowLoginGate(false);
+          if (typeof window !== 'undefined' && window.location.hash === '#login') {
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          }
+        }}
       />
     );
   }

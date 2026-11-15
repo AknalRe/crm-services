@@ -26,6 +26,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AuthStatus, LicenseInfo, SettingsSection } from '../types';
+import { ReneoCrmLogo } from './ReneoCrmLogo';
 
 interface SidebarProps {
   currentTab: string;
@@ -151,7 +152,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Brand Header */}
         <div className="h-14 px-4 flex items-center justify-between gap-2.5 border-b border-[#1E2438]">
           <div className="flex items-center gap-2.5 min-w-0">
-            <MessageCircle className="w-5 h-5 text-indigo-400 shrink-0" />
+            <ReneoCrmLogo className="w-7 h-7 shrink-0" />
             <div className="min-w-0">
               <h1 className="font-semibold text-sm text-white tracking-tight truncate">
                 Reneo CRM

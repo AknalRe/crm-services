@@ -1,0 +1,36 @@
+import React from 'react';
+
+interface ReneoCrmLogoProps {
+  className?: string;
+}
+
+export const ReneoCrmLogo: React.FC<ReneoCrmLogoProps> = ({ className = 'w-8 h-8' }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 512 512"
+    role="img"
+    aria-label="Reneo CRM"
+    className={className}
+  >
+    <rect x="40" y="40" width="432" height="432" rx="92" fill="#0B2A57" />
+    <rect x="146.0" y="150.0" width="220.0" height="152.0" rx="62.0" fill="#FFFFFF" />
+    <rect x="146.0" y="150.0" width="62.0" height="62.0" fill="#FFFFFF" />
+    <rect x="146.0" y="240.0" width="62.0" height="62.0" fill="#FFFFFF" />
+    <rect x="146.0" y="150.0" width="60.0" height="216.0" fill="#FFFFFF" />
+    <polygon points="238.0,296.0 300.0,296.0 378.0,366.0 310.0,366.0" fill="#FFFFFF" />
+    <rect x="146.0" y="212.0" width="160.0" height="16.0" rx="8.0" fill="#0B2A57" />
+    <rect x="146.0" y="212.0" width="8.0" height="8.0" fill="#0B2A57" />
+    <rect x="146.0" y="220.0" width="8.0" height="8.0" fill="#0B2A57" />
+    <polygon points="206.0,302.0 244.0,302.0 300.0,366.0 206.0,366.0" fill="#0B2A57" />
+    <circle cx="396" cy="396" r="88" fill="#0B2A57" />
+    <path
+      d="M396 324C356.2 324 324 352.4 324 387.5C324 402.8 330.1 416.8 340.3 427.8L332.5 458L364.8 446.8C374.5 449.5 385 451 396 451C435.8 451 468 422.6 468 387.5C468 352.4 435.8 324 396 324Z"
+      fill="#10B981"
+    />
+    <circle cx="370" cy="388" r="9" fill="#FFFFFF" />
+    <circle cx="396" cy="388" r="9" fill="#FFFFFF" />
+    <circle cx="422" cy="388" r="9" fill="#FFFFFF" />
+  </svg>
+);
+
+export default ReneoCrmLogo;
