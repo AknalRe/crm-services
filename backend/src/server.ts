@@ -15,6 +15,7 @@ import eventsRouter from './routes/events';
 import publicCsatRouter from './routes/publicCsat';
 import agentsRouter from './routes/agents';
 import productsRouter from './routes/products';
+import channelsRouter from './routes/channels';
 import { BirthdayService } from './services/birthday.service';
 import { startSlaMonitor } from './services/automation.service';
 import './services/queue.service'; // Start BullMQ worker
@@ -54,6 +55,7 @@ async function main() {
   await fastify.register(publicCsatRouter, { prefix: '/api/public/csat' });
   await fastify.register(agentsRouter, { prefix: '/api/agents' });
   await fastify.register(productsRouter, { prefix: '/api/products' });
+  await fastify.register(channelsRouter, { prefix: '/api/channels' });
 
   // Initialize DB Schema (PostgreSQL)
   try {

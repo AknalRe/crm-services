@@ -32,6 +32,7 @@ export async function initDb() {
     `;
 
     await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS kategori TEXT;`;
+    await sql`ALTER TABLE contacts ALTER COLUMN nomor_whatsapp DROP NOT NULL;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS campaigns (
@@ -109,6 +110,11 @@ export async function initDb() {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_rating INTEGER;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_feedback TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_submitted_at TIMESTAMP;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS external_thread_id TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context_title TEXT;`;
+    await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_key;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS chat_messages (
@@ -135,6 +141,49 @@ export async function initDb() {
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_type TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_message_id TEXT;`;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS channel_accounts (
+        id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        name TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        access_token TEXT,
+        verify_token TEXT,
+        webhook_secret TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        metadata TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS contact_identities (
+        id TEXT PRIMARY KEY,
+        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        channel TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        handle TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (channel, external_id)
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS channel_connect_links (
+        id TEXT PRIMARY KEY,
+        token TEXT NOT NULL UNIQUE,
+        channel TEXT NOT NULL,
+        label TEXT,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP,
+        created_channel_account_id TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
 
     await sql`
       CREATE TABLE IF NOT EXISTS birthday_settings (

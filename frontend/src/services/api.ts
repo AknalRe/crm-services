@@ -441,6 +441,65 @@ export const api = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
+
+  // Omnichannel Accounts
+  getChannels: async (): Promise<import('../types').ChannelAccount[]> => {
+    const res = await client.get('/channels');
+    return res.data.data || [];
+  },
+  createChannel: async (data: {
+    channel: import('../types').OmnichannelType;
+    name: string;
+    accountId: string;
+    accessToken?: string;
+    verifyToken?: string;
+  }): Promise<import('../types').ChannelAccount> => {
+    const res = await client.post('/channels', data);
+    return res.data.data;
+  },
+  updateChannel: async (
+    id: string,
+    data: Partial<{ name: string; accountId: string; accessToken: string; isActive: boolean }>
+  ): Promise<import('../types').ChannelAccount> => {
+    const res = await client.patch(`/channels/${id}`, data);
+    return res.data.data;
+  },
+  deleteChannel: async (id: string): Promise<void> => {
+    await client.delete(`/channels/${id}`);
+  },
+  getChannelConnectLinks: async (): Promise<import('../types').ChannelConnectLink[]> => {
+    const res = await client.get('/channels/connect-links');
+    return res.data.data || [];
+  },
+  createChannelConnectLink: async (data: {
+    channel: import('../types').OmnichannelType;
+    label?: string;
+    expiresHours?: number;
+  }): Promise<import('../types').ChannelConnectLink> => {
+    const res = await client.post('/channels/connect-links', data);
+    return res.data.data;
+  },
+  getPublicConnectLink: async (token: string): Promise<{
+    channel: import('../types').OmnichannelType;
+    label?: string | null;
+    expiresAt: string;
+    usedAt?: string | null;
+    isExpired: boolean;
+  }> => {
+    const res = await client.get(`/channels/connect/${encodeURIComponent(token)}`);
+    return res.data.data;
+  },
+  submitPublicConnectLink: async (
+    token: string,
+    data: { name: string; accountId: string; accessToken: string }
+  ): Promise<import('../types').ChannelAccount> => {
+    const res = await client.post(`/channels/connect/${encodeURIComponent(token)}`, data);
+    return res.data.data;
+  },
+  mergeContact: async (targetId: string, sourceContactId: string): Promise<Contact> => {
+    const res = await client.post(`/contacts/${targetId}/merge`, { sourceContactId });
+    return res.data.data;
+  },
 };
 
 export default api;

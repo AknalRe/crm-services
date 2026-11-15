@@ -14,6 +14,7 @@ import Tracking from './pages/Tracking';
 import Conversations from './pages/Conversations';
 import Settings from './pages/Settings';
 import PublicCsatPage from './pages/PublicCsatPage';
+import PublicChannelConnectPage from './pages/PublicChannelConnectPage';
 import api from './services/api';
 import { subscribeLiveEvent } from './services/liveEvents';
 import { AuthStatus, WahaStatus, LicenseInfo } from './types';
@@ -311,11 +312,21 @@ function AppShell() {
 export function App() {
   const isCsatRoute =
     typeof window !== 'undefined' && /\/csat\/?$/i.test(window.location.pathname);
+  const isConnectChannelRoute =
+    typeof window !== 'undefined' && /\/connect-channel\/?$/i.test(window.location.pathname);
 
   if (isCsatRoute) {
     return (
       <ToastProvider>
         <PublicCsatPage />
+      </ToastProvider>
+    );
+  }
+
+  if (isConnectChannelRoute) {
+    return (
+      <ToastProvider>
+        <PublicChannelConnectPage />
       </ToastProvider>
     );
   }

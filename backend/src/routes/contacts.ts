@@ -1,9 +1,17 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { and, eq, ne, or, ilike, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db';
-import { contacts } from '../db/schema';
+import {
+  contacts,
+  contactIdentities,
+  conversations,
+  chatMessages,
+  csatResponses,
+  campaignRecipients,
+} from '../db/schema';
 import { normalizePhoneNumber } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
+import { liveEvents } from '../services/events.service';
 import { requirePermission } from './auth';
 import crypto from 'crypto';
 
@@ -368,6 +376,78 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       });
 
       return reply.send({ success: true, data: Array.from(tagSet) });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST merge another contact into targetId (cross-channel contact merge)
+  fastify.post<{
+    Params: { targetId: string };
+    Body: { sourceContactId?: string };
+  }>('/:targetId/merge', async (req, reply) => {
+    try {
+      const { targetId } = req.params;
+      const sourceContactId = String(req.body?.sourceContactId || '').trim();
+      if (!sourceContactId) {
+        return reply.status(400).send({ success: false, error: 'sourceContactId wajib diisi' });
+      }
+      if (targetId === sourceContactId) {
+        return reply.status(400).send({ success: false, error: 'Tidak bisa menggabungkan kontak dengan dirinya sendiri' });
+      }
+
+      const [target] = await db.select().from(contacts).where(eq(contacts.id, targetId));
+      const [source] = await db.select().from(contacts).where(eq(contacts.id, sourceContactId));
+      if (!target || !source) {
+        return reply.status(404).send({ success: false, error: 'Kontak target atau sumber tidak ditemukan' });
+      }
+
+      await db.update(contactIdentities).set({ contactId: targetId }).where(eq(contactIdentities.contactId, sourceContactId));
+      await db.update(conversations).set({ contactId: targetId, updatedAt: new Date() }).where(eq(conversations.contactId, sourceContactId));
+      await db.update(chatMessages).set({ contactId: targetId }).where(eq(chatMessages.contactId, sourceContactId));
+      await db.update(csatResponses).set({ contactId: targetId }).where(eq(csatResponses.contactId, sourceContactId));
+      await db.update(campaignRecipients).set({ contactId: targetId }).where(eq(campaignRecipients.contactId, sourceContactId));
+
+      const mergedTags = Array.from(
+        new Set(
+          [target.tags, source.tags]
+            .filter(Boolean)
+            .flatMap((t) => String(t).split(',').map((s) => s.trim()))
+            .filter(Boolean)
+        )
+      ).join(', ');
+
+      const mergedNotes = [target.notes, source.notes].filter(Boolean).join('\n---\n') || null;
+      const patch: Record<string, any> = {
+        namaPanggilan: target.namaPanggilan || source.namaPanggilan || null,
+        alamat: target.alamat || source.alamat || null,
+        kategori: target.kategori || source.kategori || null,
+        tags: mergedTags || null,
+        notes: mergedNotes,
+        updatedAt: new Date(),
+      };
+      if (!target.nomorWhatsapp && source.nomorWhatsapp) {
+        patch.nomorWhatsapp = source.nomorWhatsapp;
+      }
+
+      // Delete source first if moving unique nomorWhatsapp, or clear source's phone first
+      if (!target.nomorWhatsapp && source.nomorWhatsapp) {
+        await db.update(contacts).set({ nomorWhatsapp: null }).where(eq(contacts.id, sourceContactId));
+      }
+      const [updatedTarget] = await db
+        .update(contacts)
+        .set(patch)
+        .where(eq(contacts.id, targetId))
+        .returning();
+
+      await db.delete(contacts).where(eq(contacts.id, sourceContactId));
+
+      liveEvents.emit('conversations:update', {});
+      return reply.send({
+        success: true,
+        message: 'Kontak berhasil digabungkan',
+        data: formatContact(updatedTarget),
+      });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }

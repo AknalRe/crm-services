@@ -21,6 +21,7 @@ import {
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
 import { AutomationProductsSettings } from '../components/AutomationProductsSettings';
+import { OmnichannelSettings } from '../components/OmnichannelSettings';
 import {
   AgentItem,
   AgentQuota,
@@ -1312,6 +1313,7 @@ export const Settings: React.FC<SettingsProps> = ({
       )}
 
       <AutomationProductsSettings />
+      <OmnichannelSettings />
 
       <ConfirmModal
         isOpen={confirmAction !== null}

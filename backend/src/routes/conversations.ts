@@ -6,6 +6,7 @@ import { conversations, chatMessages, contacts, crmAgents, cannedResponses, csat
 import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
+import { OmnichannelType, sendOutboundChannelMessage } from '../services/channel.service';
 import { getSettingMap, requirePermission } from './auth';
 import crypto from 'crypto';
 
@@ -34,11 +35,28 @@ async function sendCsatCtaForConversation(
     .replace(/\{link_csat\}/gi, csatUrl);
 
   const targetSession = opts.session?.trim() || conv.wahaSession || undefined;
-  const sendResult = await wahaService.sendTextMessage(
-    contact.nomorWhatsapp,
-    ctaBody,
-    targetSession
-  );
+  const convChannel = ((conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+  let sendResult: { success: boolean; messageId?: string; error?: string };
+
+  if (convChannel !== 'WHATSAPP') {
+    const out = await sendOutboundChannelMessage({
+      channel: convChannel,
+      channelAccountId: conv.channelAccountId,
+      contactId: conv.contactId,
+      externalThreadId: conv.externalThreadId,
+      text: ctaBody,
+    });
+    sendResult = { success: true, messageId: out.externalMessageId || undefined };
+  } else {
+    if (!contact.nomorWhatsapp) {
+      throw new Error('Kontak belum memiliki nomor WhatsApp');
+    }
+    sendResult = await wahaService.sendTextMessage(
+      contact.nomorWhatsapp,
+      ctaBody,
+      targetSession
+    );
+  }
 
   const now = new Date();
   await db.insert(csatResponses).values({
@@ -587,39 +605,63 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       }
 
       const targetSession = session?.trim() || conversation.conv.wahaSession || undefined;
+      const convChannel = ((conversation.conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
       let sendResult: { success: boolean; messageId?: string; error?: string };
       let mediaType: string | null = null;
       let storedMediaUrl: string | null = null;
 
-      if (mediaBase64 && mediaMimetype) {
-        mediaType = mediaMimetype.startsWith('image/')
-          ? 'image'
-          : mediaMimetype.startsWith('video/')
-          ? 'video'
-          : mediaMimetype.startsWith('audio/')
-          ? 'audio'
-          : 'document';
-        if (mediaType === 'image') {
-          storedMediaUrl = mediaBase64.startsWith('data:')
-            ? mediaBase64
-            : `data:${mediaMimetype};base64,${mediaBase64}`;
+      if (convChannel !== 'WHATSAPP') {
+        if (!bodyText) {
+          return reply.status(400).send({
+            success: false,
+            error: `Pengiriman pesan di ${convChannel} saat ini mendukung balasan teks`,
+          });
         }
-        sendResult = await wahaService.sendMediaMessage(
-          conversation.contact.nomorWhatsapp,
-          {
-            base64: mediaBase64,
-            mimetype: mediaMimetype,
-            filename: mediaName || 'attachment',
-            caption: bodyText,
-          },
-          targetSession
-        );
+        const out = await sendOutboundChannelMessage({
+          channel: convChannel,
+          channelAccountId: conversation.conv.channelAccountId,
+          contactId: conversation.conv.contactId,
+          externalThreadId: conversation.conv.externalThreadId,
+          text: bodyText,
+        });
+        sendResult = { success: true, messageId: out.externalMessageId || undefined };
       } else {
-        sendResult = await wahaService.sendTextMessage(
-          conversation.contact.nomorWhatsapp,
-          bodyText,
-          targetSession
-        );
+        if (!conversation.contact.nomorWhatsapp) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Kontak ini belum memiliki nomor WhatsApp',
+          });
+        }
+        if (mediaBase64 && mediaMimetype) {
+          mediaType = mediaMimetype.startsWith('image/')
+            ? 'image'
+            : mediaMimetype.startsWith('video/')
+            ? 'video'
+            : mediaMimetype.startsWith('audio/')
+            ? 'audio'
+            : 'document';
+          if (mediaType === 'image') {
+            storedMediaUrl = mediaBase64.startsWith('data:')
+              ? mediaBase64
+              : `data:${mediaMimetype};base64,${mediaBase64}`;
+          }
+          sendResult = await wahaService.sendMediaMessage(
+            conversation.contact.nomorWhatsapp,
+            {
+              base64: mediaBase64,
+              mimetype: mediaMimetype,
+              filename: mediaName || 'attachment',
+              caption: bodyText,
+            },
+            targetSession
+          );
+        } else {
+          sendResult = await wahaService.sendTextMessage(
+            conversation.contact.nomorWhatsapp,
+            bodyText,
+            targetSession
+          );
+        }
       }
 
       const now = new Date();

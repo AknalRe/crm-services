@@ -126,7 +126,7 @@ export async function handleInboundAutomation(params: {
     id: string;
     namaLengkap?: string | null;
     namaPanggilan?: string | null;
-    nomorWhatsapp: string;
+    nomorWhatsapp?: string | null;
   };
   assignedAgentId?: string | null;
   inboundBody: string;
@@ -205,7 +205,8 @@ export async function handleInboundAutomation(params: {
       }
     }
 
-    // 2. Keyword Auto-Reply Rules
+    // 2. Keyword Auto-Reply Rules (WhatsApp)
+    if (!contact.nomorWhatsapp) return;
     const trimmedBody = (inboundBody || '').trim().toLowerCase();
     if (trimmedBody) {
       const rules = await db

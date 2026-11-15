@@ -6,7 +6,7 @@ export const contacts = pgTable('contacts', {
   namaLengkap: text('nama_lengkap').notNull(),
   namaPanggilan: text('nama_panggilan'),
   tanggalLahir: timestamp('tanggal_lahir'),
-  nomorWhatsapp: text('nomor_whatsapp').notNull().unique(),
+  nomorWhatsapp: text('nomor_whatsapp').unique(),
   alamat: text('alamat'),
   kategori: text('kategori'),
   tags: text('tags'), // JSON string or comma-separated
@@ -62,8 +62,11 @@ export const conversations = pgTable('conversations', {
   id: text('id').primaryKey(),
   contactId: text('contact_id')
     .references(() => contacts.id, { onDelete: 'cascade' })
-    .unique()
     .notNull(),
+  channel: text('channel').default('WHATSAPP').notNull(), // WHATSAPP | INSTAGRAM | FACEBOOK | THREADS | TELEGRAM
+  channelAccountId: text('channel_account_id'),
+  externalThreadId: text('external_thread_id'),
+  contextTitle: text('context_title'),
   wahaSession: text('waha_session'),
   assignedAgentId: text('assigned_agent_id'),
   assignedAgentName: text('assigned_agent_name'),
@@ -93,6 +96,8 @@ export const chatMessages = pgTable('chat_messages', {
     .notNull(),
   direction: text('direction').notNull(), // INBOUND or OUTBOUND
   messageType: text('message_type').default('TEXT').notNull(), // TEXT, MEDIA, NOTE, CSAT
+  channel: text('channel').default('WHATSAPP').notNull(),
+  externalMessageId: text('external_message_id'),
   wahaSession: text('waha_session'),
   body: text('body').notNull(),
   mediaUrl: text('media_url'),
@@ -190,6 +195,42 @@ export const products = pgTable('products', {
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const channelAccounts = pgTable('channel_accounts', {
+  id: text('id').primaryKey(),
+  channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM | WHATSAPP
+  name: text('name').notNull(),
+  accountId: text('account_id').notNull(), // Page ID, IG User ID, Threads User ID, Bot Username
+  accessToken: text('access_token'),
+  verifyToken: text('verify_token'),
+  webhookSecret: text('webhook_secret'),
+  isActive: boolean('is_active').default(true).notNull(),
+  metadata: text('metadata'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const contactIdentities = pgTable('contact_identities', {
+  id: text('id').primaryKey(),
+  contactId: text('contact_id')
+    .references(() => contacts.id, { onDelete: 'cascade' })
+    .notNull(),
+  channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM | WHATSAPP
+  externalId: text('external_id').notNull(),
+  handle: text('handle'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const channelConnectLinks = pgTable('channel_connect_links', {
+  id: text('id').primaryKey(),
+  token: text('token').notNull().unique(),
+  channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM
+  label: text('label'),
+  expiresAt: timestamp('expires_at').notNull(),
+  usedAt: timestamp('used_at'),
+  createdChannelAccountId: text('created_channel_account_id'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // Relations

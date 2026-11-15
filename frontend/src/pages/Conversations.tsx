@@ -30,6 +30,7 @@ import {
   ChevronDown,
   Package,
   AlertTriangle,
+  GitMerge,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -40,9 +41,18 @@ import {
   Conversation,
   ChatMessage,
   LicenseInfo,
+  OmnichannelType,
   ProductItem,
   WahaSessionItem,
 } from '../types';
+
+const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls: string }> = {
+  WHATSAPP: { label: 'WhatsApp', short: 'WA', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  INSTAGRAM: { label: 'Instagram', short: 'IG', cls: 'bg-pink-50 text-pink-700 border-pink-200' },
+  FACEBOOK: { label: 'Facebook', short: 'FB', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  THREADS: { label: 'Threads', short: 'Threads', cls: 'bg-gray-100 text-gray-800 border-gray-300' },
+  TELEGRAM: { label: 'Telegram', short: 'TG', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
+};
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
@@ -96,6 +106,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   const [inputText, setInputText] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'PENDING' | 'RESOLVED'>('ALL');
+  const [channelFilter, setChannelFilter] = useState<'ALL' | OmnichannelType>('ALL');
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -316,6 +327,10 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [openingContactId, setOpeningContactId] = useState<string | null>(null);
 
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeSearch, setMergeSearch] = useState('');
+  const [mergingContactId, setMergingContactId] = useState<string | null>(null);
+
   // Agent assignment & Canned responses
   const [assignableAgents, setAssignableAgents] = useState<
     Array<{ id: string; name: string; email: string; role: string }>
@@ -439,6 +454,37 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
       toast.error('Gagal memuat daftar kontak');
     } finally {
       setLoadingContacts(false);
+    }
+  };
+
+  const handleOpenMergeModal = async () => {
+    setShowMergeModal(true);
+    setMergeSearch('');
+    if (contactsList.length === 0) {
+      setLoadingContacts(true);
+      try {
+        const list = await api.getContacts();
+        setContactsList(list || []);
+      } catch {
+        toast.error('Gagal memuat daftar kontak');
+      } finally {
+        setLoadingContacts(false);
+      }
+    }
+  };
+
+  const handleMergeIntoTarget = async (targetContactId: string) => {
+    if (!selectedConversation?.contact?.id) return;
+    setMergingContactId(targetContactId);
+    try {
+      await api.mergeContact(targetContactId, selectedConversation.contact.id);
+      setShowMergeModal(false);
+      toast.success('Kontak berhasil digabungkan ke kontak utama');
+      await fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menggabungkan kontak');
+    } finally {
+      setMergingContactId(null);
     }
   };
 
@@ -596,7 +642,9 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
 
   const filteredConversations = conversations.filter((c) => {
     const convStatus = (c.status || 'OPEN').toUpperCase();
+    const convChannel = (c.channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
     if (statusFilter !== 'ALL' && convStatus !== statusFilter) return false;
+    if (channelFilter !== 'ALL' && convChannel !== channelFilter) return false;
     if (assigneeFilter === 'MINE' && (!currentUser?.id || c.assignedAgentId !== currentUser.id)) {
       return false;
     }
@@ -660,6 +708,22 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                 }`}
               >
                 {st === 'ALL' ? 'Semua' : st === 'OPEN' ? 'Open' : st === 'PENDING' ? 'Pending' : 'Selesai'}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 text-[10px] overflow-x-auto pb-0.5">
+            {(['ALL', 'WHATSAPP', 'INSTAGRAM', 'FACEBOOK', 'THREADS', 'TELEGRAM'] as const).map((ch) => (
+              <button
+                key={ch}
+                type="button"
+                onClick={() => setChannelFilter(ch)}
+                className={`px-2 py-0.5 rounded border whitespace-nowrap transition-colors ${
+                  channelFilter === ch
+                    ? 'bg-gray-900 text-white border-gray-900 font-medium'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                {ch === 'ALL' ? 'Semua Channel' : CHANNEL_META[ch].short}
               </button>
             ))}
           </div>
@@ -736,6 +800,15 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                     </p>
 
                     <div className="flex items-center flex-wrap gap-1 mt-1.5">
+                      {(() => {
+                        const ch = ((conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+                        const meta = CHANNEL_META[ch] || CHANNEL_META.WHATSAPP;
+                        return (
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border ${meta.cls}`}>
+                            {meta.short}
+                          </span>
+                        );
+                      })()}
                       {conv.status === 'OPEN' &&
                         !conv.firstResponseAt &&
                         conv.firstInboundAt &&
@@ -806,31 +879,51 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                 {selectedConversation.contact?.nama_lengkap?.slice(0, 2).toUpperCase() || 'WA'}
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <h4 className="font-semibold text-gray-900 text-xs truncate">
                     {selectedConversation.contact?.nama_lengkap}
                   </h4>
-                  {selectedConversation.wahaSession && (
+                  {(() => {
+                    const ch = ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+                    const meta = CHANNEL_META[ch] || CHANNEL_META.WHATSAPP;
+                    return (
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${meta.cls}`}>
+                        {meta.label}
+                      </span>
+                    );
+                  })()}
+                  {selectedConversation.wahaSession && (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP' && (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                       <Smartphone className="w-2.5 h-2.5" />
                       {selectedConversation.wahaSession}
                     </span>
                   )}
+                  {selectedConversation.contextTitle && (
+                    <span className="text-[10px] text-gray-500 truncate">
+                      • {selectedConversation.contextTitle}
+                    </span>
+                  )}
                 </div>
-                <a
-                  href={`https://wa.me/${selectedConversation.contact?.nomor_whatsapp}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[11px] text-indigo-600 font-mono hover:underline inline-flex items-center gap-1"
-                >
-                  <Phone className="w-2.5 h-2.5" />
-                  <span>+{selectedConversation.contact?.nomor_whatsapp}</span>
-                </a>
+                {selectedConversation.contact?.nomor_whatsapp ? (
+                  <a
+                    href={`https://wa.me/${selectedConversation.contact.nomor_whatsapp}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-indigo-600 font-mono hover:underline inline-flex items-center gap-1"
+                  >
+                    <Phone className="w-2.5 h-2.5" />
+                    <span>+{selectedConversation.contact.nomor_whatsapp}</span>
+                  </a>
+                ) : (
+                  <span className="text-[11px] text-gray-500">
+                    {selectedConversation.contact?.nama_panggilan || 'Kontak Omnichannel'}
+                  </span>
+                )}
               </div>
             </div>
 
             <div className="flex items-center flex-wrap gap-1.5 min-w-0">
-              {sessions.length > 0 && (
+              {sessions.length > 0 && (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP' && (
                 <select
                   value={selectedSession}
                   onChange={(e) => setSelectedSession(e.target.value)}
@@ -1498,7 +1591,11 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                 placeholder={
                   composerMode === 'NOTE'
                     ? 'Tulis catatan internal tim (tidak dikirim ke pelanggan)...'
-                    : 'Ketik balasan WhatsApp...'
+                    : `Ketik balasan ${
+                        CHANNEL_META[
+                          ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType
+                        ]?.label || 'WhatsApp'
+                      }...`
                 }
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
@@ -1792,19 +1889,99 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
             </div>
           </div>
 
-          <div className="pt-3 border-t border-gray-200 text-center">
-            <a
-              href={`https://wa.me/${selectedConversation.contact.nomor_whatsapp}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center gap-1.5 w-full h-9 bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 font-medium rounded-md text-xs transition-colors"
+          <div className="pt-3 border-t border-gray-200 space-y-2 text-center">
+            {selectedConversation.contact.nomor_whatsapp && (
+              <a
+                href={`https://wa.me/${selectedConversation.contact.nomor_whatsapp}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-1.5 w-full h-9 bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 font-medium rounded-md text-xs transition-colors"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                <span>Buka di WhatsApp Web</span>
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => void handleOpenMergeModal()}
+              className="inline-flex items-center justify-center gap-1.5 w-full h-9 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-md text-xs transition-colors"
             >
-              <Phone className="w-3.5 h-3.5" />
-              <span>Buka di WhatsApp Web</span>
-            </a>
+              <GitMerge className="w-3.5 h-3.5" />
+              <span>Gabungkan ke Kontak Lain</span>
+            </button>
           </div>
         </div>
         </>
+      )}
+
+      {showMergeModal && selectedConversation?.contact && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-lg border border-gray-200 shadow-lg w-full max-w-md overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Gabungkan Kontak Lintas Channel</h3>
+                <p className="text-[11px] text-gray-500">
+                  Pindahkan seluruh chat &amp; identitas <strong>{selectedConversation.contact.nama_lengkap}</strong> ke kontak utama.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMergeModal(false)}
+                className="p-1 text-gray-400 hover:text-gray-700 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-3 border-b border-gray-100">
+              <div className="relative">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={mergeSearch}
+                  onChange={(e) => setMergeSearch(e.target.value)}
+                  placeholder="Cari nama atau nomor WA kontak tujuan..."
+                  className="w-full h-9 pl-9 pr-3 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-gray-100 p-2">
+              {loadingContacts ? (
+                <LoadingState message="Memuat daftar kontak..." />
+              ) : (
+                contactsList
+                  .filter((c) => {
+                    if (c.id === selectedConversation.contact.id) return false;
+                    const q = mergeSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      c.nama_lengkap.toLowerCase().includes(q) ||
+                      (c.nomor_whatsapp || '').includes(q)
+                    );
+                  })
+                  .slice(0, 30)
+                  .map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      disabled={mergingContactId === c.id}
+                      onClick={() => void handleMergeIntoTarget(c.id)}
+                      className="w-full px-3 py-2.5 text-left hover:bg-indigo-50/70 rounded-md flex items-center justify-between gap-2 transition-colors disabled:opacity-50"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-gray-900 truncate">{c.nama_lengkap}</div>
+                        <div className="text-[11px] font-mono text-gray-500">
+                          {c.nomor_whatsapp ? `+${c.nomor_whatsapp}` : 'Tanpa nomor WA'}
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-medium text-indigo-600 shrink-0">
+                        {mergingContactId === c.id ? 'Menggabungkan...' : 'Pilih Target'}
+                      </span>
+                    </button>
+                  ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {showNewChatModal && (

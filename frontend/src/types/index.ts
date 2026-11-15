@@ -62,9 +62,37 @@ export interface CampaignRecipient {
   };
 }
 
+export type OmnichannelType = 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+
+export interface ChannelAccount {
+  id: string;
+  channel: OmnichannelType;
+  name: string;
+  accountId: string;
+  verifyToken?: string | null;
+  hasToken: boolean;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ChannelConnectLink {
+  id: string;
+  token: string;
+  channel: OmnichannelType;
+  label?: string | null;
+  expiresAt: string;
+  usedAt?: string | null;
+  createdAt?: string;
+}
+
 export interface Conversation {
   id: string;
   contactId: string;
+  channel?: OmnichannelType;
+  channelAccountId?: string | null;
+  externalThreadId?: string | null;
+  contextTitle?: string | null;
   wahaSession?: string | null;
   status?: 'OPEN' | 'PENDING' | 'RESOLVED';
   labels?: string | null;
