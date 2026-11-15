@@ -149,11 +149,12 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       nama_lengkap: string;
       nama_panggilan?: string;
       tanggal_lahir?: string;
-      nomor_whatsapp: string;
+      nomor_whatsapp?: string;
       alamat?: string;
       kategori?: string;
       tags?: string | string[];
       notes?: string;
+      identities?: Array<{ channel: string; externalId: string; handle?: string }>;
     };
   }>, reply: FastifyReply) => {
     try {
@@ -166,16 +167,34 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         kategori,
         tags,
         notes,
+        identities,
       } = req.body;
 
-      if (!nama_lengkap || !nomor_whatsapp) {
+      const validIdentities = Array.isArray(identities)
+        ? identities
+            .map((idItem) => ({
+              channel: String(idItem?.channel || '').trim().toUpperCase(),
+              externalId: String(idItem?.externalId || '').trim(),
+              handle: idItem?.handle ? String(idItem.handle).trim() : null,
+            }))
+            .filter((x) => x.channel && x.externalId)
+        : [];
+
+      const rawWa = String(nomor_whatsapp || '').trim();
+      if (!nama_lengkap?.trim()) {
         return reply.status(400).send({
           success: false,
-          error: 'Nama lengkap dan nomor WhatsApp wajib diisi',
+          error: 'Nama lengkap wajib diisi',
+        });
+      }
+      if (!rawWa && validIdentities.length === 0) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Isi minimal Nomor WhatsApp atau satu Identitas Kanal (Telegram/IG/FB/Threads)',
         });
       }
 
-      const normalizedPhone = normalizePhoneNumber(nomor_whatsapp);
+      const normalizedPhone = rawWa ? normalizePhoneNumber(rawWa) : null;
 
       // Enforce contact quota from active license
       const lic = await licenseService.assertLicenseActive();
@@ -190,24 +209,27 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       }
 
       // Check if phone already exists
-      const existing = await db
-        .select()
-        .from(contacts)
-        .where(eq(contacts.nomorWhatsapp, normalizedPhone));
+      if (normalizedPhone) {
+        const existing = await db
+          .select()
+          .from(contacts)
+          .where(eq(contacts.nomorWhatsapp, normalizedPhone));
 
-      if (existing.length > 0) {
-        return reply.status(400).send({
-          success: false,
-          error: 'Nomor WhatsApp sudah terdaftar untuk kontak lain',
-        });
+        if (existing.length > 0) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Nomor WhatsApp sudah terdaftar untuk kontak lain',
+          });
+        }
       }
 
       const now = new Date();
+      const contactId = crypto.randomUUID();
       const newContact = await db
         .insert(contacts)
         .values({
-          id: crypto.randomUUID(),
-          namaLengkap: nama_lengkap,
+          id: contactId,
+          namaLengkap: nama_lengkap.trim(),
           namaPanggilan: nama_panggilan || null,
           tanggalLahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
           nomorWhatsapp: normalizedPhone,
@@ -219,6 +241,17 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           updatedAt: now,
         })
         .returning();
+
+      for (const idItem of validIdentities) {
+        await db.insert(contactIdentities).values({
+          id: crypto.randomUUID(),
+          contactId,
+          channel: idItem.channel,
+          externalId: idItem.externalId,
+          handle: idItem.handle,
+          createdAt: now,
+        });
+      }
 
       return reply.status(201).send({ success: true, data: formatContact(newContact[0]) });
     } catch (error: any) {

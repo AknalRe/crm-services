@@ -134,6 +134,89 @@ export default async function postsRouter(fastify: FastifyInstance) {
     }
   });
 
+  fastify.post<{
+    Body: {
+      items?: Array<{
+        channel?: string;
+        channelAccountId?: string;
+        caption?: string;
+        mediaUrl?: string | null;
+        targetChatId?: string | null;
+        scheduledAt?: string | null;
+      }>;
+    };
+  }>('/import', async (req, reply) => {
+    try {
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      if (items.length === 0) {
+        return reply.status(400).send({ success: false, error: 'Tidak ada baris CSV untuk diimpor.' });
+      }
+
+      const accounts = await db.select().from(channelAccounts).where(eq(channelAccounts.isActive, true));
+      let imported = 0;
+      const failed: Array<{ row: number; error: string }> = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const channel = String(item.channel || '').trim().toUpperCase();
+        const caption = String(item.caption || '').trim();
+        const mediaUrl = item.mediaUrl ? String(item.mediaUrl).trim() : null;
+        const targetChatId = item.targetChatId ? String(item.targetChatId).trim() : null;
+        let channelAccountId = String(item.channelAccountId || '').trim();
+
+        if (!channelAccountId) {
+          const matchedAcc = accounts.find((a) => a.channel === channel);
+          if (matchedAcc) channelAccountId = matchedAcc.id;
+        }
+
+        if (!channel || !caption) {
+          failed.push({ row: i + 1, error: 'Channel atau caption kosong' });
+          continue;
+        }
+        if (!channelAccountId) {
+          failed.push({ row: i + 1, error: `Akun kanal ${channel} tidak ditemukan` });
+          continue;
+        }
+        if (channel === 'INSTAGRAM' && !mediaUrl) {
+          failed.push({ row: i + 1, error: 'Instagram memerlukan mediaUrl' });
+          continue;
+        }
+        if (channel === 'TELEGRAM' && !targetChatId) {
+          failed.push({ row: i + 1, error: 'Telegram memerlukan targetChatId' });
+          continue;
+        }
+
+        const scheduledAt = item.scheduledAt ? new Date(item.scheduledAt) : new Date(Date.now() + 3600_000);
+        if (Number.isNaN(scheduledAt.getTime())) {
+          failed.push({ row: i + 1, error: 'Format scheduledAt tidak valid' });
+          continue;
+        }
+
+        const now = new Date();
+        await db.insert(scheduledPosts).values({
+          id: crypto.randomUUID(),
+          channel,
+          channelAccountId,
+          caption,
+          mediaUrl,
+          targetChatId,
+          status: 'SCHEDULED',
+          scheduledAt,
+          createdAt: now,
+          updatedAt: now,
+        });
+        imported++;
+      }
+
+      return reply.status(201).send({
+        success: true,
+        data: { imported, failed },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
   fastify.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     try {
       await db.delete(scheduledPosts).where(eq(scheduledPosts.id, req.params.id));

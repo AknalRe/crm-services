@@ -1,8 +1,11 @@
 import crypto from 'crypto';
+import axios from 'axios';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { asc, desc, eq } from 'drizzle-orm';
+import { config } from '../config';
 import { db } from '../db';
 import { channelAccounts, channelConnectLinks } from '../db/schema';
+import { licenseService } from '../services/license.service';
 import { requirePermission } from './auth';
 import {
   OmnichannelType,
@@ -422,6 +425,259 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // OAuth helpers (Reneo OAuth Broker + Direct Meta/Threads OAuth)
+  const getOAuthSecret = () =>
+    config.reneo.appToken || process.env.JWT_SECRET || 'reneo_oauth_state_secret';
+
+  const signOAuthState = (payload: Record<string, any>) => {
+    const encoded = Buffer.from(JSON.stringify({ ...payload, ts: Date.now() })).toString('base64url');
+    const sig = crypto.createHmac('sha256', getOAuthSecret()).update(encoded).digest('base64url');
+    return `${encoded}.${sig}`;
+  };
+
+  const verifyOAuthState = (raw: string): Record<string, any> | null => {
+    const [encoded, sig] = String(raw || '').split('.');
+    if (!encoded || !sig) return null;
+    const expected = crypto.createHmac('sha256', getOAuthSecret()).update(encoded).digest('base64url');
+    if (sig !== expected) return null;
+    try {
+      const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+      if (Date.now() - Number(parsed.ts || 0) > 15 * 60_000) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  };
+
+  fastify.get('/oauth/config', async (_req: FastifyRequest, reply: FastifyReply) => {
+    return reply.send({
+      success: true,
+      data: {
+        reneoOAuthReady: Boolean(config.reneo.oauthUrl),
+        directMetaReady: Boolean(config.meta.appId && config.meta.appSecret),
+        directThreadsReady: Boolean(config.meta.threadsAppId && config.meta.threadsAppSecret),
+      },
+    });
+  });
+
+  fastify.get<{
+    Querystring: { channel?: string; connectToken?: string };
+  }>('/oauth/start', async (req, reply) => {
+    try {
+      const channel = String(req.query?.channel || '').trim().toUpperCase();
+      const connectToken = String(req.query?.connectToken || '').trim();
+      if (!['INSTAGRAM', 'FACEBOOK', 'THREADS'].includes(channel)) {
+        return reply.status(400).send({ success: false, error: 'Channel OAuth tidak valid' });
+      }
+
+      if (connectToken) {
+        const [link] = await db
+          .select()
+          .from(channelConnectLinks)
+          .where(eq(channelConnectLinks.token, connectToken));
+        if (!link || link.usedAt || new Date(link.expiresAt).getTime() < Date.now()) {
+          return reply.status(400).send({ success: false, error: 'Link koneksi tidak valid atau kedaluwarsa' });
+        }
+      } else {
+        const authCheck = await new Promise<boolean>((resolve) => {
+          requirePermission('settings')(req as any, reply as any).then(
+            () => resolve(!reply.sent),
+            () => resolve(false)
+          );
+        });
+        if (!authCheck) return;
+      }
+
+      const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost:5000').split(',')[0].trim();
+      const baseUrl = (config.meta.publicBaseUrl || `${proto}://${host}`).replace(/\/+$/, '');
+      const callbackUrl = `${baseUrl}/api/channels/oauth/callback`;
+      const state = signOAuthState({ channel, connectToken: connectToken || null, returnBase: baseUrl });
+
+      if (config.reneo.oauthUrl) {
+        const lic = await licenseService.getLicense();
+        const brokerStart = `${config.reneo.oauthUrl.replace(/\/+$/, '')}/start`;
+        const target = `${brokerStart}?channel=${encodeURIComponent(channel)}&state=${encodeURIComponent(state)}&redirect_uri=${encodeURIComponent(callbackUrl)}&license_key=${encodeURIComponent(lic.licenseKey || '')}`;
+        return reply.redirect(target);
+      }
+
+      if (channel === 'THREADS' && config.meta.threadsAppId) {
+        const target = `https://threads.net/oauth/authorize?client_id=${encodeURIComponent(config.meta.threadsAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent('threads_basic,threads_content_publish,threads_manage_replies,threads_keyword_search')}&response_type=code&state=${encodeURIComponent(state)}`;
+        return reply.redirect(target);
+      }
+
+      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK') && config.meta.appId) {
+        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(config.meta.appId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent('pages_show_list,pages_messaging,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish')}&response_type=code&state=${encodeURIComponent(state)}`;
+        return reply.redirect(target);
+      }
+
+      return reply.status(400).send({
+        success: false,
+        error: 'OAuth Reneo belum dikonfigurasi di server (RENEO_OAUTH_URL atau META_APP_ID belum diisi).',
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  fastify.get<{
+    Querystring: { code?: string; grant_code?: string; state?: string; error?: string; error_description?: string };
+  }>('/oauth/callback', async (req, reply) => {
+    const parsedState = verifyOAuthState(String(req.query?.state || ''));
+    const returnBase = parsedState?.returnBase || config.frontendUrl.replace(/\/+$/, '');
+    const failRedirect = (msg: string) => {
+      const dest = parsedState?.connectToken
+        ? `${returnBase}/connect/${parsedState.connectToken}?oauth=error&msg=${encodeURIComponent(msg)}`
+        : `${returnBase}/#settings/omnichannel?oauth=error&msg=${encodeURIComponent(msg)}`;
+      return reply.redirect(dest);
+    };
+
+    try {
+      if (req.query?.error) {
+        return failRedirect(req.query.error_description || req.query.error);
+      }
+      if (!parsedState) {
+        return failRedirect('Sesi OAuth tidak valid atau kedaluwarsa.');
+      }
+
+      const accountsToSave: Array<{ channel: string; name: string; accountId: string; accessToken: string }> = [];
+
+      if (req.query?.grant_code && config.reneo.oauthUrl) {
+        const exchangeRes = await axios.post(
+          `${config.reneo.oauthUrl.replace(/\/+$/, '')}/exchange`,
+          { grant_code: req.query.grant_code, app_token: config.reneo.appToken },
+          { timeout: 15000 }
+        );
+        const list = exchangeRes.data?.data?.accounts || exchangeRes.data?.accounts || [];
+        for (const item of list) {
+          if (item.channel && item.accountId && item.accessToken) {
+            accountsToSave.push({
+              channel: String(item.channel).toUpperCase(),
+              name: String(item.name || item.accountId),
+              accountId: String(item.accountId),
+              accessToken: String(item.accessToken),
+            });
+          }
+        }
+      } else if (req.query?.code) {
+        const callbackUrl = `${returnBase}/api/channels/oauth/callback`;
+        if (parsedState.channel === 'THREADS' && config.meta.threadsAppId && config.meta.threadsAppSecret) {
+          const tokenRes = await axios.post(
+            'https://graph.threads.net/oauth/access_token',
+            new URLSearchParams({
+              client_id: config.meta.threadsAppId,
+              client_secret: config.meta.threadsAppSecret,
+              grant_type: 'authorization_code',
+              redirect_uri: callbackUrl,
+              code: req.query.code,
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
+          );
+          const shortToken = tokenRes.data?.access_token;
+          if (shortToken) {
+            const meRes = await axios.get('https://graph.threads.net/v1.0/me', {
+              params: { fields: 'id,username,name', access_token: shortToken },
+              timeout: 10000,
+            });
+            accountsToSave.push({
+              channel: 'THREADS',
+              name: meRes.data?.username ? `@${meRes.data.username}` : meRes.data?.name || 'Threads',
+              accountId: String(meRes.data?.id || tokenRes.data?.user_id),
+              accessToken: shortToken,
+            });
+          }
+        } else if (config.meta.appId && config.meta.appSecret) {
+          const tokenRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
+            params: {
+              client_id: config.meta.appId,
+              client_secret: config.meta.appSecret,
+              redirect_uri: callbackUrl,
+              code: req.query.code,
+            },
+            timeout: 15000,
+          });
+          const userToken = tokenRes.data?.access_token;
+          if (userToken) {
+            const pagesRes = await axios.get('https://graph.facebook.com/v20.0/me/accounts', {
+              params: {
+                fields: 'id,name,access_token,instagram_business_account{id,username,name}',
+                access_token: userToken,
+              },
+              timeout: 15000,
+            });
+            for (const page of pagesRes.data?.data || []) {
+              if (parsedState.channel === 'FACEBOOK' || parsedState.channel === 'INSTAGRAM') {
+                if (parsedState.channel === 'FACEBOOK') {
+                  accountsToSave.push({
+                    channel: 'FACEBOOK',
+                    name: String(page.name || page.id),
+                    accountId: String(page.id),
+                    accessToken: String(page.access_token || userToken),
+                  });
+                }
+                if (parsedState.channel === 'INSTAGRAM' && page.instagram_business_account?.id) {
+                  const ig = page.instagram_business_account;
+                  accountsToSave.push({
+                    channel: 'INSTAGRAM',
+                    name: ig.username ? `@${ig.username}` : ig.name || page.name,
+                    accountId: String(ig.id),
+                    accessToken: String(page.access_token || userToken),
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (accountsToSave.length === 0) {
+        return failRedirect('Tidak ada akun kanal yang berhasil diambil dari OAuth.');
+      }
+
+      const now = new Date();
+      let firstCreatedId = '';
+      for (const acc of accountsToSave) {
+        const existing = await db
+          .select()
+          .from(channelAccounts)
+          .where(eq(channelAccounts.accountId, acc.accountId));
+        if (existing.length > 0 && existing[0].channel === acc.channel) {
+          await db
+            .update(channelAccounts)
+            .set({ name: acc.name, accessToken: acc.accessToken, isActive: true, updatedAt: now })
+            .where(eq(channelAccounts.id, existing[0].id));
+          if (!firstCreatedId) firstCreatedId = existing[0].id;
+        } else {
+          const newId = crypto.randomUUID();
+          await db.insert(channelAccounts).values({
+            id: newId,
+            channel: acc.channel,
+            name: acc.name,
+            accountId: acc.accountId,
+            accessToken: acc.accessToken,
+            verifyToken: `reneo_${crypto.randomBytes(8).toString('hex')}`,
+            isActive: true,
+            createdAt: now,
+            updatedAt: now,
+          });
+          if (!firstCreatedId) firstCreatedId = newId;
+        }
+      }
+
+      if (parsedState.connectToken && firstCreatedId) {
+        await db
+          .update(channelConnectLinks)
+          .set({ usedAt: now, createdChannelAccountId: firstCreatedId })
+          .where(eq(channelConnectLinks.token, parsedState.connectToken));
+        return reply.redirect(`${returnBase}/connect/${parsedState.connectToken}?oauth=success`);
+      }
+
+      return reply.redirect(`${returnBase}/#settings/omnichannel?oauth=success&count=${accountsToSave.length}`);
+    } catch (error: any) {
+      return failRedirect(error.response?.data?.error?.message || error.message || 'OAuth gagal');
     }
   });
 }

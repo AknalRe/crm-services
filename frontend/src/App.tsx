@@ -10,6 +10,12 @@ import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Broadcasts from './pages/Broadcasts';
 import ScheduledPosts from './pages/ScheduledPosts';
+import ContentIdeas from './pages/ContentIdeas';
+import MediaLibrary from './pages/MediaLibrary';
+import Comments from './pages/Comments';
+import SocialFeed from './pages/SocialFeed';
+import Automations from './pages/Automations';
+import AiAgent from './pages/AiAgent';
 import BirthdayAutomation from './pages/BirthdayAutomation';
 import Tracking from './pages/Tracking';
 import Conversations from './pages/Conversations';
@@ -25,6 +31,12 @@ const VALID_TABS = new Set([
   'contacts',
   'broadcasts',
   'posts',
+  'ideas',
+  'media',
+  'comments',
+  'feed',
+  'automations',
+  'ai-agent',
   'birthday',
   'tracking',
   'conversations',
@@ -118,6 +130,11 @@ function AppShell() {
   const [isPlansModalOpen, setIsPlansModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [preselectedContactIds, setPreselectedContactIds] = useState<string[]>([]);
+  const [prefillPost, setPrefillPost] = useState<{
+    channel?: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+    caption?: string;
+    mediaUrl?: string;
+  } | null>(null);
 
   const fetchWahaStatus = async () => {
     try {
@@ -208,6 +225,10 @@ function AppShell() {
         return 'Siaran & Kampanye';
       case 'posts':
         return 'Jadwal Postingan Kanal';
+      case 'ideas':
+        return 'Ide Konten';
+      case 'media':
+        return 'Pustaka Media';
       case 'birthday':
         return 'Ucapan Ulang Tahun Otomatis';
       case 'tracking':
@@ -229,6 +250,14 @@ function AppShell() {
           default:
             return 'Pengaturan & Kanal';
         }
+      case 'comments':
+        return 'Comments';
+      case 'feed':
+        return 'Feed Threads';
+      case 'automations':
+        return 'Automations Komentar & DM';
+      case 'ai-agent':
+        return 'Agent AI & Knowledge Base';
       default:
         return 'Reneo CRM Omnichannel';
     }
@@ -326,7 +355,32 @@ function AppShell() {
                 licenseInfo={licenseInfo}
               />
             )}
-            {currentTab === 'posts' && <ScheduledPosts />}
+            {currentTab === 'posts' && (
+              <ScheduledPosts
+                prefill={prefillPost}
+                onClearPrefill={() => setPrefillPost(null)}
+              />
+            )}
+            {currentTab === 'ideas' && (
+              <ContentIdeas
+                onConvertToPost={(p) => {
+                  setPrefillPost(p);
+                  setCurrentTab('posts');
+                }}
+              />
+            )}
+            {currentTab === 'media' && (
+              <MediaLibrary
+                onUseInPost={(url) => {
+                  setPrefillPost({ mediaUrl: url });
+                  setCurrentTab('posts');
+                }}
+              />
+            )}
+            {currentTab === 'comments' && <Comments />}
+            {currentTab === 'feed' && <SocialFeed />}
+            {currentTab === 'automations' && <Automations />}
+            {currentTab === 'ai-agent' && <AiAgent />}
             {currentTab === 'birthday' && <BirthdayAutomation />}
             {currentTab === 'tracking' && <Tracking />}
             {currentTab === 'conversations' && (

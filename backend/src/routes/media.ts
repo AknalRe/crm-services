@@ -32,6 +32,72 @@ function ensureUploadsDir() {
 }
 
 export default async function mediaRouter(fastify: FastifyInstance) {
+  // List all uploaded media files in uploads/
+  fastify.get(
+    '/',
+    { preHandler: requirePermission('broadcasts', 'conversations') },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        ensureUploadsDir();
+        const entries = await fs.promises.readdir(UPLOADS_DIR, { withFileTypes: true });
+        const proto =
+          (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() ||
+          req.protocol ||
+          'http';
+        const host =
+          (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() ||
+          req.headers.host ||
+          'localhost';
+
+        const items = await Promise.all(
+          entries
+            .filter((e) => e.isFile() && /^[a-zA-Z0-9._-]+$/.test(e.name))
+            .map(async (e) => {
+              const full = path.join(UPLOADS_DIR, e.name);
+              const stat = await fs.promises.stat(full);
+              const ext = path.extname(e.name).toLowerCase();
+              const mimeType = EXT_MIME[ext] || 'application/octet-stream';
+              const relativeUrl = `/api/media/files/${e.name}`;
+              return {
+                filename: e.name,
+                url: `${proto}://${host}${relativeUrl}`,
+                relativeUrl,
+                mimeType,
+                mediaKind: mimeType.startsWith('video/') ? 'video' : 'image',
+                sizeBytes: stat.size,
+                createdAt: stat.mtime.toISOString(),
+              };
+            })
+        );
+        items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        return reply.send({ success: true, data: items });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // Delete an uploaded media file
+  fastify.delete<{ Params: { filename: string } }>(
+    '/files/:filename',
+    { preHandler: requirePermission('broadcasts', 'conversations') },
+    async (req, reply) => {
+      try {
+        const filename = String(req.params.filename || '').trim();
+        if (!/^[a-zA-Z0-9._-]+$/.test(filename)) {
+          return reply.status(400).send({ success: false, error: 'Invalid filename' });
+        }
+        const filePath = path.join(UPLOADS_DIR, filename);
+        if (fs.existsSync(filePath)) {
+          await fs.promises.unlink(filePath);
+        }
+        return reply.send({ success: true });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
+
   // Public file serving endpoint so Meta/Telegram servers and browser previews can fetch media
   fastify.get<{ Params: { filename: string } }>(
     '/files/:filename',

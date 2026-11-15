@@ -24,6 +24,15 @@ import { LoadingState, EmptyState } from '../components/ui/StateBlocks';
 
 type PostChannel = 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
 
+interface ScheduledPostsProps {
+  prefill?: {
+    channel?: PostChannel;
+    caption?: string;
+    mediaUrl?: string;
+  } | null;
+  onClearPrefill?: () => void;
+}
+
 const POST_CHANNEL_META: Record<PostChannel, { label: string; badgeCls: string }> = {
   INSTAGRAM: { label: 'Instagram Feed', badgeCls: 'bg-pink-50 text-pink-700 border-pink-200' },
   FACEBOOK: { label: 'Facebook Page', badgeCls: 'bg-blue-50 text-blue-700 border-blue-200' },
@@ -31,7 +40,10 @@ const POST_CHANNEL_META: Record<PostChannel, { label: string; badgeCls: string }
   TELEGRAM: { label: 'Telegram Channel', badgeCls: 'bg-sky-50 text-sky-700 border-sky-200' },
 };
 
-export const ScheduledPosts: React.FC = () => {
+export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
+  prefill,
+  onClearPrefill,
+}) => {
   const toast = useToast();
   const [posts, setPosts] = useState<ScheduledPostItem[]>([]);
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
@@ -50,11 +62,18 @@ export const ScheduledPosts: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [calendarGranularity, setCalendarGranularity] = useState<'month' | 'week'>('month');
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvText, setCsvText] = useState(
+    'channel,caption,scheduledAt,mediaUrl,targetChatId\nTHREADS,Promo akhir pekan diskon 20%!,2026-11-20T10:00:00,,'
+  );
+  const [importingCsv, setImportingCsv] = useState(false);
+  const csvFileRef = useRef<HTMLInputElement | null>(null);
   const [filterChannel, setFilterChannel] = useState<'ALL' | PostChannel>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | ScheduledPostItem['status']>('ALL');
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   });
 
   const handleUploadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -109,6 +128,18 @@ export const ScheduledPosts: React.FC = () => {
     });
     return unsub;
   }, [loadData]);
+
+  useEffect(() => {
+    if (!prefill) return;
+    if (prefill.channel) {
+      setChannel(prefill.channel);
+      const first = accounts.find((a) => a.channel === prefill.channel && a.isActive);
+      if (first) setChannelAccountId(first.id);
+    }
+    if (prefill.caption) setCaption(prefill.caption);
+    if (prefill.mediaUrl) setMediaUrl(prefill.mediaUrl);
+    onClearPrefill?.();
+  }, [prefill, accounts, onClearPrefill]);
 
   const matchingAccounts = accounts.filter((a) => a.channel === channel && a.isActive);
 
@@ -216,14 +247,24 @@ export const ScheduledPosts: React.FC = () => {
             Jadwalkan atau terbitkan langsung konten ke Instagram Feed, Facebook Page, Threads, dan Channel Telegram.
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={loadData}
-          leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-        >
-          Segarkan
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowCsvModal(true)}
+            leftIcon={<Upload className="w-3.5 h-3.5" />}
+          >
+            Impor CSV
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={loadData}
+            leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+          >
+            Segarkan
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -490,31 +531,90 @@ export const ScheduledPosts: React.FC = () => {
               const month = calendarMonth.getMonth();
               const firstDay = new Date(year, month, 1).getDay();
               const daysInMonth = new Date(year, month + 1, 0).getDate();
-              const cells: Array<number | null> = [
+
+              const startOfWeek = new Date(calendarMonth);
+              startOfWeek.setDate(calendarMonth.getDate() - calendarMonth.getDay());
+              const weekDates = Array.from({ length: 7 }, (_, i) => {
+                const d = new Date(startOfWeek);
+                d.setDate(startOfWeek.getDate() + i);
+                return d;
+              });
+
+              const monthCells: Array<Date | null> = [
                 ...Array(firstDay).fill(null),
-                ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+                ...Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1)),
               ];
+              const activeCells = calendarGranularity === 'week' ? weekDates : monthCells;
+
+              const handlePrev = () => {
+                if (calendarGranularity === 'week') {
+                  const d = new Date(calendarMonth);
+                  d.setDate(d.getDate() - 7);
+                  setCalendarMonth(d);
+                } else {
+                  setCalendarMonth(new Date(year, month - 1, 1));
+                }
+              };
+
+              const handleNext = () => {
+                if (calendarGranularity === 'week') {
+                  const d = new Date(calendarMonth);
+                  d.setDate(d.getDate() + 7);
+                  setCalendarMonth(d);
+                } else {
+                  setCalendarMonth(new Date(year, month + 1, 1));
+                }
+              };
+
               return (
                 <div className="p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-gray-800">
-                      {calendarMonth.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+                      {calendarGranularity === 'week'
+                        ? `${weekDates[0].toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} – ${weekDates[6].toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                        : calendarMonth.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
                     </span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setCalendarMonth(new Date(year, month - 1, 1))}
-                        className="p-1 rounded border border-gray-200 hover:bg-gray-50"
-                      >
-                        <ChevronLeft className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setCalendarMonth(new Date(year, month + 1, 1))}
-                        className="p-1 rounded border border-gray-200 hover:bg-gray-50"
-                      >
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
+                    <div className="flex items-center gap-2">
+                      <div className="inline-flex rounded border border-gray-200 bg-gray-50 p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setCalendarGranularity('month')}
+                          className={`px-2 py-0.5 rounded text-[11px] font-medium ${
+                            calendarGranularity === 'month'
+                              ? 'bg-white text-indigo-700 shadow-sm'
+                              : 'text-gray-600'
+                          }`}
+                        >
+                          Bulan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCalendarGranularity('week')}
+                          className={`px-2 py-0.5 rounded text-[11px] font-medium ${
+                            calendarGranularity === 'week'
+                              ? 'bg-white text-indigo-700 shadow-sm'
+                              : 'text-gray-600'
+                          }`}
+                        >
+                          Minggu
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={handlePrev}
+                          className="p-1 rounded border border-gray-200 hover:bg-gray-50"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleNext}
+                          className="p-1 rounded border border-gray-200 hover:bg-gray-50"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-gray-500">
@@ -523,23 +623,28 @@ export const ScheduledPosts: React.FC = () => {
                     ))}
                   </div>
                   <div className="grid grid-cols-7 gap-1">
-                    {cells.map((day, idx) => {
-                      if (!day) {
+                    {activeCells.map((cellDate, idx) => {
+                      if (!cellDate) {
                         return <div key={`empty-${idx}`} className="min-h-[68px] rounded bg-gray-50/50" />;
                       }
                       const dayPosts = filteredPosts.filter((p) => {
                         const pd = new Date(p.scheduledAt);
-                        return pd.getFullYear() === year && pd.getMonth() === month && pd.getDate() === day;
+                        return (
+                          pd.getFullYear() === cellDate.getFullYear() &&
+                          pd.getMonth() === cellDate.getMonth() &&
+                          pd.getDate() === cellDate.getDate()
+                        );
                       });
+                      const visiblePosts = calendarGranularity === 'week' ? dayPosts : dayPosts.slice(0, 2);
                       return (
                         <div
-                          key={day}
-                          className="min-h-[68px] p-1 rounded border border-gray-200 bg-white flex flex-col gap-1"
+                          key={cellDate.toISOString()}
+                          className={`${calendarGranularity === 'week' ? 'min-h-[160px]' : 'min-h-[68px]'} p-1.5 rounded border border-gray-200 bg-white flex flex-col gap-1`}
                         >
                           <span className="text-[10px] font-mono font-semibold text-gray-500">
-                            {day}
+                            {cellDate.getDate()}
                           </span>
-                          {dayPosts.slice(0, 2).map((dp) => (
+                          {visiblePosts.map((dp) => (
                             <button
                               key={dp.id}
                               type="button"
@@ -556,7 +661,7 @@ export const ScheduledPosts: React.FC = () => {
                               {dp.channel.slice(0, 2)}
                             </button>
                           ))}
-                          {dayPosts.length > 2 && (
+                          {calendarGranularity === 'month' && dayPosts.length > 2 && (
                             <span className="text-[9px] text-gray-400">+{dayPosts.length - 2} lagi</span>
                           )}
                         </div>
@@ -665,6 +770,109 @@ export const ScheduledPosts: React.FC = () => {
           })()}
         </div>
       </div>
+
+      {showCsvModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-gray-200 max-w-xl w-full p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Impor Jadwal Postingan (CSV)</h3>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Format kolom: <code className="font-mono">channel,caption,scheduledAt,mediaUrl,targetChatId</code>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCsvModal(false)}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                ref={csvFileRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setCsvText(String(reader.result || ''));
+                  reader.readAsText(file);
+                }}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => csvFileRef.current?.click()}
+                leftIcon={<Upload className="w-3.5 h-3.5" />}
+              >
+                Pilih File CSV
+              </Button>
+            </div>
+
+            <textarea
+              rows={6}
+              value={csvText}
+              onChange={(e) => setCsvText(e.target.value)}
+              className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+            />
+
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowCsvModal(false)}>
+                Batal
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                isLoading={importingCsv}
+                onClick={async () => {
+                  const lines = csvText
+                    .split(/\r?\n/)
+                    .map((l) => l.trim())
+                    .filter(Boolean);
+                  if (lines.length < 2) {
+                    toast.error('CSV minimal berisi header dan 1 baris data');
+                    return;
+                  }
+                  const dataRows = lines.slice(1).map((line) => {
+                    const cols = line.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+                    return {
+                      channel: cols[0] || '',
+                      caption: cols[1] || '',
+                      scheduledAt: cols[2] || undefined,
+                      mediaUrl: cols[3] || null,
+                      targetChatId: cols[4] || null,
+                    };
+                  });
+                  setImportingCsv(true);
+                  try {
+                    const result = await api.importScheduledPosts(dataRows);
+                    toast.success(`${result.imported} postingan berhasil dijadwalkan`);
+                    if (result.failed.length > 0) {
+                      toast.error(`${result.failed.length} baris gagal diimpor`);
+                    }
+                    setShowCsvModal(false);
+                    loadData();
+                  } catch (err: any) {
+                    toast.error(err.response?.data?.error || 'Gagal mengimpor CSV');
+                  } finally {
+                    setImportingCsv(false);
+                  }
+                }}
+              >
+                Impor &amp; Jadwalkan
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -568,6 +568,221 @@ export const api = {
     const res = await client.post('/media/upload', data);
     return res.data.data;
   },
+
+  getMediaLibrary: async (): Promise<import('../types').MediaLibraryItem[]> => {
+    const res = await client.get('/media');
+    return res.data.data || [];
+  },
+
+  deleteMediaFile: async (filename: string): Promise<void> => {
+    await client.delete(`/media/files/${encodeURIComponent(filename)}`);
+  },
+
+  getContentIdeas: async (): Promise<import('../types').ContentIdeaItem[]> => {
+    const res = await client.get('/ideas');
+    return res.data.data || [];
+  },
+
+  createContentIdea: async (data: {
+    title: string;
+    notes?: string | null;
+    channel?: string;
+    stage?: string;
+  }): Promise<import('../types').ContentIdeaItem> => {
+    const res = await client.post('/ideas', data);
+    return res.data.data;
+  },
+
+  updateContentIdea: async (
+    id: string,
+    data: Partial<{ title: string; notes: string | null; channel: string; stage: string }>
+  ): Promise<import('../types').ContentIdeaItem> => {
+    const res = await client.patch(`/ideas/${id}`, data);
+    return res.data.data;
+  },
+
+  deleteContentIdea: async (id: string): Promise<void> => {
+    await client.delete(`/ideas/${id}`);
+  },
+
+  importScheduledPosts: async (
+    items: Array<{
+      channel: string;
+      channelAccountId?: string;
+      caption: string;
+      mediaUrl?: string | null;
+      targetChatId?: string | null;
+      scheduledAt?: string | null;
+    }>
+  ): Promise<{ imported: number; failed: Array<{ row: number; error: string }> }> => {
+    const res = await client.post('/posts/import', { items });
+    return res.data.data;
+  },
+
+  getIdeaColumns: async (): Promise<import('../types').IdeaColumn[]> => {
+    const res = await client.get('/ideas/columns');
+    return res.data.data || [];
+  },
+
+  saveIdeaColumns: async (
+    columns: import('../types').IdeaColumn[]
+  ): Promise<import('../types').IdeaColumn[]> => {
+    const res = await client.put('/ideas/columns', { columns });
+    return res.data.data || [];
+  },
+
+  getSocialComments: async (params?: {
+    status?: string;
+    channel?: string;
+  }): Promise<import('../types').SocialCommentItem[]> => {
+    const res = await client.get('/comments', { params });
+    return res.data.data || [];
+  },
+
+  syncSocialComments: async (): Promise<{
+    synced: number;
+    errors?: string[];
+    message?: string;
+  }> => {
+    const res = await client.post('/comments/sync');
+    return res.data.data;
+  },
+
+  replySocialComment: async (
+    id: string,
+    replyText: string
+  ): Promise<import('../types').SocialCommentItem> => {
+    const res = await client.post(`/comments/${id}/reply`, { replyText });
+    return res.data.data;
+  },
+
+  updateSocialCommentStatus: async (
+    id: string,
+    status: 'PENDING' | 'DONE'
+  ): Promise<import('../types').SocialCommentItem> => {
+    const res = await client.patch(`/comments/${id}/status`, { status });
+    return res.data.data;
+  },
+
+  deleteSocialComment: async (id: string): Promise<void> => {
+    await client.delete(`/comments/${id}`);
+  },
+
+  searchSocialFeed: async (
+    q: string
+  ): Promise<{
+    connected: boolean;
+    accountName?: string;
+    items: import('../types').FeedPostItem[];
+    message?: string;
+  }> => {
+    const res = await client.get('/feed/search', { params: { q } });
+    return res.data.data;
+  },
+
+  replySocialFeed: async (postId: string, text: string): Promise<{ id: string }> => {
+    const res = await client.post('/feed/reply', { postId, text });
+    return res.data.data;
+  },
+
+  getCommentAutomations: async (): Promise<import('../types').CommentAutomationItem[]> => {
+    const res = await client.get('/automations');
+    return res.data.data || [];
+  },
+
+  createCommentAutomation: async (data: {
+    name: string;
+    channel: string;
+    keyword: string;
+    matchType: 'CONTAINS' | 'EXACT';
+    replyComment?: string | null;
+    sendDm?: boolean;
+    dmText?: string | null;
+    isActive?: boolean;
+  }): Promise<import('../types').CommentAutomationItem> => {
+    const res = await client.post('/automations', data);
+    return res.data.data;
+  },
+
+  updateCommentAutomation: async (
+    id: string,
+    data: Partial<{
+      name: string;
+      channel: string;
+      keyword: string;
+      matchType: 'CONTAINS' | 'EXACT';
+      replyComment: string | null;
+      sendDm: boolean;
+      dmText: string | null;
+      isActive: boolean;
+    }>
+  ): Promise<import('../types').CommentAutomationItem> => {
+    const res = await client.patch(`/automations/${id}`, data);
+    return res.data.data;
+  },
+
+  deleteCommentAutomation: async (id: string): Promise<void> => {
+    await client.delete(`/automations/${id}`);
+  },
+
+  getAiAgentConfig: async (): Promise<import('../types').AiAgentConfig> => {
+    const res = await client.get('/ai-agent/config');
+    return res.data.data;
+  },
+
+  saveAiAgentConfig: async (
+    data: Partial<import('../types').AiAgentConfig>
+  ): Promise<import('../types').AiAgentConfig> => {
+    const res = await client.put('/ai-agent/config', data);
+    return res.data.data;
+  },
+
+  getAiKnowledge: async (): Promise<import('../types').AiKnowledgeItem[]> => {
+    const res = await client.get('/ai-agent/knowledge');
+    return res.data.data || [];
+  },
+
+  createAiKnowledge: async (data: {
+    title: string;
+    category: string;
+    content: string;
+    sourceUrl?: string | null;
+  }): Promise<import('../types').AiKnowledgeItem> => {
+    const res = await client.post('/ai-agent/knowledge', data);
+    return res.data.data;
+  },
+
+  updateAiKnowledge: async (
+    id: string,
+    data: Partial<{
+      title: string;
+      category: string;
+      content: string;
+      sourceUrl: string | null;
+      isActive: boolean;
+    }>
+  ): Promise<import('../types').AiKnowledgeItem> => {
+    const res = await client.patch(`/ai-agent/knowledge/${id}`, data);
+    return res.data.data;
+  },
+
+  deleteAiKnowledge: async (id: string): Promise<void> => {
+    await client.delete(`/ai-agent/knowledge/${id}`);
+  },
+
+  testAiAgent: async (message: string): Promise<{ reply: string; source: string }> => {
+    const res = await client.post('/ai-agent/test', { message });
+    return res.data.data;
+  },
+
+  getOAuthConfig: async (): Promise<{
+    reneoOAuthReady: boolean;
+    directMetaReady: boolean;
+    directThreadsReady: boolean;
+  }> => {
+    const res = await client.get('/channels/oauth/config');
+    return res.data.data;
+  },
 };
 
 export default api;

@@ -460,4 +460,92 @@ export interface ScheduledPostItem {
   createdAt: string;
 }
 
+export interface MediaLibraryItem {
+  filename: string;
+  url: string;
+  relativeUrl: string;
+  mimeType: string;
+  mediaKind: 'image' | 'video';
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export interface ContentIdeaItem {
+  id: string;
+  title: string;
+  notes?: string | null;
+  channel: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+  stage: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IdeaColumn {
+  id: string;
+  label: string;
+}
+
+export interface SocialCommentItem {
+  id: string;
+  channel: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS';
+  channelAccountId: string;
+  accountName?: string | null;
+  postId?: string | null;
+  postCaption?: string | null;
+  externalCommentId?: string | null;
+  authorName: string;
+  authorHandle?: string | null;
+  content: string;
+  status: 'PENDING' | 'DONE';
+  replyText?: string | null;
+  repliedAt?: string | null;
+  createdAt: string;
+}
+
+export interface FeedPostItem {
+  id: string;
+  text?: string;
+  username?: string;
+  permalink?: string;
+  timestamp?: string;
+}
+
+export interface CommentAutomationItem {
+  id: string;
+  name: string;
+  channel: 'ALL' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS';
+  keyword: string;
+  matchType: 'CONTAINS' | 'EXACT';
+  replyComment?: string | null;
+  sendDm: boolean;
+  dmText?: string | null;
+  isActive: boolean;
+  triggerCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiAgentConfig {
+  enabled: boolean;
+  name: string;
+  persona: string;
+  autoReplyDm: boolean;
+  autoReplyComment: boolean;
+  provider: 'OPENAI' | 'GEMINI' | 'LOCAL_KB';
+  model: string;
+  hasApiKey?: boolean;
+  apiKey?: string;
+}
+
+export interface AiKnowledgeItem {
+  id: string;
+  title: string;
+  category: 'FAQ' | 'CATALOG' | 'POLICY' | 'WEB';
+  content: string;
+  sourceUrl?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 

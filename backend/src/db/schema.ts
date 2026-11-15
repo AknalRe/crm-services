@@ -300,6 +300,60 @@ export const scheduledPosts = pgTable('scheduled_posts', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const contentIdeas = pgTable('content_ideas', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  notes: text('notes'),
+  channel: text('channel').default('INSTAGRAM').notNull(),
+  stage: text('stage').default('IDE').notNull(), // IDE | DIKERJAKAN | SIAP | custom
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const socialComments = pgTable('social_comments', {
+  id: text('id').primaryKey(),
+  channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS
+  channelAccountId: text('channel_account_id')
+    .references(() => channelAccounts.id, { onDelete: 'cascade' })
+    .notNull(),
+  postId: text('post_id'),
+  postCaption: text('post_caption'),
+  externalCommentId: text('external_comment_id'),
+  authorName: text('author_name').notNull(),
+  authorHandle: text('author_handle'),
+  content: text('content').notNull(),
+  status: text('status').default('PENDING').notNull(), // PENDING | DONE
+  replyText: text('reply_text'),
+  repliedAt: timestamp('replied_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const commentAutomations = pgTable('comment_automations', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  channel: text('channel').default('ALL').notNull(), // ALL | INSTAGRAM | FACEBOOK | THREADS
+  keyword: text('keyword').notNull(),
+  matchType: text('match_type').default('CONTAINS').notNull(), // CONTAINS | EXACT
+  replyComment: text('reply_comment'),
+  sendDm: boolean('send_dm').default(false).notNull(),
+  dmText: text('dm_text'),
+  isActive: boolean('is_active').default(true).notNull(),
+  triggerCount: integer('trigger_count').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const aiKnowledgeItems = pgTable('ai_knowledge_items', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  category: text('category').default('FAQ').notNull(), // FAQ | CATALOG | POLICY | WEB
+  content: text('content').notNull(),
+  sourceUrl: text('source_url'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
   conversation: one(conversations, {
     fields: [chatMessages.conversationId],

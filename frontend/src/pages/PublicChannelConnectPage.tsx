@@ -116,12 +116,26 @@ export const PublicChannelConnectPage: React.FC = () => {
           </div>
         ) : linkMeta ? (
           <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-            <div className="p-3 rounded-md bg-indigo-50/70 border border-indigo-200 flex items-center justify-between">
+            <div className="p-3 rounded-md bg-indigo-50/70 border border-indigo-200 flex flex-wrap items-center justify-between gap-2">
               <span className="text-indigo-900 font-medium flex items-center gap-1.5">
                 <Globe2 className="w-3.5 h-3.5 text-indigo-600" />
                 Channel: <strong>{linkMeta.channel}</strong>
               </span>
-              {linkMeta.label && <span className="text-indigo-700">{linkMeta.label}</span>}
+              <div className="flex items-center gap-2">
+                {linkMeta.label && <span className="text-indigo-700">{linkMeta.label}</span>}
+                {['INSTAGRAM', 'FACEBOOK', 'THREADS'].includes(linkMeta.channel) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const base = window.location.pathname.replace(/\/+$/, '');
+                      window.location.href = `${base}/api/channels/oauth/start?channel=${linkMeta.channel}&connectToken=${encodeURIComponent(token)}`;
+                    }}
+                    className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-medium whitespace-nowrap"
+                  >
+                    Login 1-Klik {linkMeta.channel}
+                  </button>
+                )}
+              </div>
             </div>
 
             {error && (

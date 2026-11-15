@@ -314,6 +314,66 @@ export async function initDb() {
       );
     `;
 
+    await sql`
+      CREATE TABLE IF NOT EXISTS content_ideas (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        notes TEXT,
+        channel TEXT NOT NULL DEFAULT 'INSTAGRAM',
+        stage TEXT NOT NULL DEFAULT 'IDE',
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS social_comments (
+        id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        channel_account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        post_id TEXT,
+        post_caption TEXT,
+        external_comment_id TEXT,
+        author_name TEXT NOT NULL,
+        author_handle TEXT,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        reply_text TEXT,
+        replied_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS comment_automations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        channel TEXT NOT NULL DEFAULT 'ALL',
+        keyword TEXT NOT NULL,
+        match_type TEXT NOT NULL DEFAULT 'CONTAINS',
+        reply_comment TEXT,
+        send_dm BOOLEAN NOT NULL DEFAULT FALSE,
+        dm_text TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        trigger_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS ai_knowledge_items (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'FAQ',
+        content TEXT NOT NULL,
+        source_url TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
     // Ensure default birthday row exists
     await sql`
       INSERT INTO birthday_settings (id, is_enabled, send_time, message_template, delay_seconds, updated_at)

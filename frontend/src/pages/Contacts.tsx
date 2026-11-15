@@ -153,7 +153,19 @@ export const Contacts: React.FC<ContactsProps> = ({
         await api.updateContact(editingContact.id, formData);
         toast.success('Data pelanggan berhasil diperbarui.');
       } else {
-        await api.createContact(formData);
+        const payload: any = { ...formData };
+        if (newIdExternal.trim()) {
+          payload.identities = [
+            {
+              channel: newIdChannel,
+              externalId: newIdExternal.trim(),
+              handle: newIdHandle.trim() || undefined,
+            },
+          ];
+        }
+        await api.createContact(payload);
+        setNewIdExternal('');
+        setNewIdHandle('');
         toast.success('Pelanggan baru berhasil ditambahkan.');
       }
       setIsModalOpen(false);
@@ -733,11 +745,10 @@ export const Contacts: React.FC<ContactsProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
-                Nomor WhatsApp <span className="text-red-500">*</span>
+                Nomor WhatsApp <span className="text-gray-400 font-normal">(opsional jika ada kanal lain)</span>
               </label>
               <input
                 type="text"
-                required
                 placeholder="Contoh: 08123456789"
                 value={formData.nomor_whatsapp}
                 onChange={(e) => setFormData({ ...formData, nomor_whatsapp: e.target.value })}
@@ -823,6 +834,40 @@ export const Contacts: React.FC<ContactsProps> = ({
               />
             </div>
           </div>
+
+          {!editingContact && (
+            <div className="pt-3 border-t border-gray-200 space-y-2">
+              <label className="block text-xs font-semibold text-gray-800">
+                Identitas Kanal Lain (Opsional, wajib jika Nomor WhatsApp kosong)
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                <select
+                  value={newIdChannel}
+                  onChange={(e) => setNewIdChannel(e.target.value as any)}
+                  className="sm:col-span-3 h-8 px-2 bg-white border border-gray-200 rounded text-xs"
+                >
+                  <option value="TELEGRAM">Telegram</option>
+                  <option value="INSTAGRAM">Instagram</option>
+                  <option value="FACEBOOK">Facebook</option>
+                  <option value="THREADS">Threads</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="External ID / Chat ID"
+                  value={newIdExternal}
+                  onChange={(e) => setNewIdExternal(e.target.value)}
+                  className="sm:col-span-5 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs font-mono"
+                />
+                <input
+                  type="text"
+                  placeholder="@handle (opsional)"
+                  value={newIdHandle}
+                  onChange={(e) => setNewIdHandle(e.target.value)}
+                  className="sm:col-span-4 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs"
+                />
+              </div>
+            </div>
+          )}
 
           {editingContact && (
             <div className="pt-3 border-t border-gray-200 space-y-2.5">

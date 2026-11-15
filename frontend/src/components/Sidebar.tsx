@@ -18,6 +18,12 @@ import {
   Star,
   Plug,
   CalendarClock,
+  Lightbulb,
+  Image as ImageIcon,
+  Plus,
+  MessageSquare,
+  Radio,
+  Zap,
 } from 'lucide-react';
 import { AuthStatus, LicenseInfo, SettingsSection } from '../types';
 
@@ -77,25 +83,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const menuGroups = [
     {
-      title: 'Ringkasan',
+      title: 'Overview',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, locked: false },
       ],
     },
     {
-      title: 'Komunikasi & CRM',
+      title: 'Publikasi',
       items: [
-        { id: 'conversations', label: 'Live Chat CRM', icon: MessageCircle, locked: !isLiveChatUnlocked },
-        { id: 'contacts', label: 'Kontak Pelanggan', icon: Users, locked: false },
+        { id: 'posts', label: 'Posts', icon: CalendarClock, locked: false, perm: 'broadcasts' },
+        { id: 'ideas', label: 'Ideas', icon: Lightbulb, locked: false, perm: 'broadcasts' },
+        { id: 'media', label: 'Media', icon: ImageIcon, locked: false, perm: 'broadcasts' },
       ],
     },
     {
-      title: 'Kampanye & Otomatisasi',
+      title: 'Interaksi & CRM',
       items: [
-        { id: 'broadcasts', label: 'Siaran & Kampanye', icon: Send, locked: false, perm: 'broadcasts' },
-        { id: 'posts', label: 'Jadwal Postingan', icon: CalendarClock, locked: false, perm: 'broadcasts' },
+        { id: 'comments', label: 'Comments', icon: MessageSquare, locked: false },
+        { id: 'conversations', label: 'Inbox CRM', icon: MessageCircle, locked: !isLiveChatUnlocked },
+        { id: 'feed', label: 'Feed', icon: Radio, locked: false },
+        { id: 'automations', label: 'Automations', icon: Zap, locked: false, perm: 'settings' },
+        { id: 'ai-agent', label: 'Agent AI', icon: Bot, locked: false, perm: 'settings' },
+        { id: 'contacts', label: 'Kontak', icon: Users, locked: false },
+        { id: 'broadcasts', label: 'Siaran', icon: Send, locked: false, perm: 'broadcasts' },
         { id: 'birthday', label: 'Ulang Tahun', icon: Cake, locked: false },
-        { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck, locked: false },
+        { id: 'tracking', label: 'Pelacakan', icon: CheckCheck, locked: false },
       ],
     },
   ];
@@ -161,6 +173,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Navigation Links */}
       <nav className="flex-1 px-3 py-3 space-y-4 overflow-y-auto">
+        {isItemAllowed('broadcasts') && (
+          <button
+            type="button"
+            onClick={() => {
+              setCurrentTab('posts');
+              onClose?.();
+            }}
+            className="w-full h-9 px-3 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            <span>Buat Post</span>
+          </button>
+        )}
         {menuGroups.map((group) => {
           const visibleItems = group.items.filter((item: any) => isItemAllowed(item.perm || item.id));
           if (visibleItems.length === 0) return null;

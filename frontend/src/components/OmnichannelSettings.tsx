@@ -24,6 +24,11 @@ export const OmnichannelSettings: React.FC = () => {
   const [connectLinks, setConnectLinks] = useState<ChannelConnectLink[]>([]);
   const [linkLabel, setLinkLabel] = useState('');
   const [creatingLink, setCreatingLink] = useState(false);
+  const [oauthCfg, setOauthCfg] = useState<{
+    reneoOAuthReady: boolean;
+    directMetaReady: boolean;
+    directThreadsReady: boolean;
+  } | null>(null);
 
   useEffect(() => {
     api
@@ -33,6 +38,10 @@ export const OmnichannelSettings: React.FC = () => {
     api
       .getChannelConnectLinks()
       .then((links) => setConnectLinks(links || []))
+      .catch(() => {});
+    api
+      .getOAuthConfig()
+      .then((cfg) => setOauthCfg(cfg))
       .catch(() => {});
   }, []);
 
@@ -122,6 +131,45 @@ export const OmnichannelSettings: React.FC = () => {
             Hubungkan akun media sosial &amp; bot agar seluruh DM, komentar, dan pesan masuk ke satu Live Chat CRM.
           </p>
         </div>
+      </div>
+
+      <div className="p-3.5 rounded-md bg-indigo-50/60 border border-indigo-200 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-xs font-semibold text-indigo-950">
+              Login 1-Klik via Reneo OAuth (Tanpa Input Token Manual)
+            </div>
+            <div className="text-[11px] text-indigo-800/80">
+              Client cukup login akun Meta/Threads melalui aplikasi resmi Reneo yang terdaftar.
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {(['INSTAGRAM', 'FACEBOOK', 'THREADS'] as OmnichannelType[]).map((ch) => {
+              const ready =
+                oauthCfg?.reneoOAuthReady ||
+                (ch === 'THREADS' ? oauthCfg?.directThreadsReady : oauthCfg?.directMetaReady);
+              return (
+                <button
+                  key={ch}
+                  type="button"
+                  disabled={!ready}
+                  onClick={() => {
+                    const base = window.location.pathname.replace(/\/+$/, '');
+                    window.location.href = `${base}/api/channels/oauth/start?channel=${ch}`;
+                  }}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  Login {ch === 'INSTAGRAM' ? 'Instagram' : ch === 'FACEBOOK' ? 'Facebook' : 'Threads'}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {oauthCfg && !oauthCfg.reneoOAuthReady && !oauthCfg.directMetaReady && !oauthCfg.directThreadsReady && (
+          <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+            OAuth Reneo belum aktif di server ini (<code className="font-mono">RENEO_OAUTH_URL</code> belum diset). Gunakan form manual di bawah atau Telegram Bot.
+          </div>
+        )}
       </div>
 
       <div className="p-3 rounded-md bg-gray-50 border border-gray-200 text-xs space-y-1.5">
