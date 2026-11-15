@@ -76,6 +76,7 @@ export const conversations = pgTable('conversations', {
   lastMessageAt: timestamp('last_message_at'),
   unreadCount: integer('unread_count').default(0).notNull(),
   firstInboundAt: timestamp('first_inbound_at'),
+  lastInboundAt: timestamp('last_inbound_at'),
   firstResponseAt: timestamp('first_response_at'),
   resolvedAt: timestamp('resolved_at'),
   csatToken: text('csat_token').unique(),
@@ -230,6 +231,17 @@ export const channelConnectLinks = pgTable('channel_connect_links', {
   expiresAt: timestamp('expires_at').notNull(),
   usedAt: timestamp('used_at'),
   createdChannelAccountId: text('created_channel_account_id'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const webhookDeliveries = pgTable('webhook_deliveries', {
+  id: text('id').primaryKey(),
+  event: text('event').notNull(),
+  targetUrl: text('target_url').notNull(),
+  status: text('status').notNull(), // SUCCESS | FAILED
+  httpStatus: integer('http_status'),
+  errorMessage: text('error_message'),
+  payloadSummary: text('payload_summary'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

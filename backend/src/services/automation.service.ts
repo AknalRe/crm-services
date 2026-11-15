@@ -8,6 +8,7 @@ import {
   conversations,
   crmAgents,
   systemSettings,
+  webhookDeliveries,
 } from '../db/schema';
 import { getSettingMap } from '../routes/auth';
 import { wahaService } from './waha.service';
@@ -99,14 +100,17 @@ async function sendAutoReplyMessage(params: {
 }
 
 export async function notifyAlertWebhook(
-  event: 'sla_breach' | 'low_csat',
+  event: 'sla_breach' | 'low_csat' | 'test_ping',
   payload: Record<string, unknown>
-): Promise<void> {
+): Promise<{ delivered: boolean; httpStatus?: number; error?: string }> {
+  const settings = await getSettingMap();
+  const webhookUrl = (settings.sla_alert_webhook_url || '').trim();
+  if (!webhookUrl) {
+    return { delivered: false, error: 'URL Webhook Alert belum dikonfigurasi' };
+  }
+  const summary = JSON.stringify(payload).slice(0, 300);
   try {
-    const settings = await getSettingMap();
-    const webhookUrl = (settings.sla_alert_webhook_url || '').trim();
-    if (!webhookUrl) return;
-    await axios.post(
+    const res = await axios.post(
       webhookUrl,
       {
         event,
@@ -115,8 +119,35 @@ export async function notifyAlertWebhook(
       },
       { timeout: 5000 }
     );
+    await db.insert(webhookDeliveries).values({
+      id: crypto.randomUUID(),
+      event,
+      targetUrl: webhookUrl,
+      status: 'SUCCESS',
+      httpStatus: res.status,
+      errorMessage: null,
+      payloadSummary: summary,
+      createdAt: new Date(),
+    });
+    return { delivered: true, httpStatus: res.status };
   } catch (err: any) {
-    console.warn(`[AlertWebhook] Failed to send ${event}:`, err.message);
+    const httpStatus = err?.response?.status ?? null;
+    const errMsg = String(err?.message || 'Webhook request failed');
+    await db
+      .insert(webhookDeliveries)
+      .values({
+        id: crypto.randomUUID(),
+        event,
+        targetUrl: webhookUrl,
+        status: 'FAILED',
+        httpStatus,
+        errorMessage: errMsg,
+        payloadSummary: summary,
+        createdAt: new Date(),
+      })
+      .catch(() => {});
+    console.warn(`[AlertWebhook] Failed to send ${event}:`, errMsg);
+    return { delivered: false, httpStatus: httpStatus ?? undefined, error: errMsg };
   }
 }
 

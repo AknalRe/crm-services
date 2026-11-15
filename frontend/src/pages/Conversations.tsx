@@ -31,12 +31,14 @@ import {
   Package,
   AlertTriangle,
   GitMerge,
+  Clock,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
 import {
   AuthStatus,
   CannedResponse,
+  ChannelAccount,
   Contact,
   Conversation,
   ChatMessage,
@@ -107,6 +109,8 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'PENDING' | 'RESOLVED'>('ALL');
   const [channelFilter, setChannelFilter] = useState<'ALL' | OmnichannelType>('ALL');
+  const [channelAccounts, setChannelAccounts] = useState<ChannelAccount[]>([]);
+  const [accountFilter, setAccountFilter] = useState<'ALL' | string>('ALL');
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -217,6 +221,10 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
     api
       .getProducts(true)
       .then((items) => setProductsList(items || []))
+      .catch(() => {});
+    api
+      .getChannels()
+      .then((list) => setChannelAccounts(list || []))
       .catch(() => {});
 
     const unsubSla = subscribeLiveEvent('sla:breach', (data: any) => {
@@ -645,6 +653,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
     const convChannel = (c.channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
     if (statusFilter !== 'ALL' && convStatus !== statusFilter) return false;
     if (channelFilter !== 'ALL' && convChannel !== channelFilter) return false;
+    if (accountFilter !== 'ALL' && c.channelAccountId !== accountFilter) return false;
     if (assigneeFilter === 'MINE' && (!currentUser?.id || c.assignedAgentId !== currentUser.id)) {
       return false;
     }
@@ -716,7 +725,10 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
               <button
                 key={ch}
                 type="button"
-                onClick={() => setChannelFilter(ch)}
+                onClick={() => {
+                  setChannelFilter(ch);
+                  setAccountFilter('ALL');
+                }}
                 className={`px-2 py-0.5 rounded border whitespace-nowrap transition-colors ${
                   channelFilter === ch
                     ? 'bg-gray-900 text-white border-gray-900 font-medium'
@@ -727,6 +739,22 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
               </button>
             ))}
           </div>
+          {channelAccounts.length > 0 && (
+            <select
+              value={accountFilter}
+              onChange={(e) => setAccountFilter(e.target.value)}
+              className="w-full h-7 px-2 bg-white border border-gray-200 rounded text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="ALL">Semua Akun Kanal ({channelAccounts.length})</option>
+              {channelAccounts
+                .filter((acc) => channelFilter === 'ALL' || acc.channel === channelFilter)
+                .map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {CHANNEL_META[acc.channel]?.short || acc.channel} • {acc.name}
+                  </option>
+                ))}
+            </select>
+          )}
           {assignableAgents.length > 0 && (
             <div className="flex items-center gap-1 text-[10px]">
               {([
@@ -898,6 +926,41 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                       {selectedConversation.wahaSession}
                     </span>
                   )}
+                  {(selectedConversation.channel === 'INSTAGRAM' || selectedConversation.channel === 'FACEBOOK') && (() => {
+                    const latestInbound =
+                      selectedConversation.lastInboundAt ||
+                      [...messages].reverse().find((m) => m.direction === 'INBOUND')?.createdAt ||
+                      selectedConversation.firstInboundAt;
+                    if (!latestInbound) return null;
+                    const remainingMs = new Date(latestInbound).getTime() + 24 * 3600_000 - Date.now();
+                    if (remainingMs <= 0) {
+                      return (
+                        <span
+                          title="Jendela balas 24 jam Meta telah berakhir. Menunggu pesan masuk baru dari pelanggan."
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 shrink-0 whitespace-nowrap"
+                        >
+                          <Clock className="w-2.5 h-2.5" />
+                          Jendela 24j Berakhir
+                        </span>
+                      );
+                    }
+                    const hrs = Math.floor(remainingMs / 3600_000);
+                    const mins = Math.floor((remainingMs % 3600_000) / 60_000);
+                    const isLow = hrs < 4;
+                    return (
+                      <span
+                        title="Sisa waktu jendela balas 24 jam sesuai kebijakan Meta Messaging"
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border shrink-0 whitespace-nowrap ${
+                          isLow
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-sky-50 text-sky-700 border-sky-200'
+                        }`}
+                      >
+                        <Clock className="w-2.5 h-2.5" />
+                        Jendela Meta: {hrs}j {mins}m
+                      </span>
+                    );
+                  })()}
                   {selectedConversation.contextTitle && (
                     <span className="text-[10px] text-gray-500 truncate">
                       • {selectedConversation.contextTitle}

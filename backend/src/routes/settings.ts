@@ -1,11 +1,12 @@
 import crypto from 'crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { asc, eq } from 'drizzle-orm';
+import { asc, desc, eq } from 'drizzle-orm';
 import { db } from '../db';
-import { systemSettings, birthdaySettings, autoReplyRules } from '../db/schema';
+import { systemSettings, birthdaySettings, autoReplyRules, webhookDeliveries } from '../db/schema';
 import { BirthdayService } from '../services/birthday.service';
 import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
+import { notifyAlertWebhook } from '../services/automation.service';
 import { requirePermission } from './auth';
 
 export default async function settingsRouter(fastify: FastifyInstance) {
@@ -422,6 +423,39 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       try {
         await db.delete(autoReplyRules).where(eq(autoReplyRules.id, req.params.id));
         return reply.send({ success: true });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // Webhook Delivery Logs
+  fastify.get(
+    '/webhook-deliveries',
+    { preHandler: requirePermission('settings') },
+    async (_req, reply) => {
+      try {
+        const rows = await db
+          .select()
+          .from(webhookDeliveries)
+          .orderBy(desc(webhookDeliveries.createdAt))
+          .limit(30);
+        return reply.send({ success: true, data: rows });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
+
+  fastify.post(
+    '/webhook-deliveries/test',
+    { preHandler: requirePermission('settings') },
+    async (_req, reply) => {
+      try {
+        const result = await notifyAlertWebhook('test_ping', {
+          message: 'Tes koneksi webhook alert CRM Reneo',
+        });
+        return reply.send({ success: true, data: result });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });
       }

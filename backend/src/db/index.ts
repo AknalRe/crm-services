@@ -104,6 +104,7 @@ export async function initDb() {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'OPEN';`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS labels TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS first_inbound_at TIMESTAMP;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_inbound_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_token TEXT;`;
@@ -181,6 +182,19 @@ export async function initDb() {
         expires_at TIMESTAMP NOT NULL,
         used_at TIMESTAMP,
         created_channel_account_id TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS webhook_deliveries (
+        id TEXT PRIMARY KEY,
+        event TEXT NOT NULL,
+        target_url TEXT NOT NULL,
+        status TEXT NOT NULL,
+        http_status INTEGER,
+        error_message TEXT,
+        payload_summary TEXT,
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;

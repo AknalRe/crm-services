@@ -500,6 +500,16 @@ export const api = {
     const res = await client.post(`/contacts/${targetId}/merge`, { sourceContactId });
     return res.data.data;
   },
+
+  getWebhookDeliveries: async (): Promise<import('../types').WebhookDeliveryItem[]> => {
+    const res = await client.get('/settings/webhook-deliveries');
+    return res.data.data || [];
+  },
+
+  testAlertWebhook: async (): Promise<{ delivered: boolean; httpStatus?: number; error?: string }> => {
+    const res = await client.post('/settings/webhook-deliveries/test');
+    return res.data.data;
+  },
 };
 
 export default api;

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, Package, Plus, Save, Trash2, BellRing } from 'lucide-react';
+import { Bot, Package, Plus, Save, Trash2, BellRing, Send, RefreshCw } from 'lucide-react';
 import api from '../services/api';
-import { AutomationConfig, AutoReplyRule, ProductItem } from '../types';
+import { AutomationConfig, AutoReplyRule, ProductItem, WebhookDeliveryItem } from '../types';
 import { Button } from './ui/Button';
 import { useToast } from './ui/ToastProvider';
 
@@ -40,6 +40,19 @@ export const AutomationProductsSettings: React.FC = () => {
   const [prodDesc, setProdDesc] = useState('');
   const [addingProd, setAddingProd] = useState(false);
 
+  const [deliveries, setDeliveries] = useState<WebhookDeliveryItem[]>([]);
+  const [loadingDeliveries, setLoadingDeliveries] = useState(false);
+  const [testingWebhook, setTestingWebhook] = useState(false);
+
+  const loadDeliveries = () => {
+    setLoadingDeliveries(true);
+    api
+      .getWebhookDeliveries()
+      .then((list) => setDeliveries(list || []))
+      .catch(() => {})
+      .finally(() => setLoadingDeliveries(false));
+  };
+
   useEffect(() => {
     api
       .getAutomationSettings()
@@ -52,7 +65,30 @@ export const AutomationProductsSettings: React.FC = () => {
       .getProducts(false)
       .then((list) => setProducts(list || []))
       .catch(() => {});
+    loadDeliveries();
   }, []);
+
+  const handleTestWebhook = async () => {
+    if (!config.slaAlertWebhookUrl.trim()) {
+      toast.error('Isi dan simpan URL Webhook Alert terlebih dahulu');
+      return;
+    }
+    setTestingWebhook(true);
+    try {
+      await api.saveAutomationSettings(config);
+      const res = await api.testAlertWebhook();
+      if (res.delivered) {
+        toast.success(`Test webhook terkirim (HTTP ${res.httpStatus || 200})`);
+      } else {
+        toast.error(`Test webhook gagal: ${res.error || `HTTP ${res.httpStatus || '-'}`}`);
+      }
+      loadDeliveries();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengirim test webhook');
+    } finally {
+      setTestingWebhook(false);
+    }
+  };
 
   const handleSaveAutomation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,18 +235,85 @@ export const AutomationProductsSettings: React.FC = () => {
                   className="h-4 w-4 rounded border-gray-300 text-indigo-600"
                 />
               </div>
-              <input
-                type="url"
-                placeholder="Webhook Alert (opsional, mis. https://hooks.slack.com/...)"
-                value={config.slaAlertWebhookUrl}
-                onChange={(e) =>
-                  setConfig((prev) => ({ ...prev, slaAlertWebhookUrl: e.target.value }))
-                }
-                className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  placeholder="Webhook Alert (opsional, mis. https://hooks.slack.com/...)"
+                  value={config.slaAlertWebhookUrl}
+                  onChange={(e) =>
+                    setConfig((prev) => ({ ...prev, slaAlertWebhookUrl: e.target.value }))
+                  }
+                  className="flex-1 min-w-0 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleTestWebhook}
+                  disabled={testingWebhook || !config.slaAlertWebhookUrl.trim()}
+                  className="h-9 shrink-0 whitespace-nowrap"
+                >
+                  <Send className="w-3.5 h-3.5 mr-1.5" />
+                  {testingWebhook ? 'Menguji...' : 'Test Webhook'}
+                </Button>
+              </div>
               <p className="text-[11px] text-gray-500">
                 Menandai chat terlewat SLA di Live Chat dan mengirim alert jika ada rating CSAT ≤ 2.
               </p>
+              <div className="pt-2 border-t border-gray-200/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-gray-700">
+                    Riwayat Pengiriman Webhook
+                  </span>
+                  <button
+                    type="button"
+                    onClick={loadDeliveries}
+                    disabled={loadingDeliveries}
+                    className="inline-flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-700 font-medium whitespace-nowrap"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${loadingDeliveries ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+                {deliveries.length === 0 ? (
+                  <p className="text-[11px] text-gray-400">Belum ada riwayat pengiriman webhook.</p>
+                ) : (
+                  <div className="max-h-36 overflow-y-auto space-y-1 pr-0.5">
+                    {deliveries.map((d) => (
+                      <div
+                        key={d.id}
+                        className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-gray-200/80 text-[11px]"
+                      >
+                        <div className="min-w-0 flex items-center gap-1.5">
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
+                              d.status === 'SUCCESS'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-rose-50 text-rose-700 border border-rose-200'
+                            }`}
+                          >
+                            {d.status === 'SUCCESS' ? `OK ${d.httpStatus || 200}` : `FAIL ${d.httpStatus || ''}`.trim()}
+                          </span>
+                          <span className="font-mono text-gray-700 truncate">{d.event}</span>
+                          {d.errorMessage && (
+                            <span className="text-rose-600 truncate" title={d.errorMessage}>
+                              — {d.errorMessage}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-gray-400 font-mono shrink-0">
+                          {new Date(d.createdAt).toLocaleString('id-ID', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

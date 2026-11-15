@@ -103,6 +103,7 @@ export interface Conversation {
   unreadCount: number;
   firstInboundAt?: string | null;
   firstResponseAt?: string | null;
+  lastInboundAt?: string | null;
   resolvedAt?: string | null;
   csatToken?: string | null;
   csatRating?: number | null;
@@ -404,6 +405,17 @@ export interface AutomationConfig {
   offhoursMessage: string;
   slaEscalationEnabled: boolean;
   slaAlertWebhookUrl: string;
+}
+
+export interface WebhookDeliveryItem {
+  id: string;
+  event: string;
+  targetUrl: string;
+  status: string;
+  httpStatus?: number | null;
+  errorMessage?: string | null;
+  payloadSummary?: string | null;
+  createdAt: string;
 }
 
 
