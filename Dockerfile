@@ -1,5 +1,5 @@
-# Stage 1: Build Frontend (React + Vite + Tailwind)
-FROM node:20-alpine AS frontend-builder
+# Stage 1: Build Frontend (React + Vite + Tailwind) on native builder platform
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 COPY frontend/package*.json ./
@@ -10,8 +10,8 @@ COPY frontend/public ./public/
 COPY frontend/src ./src/
 RUN npm run build
 
-# Stage 2: Build Backend (Fastify + Drizzle ORM + TypeScript)
-FROM node:20-alpine AS backend-builder
+# Stage 2: Build Backend (Fastify + Drizzle ORM + TypeScript) on native builder platform
+FROM --platform=$BUILDPLATFORM node:20-alpine AS backend-builder
 WORKDIR /app/backend
 
 COPY backend/package*.json ./
