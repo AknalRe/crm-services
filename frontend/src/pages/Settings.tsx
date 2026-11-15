@@ -436,39 +436,8 @@ export const Settings: React.FC<SettingsProps> = ({
   const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
   const isScanRequired = wahaStatus?.sessionStatus === 'SCAN_QR_CODE';
 
-  const settingsTabs = [
-    { id: 'whatsapp' as const, label: 'WhatsApp (WAHA)', icon: Smartphone },
-    { id: 'omnichannel' as const, label: 'Omnichannel', icon: Globe },
-    { id: 'automation' as const, label: 'Otomatisasi & Bot', icon: Bot },
-    { id: 'crm_products' as const, label: 'CSAT, SLA & Produk', icon: Star },
-    ...(isAdmin ? [{ id: 'agents' as const, label: 'Tim & Akses', icon: Users }] : []),
-  ];
-
   return (
     <div className="space-y-5">
-      {/* Structured Settings Sub-Navigation */}
-      <div className="bg-white rounded-lg border border-gray-200 p-1.5 flex items-center gap-1 overflow-x-auto">
-        {settingsTabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = settingsTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setSettingsTab(tab.id)}
-              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium whitespace-nowrap transition-colors shrink-0 ${
-                active
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5 shrink-0" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
       {settingsTab === 'whatsapp' && (
       <div className="space-y-5">
       {/* Header */}

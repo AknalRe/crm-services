@@ -1,11 +1,23 @@
 import cron from 'node-cron';
-import { eq, isNotNull } from 'drizzle-orm';
+import { eq, inArray, isNotNull } from 'drizzle-orm';
 import { db } from '../db';
-import { birthdaySettings, contacts } from '../db/schema';
+import {
+  birthdaySettings,
+  channelAccounts,
+  contactIdentities,
+  contacts,
+  systemSettings,
+} from '../db/schema';
 import { BroadcastService } from './broadcast.service';
 import { licenseService } from './license.service';
 import { OmnichannelType } from './channel.service';
 import { formatContact } from '../routes/contacts';
+
+export interface BirthdayMultiSenders {
+  mode: 'AUTO_MULTI' | 'SINGLE';
+  wahaSessions: string[];
+  channelAccountIds: string[];
+}
 
 function formatLocalDate(d: Date): string {
   const year = d.getFullYear();
@@ -107,18 +119,144 @@ export class BirthdayService {
 
     console.log(`[BirthdayService] Ditemukan ${birthdayContacts.length} pelanggan berulang tahun pada ${dateLabel}`);
 
-    const campaignResult = await BroadcastService.createCampaign({
-      title: `Ucapan Ulang Tahun (${dateLabel})`,
-      messageTemplate: setting.messageTemplate,
-      type: 'BIRTHDAY',
-      channel: ((setting.channel || 'WHATSAPP').toUpperCase() as OmnichannelType),
-      channelAccountId: setting.channelAccountId || null,
-      delaySeconds: setting.delaySeconds || 5,
-      intervalSeconds: 15,
-      batchSize: 5,
-      sessionName: setting.wahaSession || undefined,
-      contactIds: birthdayContacts.map((c) => c.id),
-    });
+    const [multiRow] = await db
+      .select()
+      .from(systemSettings)
+      .where(eq(systemSettings.key, 'birthday_multi_senders'));
+
+    let multiSenders: BirthdayMultiSenders = {
+      mode: 'AUTO_MULTI',
+      wahaSessions: setting.wahaSession ? [setting.wahaSession] : [],
+      channelAccountIds: setting.channelAccountId ? [setting.channelAccountId] : [],
+    };
+    if (multiRow?.value) {
+      try {
+        const parsed = JSON.parse(multiRow.value);
+        multiSenders = {
+          mode: parsed.mode === 'SINGLE' ? 'SINGLE' : 'AUTO_MULTI',
+          wahaSessions: Array.isArray(parsed.wahaSessions) ? parsed.wahaSessions : [],
+          channelAccountIds: Array.isArray(parsed.channelAccountIds) ? parsed.channelAccountIds : [],
+        };
+      } catch {
+        // fallback
+      }
+    }
+
+    if (multiSenders.mode === 'SINGLE') {
+      const campaignResult = await BroadcastService.createCampaign({
+        title: `Ucapan Ulang Tahun (${dateLabel})`,
+        messageTemplate: setting.messageTemplate,
+        type: 'BIRTHDAY',
+        channel: ((setting.channel || 'WHATSAPP').toUpperCase() as OmnichannelType),
+        channelAccountId: setting.channelAccountId || null,
+        delaySeconds: setting.delaySeconds || 5,
+        intervalSeconds: 15,
+        batchSize: 5,
+        sessionName: setting.wahaSession || undefined,
+        contactIds: birthdayContacts.map((c) => c.id),
+      });
+
+      await db
+        .update(birthdaySettings)
+        .set({ lastRunDate: dateLabel, updatedAt: new Date() })
+        .where(eq(birthdaySettings.id, 'default'));
+
+      return {
+        count: birthdayContacts.length,
+        campaign: campaignResult.campaign,
+        contacts: birthdayContacts,
+      };
+    }
+
+    // Multi-channel & multi-session routing
+    const contactIds = birthdayContacts.map((c) => c.id);
+    const idRows = await db
+      .select()
+      .from(contactIdentities)
+      .where(inArray(contactIdentities.contactId, contactIds));
+    const identitiesByContact = new Map<string, typeof idRows>();
+    for (const r of idRows) {
+      const arr = identitiesByContact.get(r.contactId) || [];
+      arr.push(r);
+      identitiesByContact.set(r.contactId, arr);
+    }
+
+    const activeAccounts = await db
+      .select()
+      .from(channelAccounts)
+      .where(eq(channelAccounts.isActive, true));
+    const selectedAccounts =
+      multiSenders.channelAccountIds.length > 0
+        ? activeAccounts.filter((a) => multiSenders.channelAccountIds.includes(a.id))
+        : activeAccounts;
+
+    type GroupKey = string;
+    const groups = new Map<
+      GroupKey,
+      { channel: OmnichannelType; sessionName?: string; channelAccountId?: string | null; contactIds: string[] }
+    >();
+    let waRoundRobinIdx = 0;
+
+    for (const c of birthdayContacts) {
+      const cIdentities = identitiesByContact.get(c.id) || [];
+      let assigned = false;
+
+      // 1. Prefer WhatsApp if contact has WA number and WA is not explicitly excluded
+      const waAllowed =
+        multiSenders.wahaSessions.length > 0 || multiSenders.channelAccountIds.length === 0;
+      if (c.nomorWhatsapp && waAllowed) {
+        const sessionName =
+          multiSenders.wahaSessions.length > 0
+            ? multiSenders.wahaSessions[waRoundRobinIdx % multiSenders.wahaSessions.length]
+            : setting.wahaSession || undefined;
+        waRoundRobinIdx++;
+        const key = `WHATSAPP::${sessionName || 'default'}`;
+        const grp = groups.get(key) || {
+          channel: 'WHATSAPP',
+          sessionName,
+          channelAccountId: null,
+          contactIds: [],
+        };
+        grp.contactIds.push(c.id);
+        groups.set(key, grp);
+        assigned = true;
+      }
+
+      // 2. Otherwise match any enabled omnichannel identity (Telegram, Instagram, Facebook, Threads)
+      if (!assigned && cIdentities.length > 0) {
+        for (const acc of selectedAccounts) {
+          if (cIdentities.some((ci) => ci.channel === acc.channel)) {
+            const key = `${acc.channel}::${acc.id}`;
+            const grp = groups.get(key) || {
+              channel: acc.channel as OmnichannelType,
+              channelAccountId: acc.id,
+              contactIds: [],
+            };
+            grp.contactIds.push(c.id);
+            groups.set(key, grp);
+            assigned = true;
+            break;
+          }
+        }
+      }
+    }
+
+    let firstCampaign: any = null;
+    for (const grp of groups.values()) {
+      const res = await BroadcastService.createCampaign({
+        title: `Ucapan Ulang Tahun ${grp.channel} (${dateLabel})`,
+        messageTemplate: setting.messageTemplate,
+        type: 'BIRTHDAY',
+        channel: grp.channel,
+        channelAccountId: grp.channelAccountId || null,
+        delaySeconds: setting.delaySeconds || 5,
+        intervalSeconds: 15,
+        batchSize: 5,
+        sessionName: grp.sessionName,
+        contactIds: grp.contactIds,
+      });
+      if (!firstCampaign) firstCampaign = res.campaign;
+    }
 
     await db
       .update(birthdaySettings)
@@ -127,7 +265,7 @@ export class BirthdayService {
 
     return {
       count: birthdayContacts.length,
-      campaign: campaignResult.campaign,
+      campaign: firstCampaign,
       contacts: birthdayContacts,
     };
   }
@@ -151,8 +289,25 @@ export class BirthdayService {
       return bDate.getMonth() + 1 === currentMonth && bDate.getDate() === currentDay;
     });
 
+    const todayIds = todayList.map((c) => c.id);
+    const idMap = new Map<string, any[]>();
+    if (todayIds.length > 0) {
+      const idRows = await db
+        .select()
+        .from(contactIdentities)
+        .where(inArray(contactIdentities.contactId, todayIds));
+      for (const r of idRows) {
+        const arr = idMap.get(r.contactId) || [];
+        arr.push(r);
+        idMap.set(r.contactId, arr);
+      }
+    }
+
     return {
-      today: todayList.map(formatContact),
+      today: todayList.map((c) => ({
+        ...formatContact(c),
+        identities: idMap.get(c.id) || [],
+      })),
       totalRegistered: allContacts.length,
     };
   }

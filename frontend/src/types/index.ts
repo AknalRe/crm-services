@@ -269,6 +269,11 @@ export interface BirthdaySetting {
   channelAccountId?: string | null;
   wahaSession?: string | null;
   lastRunDate?: string | null;
+  multiSenders?: {
+    mode: 'AUTO_MULTI' | 'SINGLE';
+    wahaSessions: string[];
+    channelAccountIds: string[];
+  };
 }
 
 export interface AuthStatus {

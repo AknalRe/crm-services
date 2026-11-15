@@ -111,10 +111,29 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         lastRunDate: null,
       };
 
+      const baseSetting = list[0] || defaultSetting;
+      const [multiRow] = await db
+        .select()
+        .from(systemSettings)
+        .where(eq(systemSettings.key, 'birthday_multi_senders'));
+
+      let multiSenders = {
+        mode: 'AUTO_MULTI',
+        wahaSessions: baseSetting.wahaSession ? [baseSetting.wahaSession] : [],
+        channelAccountIds: baseSetting.channelAccountId ? [baseSetting.channelAccountId] : [],
+      };
+      if (multiRow?.value) {
+        try {
+          multiSenders = { ...multiSenders, ...JSON.parse(multiRow.value) };
+        } catch {
+          // fallback
+        }
+      }
+
       return reply.send({
         success: true,
         data: {
-          setting: list[0] || defaultSetting,
+          setting: { ...baseSetting, multiSenders },
           celebrants,
         },
       });
@@ -133,10 +152,24 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       channel?: 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
       channelAccountId?: string | null;
       wahaSession?: string | null;
+      multiSenders?: {
+        mode?: 'AUTO_MULTI' | 'SINGLE';
+        wahaSessions?: string[];
+        channelAccountIds?: string[];
+      };
     };
   }>('/birthday', { preHandler: requirePermission('birthday') }, async (req, reply: FastifyReply) => {
     try {
-      const { isEnabled, sendTime, messageTemplate, delaySeconds, channel, channelAccountId, wahaSession } = req.body;
+      const {
+        isEnabled,
+        sendTime,
+        messageTemplate,
+        delaySeconds,
+        channel,
+        channelAccountId,
+        wahaSession,
+        multiSenders,
+      } = req.body;
       const now = new Date();
 
       const updateData: any = { updatedAt: now };
@@ -175,10 +208,29 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         })
         .returning();
 
+      if (multiSenders) {
+        const sanitizedMulti = {
+          mode: multiSenders.mode === 'SINGLE' ? 'SINGLE' : 'AUTO_MULTI',
+          wahaSessions: Array.isArray(multiSenders.wahaSessions)
+            ? multiSenders.wahaSessions.map((s) => String(s).trim()).filter(Boolean)
+            : [],
+          channelAccountIds: Array.isArray(multiSenders.channelAccountIds)
+            ? multiSenders.channelAccountIds.map((s) => String(s).trim()).filter(Boolean)
+            : [],
+        };
+        await db
+          .insert(systemSettings)
+          .values({ key: 'birthday_multi_senders', value: JSON.stringify(sanitizedMulti) })
+          .onConflictDoUpdate({
+            target: systemSettings.key,
+            set: { value: JSON.stringify(sanitizedMulti), updatedAt: now },
+          });
+      }
+
       return reply.send({
         success: true,
         message: 'Pengaturan ucapan ulang tahun berhasil disimpan',
-        data: updated[0],
+        data: { ...updated[0], multiSenders },
       });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

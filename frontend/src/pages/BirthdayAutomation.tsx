@@ -35,6 +35,9 @@ export const BirthdayAutomation: React.FC = () => {
   const [wahaSession, setWahaSession] = useState('');
   const [wahaSessions, setWahaSessions] = useState<WahaSessionItem[]>([]);
   const [activeWahaSession, setActiveWahaSession] = useState('');
+  const [senderMode, setSenderMode] = useState<'AUTO_MULTI' | 'SINGLE'>('AUTO_MULTI');
+  const [selectedWahaSessions, setSelectedWahaSessions] = useState<string[]>([]);
+  const [selectedChannelAccountIds, setSelectedChannelAccountIds] = useState<string[]>([]);
 
   const loadWahaSessions = useCallback(async () => {
     try {
@@ -60,6 +63,9 @@ export const BirthdayAutomation: React.FC = () => {
       setChannel((data.setting?.channel as OmnichannelType) || 'WHATSAPP');
       setChannelAccountId(data.setting?.channelAccountId || '');
       setWahaSession(data.setting?.wahaSession || '');
+      setSenderMode(data.setting?.multiSenders?.mode || 'AUTO_MULTI');
+      setSelectedWahaSessions(data.setting?.multiSenders?.wahaSessions || []);
+      setSelectedChannelAccountIds(data.setting?.multiSenders?.channelAccountIds || []);
       setCelebrantsToday(data.celebrants.today || []);
       setTotalRegistered(data.celebrants.totalRegistered || 0);
       setError(null);
@@ -98,6 +104,11 @@ export const BirthdayAutomation: React.FC = () => {
         channel,
         channelAccountId: channel === 'WHATSAPP' ? null : channelAccountId || null,
         wahaSession: wahaSession.trim() || null,
+        multiSenders: {
+          mode: senderMode,
+          wahaSessions: selectedWahaSessions,
+          channelAccountIds: selectedChannelAccountIds,
+        },
       });
       toast.success('Pengaturan ucapan ulang tahun berhasil disimpan.');
       loadBirthdayData();
@@ -238,76 +249,199 @@ export const BirthdayAutomation: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Channel Pengirim Ucapan
-                </label>
-                <select
-                  value={channel}
-                  onChange={(e) => {
-                    const nextCh = e.target.value as OmnichannelType;
-                    setChannel(nextCh);
-                    const matching = channelAccounts.filter(
-                      (a) => a.channel === nextCh && a.isActive
-                    );
-                    setChannelAccountId(matching[0]?.id || '');
-                  }}
-                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="WHATSAPP">WhatsApp (WAHA)</option>
-                  <option value="TELEGRAM">Telegram Bot</option>
-                  <option value="INSTAGRAM">Instagram DM</option>
-                  <option value="FACEBOOK">Facebook Messenger</option>
-                  <option value="THREADS">Threads</option>
-                </select>
+            <div className="space-y-3 p-3.5 rounded-md bg-gray-50 border border-gray-200">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-800">
+                    Pengirim Ucapan (Multi-Channel &amp; Multi-Sesi)
+                  </label>
+                  <p className="text-[11px] text-gray-500">
+                    Pilih mode otomatis multi-kanal sesuai identitas kontak, atau kunci ke satu kanal/sesi saja.
+                  </p>
+                </div>
+                <div className="inline-flex rounded-md border border-gray-200 bg-white p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setSenderMode('AUTO_MULTI')}
+                    className={`px-2.5 py-1 rounded font-medium ${
+                      senderMode === 'AUTO_MULTI' ? 'bg-indigo-600 text-white' : 'text-gray-600'
+                    }`}
+                  >
+                    Multi-Channel &amp; Sesi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSenderMode('SINGLE')}
+                    className={`px-2.5 py-1 rounded font-medium ${
+                      senderMode === 'SINGLE' ? 'bg-indigo-600 text-white' : 'text-gray-600'
+                    }`}
+                  >
+                    Satu Kanal Saja
+                  </button>
+                </div>
               </div>
 
-              {channel === 'WHATSAPP' ? (
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Sesi WhatsApp Pengirim
-                  </label>
-                  <select
-                    value={wahaSession}
-                    onChange={(e) => setWahaSession(e.target.value)}
-                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="">
-                      {activeWahaSession
-                        ? `Sesi aktif bawaan (${activeWahaSession})`
-                        : 'Sesi aktif bawaan'}
-                    </option>
-                    {wahaSessions.map((sess) => (
-                      <option key={sess.name} value={sess.name}>
-                        {sess.name} ({sess.status})
-                      </option>
-                    ))}
-                  </select>
+              {senderMode === 'AUTO_MULTI' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div className="bg-white rounded border border-gray-200 p-2.5 space-y-1.5">
+                    <div className="text-[11px] font-semibold text-gray-700">
+                      Sesi WhatsApp (Round-Robin)
+                    </div>
+                    {wahaSessions.length === 0 ? (
+                      <div className="text-[11px] text-gray-400">
+                        Menggunakan sesi aktif bawaan ({activeWahaSession || 'default'}).
+                      </div>
+                    ) : (
+                      <div className="space-y-1 max-h-28 overflow-y-auto">
+                        {wahaSessions.map((sess) => {
+                          const checked = selectedWahaSessions.includes(sess.name);
+                          return (
+                            <label
+                              key={sess.name}
+                              className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) =>
+                                  setSelectedWahaSessions((prev) =>
+                                    e.target.checked
+                                      ? [...prev, sess.name]
+                                      : prev.filter((s) => s !== sess.name)
+                                  )
+                                }
+                                className="rounded border-gray-300"
+                              />
+                              <span className="font-mono text-[11px]">{sess.name}</span>
+                              <span className="text-[10px] text-gray-400">({sess.status})</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-gray-400">
+                      Kosongkan untuk pakai sesi bawaan, atau centang beberapa sesi untuk rotasi otomatis.
+                    </p>
+                  </div>
+
+                  <div className="bg-white rounded border border-gray-200 p-2.5 space-y-1.5">
+                    <div className="text-[11px] font-semibold text-gray-700">
+                      Akun Omnichannel (TG / IG / FB / Threads)
+                    </div>
+                    {channelAccounts.filter((a) => a.isActive).length === 0 ? (
+                      <div className="text-[11px] text-gray-400">
+                        Belum ada akun omnichannel aktif di Integrasi &amp; Kanal.
+                      </div>
+                    ) : (
+                      <div className="space-y-1 max-h-28 overflow-y-auto">
+                        {channelAccounts
+                          .filter((a) => a.isActive)
+                          .map((acc) => {
+                            const checked = selectedChannelAccountIds.includes(acc.id);
+                            return (
+                              <label
+                                key={acc.id}
+                                className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) =>
+                                    setSelectedChannelAccountIds((prev) =>
+                                      e.target.checked
+                                        ? [...prev, acc.id]
+                                        : prev.filter((id) => id !== acc.id)
+                                    )
+                                  }
+                                  className="rounded border-gray-300"
+                                />
+                                <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-semibold">
+                                  {acc.channel}
+                                </span>
+                                <span className="truncate">{acc.name}</span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-gray-400">
+                      Kontak tanpa WhatsApp akan dikirim lewat kanal yang dicentang sesuai identitasnya.
+                    </p>
+                  </div>
                 </div>
               ) : (
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Akun Kanal Pengirim
-                  </label>
-                  {channelAccounts.filter((a) => a.channel === channel && a.isActive).length === 0 ? (
-                    <div className="h-9 px-3 flex items-center bg-amber-50 border border-amber-200 rounded-md text-[11px] text-amber-800">
-                      Belum ada akun {channel} aktif di Integrasi &amp; Kanal → Omnichannel.
-                    </div>
-                  ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Channel Pengirim Ucapan
+                    </label>
                     <select
-                      value={channelAccountId}
-                      onChange={(e) => setChannelAccountId(e.target.value)}
+                      value={channel}
+                      onChange={(e) => {
+                        const nextCh = e.target.value as OmnichannelType;
+                        setChannel(nextCh);
+                        const matching = channelAccounts.filter(
+                          (a) => a.channel === nextCh && a.isActive
+                        );
+                        setChannelAccountId(matching[0]?.id || '');
+                      }}
                       className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
                     >
-                      {channelAccounts
-                        .filter((a) => a.channel === channel && a.isActive)
-                        .map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.accountId})
+                      <option value="WHATSAPP">WhatsApp (WAHA)</option>
+                      <option value="TELEGRAM">Telegram Bot</option>
+                      <option value="INSTAGRAM">Instagram DM</option>
+                      <option value="FACEBOOK">Facebook Messenger</option>
+                      <option value="THREADS">Threads</option>
+                    </select>
+                  </div>
+
+                  {channel === 'WHATSAPP' ? (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Sesi WhatsApp Pengirim
+                      </label>
+                      <select
+                        value={wahaSession}
+                        onChange={(e) => setWahaSession(e.target.value)}
+                        className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="">
+                          {activeWahaSession
+                            ? `Sesi aktif bawaan (${activeWahaSession})`
+                            : 'Sesi aktif bawaan'}
+                        </option>
+                        {wahaSessions.map((sess) => (
+                          <option key={sess.name} value={sess.name}>
+                            {sess.name} ({sess.status})
                           </option>
                         ))}
-                    </select>
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        Akun Kanal Pengirim
+                      </label>
+                      {channelAccounts.filter((a) => a.channel === channel && a.isActive).length === 0 ? (
+                        <div className="h-9 px-3 flex items-center bg-amber-50 border border-amber-200 rounded-md text-[11px] text-amber-800">
+                          Belum ada akun {channel} aktif di Integrasi &amp; Kanal → Omnichannel.
+                        </div>
+                      ) : (
+                        <select
+                          value={channelAccountId}
+                          onChange={(e) => setChannelAccountId(e.target.value)}
+                          className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
+                        >
+                          {channelAccounts
+                            .filter((a) => a.channel === channel && a.isActive)
+                            .map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name} ({a.accountId})
+                              </option>
+                            ))}
+                        </select>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -403,8 +537,17 @@ export const BirthdayAutomation: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-gray-500 font-mono mt-0.5">
-                        +{contact.nomor_whatsapp} {contact.alamat && `• ${contact.alamat}`}
+                      <div className="text-[11px] text-gray-500 font-mono mt-0.5 flex flex-wrap items-center gap-1.5">
+                        {contact.nomor_whatsapp && <span>+{contact.nomor_whatsapp}</span>}
+                        {contact.identities?.map((idItem) => (
+                          <span
+                            key={idItem.id}
+                            className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-sans font-semibold"
+                          >
+                            {idItem.channel}: {idItem.handle || idItem.externalId}
+                          </span>
+                        ))}
+                        {contact.alamat && <span className="font-sans">• {contact.alamat}</span>}
                       </div>
                     </div>
 

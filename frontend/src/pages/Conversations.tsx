@@ -704,46 +704,61 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
               <span>Baru</span>
             </button>
           </div>
-          <div className="flex items-center gap-1 text-[11px]">
+          <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
             {(['ALL', 'OPEN', 'PENDING', 'RESOLVED'] as const).map((st) => (
               <button
                 key={st}
                 type="button"
                 onClick={() => setStatusFilter(st)}
-                className={`flex-1 py-1 rounded font-medium border transition-colors ${
+                className={`py-1 rounded font-medium transition-colors ${
                   statusFilter === st
-                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    ? 'bg-white text-indigo-700 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
                 {st === 'ALL' ? 'Semua' : st === 'OPEN' ? 'Open' : st === 'PENDING' ? 'Pending' : 'Selesai'}
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-1 text-[10px] overflow-x-auto pb-0.5">
-            {(['ALL', 'WHATSAPP', 'INSTAGRAM', 'FACEBOOK', 'THREADS', 'TELEGRAM'] as const).map((ch) => (
-              <button
-                key={ch}
-                type="button"
-                onClick={() => {
-                  setChannelFilter(ch);
-                  setAccountFilter('ALL');
-                }}
-                className={`px-2 py-0.5 rounded border whitespace-nowrap transition-colors ${
-                  channelFilter === ch
-                    ? 'bg-gray-900 text-white border-gray-900 font-medium'
-                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                }`}
+
+          <div className={`grid gap-1.5 ${assignableAgents.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <select
+              value={channelFilter}
+              onChange={(e) => {
+                setChannelFilter(e.target.value as any);
+                setAccountFilter('ALL');
+              }}
+              aria-label="Filter Channel"
+              className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="ALL">Semua Channel</option>
+              <option value="WHATSAPP">WhatsApp</option>
+              <option value="INSTAGRAM">Instagram</option>
+              <option value="FACEBOOK">Facebook</option>
+              <option value="THREADS">Threads</option>
+              <option value="TELEGRAM">Telegram</option>
+            </select>
+
+            {assignableAgents.length > 0 && (
+              <select
+                value={assigneeFilter}
+                onChange={(e) => setAssigneeFilter(e.target.value as any)}
+                aria-label="Filter Agent"
+                className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
               >
-                {ch === 'ALL' ? 'Semua Channel' : CHANNEL_META[ch].short}
-              </button>
-            ))}
+                <option value="ALL">Semua Agent</option>
+                <option value="MINE">Milik Saya</option>
+                <option value="UNASSIGNED">Belum Ditugaskan</option>
+              </select>
+            )}
           </div>
+
           {channelAccounts.length > 0 && (
             <select
               value={accountFilter}
               onChange={(e) => setAccountFilter(e.target.value)}
-              className="w-full h-7 px-2 bg-white border border-gray-200 rounded text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+              aria-label="Filter Akun Kanal"
+              className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
             >
               <option value="ALL">Semua Akun Kanal ({channelAccounts.length})</option>
               {channelAccounts
@@ -754,28 +769,6 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
                   </option>
                 ))}
             </select>
-          )}
-          {assignableAgents.length > 0 && (
-            <div className="flex items-center gap-1 text-[10px]">
-              {([
-                { key: 'ALL', label: 'Semua Agent' },
-                { key: 'MINE', label: 'Milik Saya' },
-                { key: 'UNASSIGNED', label: 'Belum Ditugaskan' },
-              ] as const).map((f) => (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => setAssigneeFilter(f.key)}
-                  className={`flex-1 py-0.5 px-1 rounded border transition-colors truncate ${
-                    assigneeFilter === f.key
-                      ? 'bg-sky-50 text-sky-700 border-sky-200 font-medium'
-                      : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
           )}
         </div>
 
