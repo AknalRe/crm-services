@@ -407,19 +407,19 @@ export const AutomationProductsSettings: React.FC<AutomationProductsSettingsProp
         {/* Keyword Auto-Reply Rules */}
         <div className="pt-4 border-t border-gray-200 space-y-3">
           <h3 className="text-xs font-semibold text-gray-900">Aturan Balasan Kata Kunci (Auto-Reply)</h3>
-          <form onSubmit={handleAddRule} className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+          <form onSubmit={handleAddRule} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center">
             <input
               type="text"
               required
               placeholder="Kata kunci (mis. harga)"
               value={newKeyword}
               onChange={(e) => setNewKeyword(e.target.value)}
-              className="sm:col-span-3 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs font-mono"
+              className="sm:col-span-3 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
             />
             <select
               value={newMatchType}
               onChange={(e) => setNewMatchType(e.target.value as any)}
-              className="sm:col-span-2 h-9 px-2 bg-gray-50 border border-gray-200 rounded-md text-xs"
+              className="sm:col-span-2 h-9 px-2 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
             >
               <option value="CONTAINS">Mengandung</option>
               <option value="EXACT">Sama Persis</option>
@@ -431,7 +431,7 @@ export const AutomationProductsSettings: React.FC<AutomationProductsSettingsProp
               placeholder="Isi balasan otomatis..."
               value={newReplyText}
               onChange={(e) => setNewReplyText(e.target.value)}
-              className="sm:col-span-5 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs"
+              className="sm:col-span-5 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
             />
             <Button type="submit" variant="secondary" size="md" isLoading={addingRule} leftIcon={<Plus className="w-3.5 h-3.5" />} className="sm:col-span-2">
               Tambah
@@ -493,13 +493,13 @@ export const AutomationProductsSettings: React.FC<AutomationProductsSettingsProp
           </p>
         </div>
 
-        <form onSubmit={handleAddProduct} className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+        <form onSubmit={handleAddProduct} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
           <input
             type="text"
             placeholder="SKU"
             value={prodSku}
             onChange={(e) => setProdSku(e.target.value)}
-            className="sm:col-span-2 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs font-mono"
+            className="sm:col-span-2 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
           />
           <input
             type="text"
@@ -507,14 +507,14 @@ export const AutomationProductsSettings: React.FC<AutomationProductsSettingsProp
             placeholder="Nama produk / jasa"
             value={prodName}
             onChange={(e) => setProdName(e.target.value)}
-            className="sm:col-span-3 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs"
+            className="sm:col-span-4 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
           />
           <input
             type="text"
             placeholder="Kategori"
             value={prodCategory}
             onChange={(e) => setProdCategory(e.target.value)}
-            className="sm:col-span-2 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs"
+            className="sm:col-span-2 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
           />
           <input
             type="number"
@@ -523,25 +523,25 @@ export const AutomationProductsSettings: React.FC<AutomationProductsSettingsProp
             placeholder="Harga (Rp)"
             value={prodPrice}
             onChange={(e) => setProdPrice(e.target.value)}
-            className="sm:col-span-2 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs font-mono"
+            className="sm:col-span-2 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
           />
           <input
             type="text"
             placeholder="Satuan"
             value={prodUnit}
             onChange={(e) => setProdUnit(e.target.value)}
-            className="sm:col-span-1 h-9 px-2 bg-gray-50 border border-gray-200 rounded-md text-xs"
+            className="sm:col-span-2 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
           />
-          <Button type="submit" variant="primary" size="md" isLoading={addingProd} leftIcon={<Plus className="w-3.5 h-3.5" />} className="sm:col-span-2">
-            Tambah
-          </Button>
           <input
             type="text"
             placeholder="Deskripsi singkat produk (opsional)..."
             value={prodDesc}
             onChange={(e) => setProdDesc(e.target.value)}
-            className="sm:col-span-12 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs"
+            className="sm:col-span-10 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
           />
+          <Button type="submit" variant="primary" size="md" isLoading={addingProd} leftIcon={<Plus className="w-3.5 h-3.5" />} className="sm:col-span-2">
+            Tambah
+          </Button>
         </form>
 
         {products.length > 0 && (

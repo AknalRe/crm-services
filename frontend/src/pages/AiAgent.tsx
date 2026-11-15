@@ -3,8 +3,9 @@ import { Bot, BookOpen, Plus, Trash2, Send, Save } from 'lucide-react';
 import api from '../services/api';
 import { AiAgentConfig, AiKnowledgeItem } from '../types';
 import { Button } from '../components/ui/Button';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
-import { LoadingState, EmptyState } from '../components/ui/StateBlocks';
+import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
 export const AiAgent: React.FC = () => {
   const toast = useToast();
@@ -20,7 +21,10 @@ export const AiAgent: React.FC = () => {
   });
   const [knowledge, setKnowledge] = useState<AiKnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AiKnowledgeItem | null>(null);
+  const [deletingKb, setDeletingKb] = useState(false);
 
   const [kbTitle, setKbTitle] = useState('');
   const [kbCategory, setKbCategory] = useState<'FAQ' | 'CATALOG' | 'POLICY' | 'WEB'>('FAQ');
@@ -33,12 +37,14 @@ export const AiAgent: React.FC = () => {
   const [testing, setTesting] = useState(false);
 
   const loadAll = useCallback(async () => {
+    setLoading(true);
     try {
       const [cfg, kb] = await Promise.all([api.getAiAgentConfig(), api.getAiKnowledge()]);
       setConfig(cfg);
       setKnowledge(kb || []);
-    } catch {
-      // ignore
+      setError(null);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Gagal memuat Agent AI & Knowledge Base');
     } finally {
       setLoading(false);
     }
@@ -86,11 +92,16 @@ export const AiAgent: React.FC = () => {
   };
 
   const handleDeleteKb = async (id: string) => {
+    setDeletingKb(true);
     try {
       await api.deleteAiKnowledge(id);
       setKnowledge((prev) => prev.filter((k) => k.id !== id));
+      setDeleteTarget(null);
+      toast.success('Item Knowledge Base dihapus');
     } catch {
       toast.error('Gagal menghapus item knowledge');
+    } finally {
+      setDeletingKb(false);
     }
   };
 
@@ -109,6 +120,7 @@ export const AiAgent: React.FC = () => {
   };
 
   if (loading) return <LoadingState message="Memuat Agent AI & Knowledge Base..." />;
+  if (error) return <ErrorState message={error} onRetry={loadAll} />;
 
   return (
     <div className="space-y-5">
@@ -306,8 +318,9 @@ export const AiAgent: React.FC = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleDeleteKb(k.id)}
-                      className="p-1 text-gray-400 hover:text-rose-600"
+                      onClick={() => setDeleteTarget(k)}
+                      className="p-1 text-gray-400 hover:text-rose-600 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                      title="Hapus"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -348,6 +361,23 @@ export const AiAgent: React.FC = () => {
           </form>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) void handleDeleteKb(deleteTarget.id);
+        }}
+        isLoading={deletingKb}
+        title="Hapus Item Knowledge Base?"
+        description={
+          deleteTarget
+            ? `Materi "${deleteTarget.title}" akan dihapus dan tidak lagi dipakai oleh Agent AI.`
+            : ''
+        }
+        confirmLabel="Hapus"
+        variant="danger"
+      />
     </div>
   );
 };

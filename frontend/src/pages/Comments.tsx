@@ -3,25 +3,29 @@ import { MessageSquare, RefreshCw, Send, CheckCircle2, Trash2 } from 'lucide-rea
 import api from '../services/api';
 import { SocialCommentItem } from '../types';
 import { Button } from '../components/ui/Button';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
-import { LoadingState, EmptyState } from '../components/ui/StateBlocks';
+import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
 export const Comments: React.FC = () => {
   const toast = useToast();
   const [comments, setComments] = useState<SocialCommentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [statusTab, setStatusTab] = useState<'PENDING' | 'DONE' | 'ALL'>('PENDING');
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SocialCommentItem | null>(null);
 
   const loadComments = useCallback(async () => {
     setLoading(true);
     try {
       const list = await api.getSocialComments({ status: statusTab });
       setComments(list || []);
-    } catch {
-      // ignore
+      setError(null);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Gagal memuat daftar komentar');
     } finally {
       setLoading(false);
     }
@@ -83,6 +87,8 @@ export const Comments: React.FC = () => {
     try {
       await api.deleteSocialComment(id);
       setComments((prev) => prev.filter((c) => c.id !== id));
+      setDeleteTarget(null);
+      toast.success('Komentar dihapus');
     } catch {
       toast.error('Gagal menghapus komentar');
     } finally {
@@ -136,6 +142,8 @@ export const Comments: React.FC = () => {
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         {loading ? (
           <LoadingState message="Memuat daftar komentar..." />
+        ) : error ? (
+          <ErrorState message={error} onRetry={loadComments} />
         ) : comments.length === 0 ? (
           <EmptyState
             icon={<MessageSquare className="w-5 h-5" />}
@@ -180,8 +188,8 @@ export const Comments: React.FC = () => {
                     <button
                       type="button"
                       disabled={busyId === c.id}
-                      onClick={() => handleDelete(c.id)}
-                      className="p-1 text-gray-400 hover:text-rose-600"
+                      onClick={() => setDeleteTarget(c)}
+                      className="p-1 text-gray-400 hover:text-rose-600 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                       title="Hapus"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -230,6 +238,23 @@ export const Comments: React.FC = () => {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        isOpen={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) void handleDelete(deleteTarget.id);
+        }}
+        isLoading={Boolean(deleteTarget && busyId === deleteTarget.id)}
+        title="Hapus Komentar?"
+        description={
+          deleteTarget
+            ? `Komentar dari "${deleteTarget.authorName}" akan dihapus dari daftar CRM.`
+            : ''
+        }
+        confirmLabel="Hapus"
+        variant="danger"
+      />
     </div>
   );
 };

@@ -782,8 +782,8 @@ export const Settings: React.FC<SettingsProps> = ({
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+              <div className="sm:col-span-4">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Nomor WhatsApp Tujuan
                 </label>
@@ -797,7 +797,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 />
               </div>
 
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-5">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Isi Pesan Uji Coba
                 </label>
@@ -808,6 +808,19 @@ export const Settings: React.FC<SettingsProps> = ({
                   onChange={(e) => setTestMessage(e.target.value)}
                   className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
                 />
+              </div>
+
+              <div className="sm:col-span-3 flex justify-end">
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  size="md"
+                  isLoading={testSending}
+                  leftIcon={<Send className="w-3.5 h-3.5" />}
+                  className="w-full sm:w-auto"
+                >
+                  Kirim Pesan Tes
+                </Button>
               </div>
             </div>
 
@@ -822,18 +835,6 @@ export const Settings: React.FC<SettingsProps> = ({
                 {testResult.text}
               </div>
             )}
-
-            <div className="flex justify-end">
-              <Button
-                type="submit"
-                variant="secondary"
-                isLoading={testSending}
-                disabled={!testPhone.trim()}
-                leftIcon={<Send className="w-3.5 h-3.5" />}
-              >
-                Kirim Pesan Tes
-              </Button>
-            </div>
           </form>
         </div>
 
@@ -1056,9 +1057,11 @@ export const Settings: React.FC<SettingsProps> = ({
               </p>
             </div>
 
-            <Button type="submit" variant="primary" isLoading={savingCrm} className="w-full">
-              Simpan Pengaturan CSAT & SLA
-            </Button>
+            <div className="flex justify-end pt-2">
+              <Button type="submit" variant="primary" size="md" isLoading={savingCrm}>
+                Simpan Pengaturan CSAT &amp; SLA
+              </Button>
+            </div>
           </div>
         </form>
       </div>

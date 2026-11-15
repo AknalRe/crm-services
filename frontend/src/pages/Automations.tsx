@@ -3,15 +3,19 @@ import { Zap, Plus, Trash2, Power } from 'lucide-react';
 import api from '../services/api';
 import { CommentAutomationItem } from '../types';
 import { Button } from '../components/ui/Button';
+import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
-import { LoadingState, EmptyState } from '../components/ui/StateBlocks';
+import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
 export const Automations: React.FC = () => {
   const toast = useToast();
   const [rules, setRules] = useState<CommentAutomationItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CommentAutomationItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [name, setName] = useState('');
   const [channel, setChannel] = useState<'ALL' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS'>('INSTAGRAM');
@@ -22,11 +26,13 @@ export const Automations: React.FC = () => {
   const [dmText, setDmText] = useState('');
 
   const loadRules = useCallback(async () => {
+    setLoading(true);
     try {
       const list = await api.getCommentAutomations();
       setRules(list || []);
-    } catch {
-      // ignore
+      setError(null);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Gagal memuat daftar otomasi');
     } finally {
       setLoading(false);
     }
@@ -74,11 +80,16 @@ export const Automations: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
+    setDeleting(true);
     try {
       await api.deleteCommentAutomation(id);
       setRules((prev) => prev.filter((r) => r.id !== id));
+      setDeleteTarget(null);
+      toast.success('Aturan otomasi dihapus');
     } catch {
       toast.error('Gagal menghapus aturan');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -185,6 +196,8 @@ export const Automations: React.FC = () => {
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         {loading ? (
           <LoadingState message="Memuat daftar otomasi..." />
+        ) : error ? (
+          <ErrorState message={error} onRetry={loadRules} />
         ) : rules.length === 0 ? (
           <EmptyState
             icon={<Zap className="w-5 h-5" />}
@@ -237,8 +250,8 @@ export const Automations: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleDelete(r.id)}
-                    className="p-1.5 text-gray-400 hover:text-rose-600"
+                    onClick={() => setDeleteTarget(r)}
+                    className="p-1.5 text-gray-400 hover:text-rose-600 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                     title="Hapus"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -249,6 +262,23 @@ export const Automations: React.FC = () => {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        isOpen={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) void handleDelete(deleteTarget.id);
+        }}
+        isLoading={deleting}
+        title="Hapus Aturan Otomasi?"
+        description={
+          deleteTarget
+            ? `Aturan "${deleteTarget.name}" (kata kunci: ${deleteTarget.keyword}) akan dihapus permanen.`
+            : ''
+        }
+        confirmLabel="Hapus"
+        variant="danger"
+      />
     </div>
   );
 };

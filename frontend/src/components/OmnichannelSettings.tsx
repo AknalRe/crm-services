@@ -43,7 +43,23 @@ export const OmnichannelSettings: React.FC = () => {
       .getOAuthConfig()
       .then((cfg) => setOauthCfg(cfg))
       .catch(() => {});
-  }, []);
+
+    if (typeof window !== 'undefined') {
+      const hashQuery = window.location.hash.split('?')[1] || '';
+      const params = new URLSearchParams(hashQuery || window.location.search);
+      const oauthStatus = params.get('oauth');
+      if (oauthStatus === 'success') {
+        const count = params.get('count');
+        toast.success(
+          count ? `${count} akun omnichannel berhasil dihubungkan via OAuth.` : 'Akun omnichannel berhasil dihubungkan.'
+        );
+        window.history.replaceState(null, '', '#settings/omnichannel');
+      } else if (oauthStatus === 'error') {
+        toast.error(params.get('msg') || 'Gagal menghubungkan akun melalui OAuth.');
+        window.history.replaceState(null, '', '#settings/omnichannel');
+      }
+    }
+  }, [toast]);
 
   const handleCreateConnectLink = async () => {
     setCreatingLink(true);
@@ -133,17 +149,19 @@ export const OmnichannelSettings: React.FC = () => {
         </div>
       </div>
 
-      <div className="p-3.5 rounded-md bg-indigo-50/60 border border-indigo-200 space-y-2.5">
+      <div className="p-3.5 rounded-md bg-gray-50 border border-gray-200 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <div className="text-xs font-semibold text-indigo-950">
-              Login 1-Klik via Reneo OAuth (Tanpa Input Token Manual)
+            <div className="text-xs font-semibold text-gray-900">
+              Login 1-Klik via Reneo OAuth
             </div>
-            <div className="text-[11px] text-indigo-800/80">
-              Client cukup login akun Meta/Threads melalui aplikasi resmi Reneo yang terdaftar.
+            <div className="text-[11px] text-gray-500">
+              {oauthCfg && !oauthCfg.reneoOAuthReady && !oauthCfg.directMetaReady && !oauthCfg.directThreadsReady
+                ? 'Menunggu konfigurasi RENEO_OAUTH_URL di server. Sementara gunakan form manual di bawah.'
+                : 'Client cukup login akun Meta/Threads melalui aplikasi resmi Reneo yang terdaftar.'}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             {(['INSTAGRAM', 'FACEBOOK', 'THREADS'] as OmnichannelType[]).map((ch) => {
               const ready =
                 oauthCfg?.reneoOAuthReady ||
@@ -157,7 +175,7 @@ export const OmnichannelSettings: React.FC = () => {
                     const base = window.location.pathname.replace(/\/+$/, '');
                     window.location.href = `${base}/api/channels/oauth/start?channel=${ch}`;
                   }}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="h-8 px-3 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed whitespace-nowrap transition-colors"
                 >
                   Login {ch === 'INSTAGRAM' ? 'Instagram' : ch === 'FACEBOOK' ? 'Facebook' : 'Threads'}
                 </button>
@@ -165,11 +183,6 @@ export const OmnichannelSettings: React.FC = () => {
             })}
           </div>
         </div>
-        {oauthCfg && !oauthCfg.reneoOAuthReady && !oauthCfg.directMetaReady && !oauthCfg.directThreadsReady && (
-          <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
-            OAuth Reneo belum aktif di server ini (<code className="font-mono">RENEO_OAUTH_URL</code> belum diset). Gunakan form manual di bawah atau Telegram Bot.
-          </div>
-        )}
       </div>
 
       <div className="p-3 rounded-md bg-gray-50 border border-gray-200 text-xs space-y-1.5">
@@ -187,7 +200,7 @@ export const OmnichannelSettings: React.FC = () => {
         <div className="font-mono text-[11px] text-gray-800 break-all select-all">{metaWebhookUrl}</div>
       </div>
 
-      <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+      <form onSubmit={handleCreate} autoComplete="off" className="grid grid-cols-1 sm:grid-cols-12 gap-2">
         <select
           value={channel}
           onChange={(e) => setChannel(e.target.value as OmnichannelType)}
@@ -201,6 +214,8 @@ export const OmnichannelSettings: React.FC = () => {
         </select>
         <input
           type="text"
+          name="channel_display_name"
+          autoComplete="off"
           required
           placeholder="Nama Tampilan (mis. @tokoresmi)"
           value={name}
@@ -209,6 +224,8 @@ export const OmnichannelSettings: React.FC = () => {
         />
         <input
           type="text"
+          name="channel_account_id"
+          autoComplete="off"
           required
           placeholder={selectedOpt.idHint}
           value={accountId}
@@ -217,6 +234,8 @@ export const OmnichannelSettings: React.FC = () => {
         />
         <input
           type="password"
+          name="channel_access_token"
+          autoComplete="new-password"
           placeholder="Access Token / Bot Token"
           value={accessToken}
           onChange={(e) => setAccessToken(e.target.value)}
