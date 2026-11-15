@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -11,12 +11,20 @@ import {
   Lock,
   X,
   LogOut,
+  ChevronDown,
+  ChevronRight,
+  Globe,
+  Bot,
+  Star,
+  Plug,
 } from 'lucide-react';
-import { AuthStatus, LicenseInfo, WahaStatus } from '../types';
+import { AuthStatus, LicenseInfo, SettingsSection, WahaStatus } from '../types';
 
 interface SidebarProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
+  settingsSection?: SettingsSection;
+  onSelectSettingsSection?: (section: SettingsSection) => void;
   wahaStatus: WahaStatus | null;
   licenseInfo?: LicenseInfo | null;
   user?: AuthStatus['user'] | null;
@@ -29,6 +37,8 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   setCurrentTab,
+  settingsSection = 'whatsapp',
+  onSelectSettingsSection,
   wahaStatus,
   licenseInfo,
   user,
@@ -40,21 +50,79 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isLiveChatUnlocked = Boolean(
     licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
   );
+  const isAdmin = !user || user.role !== 'AGENT';
 
-  const allMenuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, locked: false },
-    { id: 'contacts', label: 'Kontak Pelanggan', icon: Users, locked: false },
-    { id: 'broadcasts', label: 'Siaran WhatsApp', icon: Send, locked: false },
-    { id: 'birthday', label: 'Ulang Tahun', icon: Cake, locked: false },
-    { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck, locked: false },
-    { id: 'conversations', label: 'Live Chat CRM', icon: MessageCircle, locked: !isLiveChatUnlocked },
-    { id: 'settings', label: 'Pengaturan & WAHA', icon: Settings, locked: false },
+  const isIntegrationsActive =
+    currentTab === 'settings' &&
+    (settingsSection === 'whatsapp' || settingsSection === 'omnichannel');
+  const isSystemSettingsActive =
+    currentTab === 'settings' &&
+    (settingsSection === 'automation' ||
+      settingsSection === 'crm_products' ||
+      settingsSection === 'agents');
+
+  const [openDropdowns, setOpenDropdowns] = useState<{
+    integrations: boolean;
+    settings: boolean;
+  }>({
+    integrations: true,
+    settings: isSystemSettingsActive,
+  });
+
+  useEffect(() => {
+    if (isIntegrationsActive) {
+      setOpenDropdowns((prev) => ({ ...prev, integrations: true }));
+    }
+    if (isSystemSettingsActive) {
+      setOpenDropdowns((prev) => ({ ...prev, settings: true }));
+    }
+  }, [isIntegrationsActive, isSystemSettingsActive]);
+
+  const menuGroups = [
+    {
+      title: 'Ringkasan',
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, locked: false },
+      ],
+    },
+    {
+      title: 'Komunikasi & CRM',
+      items: [
+        { id: 'conversations', label: 'Live Chat CRM', icon: MessageCircle, locked: !isLiveChatUnlocked },
+        { id: 'contacts', label: 'Kontak Pelanggan', icon: Users, locked: false },
+      ],
+    },
+    {
+      title: 'Kampanye & Otomatisasi',
+      items: [
+        { id: 'broadcasts', label: 'Siaran WhatsApp', icon: Send, locked: false },
+        { id: 'birthday', label: 'Ulang Tahun', icon: Cake, locked: false },
+        { id: 'tracking', label: 'Pelacakan Status', icon: CheckCheck, locked: false },
+      ],
+    },
   ];
 
-  const menuItems = allMenuItems.filter((item) => {
+  const integrationSubItems: { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { id: 'whatsapp', label: 'WhatsApp (WAHA)', icon: Smartphone },
+    { id: 'omnichannel', label: 'Omnichannel', icon: Globe },
+  ];
+
+  const settingsSubItems: { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { id: 'automation', label: 'Otomatisasi & Bot', icon: Bot },
+    { id: 'crm_products', label: 'CSAT, SLA & Produk', icon: Star },
+    ...(isAdmin ? [{ id: 'agents' as const, label: 'Tim & Akses', icon: Users }] : []),
+  ];
+
+  const isItemAllowed = (id: string) => {
     if (!user || user.role === 'ADMIN' || !Array.isArray(user.permissions)) return true;
-    return user.permissions.includes(item.id);
-  });
+    return user.permissions.includes(id);
+  };
+
+  const handleOpenSettingsSub = (section: SettingsSection) => {
+    setCurrentTab('settings');
+    onSelectSettingsSection?.(section);
+    onClose?.();
+  };
 
   const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
 
@@ -96,44 +164,160 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
       {/* Navigation Links */}
-      <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
-        <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-          Menu Utama
-        </div>
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = currentTab === item.id;
+      <nav className="flex-1 px-3 py-3 space-y-4 overflow-y-auto">
+        {menuGroups.map((group) => {
+          const visibleItems = group.items.filter((item) => isItemAllowed(item.id));
+          if (visibleItems.length === 0) return null;
           return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                setCurrentTab(item.id);
-                onClose?.();
-              }}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] font-medium transition-colors ${
-                isActive
-                  ? 'bg-[#1E2438] text-white'
-                  : 'text-gray-400 hover:bg-[#1E2438]/60 hover:text-gray-100'
-              }`}
-            >
-              <Icon
-                className={`w-4 h-4 shrink-0 ${
-                  isActive ? 'text-indigo-400' : 'text-gray-400'
-                }`}
-              />
-              <span className="truncate flex-1 text-left">{item.label}</span>
-              {item.locked && (
-                <span
-                  title="Terkunci oleh lisensi — butuh paket Pro atau Enterprise"
-                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/60 text-amber-400 shrink-0"
-                >
-                  <Lock className="w-3 h-3" />
-                </span>
-              )}
-            </button>
+            <div key={group.title} className="space-y-0.5">
+              <div className="px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                {group.title}
+              </div>
+              {visibleItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = currentTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setCurrentTab(item.id);
+                      onClose?.();
+                    }}
+                    className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] font-medium transition-colors ${
+                      isActive
+                        ? 'bg-[#1E2438] text-white'
+                        : 'text-gray-400 hover:bg-[#1E2438]/60 hover:text-gray-100'
+                    }`}
+                  >
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        isActive ? 'text-indigo-400' : 'text-gray-400'
+                      }`}
+                    />
+                    <span className="truncate flex-1 text-left">{item.label}</span>
+                    {item.locked && (
+                      <span
+                        title="Terkunci oleh lisensi — butuh paket Pro atau Enterprise"
+                        className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/60 text-amber-400 shrink-0"
+                      >
+                        <Lock className="w-3 h-3" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           );
         })}
+
+        {isItemAllowed('settings') && (
+          <div className="space-y-1">
+            <div className="px-2.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+              Konfigurasi
+            </div>
+
+            {/* Dropdown: Integrasi & Kanal */}
+            <div>
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenDropdowns((prev) => ({ ...prev, integrations: !prev.integrations }))
+                }
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] font-medium transition-colors ${
+                  isIntegrationsActive
+                    ? 'bg-[#1E2438] text-white'
+                    : 'text-gray-400 hover:bg-[#1E2438]/60 hover:text-gray-100'
+                }`}
+              >
+                <Plug
+                  className={`w-4 h-4 shrink-0 ${
+                    isIntegrationsActive ? 'text-indigo-400' : 'text-gray-400'
+                  }`}
+                />
+                <span className="truncate flex-1 text-left">Integrasi &amp; Kanal</span>
+                {openDropdowns.integrations ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                )}
+              </button>
+              {openDropdowns.integrations && (
+                <div className="mt-0.5 ml-3 pl-2.5 border-l border-[#242B42] space-y-0.5">
+                  {integrationSubItems.map((sub) => {
+                    const SubIcon = sub.icon;
+                    const active = currentTab === 'settings' && settingsSection === sub.id;
+                    return (
+                      <button
+                        key={sub.id}
+                        type="button"
+                        onClick={() => handleOpenSettingsSub(sub.id)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                          active
+                            ? 'bg-indigo-600/20 text-indigo-300'
+                            : 'text-gray-400 hover:bg-[#1E2438]/50 hover:text-gray-200'
+                        }`}
+                      >
+                        <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate text-left">{sub.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Dropdown: Pengaturan */}
+            <div>
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenDropdowns((prev) => ({ ...prev, settings: !prev.settings }))
+                }
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] font-medium transition-colors ${
+                  isSystemSettingsActive
+                    ? 'bg-[#1E2438] text-white'
+                    : 'text-gray-400 hover:bg-[#1E2438]/60 hover:text-gray-100'
+                }`}
+              >
+                <Settings
+                  className={`w-4 h-4 shrink-0 ${
+                    isSystemSettingsActive ? 'text-indigo-400' : 'text-gray-400'
+                  }`}
+                />
+                <span className="truncate flex-1 text-left">Pengaturan</span>
+                {openDropdowns.settings ? (
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                )}
+              </button>
+              {openDropdowns.settings && (
+                <div className="mt-0.5 ml-3 pl-2.5 border-l border-[#242B42] space-y-0.5">
+                  {settingsSubItems.map((sub) => {
+                    const SubIcon = sub.icon;
+                    const active = currentTab === 'settings' && settingsSection === sub.id;
+                    return (
+                      <button
+                        key={sub.id}
+                        type="button"
+                        onClick={() => handleOpenSettingsSub(sub.id)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                          active
+                            ? 'bg-indigo-600/20 text-indigo-300'
+                            : 'text-gray-400 hover:bg-[#1E2438]/50 hover:text-gray-200'
+                        }`}
+                      >
+                        <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate text-left">{sub.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* WAHA Status & User Card */}

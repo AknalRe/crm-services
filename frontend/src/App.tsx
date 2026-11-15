@@ -17,7 +17,7 @@ import PublicCsatPage from './pages/PublicCsatPage';
 import PublicChannelConnectPage from './pages/PublicChannelConnectPage';
 import api from './services/api';
 import { subscribeLiveEvent } from './services/liveEvents';
-import { AuthStatus, WahaStatus, LicenseInfo } from './types';
+import { AuthStatus, WahaStatus, LicenseInfo, SettingsSection } from './types';
 
 const VALID_TABS = new Set([
   'dashboard',
@@ -29,24 +29,64 @@ const VALID_TABS = new Set([
   'settings',
 ]);
 
-function getInitialTab(): string {
-  if (typeof window === 'undefined') return 'dashboard';
-  const hashTab = window.location.hash.replace(/^#/, '').trim();
-  if (VALID_TABS.has(hashTab)) return hashTab;
-  try {
-    const saved = localStorage.getItem('crm_current_tab') || '';
-    if (VALID_TABS.has(saved)) return saved;
-  } catch {
-    // Ignore storage access error
+const VALID_SETTINGS_SECTIONS = new Set<SettingsSection>([
+  'whatsapp',
+  'omnichannel',
+  'automation',
+  'crm_products',
+  'agents',
+]);
+
+function getInitialLocation(): { tab: string; settingsSection: SettingsSection } {
+  if (typeof window === 'undefined') return { tab: 'dashboard', settingsSection: 'whatsapp' };
+  const rawHash = window.location.hash.replace(/^#/, '').trim();
+  if (rawHash.startsWith('settings/')) {
+    const sub = rawHash.slice('settings/'.length) as SettingsSection;
+    return {
+      tab: 'settings',
+      settingsSection: VALID_SETTINGS_SECTIONS.has(sub) ? sub : 'whatsapp',
+    };
   }
-  return 'dashboard';
+  if (VALID_TABS.has(rawHash)) {
+    let savedSub: SettingsSection = 'whatsapp';
+    try {
+      const s = localStorage.getItem('crm_settings_section') as SettingsSection;
+      if (VALID_SETTINGS_SECTIONS.has(s)) savedSub = s;
+    } catch {
+      // ignore
+    }
+    return { tab: rawHash, settingsSection: savedSub };
+  }
+  try {
+    const savedTab = localStorage.getItem('crm_current_tab') || '';
+    const savedSub = localStorage.getItem('crm_settings_section') as SettingsSection;
+    return {
+      tab: VALID_TABS.has(savedTab) ? savedTab : 'dashboard',
+      settingsSection: VALID_SETTINGS_SECTIONS.has(savedSub) ? savedSub : 'whatsapp',
+    };
+  } catch {
+    return { tab: 'dashboard', settingsSection: 'whatsapp' };
+  }
 }
 
 function AppShell() {
+  const initialLoc = getInitialLocation();
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [currentTab, setCurrentTabState] = useState<string>(getInitialTab);
+  const [currentTab, setCurrentTabState] = useState<string>(initialLoc.tab);
+  const [settingsSection, setSettingsSectionState] = useState<SettingsSection>(
+    initialLoc.settingsSection
+  );
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  const syncHash = (tab: string, section: SettingsSection) => {
+    if (typeof window === 'undefined') return;
+    const targetHash = tab === 'settings' ? `#settings/${section}` : `#${tab}`;
+    if (window.location.hash !== targetHash) {
+      window.history.replaceState(null, '', targetHash);
+    }
+  };
+
   const setCurrentTab = (tab: string) => {
     const next = VALID_TABS.has(tab) ? tab : 'dashboard';
     setCurrentTabState(next);
@@ -55,9 +95,18 @@ function AppShell() {
     } catch {
       // Ignore storage error
     }
-    if (typeof window !== 'undefined' && window.location.hash !== `#${next}`) {
-      window.history.replaceState(null, '', `#${next}`);
+    syncHash(next, settingsSection);
+  };
+
+  const setSettingsSection = (section: SettingsSection) => {
+    const next = VALID_SETTINGS_SECTIONS.has(section) ? section : 'whatsapp';
+    setSettingsSectionState(next);
+    try {
+      localStorage.setItem('crm_settings_section', next);
+    } catch {
+      // Ignore storage error
     }
+    syncHash('settings', next);
   };
 
   const [wahaStatus, setWahaStatus] = useState<WahaStatus | null>(null);
@@ -160,9 +209,22 @@ function AppShell() {
       case 'tracking':
         return 'Pelacakan Status Pengiriman';
       case 'conversations':
-        return 'Live Chat CRM WhatsApp';
+        return 'Live Chat CRM';
       case 'settings':
-        return 'Pengaturan & Koneksi WAHA';
+        switch (settingsSection) {
+          case 'whatsapp':
+            return 'Integrasi WhatsApp (WAHA)';
+          case 'omnichannel':
+            return 'Integrasi Omnichannel';
+          case 'automation':
+            return 'Otomatisasi & Bot';
+          case 'crm_products':
+            return 'CSAT, SLA & Produk';
+          case 'agents':
+            return 'Tim & Hak Akses';
+          default:
+            return 'Pengaturan & Kanal';
+        }
       default:
         return 'CRM WhatsApp Services';
     }
@@ -219,6 +281,8 @@ function AppShell() {
           if (tab !== 'broadcasts') setPreselectedContactIds([]);
           setCurrentTab(tab);
         }}
+        settingsSection={settingsSection}
+        onSelectSettingsSection={setSettingsSection}
         wahaStatus={wahaStatus}
         licenseInfo={licenseInfo}
         user={authStatus?.user}
@@ -276,6 +340,8 @@ function AppShell() {
                 wahaStatus={wahaStatus}
                 licenseInfo={licenseInfo}
                 currentUser={authStatus?.user}
+                activeSection={settingsSection}
+                onSectionChange={setSettingsSection}
                 onOpenPlans={() => setIsPlansModalOpen(true)}
                 onRefreshStatus={fetchWahaStatus}
                 onOpenQr={(sessionName?: string) => {

@@ -418,4 +418,11 @@ export interface WebhookDeliveryItem {
   createdAt: string;
 }
 
+export type SettingsSection =
+  | 'whatsapp'
+  | 'omnichannel'
+  | 'automation'
+  | 'crm_products'
+  | 'agents';
+
 

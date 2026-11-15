@@ -17,6 +17,8 @@ import {
   Star,
   Edit3,
   UserPlus,
+  Bot,
+  Smartphone,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -27,6 +29,7 @@ import {
   AgentQuota,
   AuthStatus,
   LicenseInfo,
+  SettingsSection,
   WahaSessionItem,
   WahaStatus,
 } from '../types';
@@ -41,13 +44,15 @@ const PERMISSION_OPTIONS = [
   { id: 'birthday', label: 'Ulang Tahun' },
   { id: 'tracking', label: 'Pelacakan Status' },
   { id: 'conversations', label: 'Live Chat CRM' },
-  { id: 'settings', label: 'Pengaturan & WAHA' },
+  { id: 'settings', label: 'Pengaturan & Kanal' },
 ];
 
 interface SettingsProps {
   wahaStatus: WahaStatus | null;
   licenseInfo?: LicenseInfo | null;
   currentUser?: AuthStatus['user'] | null;
+  activeSection?: SettingsSection;
+  onSectionChange?: (section: SettingsSection) => void;
   onOpenPlans?: () => void;
   onRefreshStatus: () => void;
   onOpenQr: (sessionName?: string) => void;
@@ -57,6 +62,8 @@ export const Settings: React.FC<SettingsProps> = ({
   wahaStatus,
   licenseInfo,
   currentUser,
+  activeSection,
+  onSectionChange,
   onOpenPlans,
   onRefreshStatus,
   onOpenQr,
@@ -110,6 +117,12 @@ export const Settings: React.FC<SettingsProps> = ({
   const [agentPermissions, setAgentPermissions] = useState<string[]>(['dashboard', 'contacts', 'conversations']);
   const [savingAgent, setSavingAgent] = useState(false);
   const [confirmDeleteAgent, setConfirmDeleteAgent] = useState<AgentItem | null>(null);
+  const [internalTab, setInternalTab] = useState<SettingsSection>('whatsapp');
+  const settingsTab = activeSection ?? internalTab;
+  const setSettingsTab = (sec: SettingsSection) => {
+    setInternalTab(sec);
+    onSectionChange?.(sec);
+  };
 
   const fetchCrmSettings = useCallback(async () => {
     try {
@@ -423,8 +436,41 @@ export const Settings: React.FC<SettingsProps> = ({
   const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
   const isScanRequired = wahaStatus?.sessionStatus === 'SCAN_QR_CODE';
 
+  const settingsTabs = [
+    { id: 'whatsapp' as const, label: 'WhatsApp (WAHA)', icon: Smartphone },
+    { id: 'omnichannel' as const, label: 'Omnichannel', icon: Globe },
+    { id: 'automation' as const, label: 'Otomatisasi & Bot', icon: Bot },
+    { id: 'crm_products' as const, label: 'CSAT, SLA & Produk', icon: Star },
+    ...(isAdmin ? [{ id: 'agents' as const, label: 'Tim & Akses', icon: Users }] : []),
+  ];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Structured Settings Sub-Navigation */}
+      <div className="bg-white rounded-lg border border-gray-200 p-1.5 flex items-center gap-1 overflow-x-auto">
+        {settingsTabs.map((tab) => {
+          const Icon = tab.icon;
+          const active = settingsTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setSettingsTab(tab.id)}
+              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium whitespace-nowrap transition-colors shrink-0 ${
+                active
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5 shrink-0" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {settingsTab === 'whatsapp' && (
+      <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -920,8 +966,12 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
         </div>
       </div>
+      </div>
+      )}
 
       {/* Pengaturan CSAT Template & SLA */}
+      {settingsTab === 'crm_products' && (
+      <div className="space-y-5">
       <div className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-4 border-b border-gray-100">
           <div>
@@ -1043,9 +1093,12 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
         </form>
       </div>
+      <AutomationProductsSettings section="products" />
+      </div>
+      )}
 
       {/* Manajemen Multi-Agent & Hak Akses (ADMIN only) */}
-      {isAdmin && (
+      {settingsTab === 'agents' && isAdmin && (
         <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100">
             <div>
@@ -1312,8 +1365,8 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
       )}
 
-      <AutomationProductsSettings />
-      <OmnichannelSettings />
+      {settingsTab === 'automation' && <AutomationProductsSettings section="automation" />}
+      {settingsTab === 'omnichannel' && <OmnichannelSettings />}
 
       <ConfirmModal
         isOpen={confirmAction !== null}

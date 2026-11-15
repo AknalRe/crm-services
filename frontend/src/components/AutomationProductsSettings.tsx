@@ -20,7 +20,15 @@ const DEFAULT_CONFIG: AutomationConfig = {
   slaAlertWebhookUrl: '',
 };
 
-export const AutomationProductsSettings: React.FC = () => {
+interface AutomationProductsSettingsProps {
+  section?: 'all' | 'automation' | 'products';
+}
+
+export const AutomationProductsSettings: React.FC<AutomationProductsSettingsProps> = ({
+  section = 'all',
+}) => {
+  const showAutomation = section === 'all' || section === 'automation';
+  const showProducts = section === 'all' || section === 'products';
   const toast = useToast();
   const [config, setConfig] = useState<AutomationConfig>(DEFAULT_CONFIG);
   const [rules, setRules] = useState<AutoReplyRule[]>([]);
@@ -182,6 +190,7 @@ export const AutomationProductsSettings: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Automation, Routing & SLA Escalation */}
+      {showAutomation && (
       <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-gray-200">
           <div>
@@ -469,8 +478,10 @@ export const AutomationProductsSettings: React.FC = () => {
           )}
         </div>
       </div>
+      )}
 
       {/* Product Catalog Management */}
+      {showProducts && (
       <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
         <div className="pb-3 border-b border-gray-200">
           <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
@@ -574,6 +585,7 @@ export const AutomationProductsSettings: React.FC = () => {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };
