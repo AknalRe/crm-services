@@ -23,6 +23,7 @@ interface LandingPageProps {
 }
 
 const PANEL_URL = 'https://panel.reneo.my.id';
+const PANEL_ORDER_URL = 'https://panel.reneo.my.id/order';
 
 const NAV_LINKS = [
   { href: '#studi-kasus', label: 'Studi Kasus' },
@@ -239,11 +240,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             <button
               type="button"
               onClick={onEnterLogin}
+              className="h-8 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium inline-flex items-center transition-colors whitespace-nowrap"
+            >
+              {initialized ? 'Masuk CRM' : 'Setup CRM'}
+            </button>
+            <a
+              href={PANEL_URL}
               className="h-8 px-3 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
-              <span>{initialized ? 'Buka CRM' : 'Setup CRM'}</span>
+              <span>Pasang di Panel</span>
               <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
-            </button>
+            </a>
             <button
               type="button"
               onClick={() => setMobileMenuOpen((prev) => !prev)}
@@ -287,21 +294,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
               Asisten AI, siaran terjadwal, dan laporan kecepatan balas tim.
             </p>
 
-            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5">
-              <button
-                type="button"
-                onClick={onEnterLogin}
-                className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
-              >
-                <span>{initialized ? 'Masuk ke Ruang Kerja CRM' : 'Mulai Setup CRM'}</span>
-                <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
-              </button>
-              <a
-                href={PANEL_URL}
-                className="h-10 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-mono font-medium inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
-              >
-                panel.reneo.my.id
-              </a>
+            <div className="space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5">
+                <a
+                  href={PANEL_URL}
+                  className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+                >
+                  <span>Pasang Panel &amp; CRM</span>
+                  <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+                </a>
+                <a
+                  href={PANEL_ORDER_URL}
+                  className="h-10 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+                >
+                  Beli Hosting &amp; Lisensi
+                </a>
+              </div>
+              <div className="text-xs text-slate-500">
+                Sudah terpasang di server ini?{' '}
+                <button
+                  type="button"
+                  onClick={onEnterLogin}
+                  className="font-semibold text-[#2563eb] hover:underline"
+                >
+                  {initialized ? 'Masuk ke Ruang Kerja CRM' : 'Lanjutkan Setup CRM'}
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 pt-4 border-t border-slate-200">
@@ -732,14 +750,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onEnterLogin}
-            className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap w-full lg:w-auto shrink-0"
-          >
-            <span>{initialized ? 'Masuk ke Ruang Kerja CRM' : 'Mulai Setup CRM'}</span>
-            <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
-          </button>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 w-full lg:w-auto">
+            <a
+              href={PANEL_URL}
+              className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+            >
+              <span>Pasang Panel &amp; CRM</span>
+              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </a>
+            <a
+              href={PANEL_ORDER_URL}
+              className="h-10 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-semibold inline-flex items-center justify-center transition-colors whitespace-nowrap"
+            >
+              Beli Hosting &amp; Lisensi
+            </a>
+          </div>
         </div>
       </section>
 
