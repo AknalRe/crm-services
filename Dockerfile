@@ -6,6 +6,7 @@ COPY frontend/package*.json ./
 RUN npm install
 
 COPY frontend/tsconfig.json frontend/vite.config.ts frontend/tailwind.config.js frontend/postcss.config.js frontend/index.html ./
+COPY frontend/public ./public/
 COPY frontend/src ./src/
 RUN npm run build
 
@@ -24,7 +25,7 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-RUN apk add --no-cache nginx openssl libc6-compat
+RUN apk add --no-cache nginx openssl && (apk add --no-cache libc6-compat || apk add --no-cache gcompat || true)
 
 # Copy Frontend SPA build to Nginx
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
