@@ -247,6 +247,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             </button>
             <a
               href={PANEL_ORDER_URL}
+              target="_top"
               className="h-8 px-3 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
               <span>Beli Hosting + CRM</span>
@@ -299,6 +300,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
               <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5">
                 <a
                   href={PANEL_ORDER_URL}
+                  target="_top"
                   className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
                 >
                   <span>Beli Hosting + CRM &amp; Lisensi</span>
@@ -306,6 +308,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 </a>
                 <a
                   href={PANEL_INSTALL_URL}
+                  target="_top"
                   className="h-10 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
                 >
                   Pasang di Server Sendiri
@@ -733,6 +736,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 Masuk ke ruang kerja CRM Anda atau kelola server dari{' '}
                 <a
                   href={PANEL_URL}
+                  target="_top"
                   className="font-mono underline underline-offset-2 text-white hover:text-blue-200"
                 >
                   panel.reneo.my.id
@@ -755,6 +759,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 w-full lg:w-auto">
             <a
               href={PANEL_ORDER_URL}
+              target="_top"
               className="h-10 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
             >
               <span>Beli Hosting + CRM &amp; Lisensi</span>
@@ -762,6 +767,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             </a>
             <a
               href={PANEL_INSTALL_URL}
+              target="_top"
               className="h-10 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-semibold inline-flex items-center justify-center transition-colors whitespace-nowrap"
             >
               Pasang di Server Sendiri
@@ -777,7 +783,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             <ReneoCrmLogo className="w-5 h-5 shrink-0" />
             <span>Reneo CRM</span>
             <span className="text-slate-300">·</span>
-            <a href={PANEL_URL} className="font-mono hover:text-slate-800 transition-colors">
+            <a href={PANEL_URL} target="_top" className="font-mono hover:text-slate-800 transition-colors">
               panel.reneo.my.id
             </a>
           </div>
