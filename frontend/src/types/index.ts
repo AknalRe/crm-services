@@ -72,7 +72,7 @@ export interface CampaignRecipient {
   };
 }
 
-export type OmnichannelType = 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+export type OmnichannelType = 'WHATSAPP' | 'WHATSAPP_CLOUD' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
 
 export interface ChannelAccount {
   id: string;

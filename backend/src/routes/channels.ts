@@ -13,6 +13,7 @@ import {
 } from '../services/channel.service';
 
 const ALLOWED_CHANNELS = new Set<OmnichannelType>([
+  'WHATSAPP_CLOUD',
   'INSTAGRAM',
   'FACEBOOK',
   'THREADS',
@@ -175,6 +176,51 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       const allAccounts = await db.select().from(channelAccounts);
 
       for (const entry of entries) {
+        if (objectType === 'whatsapp_business_account') {
+          const changes: any[] = Array.isArray(entry.changes) ? entry.changes : [];
+          for (const ch of changes) {
+            const val = ch.value || {};
+            const phoneNumberId = String(val.metadata?.phone_number_id || '');
+            const waAccount =
+              allAccounts.find(
+                (a) =>
+                  a.isActive &&
+                  a.channel === 'WHATSAPP_CLOUD' &&
+                  a.accountId === phoneNumberId
+              ) || allAccounts.find((a) => a.isActive && a.channel === 'WHATSAPP_CLOUD');
+            if (!waAccount) continue;
+
+            const waContacts: any[] = Array.isArray(val.contacts) ? val.contacts : [];
+            const messages: any[] = Array.isArray(val.messages) ? val.messages : [];
+            for (const msg of messages) {
+              const senderId = String(msg.from || '');
+              if (!senderId) continue;
+              const profileName =
+                waContacts.find((c) => c.wa_id === senderId)?.profile?.name || null;
+              const msgBody =
+                String(
+                  msg.text?.body ||
+                    msg.button?.text ||
+                    msg.interactive?.button_reply?.title ||
+                    msg.interactive?.list_reply?.title ||
+                    ''
+                ).trim() || (msg.type ? `[${String(msg.type).toUpperCase()}]` : '');
+              if (!msgBody) continue;
+
+              await upsertInboundChannelMessage({
+                channel: 'WHATSAPP_CLOUD',
+                channelAccountId: waAccount.id,
+                externalSenderId: senderId,
+                senderName: profileName,
+                senderHandle: `+${senderId.replace(/\D/g, '')}`,
+                externalMessageId: msg.id || null,
+                body: msgBody,
+              });
+            }
+          }
+          continue;
+        }
+
         const pageOrAccountId = String(entry.id || '');
         const channelGuess: OmnichannelType =
           objectType === 'instagram'
@@ -469,7 +515,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     try {
       const channel = String(req.query?.channel || '').trim().toUpperCase();
       const connectToken = String(req.query?.connectToken || '').trim();
-      if (!['INSTAGRAM', 'FACEBOOK', 'THREADS'].includes(channel)) {
+      if (!['INSTAGRAM', 'FACEBOOK', 'THREADS', 'WHATSAPP_CLOUD'].includes(channel)) {
         return reply.status(400).send({ success: false, error: 'Channel OAuth tidak valid' });
       }
 
@@ -509,8 +555,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return reply.redirect(target);
       }
 
-      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK') && config.meta.appId) {
-        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(config.meta.appId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent('pages_show_list,pages_messaging,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish')}&response_type=code&state=${encodeURIComponent(state)}`;
+      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK' || channel === 'WHATSAPP_CLOUD') && config.meta.appId) {
+        const scope =
+          channel === 'WHATSAPP_CLOUD'
+            ? 'whatsapp_business_management,whatsapp_business_messaging,business_management'
+            : 'pages_show_list,pages_messaging,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish';
+        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(config.meta.appId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${encodeURIComponent(state)}`;
         return reply.redirect(target);
       }
 

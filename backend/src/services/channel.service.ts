@@ -11,7 +11,13 @@ import {
 } from '../db/schema';
 import { liveEvents } from './events.service';
 
-export type OmnichannelType = 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+export type OmnichannelType =
+  | 'WHATSAPP'
+  | 'WHATSAPP_CLOUD'
+  | 'INSTAGRAM'
+  | 'FACEBOOK'
+  | 'THREADS'
+  | 'TELEGRAM';
 
 export async function upsertInboundChannelMessage(params: {
   channel: OmnichannelType;
@@ -66,18 +72,42 @@ export async function upsertInboundChannelMessage(params: {
 
   let contactId = identityRows[0]?.contactId;
 
+  if (!contactId && channel === 'WHATSAPP_CLOUD') {
+    const cleanPhone = externalSenderId.replace(/\D/g, '');
+    if (cleanPhone) {
+      const byPhone = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.nomorWhatsapp, cleanPhone));
+      if (byPhone[0]) {
+        contactId = byPhone[0].id;
+        await db.insert(contactIdentities).values({
+          id: crypto.randomUUID(),
+          contactId,
+          channel,
+          externalId: externalSenderId,
+          handle: `+${cleanPhone}`,
+          createdAt: now,
+        });
+      }
+    }
+  }
+
   if (!contactId) {
     const displayName =
       (senderName || '').trim() ||
       (senderHandle ? `@${senderHandle.replace(/^@/, '')}` : '') ||
       `${channel} ${externalSenderId.slice(-6)}`;
 
+    const cleanWaCloud =
+      channel === 'WHATSAPP_CLOUD' ? externalSenderId.replace(/\D/g, '') || null : null;
+
     contactId = crypto.randomUUID();
     await db.insert(contacts).values({
       id: contactId,
       namaLengkap: displayName,
       namaPanggilan: senderHandle || senderName || null,
-      nomorWhatsapp: null,
+      nomorWhatsapp: cleanWaCloud,
       tags: `Inbound ${channel}`,
       createdAt: now,
       updatedAt: now,
@@ -88,7 +118,7 @@ export async function upsertInboundChannelMessage(params: {
       contactId,
       channel,
       externalId: externalSenderId,
-      handle: senderHandle || null,
+      handle: senderHandle || (cleanWaCloud ? `+${cleanWaCloud}` : null),
       createdAt: now,
     });
   }
@@ -194,15 +224,43 @@ export async function sendOutboundChannelMessage(params: {
     .from(contactIdentities)
     .where(and(eq(contactIdentities.contactId, contactId), eq(contactIdentities.channel, channel)));
 
-  if (!identity) {
+  let targetExternalId = identity?.externalId || '';
+  if (!targetExternalId && channel === 'WHATSAPP_CLOUD') {
+    const [contactRow] = await db.select().from(contacts).where(eq(contacts.id, contactId));
+    if (contactRow?.nomorWhatsapp) {
+      targetExternalId = contactRow.nomorWhatsapp.replace(/\D/g, '');
+    }
+  }
+
+  if (!targetExternalId) {
     throw new Error(`Identitas penerima untuk channel ${channel} tidak ditemukan`);
+  }
+
+  if (channel === 'WHATSAPP_CLOUD') {
+    const toPhone = targetExternalId.replace(/\D/g, '');
+    const res = await axios.post(
+      `https://graph.facebook.com/v20.0/${account.accountId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: toPhone,
+        type: 'text',
+        text: { body: text },
+      },
+      {
+        headers: { Authorization: `Bearer ${account.accessToken}` },
+        timeout: 12_000,
+      }
+    );
+    const msgId = res.data?.messages?.[0]?.id ? String(res.data.messages[0].id) : null;
+    return { externalMessageId: msgId };
   }
 
   if (channel === 'TELEGRAM') {
     const res = await axios.post(
       `https://api.telegram.org/bot${account.accessToken}/sendMessage`,
       {
-        chat_id: identity.externalId,
+        chat_id: targetExternalId,
         text,
       },
       { timeout: 10_000 }
@@ -220,7 +278,7 @@ export async function sendOutboundChannelMessage(params: {
     const res = await axios.post(
       endpoint,
       {
-        recipient: { id: identity.externalId },
+        recipient: { id: targetExternalId },
         message: { text },
       },
       {

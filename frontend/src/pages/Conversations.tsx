@@ -50,6 +50,7 @@ import {
 
 const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls: string }> = {
   WHATSAPP: { label: 'WhatsApp', short: 'WA', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  WHATSAPP_CLOUD: { label: 'WA Business Cloud', short: 'WA Cloud', cls: 'bg-teal-50 text-teal-700 border-teal-200' },
   INSTAGRAM: { label: 'Instagram', short: 'IG', cls: 'bg-pink-50 text-pink-700 border-pink-200' },
   FACEBOOK: { label: 'Facebook', short: 'FB', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
   THREADS: { label: 'Threads', short: 'Threads', cls: 'bg-gray-100 text-gray-800 border-gray-300' },
@@ -733,6 +734,7 @@ export const Conversations: React.FC<ConversationsProps> = ({ licenseInfo, curre
             >
               <option value="ALL">Semua Channel</option>
               <option value="WHATSAPP">WhatsApp</option>
+              <option value="WHATSAPP_CLOUD">WA Business Cloud</option>
               <option value="INSTAGRAM">Instagram</option>
               <option value="FACEBOOK">Facebook</option>
               <option value="THREADS">Threads</option>

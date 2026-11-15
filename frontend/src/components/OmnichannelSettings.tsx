@@ -6,6 +6,7 @@ import { Button } from './ui/Button';
 import { useToast } from './ui/ToastProvider';
 
 const CHANNEL_OPTIONS: Array<{ value: OmnichannelType; label: string; idHint: string }> = [
+  { value: 'WHATSAPP_CLOUD', label: 'WhatsApp Business (Cloud API)', idHint: 'Phone Number ID (Meta)' },
   { value: 'INSTAGRAM', label: 'Instagram DM & Komentar', idHint: 'IG Business Account ID' },
   { value: 'FACEBOOK', label: 'Facebook Messenger & Page', idHint: 'Facebook Page ID' },
   { value: 'THREADS', label: 'Threads (Replies & Mentions)', idHint: 'Threads User ID' },
@@ -162,10 +163,18 @@ export const OmnichannelSettings: React.FC = () => {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            {(['INSTAGRAM', 'FACEBOOK', 'THREADS'] as OmnichannelType[]).map((ch) => {
+            {(['WHATSAPP_CLOUD', 'INSTAGRAM', 'FACEBOOK', 'THREADS'] as OmnichannelType[]).map((ch) => {
               const ready =
                 oauthCfg?.reneoOAuthReady ||
                 (ch === 'THREADS' ? oauthCfg?.directThreadsReady : oauthCfg?.directMetaReady);
+              const label =
+                ch === 'WHATSAPP_CLOUD'
+                  ? 'WA Business'
+                  : ch === 'INSTAGRAM'
+                    ? 'Instagram'
+                    : ch === 'FACEBOOK'
+                      ? 'Facebook'
+                      : 'Threads';
               return (
                 <button
                   key={ch}
@@ -177,7 +186,7 @@ export const OmnichannelSettings: React.FC = () => {
                   }}
                   className="h-8 px-3 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed whitespace-nowrap transition-colors"
                 >
-                  Login {ch === 'INSTAGRAM' ? 'Instagram' : ch === 'FACEBOOK' ? 'Facebook' : 'Threads'}
+                  Login {label}
                 </button>
               );
             })}
