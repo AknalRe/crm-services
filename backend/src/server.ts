@@ -31,7 +31,7 @@ import { startSlaMonitor } from './services/automation.service';
 import './services/queue.service'; // Start BullMQ worker
 
 const fastify = Fastify({
-  bodyLimit: 15 * 1024 * 1024,
+  bodyLimit: 16 * 1024 * 1024,
   logger: {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
   },

@@ -11,6 +11,9 @@ import {
   Cake,
   Users,
   FolderKanban,
+  MapPin,
+  X,
+  Send,
 } from 'lucide-react';
 import api from '../services/api';
 import { Contact, LicenseInfo } from '../types';
@@ -404,27 +407,37 @@ export const Contacts: React.FC<ContactsProps> = ({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       {/* Action Header */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         <div className="flex flex-1 flex-col sm:flex-row sm:items-center gap-2 min-w-0">
           <form onSubmit={handleSearchSubmit} className="relative w-full flex-none sm:flex-1 min-w-0 sm:min-w-[200px] lg:max-w-md">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               placeholder="Cari nama, panggilan, nomor WA, alamat..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full h-9 pl-9 pr-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-800 placeholder-gray-400 focus:outline-none focus:border-indigo-500"
+              className="w-full h-9 pl-9 pr-8 bg-white border border-gray-200 rounded-md text-[13px] text-gray-800 placeholder-gray-400 focus:outline-none focus:border-indigo-500"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                title="Bersihkan pencarian"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-400 hover:text-gray-700"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </form>
 
-          <div className="grid grid-cols-2 sm:flex items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex items-center gap-2 min-w-0">
             <select
               value={selectedKategori}
               onChange={(e) => setSelectedKategori(e.target.value)}
               title="Filter Kelompok / Kategori Kontak"
-              className="w-full sm:w-auto max-w-full h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
+              className="w-full sm:w-auto max-w-full min-w-0 h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-xs sm:text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
             >
               <option value="ALL">Semua Kelompok</option>
               {availableCategories.map((cat) => (
@@ -438,7 +451,7 @@ export const Contacts: React.FC<ContactsProps> = ({
             <select
               value={selectedTag}
               onChange={(e) => setSelectedTag(e.target.value)}
-              className="w-full sm:w-auto max-w-full h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
+              className="w-full sm:w-auto max-w-full min-w-0 h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-xs sm:text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
             >
               <option value="ALL">Semua Tag</option>
               {availableTags.map((tag) => (
@@ -450,37 +463,52 @@ export const Contacts: React.FC<ContactsProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
           {licenseInfo && licenseInfo.features?.maxContacts > 0 && (
-            <span className="inline-flex items-center h-9 px-2.5 rounded-md text-xs font-mono font-medium bg-gray-50 text-gray-700 border border-gray-200 tabular-nums">
-              {contacts.length}/{licenseInfo.features.maxContacts.toLocaleString('id-ID')} kontak
-            </span>
+            <div className="flex items-center justify-between sm:justify-start">
+              <span className="inline-flex items-center h-8 sm:h-9 px-2.5 rounded-md text-[11px] sm:text-xs font-mono font-medium bg-gray-50 text-gray-700 border border-gray-200 tabular-nums">
+                {contacts.length}/{licenseInfo.features.maxContacts.toLocaleString('id-ID')} kontak
+              </span>
+              {selectedIds.length > 0 && (
+                <span className="sm:hidden text-xs font-semibold text-indigo-700">
+                  {selectedIds.length} dipilih
+                </span>
+              )}
+            </div>
           )}
-          {selectedIds.length > 0 && onStartBroadcastWithContacts && (
+
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2">
+            {selectedIds.length > 0 && onStartBroadcastWithContacts && (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => onStartBroadcastWithContacts(selectedIds)}
+                className="col-span-2 sm:col-span-1 justify-center"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Siaran ({selectedIds.length})</span>
+              </Button>
+            )}
+
             <Button
-              variant="primary"
+              variant="secondary"
               size="md"
-              onClick={() => onStartBroadcastWithContacts(selectedIds)}
+              onClick={() => setIsImportModalOpen(true)}
+              className="justify-center"
             >
-              Siaran ({selectedIds.length})
+              <Upload className="w-3.5 h-3.5" />
+              <span>Import Data</span>
             </Button>
-          )}
 
-          <Button
-            variant="secondary"
-            size="md"
-            onClick={() => setIsImportModalOpen(true)}
-          >
-            Import Data
-          </Button>
-
-          <Button
-            variant={selectedIds.length > 0 ? 'secondary' : 'primary'}
-            size="md"
-            onClick={handleOpenAddModal}
-          >
-            Tambah Kontak
-          </Button>
+            <Button
+              variant={selectedIds.length > 0 ? 'secondary' : 'primary'}
+              size="md"
+              onClick={handleOpenAddModal}
+              className="justify-center"
+            >
+              <span>Tambah Kontak</span>
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -503,154 +531,182 @@ export const Contacts: React.FC<ContactsProps> = ({
           />
         ) : (
           <>
-            <div className="sm:hidden divide-y divide-gray-200">
-              <div className="px-3.5 py-2.5 bg-gray-50 flex items-center justify-between text-xs text-gray-600">
+            <div className="lg:hidden divide-y divide-gray-200">
+              <div className="px-3.5 py-2.5 bg-gray-50 flex items-center justify-between gap-2 text-xs text-gray-600">
                 <label className="inline-flex items-center gap-2 cursor-pointer font-medium">
                   <input
                     type="checkbox"
                     checked={contacts.length > 0 && selectedIds.length === contacts.length}
                     onChange={toggleSelectAll}
-                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                   />
                   <span>Pilih Semua ({contacts.length})</span>
                 </label>
                 {selectedIds.length > 0 && (
-                  <span className="font-semibold text-indigo-700">{selectedIds.length} dipilih</span>
+                  <span className="font-semibold text-indigo-700 tabular-nums">
+                    {selectedIds.length} dipilih
+                  </span>
                 )}
               </div>
-              {contacts.map((contact) => {
-                const isSelected = selectedIds.includes(contact.id);
-                const birthDate = contact.tanggal_lahir ? new Date(contact.tanggal_lahir) : null;
-                const isBirthdayToday =
-                  birthDate &&
-                  birthDate.getMonth() === new Date().getMonth() &&
-                  birthDate.getDate() === new Date().getDate();
-                return (
-                  <div
-                    key={contact.id}
-                    className={`p-3.5 space-y-2 text-xs ${isSelected ? 'bg-indigo-50/40' : 'bg-white'}`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <label className="flex items-start gap-2.5 min-w-0 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleSelectContact(contact.id)}
-                          className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <div className="font-semibold text-gray-900 truncate">{contact.nama_lengkap}</div>
-                          {contact.nama_panggilan && (
-                            <div className="text-[11px] text-gray-500">
-                              Panggilan: <span className="text-gray-700">{contact.nama_panggilan}</span>
+              <div className="divide-y divide-gray-200 md:grid md:grid-cols-2 md:divide-y-0 md:gap-px md:bg-gray-200">
+                {contacts.map((contact) => {
+                  const isSelected = selectedIds.includes(contact.id);
+                  const birthDate = contact.tanggal_lahir ? new Date(contact.tanggal_lahir) : null;
+                  const isBirthdayToday =
+                    birthDate &&
+                    birthDate.getMonth() === new Date().getMonth() &&
+                    birthDate.getDate() === new Date().getDate();
+                  const tagList = contact.tags
+                    ? contact.tags
+                        .split(',')
+                        .map((t) => t.trim())
+                        .filter(Boolean)
+                    : [];
+                  return (
+                    <div
+                      key={contact.id}
+                      className={`p-3.5 space-y-2.5 text-xs transition-colors ${
+                        isSelected ? 'bg-indigo-50/60' : 'bg-white'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2.5">
+                        <label className="flex items-start gap-2.5 flex-1 min-w-0 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectContact(contact.id)}
+                            className="mt-1 w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+                          />
+                          <div className="w-8 h-8 rounded-md bg-indigo-50 text-indigo-700 font-semibold text-xs flex items-center justify-center border border-indigo-200/70 shrink-0">
+                            {contact.nama_lengkap.slice(0, 2).toUpperCase()}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-gray-900 text-[13px] leading-snug break-words">
+                              {contact.nama_lengkap}
                             </div>
-                          )}
+                            {contact.nama_panggilan && (
+                              <div className="text-[11px] text-gray-500 truncate">
+                                Panggilan: <span className="text-gray-700">{contact.nama_panggilan}</span>
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                        <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(contact)}
+                            className="h-8 w-8 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50"
+                            title="Edit Kontak"
+                          >
+                            <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteTarget({ id: contact.id, name: contact.nama_lengkap })
+                            }
+                            className="h-8 w-8 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50"
+                            title="Hapus Kontak"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                          </button>
                         </div>
-                      </label>
-                      <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(contact)}
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50"
-                          title="Edit Kontak"
-                        >
-                          <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setDeleteTarget({ id: contact.id, name: contact.nama_lengkap })
-                          }
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50"
-                          title="Hapus Kontak"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-                        </button>
                       </div>
-                    </div>
 
-                    <div className="pl-6 space-y-1.5">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         {contact.nomor_whatsapp ? (
                           <a
                             href={`https://wa.me/${contact.nomor_whatsapp}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1 font-mono text-indigo-600 hover:underline"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50/70 border border-emerald-200 font-mono text-[11px] text-emerald-800 hover:bg-emerald-100/80 transition-colors"
                           >
-                            <Phone className="w-3 h-3 text-gray-400" />
+                            <Phone className="w-3 h-3 text-emerald-600 shrink-0" />
                             <span>+{contact.nomor_whatsapp}</span>
                           </a>
                         ) : (
-                          <span className="text-[11px] text-gray-400">Tanpa WA</span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-gray-100 text-[11px] text-gray-500">
+                            Tanpa WA
+                          </span>
                         )}
                         {contact.kategori && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                            <FolderKanban className="w-2.5 h-2.5 text-slate-500" strokeWidth={1.75} />
-                            <span>{contact.kategori}</span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200 max-w-full">
+                            <FolderKanban className="w-3 h-3 text-slate-500 shrink-0" strokeWidth={1.75} />
+                            <span className="truncate">{contact.kategori}</span>
                           </span>
                         )}
-                        {isBirthdayToday && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                            <Cake className="w-2.5 h-2.5" /> Ultah
-                          </span>
-                        )}
-                      </div>
-
-                      {contact.identities && contact.identities.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {contact.identities.map((idItem) => (
-                            <span
-                              key={idItem.id}
-                              className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-100 text-gray-700 border border-gray-200"
-                            >
-                              {idItem.channel === 'INSTAGRAM'
-                                ? 'IG'
-                                : idItem.channel === 'FACEBOOK'
-                                ? 'FB'
-                                : idItem.channel === 'TELEGRAM'
-                                ? 'TG'
-                                : idItem.channel}
-                              : {idItem.handle || idItem.externalId}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {(birthDate || contact.alamat) && (
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
-                          {birthDate && (
-                            <span className="inline-flex items-center gap-1 tabular-nums">
-                              <Calendar className="w-3 h-3 text-gray-400" />
+                        {birthDate && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-gray-50 text-gray-600 border border-gray-200 tabular-nums">
+                            <Calendar className="w-3 h-3 text-gray-400 shrink-0" />
+                            <span>
                               {birthDate.toLocaleDateString('id-ID', {
                                 day: 'numeric',
                                 month: 'short',
                                 year: 'numeric',
                               })}
                             </span>
-                          )}
-                          {contact.alamat && <span className="truncate max-w-full">{contact.alamat}</span>}
+                          </span>
+                        )}
+                        {isBirthdayToday && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                            <Cake className="w-3 h-3 shrink-0" /> Ultah
+                          </span>
+                        )}
+                      </div>
+
+                      {contact.identities && contact.identities.length > 0 && (
+                        <div className="flex flex-wrap gap-1 min-w-0">
+                          {contact.identities.map((idItem) => (
+                            <span
+                              key={idItem.id}
+                              className="inline-flex items-center max-w-full px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-100 text-gray-700 border border-gray-200"
+                            >
+                              <span className="truncate">
+                                {idItem.channel === 'INSTAGRAM'
+                                  ? 'IG'
+                                  : idItem.channel === 'FACEBOOK'
+                                  ? 'FB'
+                                  : idItem.channel === 'TELEGRAM'
+                                  ? 'TG'
+                                  : idItem.channel}
+                                : {idItem.handle || idItem.externalId}
+                              </span>
+                            </span>
+                          ))}
                         </div>
                       )}
 
-                      {contact.tags && (
-                        <div className="flex flex-wrap gap-1">
-                          {contact.tags.split(',').map((tag, idx) => (
+                      {contact.alamat && (
+                        <div className="flex items-start gap-1.5 text-[11px] text-gray-600 leading-relaxed">
+                          <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
+                          <span className="line-clamp-2 break-words">{contact.alamat}</span>
+                        </div>
+                      )}
+
+                      {contact.notes && (
+                        <p className="text-[11px] text-gray-500 italic line-clamp-1 break-words">
+                          Catatan: {contact.notes}
+                        </p>
+                      )}
+
+                      {tagList.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-0.5">
+                          {tagList.map((tag, idx) => (
                             <span
                               key={idx}
-                              className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 border border-gray-200"
+                              className="px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50/70 text-indigo-700 border border-indigo-200/80 max-w-full truncate"
                             >
-                              {tag.trim()}
+                              {tag}
                             </span>
                           ))}
                         </div>
                       )}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-            <div className="hidden sm:block overflow-x-auto">
+            <div className="hidden lg:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -833,19 +889,31 @@ export const Contacts: React.FC<ContactsProps> = ({
           </>
         )}
 
-        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between text-xs text-gray-500">
+        <div className="px-3.5 sm:px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
           <span className="tabular-nums">
             Total: <strong className="text-gray-900">{contacts.length}</strong> pelanggan | Terpilih:{' '}
             <strong className="text-indigo-700">{selectedIds.length}</strong>
           </span>
           {selectedIds.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedIds([])}
-              className="text-xs text-gray-500 hover:text-gray-800 underline"
-            >
-              Batalkan Pilihan
-            </button>
+            <div className="flex items-center gap-3">
+              {onStartBroadcastWithContacts && (
+                <button
+                  type="button"
+                  onClick={() => onStartBroadcastWithContacts(selectedIds)}
+                  className="text-xs font-semibold text-indigo-700 hover:underline inline-flex items-center gap-1"
+                >
+                  <Send className="w-3 h-3" />
+                  <span>Kirim Siaran ({selectedIds.length})</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSelectedIds([])}
+                className="text-xs text-gray-500 hover:text-gray-800 underline"
+              >
+                Batalkan Pilihan
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -1031,14 +1099,16 @@ export const Contacts: React.FC<ContactsProps> = ({
                 Identitas Kanal Omnichannel
               </label>
               {editingContact.identities && editingContact.identities.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 min-w-0">
                   {editingContact.identities.map((idItem) => (
                     <span
                       key={idItem.id}
-                      className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-700"
+                      className="inline-flex items-center gap-1.5 max-w-full px-2 py-1 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-700"
                     >
-                      <span className="font-semibold text-indigo-700">{idItem.channel}</span>
-                      <span>{idItem.handle || idItem.externalId}</span>
+                      <span className="font-semibold text-indigo-700 shrink-0">{idItem.channel}</span>
+                      <span className="truncate max-w-[180px] sm:max-w-xs">
+                        {idItem.handle || idItem.externalId}
+                      </span>
                       <button
                         type="button"
                         onClick={async () => {
@@ -1076,7 +1146,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                 <select
                   value={newIdChannel}
                   onChange={(e) => setNewIdChannel(e.target.value as any)}
-                  className="sm:col-span-3 h-8 px-2 bg-white border border-gray-200 rounded text-xs"
+                  className="sm:col-span-3 w-full h-9 sm:h-8 px-2 bg-white border border-gray-200 rounded text-xs"
                 >
                   <option value="TELEGRAM">Telegram</option>
                   <option value="INSTAGRAM">Instagram</option>
@@ -1088,14 +1158,14 @@ export const Contacts: React.FC<ContactsProps> = ({
                   placeholder="External ID / Chat ID"
                   value={newIdExternal}
                   onChange={(e) => setNewIdExternal(e.target.value)}
-                  className="sm:col-span-4 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs font-mono"
+                  className="sm:col-span-4 w-full min-w-0 h-9 sm:h-8 px-2.5 bg-white border border-gray-200 rounded text-xs font-mono"
                 />
                 <input
                   type="text"
                   placeholder="@handle (opsional)"
                   value={newIdHandle}
                   onChange={(e) => setNewIdHandle(e.target.value)}
-                  className="sm:col-span-3 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs"
+                  className="sm:col-span-3 w-full min-w-0 h-9 sm:h-8 px-2.5 bg-white border border-gray-200 rounded text-xs"
                 />
                 <Button
                   type="button"
@@ -1126,7 +1196,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                       setSavingIdentity(false);
                     }
                   }}
-                  className="sm:col-span-2 h-8"
+                  className="sm:col-span-2 w-full h-9 sm:h-8 justify-center"
                 >
                   Tambah
                 </Button>

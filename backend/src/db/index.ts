@@ -114,12 +114,14 @@ export async function initDb() {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_token TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_rating INTEGER;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_overall_score DOUBLE PRECISION;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_feedback TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_submitted_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS external_thread_id TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context_title TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS session_started_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_key;`;
 
     await sql`
@@ -150,6 +152,10 @@ export async function initDb() {
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_message_id TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS error_message TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_message_id TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_body TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_sender TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS metadata_json TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS channel_accounts (
@@ -293,12 +299,24 @@ export async function initDb() {
         assigned_agent_name TEXT,
         token TEXT NOT NULL UNIQUE,
         trigger_type TEXT NOT NULL DEFAULT 'MANUAL',
+        profile_id TEXT,
+        profile_name TEXT,
+        snapshot_json TEXT,
+        criteria_scores_json TEXT,
         rating INTEGER,
+        overall_score DOUBLE PRECISION,
         feedback TEXT,
         sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
         submitted_at TIMESTAMP
       );
     `;
+    await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS profile_id TEXT;`;
+    await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS profile_name TEXT;`;
+    await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS snapshot_json TEXT;`;
+    await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS criteria_scores_json TEXT;`;
+    await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS overall_score DOUBLE PRECISION;`;
+    await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS conversation_started_at TIMESTAMP;`;
+    await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS conversation_resolved_at TIMESTAMP;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS auto_reply_rules (

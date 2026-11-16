@@ -9,6 +9,8 @@ export interface LicenseInfo {
   plan: string; // e.g. "Bulanan (Pro)", "Tahunan", "Free Trial"
   period: 'monthly' | 'quarterly' | 'annual' | 'trial';
   expiresAt: string; // ISO string
+  startedAt?: string;
+  priceAmount?: number;
   daysLeft: number;
   isExpired: boolean;
   managedByReneo: boolean;
@@ -268,6 +270,11 @@ export class LicenseService {
               status: isExpired ? 'EXPIRED' : data.status || 'ACTIVE',
               plan: planName,
               period: data.period || 'monthly',
+              startedAt: data.startedAt ? String(data.startedAt) : undefined,
+              priceAmount:
+                typeof data.priceAmount === 'number' && data.priceAmount >= 0
+                  ? data.priceAmount
+                  : undefined,
               expiresAt: data.expiresAt,
               daysLeft,
               isExpired,
@@ -662,6 +669,7 @@ export class LicenseService {
    */
   public async createOrder(payload: {
     planSlug: string;
+    quantity?: number;
     buyerName?: string;
     buyerEmail?: string;
     buyerPhone?: string;
@@ -679,11 +687,14 @@ export class LicenseService {
       buyerName = buyerName || map.get('crm_admin_name') || 'Pelanggan CRM';
       buyerEmail = buyerEmail || map.get('crm_admin_email') || undefined;
     }
+    const rawQty = Number(payload.quantity ?? 1);
+    const quantity = Number.isFinite(rawQty) ? Math.min(24, Math.max(1, Math.round(rawQty))) : 1;
     const res = await axios.post(
       `${reneoUrl.replace(/\/+$/, '')}/api/v1/app-catalog/order`,
       {
         catalogId: 'reneo-crm',
         planSlug: payload.planSlug,
+        quantity,
         buyerName,
         buyerEmail,
         buyerPhone: payload.buyerPhone,

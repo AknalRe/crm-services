@@ -672,13 +672,16 @@ test('sendTextMessage & sendMediaMessage resolve away from stale default session
     },
   })) as any;
 
-  const textRes = await wahaService.sendTextMessage('0812-3456-7890', 'Tes kirim');
+  const textRes = await wahaService.sendTextMessage('0812-3456-7890', 'Tes kirim', undefined, {
+    replyTo: 'true_6281234567890@c.us_ORIG1',
+  });
   assert.equal(textRes.success, true);
   assert.equal(textRes.sessionUsed, 'HRIS_HR');
   assert.equal(textRes.messageId, 'true_6281234567890@c.us_MSG123');
   assert.equal(posted[0].url, '/api/sendText');
   assert.equal(posted[0].body.session, 'HRIS_HR');
   assert.equal(posted[0].body.chatId, '6281234567890@c.us');
+  assert.equal(posted[0].body.reply_to, 'true_6281234567890@c.us_ORIG1');
 
   const videoRes = await wahaService.sendMediaMessage(
     '123456789012345@lid',
@@ -687,6 +690,7 @@ test('sendTextMessage & sendMediaMessage resolve away from stale default session
       mimetype: 'video/mp4',
       filename: 'promo.mp4',
       caption: 'Video promo',
+      replyTo: 'true_123456789012345@lid_ORIG2',
     },
     'HRIS_HR'
   );
@@ -695,9 +699,329 @@ test('sendTextMessage & sendMediaMessage resolve away from stale default session
   assert.equal(posted[1].url, '/api/sendVideo');
   assert.equal(posted[2].url, '/api/sendFile');
   assert.equal(posted[2].body.chatId, '123456789012345@lid');
+  assert.equal(posted[2].body.reply_to, 'true_123456789012345@lid_ORIG2');
 
   const stoppedRes = await wahaService.sendTextMessage('081234567890', 'Halo', 'WA_OFF');
   assert.equal(stoppedRes.success, false);
   assert.match(stoppedRes.error || '', /SCAN_QR_CODE/);
 });
+
+test('sendSeen, setTyping, sendLinkPreviewMessage, sendButtonsMessage, sendPollMessage work with WAHA endpoints and graceful fallbacks', async (t) => {
+  const origGetConfig = wahaService.getConfig.bind(wahaService);
+  const origCreate = axios.create;
+
+  t.after(() => {
+    (wahaService as any).getConfig = origGetConfig;
+    axios.create = origCreate;
+  });
+
+  (wahaService as any).getConfig = async () => ({
+    mode: 'EXTERNAL',
+    baseUrl: 'https://wagt.example.com',
+    apiKey: 'ext-key',
+    session: 'HRIS_HR',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const posted: Array<{ url: string; body: any }> = [];
+  let failSendButtons = true;
+  let failCustomPreview = true;
+  let failSendSeenPrimary = true;
+
+  axios.create = (() => ({
+    get: async () => ({ data: [{ name: 'HRIS_HR', status: 'WORKING' }] }),
+    post: async (url: string, body: any) => {
+      posted.push({ url, body });
+      if (url === '/api/sendSeen' && failSendSeenPrimary) {
+        const err: any = new Error('Not Found');
+        err.response = { status: 404, data: { message: 'Not Found' } };
+        throw err;
+      }
+      if (url === '/api/send/link-custom-preview' && failCustomPreview) {
+        const err: any = new Error('Not Implemented');
+        err.response = { status: 501, data: { message: 'Not Implemented' } };
+        throw err;
+      }
+      if (url === '/api/sendButtons' && failSendButtons) {
+        const err: any = new Error('Buttons are deprecated');
+        err.response = { status: 422, data: { message: 'Buttons are deprecated on this engine' } };
+        throw err;
+      }
+      return { data: { id: { _serialized: `true_${body?.chatId || 'x'}_OK1` } } };
+    },
+  })) as any;
+
+  // 1. sendSeen (primary 404 -> fallback chats/.../messages/read)
+  const seenRes = await wahaService.sendSeen('081234567890', 'HRIS_HR', {
+    messageIds: ['false_6281234567890@c.us_IN1'],
+  });
+  assert.equal(seenRes.success, true);
+  assert.equal(posted[0].url, '/api/sendSeen');
+  assert.equal(posted[0].body.messageId, 'false_6281234567890@c.us_IN1');
+  assert.equal(posted[1].url, '/api/HRIS_HR/chats/6281234567890%40c.us/messages/read');
+
+  // 2. setTyping start & stop
+  const startTyp = await wahaService.setTyping('081234567890', true, 'HRIS_HR');
+  const stopTyp = await wahaService.setTyping('081234567890', false, 'HRIS_HR');
+  assert.equal(startTyp.success, true);
+  assert.equal(stopTyp.success, true);
+  assert.equal(posted[2].url, '/api/startTyping');
+  assert.equal(posted[3].url, '/api/stopTyping');
+
+  // 3. sendLinkPreviewMessage fallback -> sendText with linkPreview: true, and native preview when supported
+  const linkFallbackRes = await wahaService.sendLinkPreviewMessage(
+    '081234567890',
+    {
+      url: 'https://reneo.id/promo',
+      title: 'Promo Akhir Bulan',
+      description: 'Diskon 30%',
+      caption: 'Cek katalog kami',
+      replyTo: 'ORIG_LINK',
+    },
+    'HRIS_HR'
+  );
+  assert.equal(linkFallbackRes.success, true);
+  assert.equal(linkFallbackRes.usedFallbackText, true);
+  assert.equal(posted[4].url, '/api/send/link-custom-preview');
+  assert.equal(posted[5].url, '/api/sendText');
+  assert.equal(posted[5].body.linkPreview, true);
+  assert.equal(posted[5].body.reply_to, 'ORIG_LINK');
+  assert.match(posted[5].body.text, /https:\/\/reneo\.id\/promo/);
+
+  failCustomPreview = false;
+  const linkNativeRes = await wahaService.sendLinkPreviewMessage(
+    '081234567890',
+    {
+      url: 'https://reneo.id/promo',
+      title: 'Promo',
+      imageUrl: 'https://reneo.id/thumb.png',
+    },
+    'HRIS_HR'
+  );
+  assert.equal(linkNativeRes.success, true);
+  assert.equal(linkNativeRes.usedFallbackText, undefined);
+  assert.equal(posted[6].url, '/api/send/link-custom-preview');
+  assert.equal(posted[6].body.preview.image.url, 'https://reneo.id/thumb.png');
+
+  // 4. sendButtonsMessage fallback when WAHA rejects buttons, strict failure when fallback disabled, and native success
+  const btnFallbackRes = await wahaService.sendButtonsMessage(
+    '081234567890',
+    {
+      header: 'Konfirmasi Order',
+      body: 'Pilih tindakan:',
+      footer: 'Tim CS Reneo',
+      buttons: [
+        { type: 'reply', text: 'Ya, Lanjut' },
+        { type: 'url', text: 'Buka Invoice', url: 'https://reneo.id/inv/1' },
+      ],
+      fallbackTextOnUnsupported: true,
+    },
+    'HRIS_HR'
+  );
+  assert.equal(btnFallbackRes.success, true);
+  assert.equal(btnFallbackRes.usedFallbackText, true);
+  assert.equal(posted[7].url, '/api/sendButtons');
+  assert.equal(posted[8].url, '/api/sendText');
+  assert.match(posted[8].body.text, /1\. Ya, Lanjut/);
+  assert.match(posted[8].body.text, /2\. Buka Invoice: https:\/\/reneo\.id\/inv\/1/);
+
+  const btnStrictFail = await wahaService.sendButtonsMessage(
+    '081234567890',
+    {
+      body: 'Pilih:',
+      buttons: [{ type: 'reply', text: 'Oke' }],
+      fallbackTextOnUnsupported: false,
+    },
+    'HRIS_HR'
+  );
+  assert.equal(btnStrictFail.success, false);
+
+  failSendButtons = false;
+  const btnNativeRes = await wahaService.sendButtonsMessage(
+    '081234567890',
+    {
+      body: 'Silakan pilih:',
+      buttons: [
+        { type: 'reply', text: 'Setuju' },
+        { type: 'copy', text: 'Salin Promo', copyCode: 'RENEO20' },
+      ],
+    },
+    'HRIS_HR'
+  );
+  assert.equal(btnNativeRes.success, true);
+  assert.equal(btnNativeRes.usedFallbackText, undefined);
+  assert.equal(posted[10].url, '/api/sendButtons');
+  assert.equal(posted[10].body.buttons[1].copyCode, 'RENEO20');
+
+  // 5. sendPollMessage
+  const pollRes = await wahaService.sendPollMessage(
+    '081234567890',
+    {
+      question: 'Jadwal yang paling sesuai?',
+      options: ['Pagi', 'Siang', 'Sore'],
+      multipleAnswers: false,
+    },
+    'HRIS_HR'
+  );
+  assert.equal(pollRes.success, true);
+  assert.equal(posted[11].url, '/api/sendPoll');
+  assert.equal(posted[11].body.poll.name, 'Jadwal yang paling sesuai?');
+  assert.deepEqual(posted[11].body.poll.options, ['Pagi', 'Siang', 'Sore']);
+});
+
+test('extractWahaPresence & interactiveResponseMessage parse presence and interactive button replies', () => {
+  const { extractWahaPresence, extractInboundWahaText } = require('../routes/waha') as typeof import('../routes/waha');
+
+  assert.deepEqual(
+    extractWahaPresence({
+      id: '6281234567890@c.us',
+      presences: [{ participant: '6281234567890@c.us', lastKnownPresence: 'composing' }],
+    }),
+    { chatId: '6281234567890@c.us', status: 'typing' }
+  );
+  assert.deepEqual(
+    extractWahaPresence({ id: '99887766@lid', lastKnownPresence: 'recording' }),
+    { chatId: '99887766@lid', status: 'recording' }
+  );
+  assert.deepEqual(
+    extractWahaPresence({ id: '6281234567890@c.us', presence: 'paused' }),
+    { chatId: '6281234567890@c.us', status: 'paused' }
+  );
+  assert.equal(
+    extractWahaPresence({ id: '120363000000@g.us', presences: [{ lastKnownPresence: 'composing' }] }),
+    null
+  );
+
+  assert.equal(
+    extractInboundWahaText({
+      _data: { message: { interactiveResponseMessage: { body: { text: 'Konfirmasi Bayar' } } } },
+    }),
+    'Konfirmasi Bayar'
+  );
+});
+
+test('inbound WAHA media extraction, unmasked downloadMedia proxy, and mime normalization work end-to-end', async (t) => {
+  const fs = require('node:fs') as typeof import('node:fs');
+  const path = require('node:path') as typeof import('node:path');
+  const { resolveWahaMediaTargetUrl } = require('./waha.service') as typeof import('./waha.service');
+  const { extractInboundWahaMediaMeta, extractInboundWahaText } = require('../routes/waha') as typeof import('../routes/waha');
+  const { saveBase64MediaFile } = require('../routes/media') as typeof import('../routes/media');
+
+  assert.equal(
+    resolveWahaMediaTargetUrl('http://localhost:3000/api/files/default/a.jpg', 'http://127.0.0.1:4100')?.toString(),
+    'http://127.0.0.1:4100/api/files/default/a.jpg'
+  );
+  assert.equal(
+    resolveWahaMediaTargetUrl('http://waha:3000/api/files/default/b.mp4', 'https://waha.example.com')?.toString(),
+    'https://waha.example.com/api/files/default/b.mp4'
+  );
+  assert.equal(
+    resolveWahaMediaTargetUrl('/api/files/c.pdf', 'https://waha.example.com')?.toString(),
+    'https://waha.example.com/api/files/c.pdf'
+  );
+  assert.equal(
+    resolveWahaMediaTargetUrl('https://evil.example.com/secret', 'https://waha.example.com'),
+    null
+  );
+
+  const origGetConfig = wahaService.getConfig.bind(wahaService);
+  const origAxiosGet = axios.get;
+  t.after(() => {
+    (wahaService as any).getConfig = origGetConfig;
+    (axios as any).get = origAxiosGet;
+  });
+
+  (wahaService as any).getConfig = async (maskSecret = false) => ({
+    mode: 'INTERNAL',
+    baseUrl: 'http://127.0.0.1:4100',
+    apiKey: maskSecret ? '••••••••' : 'real-secret-waha-key',
+    session: 'default',
+    internalLocked: true,
+    hasApiKey: true,
+  });
+
+  let capturedUrl = '';
+  let capturedHeaders: Record<string, string> = {};
+  (axios as any).get = async (url: string, cfg: any) => {
+    capturedUrl = url;
+    capturedHeaders = cfg?.headers || {};
+    return {
+      data: Buffer.from([1, 2, 3, 4]),
+      headers: { 'content-type': 'image/jpeg' },
+    };
+  };
+
+  const downloaded = await wahaService.downloadMedia('http://localhost:3000/api/files/default/foto.jpg');
+  assert.equal(capturedUrl, 'http://127.0.0.1:4100/api/files/default/foto.jpg');
+  assert.equal(capturedHeaders['X-Api-Key'], 'real-secret-waha-key');
+  assert.equal(downloaded.contentType, 'image/jpeg');
+  assert.equal(downloaded.buffer.length, 4);
+
+  const imgMeta = extractInboundWahaMediaMeta({
+    hasMedia: true,
+    media: {
+      url: 'http://localhost:3000/api/files/default/img.jpg',
+      mimetype: 'image/jpeg',
+      filename: 'bukti-tf.jpg',
+    },
+  });
+  assert.equal(imgMeta.hasMedia, true);
+  assert.equal(imgMeta.mediaType, 'image');
+  assert.equal(imgMeta.mimetype, 'image/jpeg');
+  assert.equal(imgMeta.mediaName, 'bukti-tf.jpg');
+
+  const pttMeta = extractInboundWahaMediaMeta({
+    hasMedia: true,
+    type: 'ptt',
+    media: {
+      url: '/api/files/default/voice.ogg',
+      mimetype: 'audio/ogg; codecs=opus',
+    },
+  });
+  assert.equal(pttMeta.mediaType, 'audio');
+  assert.equal(pttMeta.mimetype, 'audio/ogg');
+
+  const stickerMeta = extractInboundWahaMediaMeta({
+    hasMedia: true,
+    type: 'sticker',
+    _data: { message: { stickerMessage: { mimetype: 'image/webp' } } },
+    media: { url: '/api/files/default/stk.webp' },
+  });
+  assert.equal(stickerMeta.mediaType, 'image');
+  assert.equal(stickerMeta.isSticker, true);
+  assert.equal(stickerMeta.mimetype, 'image/webp');
+
+  const docCapPayload = {
+    _data: {
+      message: {
+        documentWithCaptionMessage: {
+          message: {
+            documentMessage: {
+              mimetype: 'application/pdf',
+              fileName: 'invoice-01.pdf',
+              caption: 'Berikut invoice tagihan Anda',
+            },
+          },
+        },
+      },
+    },
+    media: { url: '/api/files/default/invoice-01.pdf' },
+  };
+  const docMeta = extractInboundWahaMediaMeta(docCapPayload);
+  assert.equal(docMeta.mediaType, 'document');
+  assert.equal(docMeta.mediaName, 'invoice-01.pdf');
+  assert.equal(extractInboundWahaText(docCapPayload), 'Berikut invoice tagihan Anda');
+
+  const savedOgg = await saveBase64MediaFile({
+    base64: Buffer.from('OggS').toString('base64'),
+    mimeType: 'audio/ogg; codecs=opus',
+  });
+  t.after(async () => {
+    await fs.promises.unlink(path.resolve(process.cwd(), 'uploads', savedOgg.filename)).catch(() => {});
+  });
+  assert.match(savedOgg.relativeUrl, /\.ogg$/);
+});
+
+
 

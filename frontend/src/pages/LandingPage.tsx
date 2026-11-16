@@ -11,6 +11,7 @@ import { ReneoCrmLogo } from '../components/ReneoCrmLogo';
 
 interface LandingPageProps {
   initialized: boolean;
+  authenticated?: boolean;
   onEnterLogin: () => void;
 }
 
@@ -200,7 +201,11 @@ const FAQS = [
   },
 ];
 
-export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLogin }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({
+  initialized,
+  authenticated = false,
+  onEnterLogin,
+}) => {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const currentHost =
@@ -241,10 +246,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             <button
               type="button"
               onClick={onEnterLogin}
-              className="h-8 px-2.5 sm:px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium inline-flex items-center transition-colors whitespace-nowrap"
+              className={`h-8 px-2.5 sm:px-3 rounded-lg text-xs font-medium inline-flex items-center transition-colors whitespace-nowrap ${
+                authenticated
+                  ? 'bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold'
+                  : 'border border-slate-200 hover:bg-slate-50 text-slate-700'
+              }`}
             >
-              <span>{initialized ? 'Masuk' : 'Setup'}</span>
-              <span className="hidden sm:inline">&nbsp;CRM</span>
+              {authenticated ? (
+                <>
+                  <span className="sm:hidden">Workspace</span>
+                  <span className="hidden sm:inline">Buka Workspace CRM</span>
+                </>
+              ) : (
+                <>
+                  <span>{initialized ? 'Masuk' : 'Setup'}</span>
+                  <span className="hidden sm:inline">&nbsp;CRM</span>
+                </>
+              )}
             </button>
             <a
               href={PANEL_ORDER_URL}
@@ -295,7 +313,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 }}
                 className="h-9 px-3 rounded-lg border border-slate-200 text-slate-700 text-xs font-medium inline-flex items-center justify-center"
               >
-                {initialized ? 'Masuk ke Ruang Kerja CRM' : 'Lanjutkan Setup CRM'}
+                {authenticated
+                  ? 'Buka Workspace CRM'
+                  : initialized
+                  ? 'Masuk ke Ruang Kerja CRM'
+                  : 'Lanjutkan Setup CRM'}
               </button>
             </div>
           </nav>
@@ -334,15 +356,31 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 </a>
               </div>
               <div className="text-xs text-slate-500 leading-relaxed">
-                Pilih paket <strong className="font-semibold text-slate-700">Hosting + Reneo CRM siap pakai</strong> dalam 1 tagihan atau pasang di VPS sendiri. Sudah punya ruang kerja?{' '}
-                <button
-                  type="button"
-                  onClick={onEnterLogin}
-                  className="font-semibold text-[#2563eb] hover:underline"
-                >
-                  {initialized ? 'Masuk ke CRM' : 'Lanjutkan Setup CRM'}
-                </button>
-                .
+                {authenticated ? (
+                  <>
+                    Sesi akun CRM Anda masih aktif.{' '}
+                    <button
+                      type="button"
+                      onClick={onEnterLogin}
+                      className="font-semibold text-[#2563eb] hover:underline"
+                    >
+                      Kembali ke Workspace CRM
+                    </button>
+                    .
+                  </>
+                ) : (
+                  <>
+                    Pilih paket <strong className="font-semibold text-slate-700">Hosting + Reneo CRM siap pakai</strong> dalam 1 tagihan atau pasang di VPS sendiri. Sudah punya ruang kerja?{' '}
+                    <button
+                      type="button"
+                      onClick={onEnterLogin}
+                      className="font-semibold text-[#2563eb] hover:underline"
+                    >
+                      {initialized ? 'Masuk ke CRM' : 'Lanjutkan Setup CRM'}
+                    </button>
+                    .
+                  </>
+                )}
               </div>
             </div>
 
@@ -809,7 +847,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             onClick={onEnterLogin}
             className="text-[#2563eb] hover:text-[#1d4ed8] font-medium"
           >
-            {initialized ? 'Masuk ke Ruang Kerja CRM' : 'Setup Awal CRM'}
+            {authenticated
+              ? 'Buka Workspace CRM'
+              : initialized
+              ? 'Masuk ke Ruang Kerja CRM'
+              : 'Setup Awal CRM'}
           </button>
         </div>
       </footer>

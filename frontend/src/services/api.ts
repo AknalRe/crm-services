@@ -19,9 +19,10 @@ import {
   CrmSlaCsatSettings,
   CannedResponse,
 } from '../types';
+import { getApiBaseUrl } from './paths';
 
 const client = axios.create({
-  baseURL: './api',
+  baseURL: typeof window !== 'undefined' ? getApiBaseUrl(window.location.pathname) : './api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -111,9 +112,32 @@ export const api = {
     const res = await client.get('/conversations');
     return res.data.data;
   },
-  getConversationMessages: async (id: string): Promise<ChatMessage[]> => {
-    const res = await client.get(`/conversations/${id}/messages`);
+  getConversationMessages: async (
+    id: string,
+    opts?: { markRead?: boolean; forceSeen?: boolean }
+  ): Promise<ChatMessage[]> => {
+    const params: Record<string, string> = {};
+    if (opts?.markRead === false) params.markRead = 'false';
+    if (opts?.forceSeen) params.forceSeen = '1';
+    const res = await client.get(`/conversations/${id}/messages`, { params });
     return res.data.data;
+  },
+  markConversationRead: async (
+    id: string
+  ): Promise<{ seenSent: boolean; error?: string }> => {
+    const res = await client.post(`/conversations/${id}/read`);
+    return res.data.data || { seenSent: false };
+  },
+  sendConversationTyping: async (
+    id: string,
+    typing: boolean,
+    session?: string
+  ): Promise<{ success: boolean }> => {
+    const res = await client.post(`/conversations/${id}/typing`, {
+      typing,
+      ...(session ? { session } : {}),
+    });
+    return res.data;
   },
   sendConversationMessage: async (
     id: string,
@@ -123,6 +147,34 @@ export const api = {
       mediaBase64?: string;
       mediaMimetype?: string;
       mediaName?: string;
+      replyToMessageId?: string;
+      messageKind?: 'TEXT' | 'MEDIA' | 'LINK_PREVIEW' | 'BUTTONS' | 'POLL';
+      linkPreview?: {
+        url: string;
+        title?: string;
+        description?: string;
+        caption?: string;
+        imageUrl?: string;
+        highQuality?: boolean;
+      };
+      interactiveButtons?: {
+        header?: string;
+        body: string;
+        footer?: string;
+        fallbackTextOnUnsupported?: boolean;
+        buttons: Array<{
+          type: 'reply' | 'url' | 'call' | 'copy';
+          text: string;
+          url?: string;
+          phoneNumber?: string;
+          copyCode?: string;
+        }>;
+      };
+      poll?: {
+        question: string;
+        options: string[];
+        multipleAnswers?: boolean;
+      };
     }
   ): Promise<ChatMessage> => {
     const res = await client.post(`/conversations/${id}/messages`, payload);
@@ -169,8 +221,16 @@ export const api = {
     token: string
   ): Promise<{
     contactName: string;
+    agentName?: string | null;
+    wahaSession?: string | null;
+    profileName?: string;
+    texts?: import('../types').CsatTextConfig;
+    criteria?: import('../types').CsatCriterion[];
     alreadyRated: boolean;
     rating?: number | null;
+    overallScore?: number | null;
+    criteriaScores?: Record<string, number>;
+    criteriaDetails?: import('../types').CsatCriterionScoreDetail[];
     feedback?: string | null;
     submittedAt?: string | null;
   }> => {
@@ -179,7 +239,7 @@ export const api = {
   },
   submitPublicCsat: async (
     token: string,
-    payload: { rating: number; feedback?: string }
+    payload: { rating?: number; criteriaScores?: Record<string, number>; feedback?: string }
   ): Promise<any> => {
     const res = await client.post(`/public/csat/${encodeURIComponent(token)}`, payload);
     return res.data;
@@ -395,6 +455,7 @@ export const api = {
   },
   createLicenseOrder: async (data: {
     planSlug: string;
+    quantity?: number;
     buyerName?: string;
     buyerEmail?: string;
     buyerPhone?: string;

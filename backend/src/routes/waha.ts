@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, inArray, like, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   campaignRecipients,
@@ -20,6 +20,7 @@ import {
 } from '../services/phone.utils';
 import { handleInboundAutomation } from '../services/automation.service';
 import { requirePermission } from './auth';
+import { saveBase64MediaFile, saveMediaBufferFile } from './media';
 import crypto from 'crypto';
 
 export function resolveRequestPublicBase(req: FastifyRequest): string | null {
@@ -71,41 +72,138 @@ export function isWahaFromMe(payload: any): boolean {
 }
 
 export function extractInboundWahaText(payload: any): string {
+  const msg = payload?._data?.message || payload?._data?.Message || {};
   const viewOnceMsg =
-    payload?._data?.message?.viewOnceMessage?.message ||
-    payload?._data?.message?.viewOnceMessageV2?.message;
+    msg?.viewOnceMessage?.message ||
+    msg?.viewOnceMessageV2?.message ||
+    msg?.viewOnceMessageV2Extension?.message;
+  const docWithCaptionMsg = msg?.documentWithCaptionMessage?.message?.documentMessage;
   const candidates = [
     payload?.body,
     payload?.caption,
     payload?._data?.body,
     payload?._data?.caption,
-    payload?._data?.message?.conversation,
-    payload?._data?.message?.extendedTextMessage?.text,
-    payload?._data?.message?.imageMessage?.caption,
-    payload?._data?.message?.videoMessage?.caption,
-    payload?._data?.message?.documentMessage?.caption,
+    msg?.conversation,
+    msg?.extendedTextMessage?.text,
+    msg?.imageMessage?.caption,
+    msg?.videoMessage?.caption,
+    msg?.documentMessage?.caption,
+    docWithCaptionMsg?.caption,
     viewOnceMsg?.imageMessage?.caption,
     viewOnceMsg?.videoMessage?.caption,
-    payload?._data?.message?.buttonsResponseMessage?.selectedDisplayText,
-    payload?._data?.message?.listResponseMessage?.title,
-    payload?._data?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    payload?._data?.Message?.conversation,
-    payload?._data?.Message?.extendedTextMessage?.text,
-    payload?._data?.Message?.imageMessage?.caption,
+    viewOnceMsg?.documentMessage?.caption,
+    msg?.buttonsResponseMessage?.selectedDisplayText,
+    msg?.listResponseMessage?.title,
+    msg?.templateButtonReplyMessage?.selectedDisplayText,
+    msg?.interactiveResponseMessage?.body?.text,
   ];
   for (const c of candidates) {
     if (typeof c === 'string' && c.trim()) return c;
   }
-  if (payload?.location || payload?._data?.message?.locationMessage) {
+  if (payload?.location || msg?.locationMessage) {
     return '[Lokasi dibagikan]';
   }
-  if (payload?.vCards || payload?._data?.message?.contactMessage || payload?._data?.message?.contactsArrayMessage) {
+  if (payload?.vCards || msg?.contactMessage || msg?.contactsArrayMessage) {
     return '[Kontak dibagikan]';
   }
-  if (payload?._data?.message?.stickerMessage || payload?.type === 'sticker') {
+  if (msg?.stickerMessage || payload?.type === 'sticker') {
     return '[Stiker]';
   }
   return '';
+}
+
+export interface InboundWahaMediaMeta {
+  hasMedia: boolean;
+  rawMediaUrl: string | null;
+  inlineBase64: string | null;
+  mimetype: string | null;
+  mediaType: 'image' | 'video' | 'audio' | 'document' | null;
+  mediaName: string | null;
+  isSticker: boolean;
+}
+
+export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta {
+  const msg = payload?._data?.message || payload?._data?.Message || {};
+  const viewOnceMsg =
+    msg?.viewOnceMessage?.message ||
+    msg?.viewOnceMessageV2?.message ||
+    msg?.viewOnceMessageV2Extension?.message ||
+    {};
+  const docMsg = msg?.documentWithCaptionMessage?.message?.documentMessage || msg?.documentMessage;
+  const imgMsg = viewOnceMsg?.imageMessage || msg?.imageMessage;
+  const vidMsg = viewOnceMsg?.videoMessage || msg?.videoMessage;
+  const audMsg = msg?.audioMessage || viewOnceMsg?.audioMessage;
+  const stickerMsg = msg?.stickerMessage;
+
+  const rawMediaUrl =
+    String(payload?.media?.url || payload?.mediaUrl || payload?._data?.mediaUrl || '').trim() ||
+    null;
+  const inlineBase64 =
+    String(payload?.media?.data || payload?.media?.base64 || payload?._data?.mediaData || '').trim() ||
+    null;
+
+  const rawType = String(payload?.type || '').toLowerCase().trim();
+  const isSticker = Boolean(stickerMsg || rawType === 'sticker');
+
+  const rawMime = String(
+    payload?.media?.mimetype ||
+      payload?._data?.mimetype ||
+      imgMsg?.mimetype ||
+      vidMsg?.mimetype ||
+      audMsg?.mimetype ||
+      docMsg?.mimetype ||
+      stickerMsg?.mimetype ||
+      ''
+  )
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+
+  let mediaType: 'image' | 'video' | 'audio' | 'document' | null = null;
+  if (rawMime.startsWith('image/') || isSticker || imgMsg || rawType === 'image') {
+    mediaType = 'image';
+  } else if (rawMime.startsWith('video/') || vidMsg || rawType === 'video') {
+    mediaType = 'video';
+  } else if (rawMime.startsWith('audio/') || audMsg || rawType === 'audio' || rawType === 'ptt') {
+    mediaType = 'audio';
+  } else if (docMsg || rawType === 'document' || payload?.hasMedia || rawMediaUrl || inlineBase64) {
+    mediaType = 'document';
+  }
+
+  const effectiveMime =
+    rawMime ||
+    (isSticker
+      ? 'image/webp'
+      : mediaType === 'image'
+      ? 'image/jpeg'
+      : mediaType === 'video'
+      ? 'video/mp4'
+      : mediaType === 'audio'
+      ? 'audio/ogg'
+      : null);
+
+  const rawName =
+    String(
+      payload?.media?.filename ||
+        payload?._data?.filename ||
+        docMsg?.fileName ||
+        payload?._data?.Info?.FileName ||
+        ''
+    ).trim() || null;
+
+  const hasMedia = Boolean(
+    payload?.hasMedia || rawMediaUrl || inlineBase64 || imgMsg || vidMsg || audMsg || docMsg || stickerMsg
+  );
+
+  return {
+    hasMedia,
+    rawMediaUrl,
+    inlineBase64,
+    mimetype: effectiveMime,
+    mediaType: hasMedia ? mediaType : null,
+    mediaName: rawName,
+    isSticker,
+  };
 }
 
 export function extractPhoneCandidatesFromWahaPayload(payload: any): string[] {
@@ -134,6 +232,39 @@ export function extractPhoneCandidatesFromWahaPayload(payload: any): string[] {
     }
   }
   return out;
+}
+
+export function extractWahaPresence(
+  payload: any
+): { chatId: string; status: 'typing' | 'recording' | 'online' | 'paused' } | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const chatId = String(payload.id || payload.chatId || payload.from || '').trim();
+  if (!chatId || !isPersonalWahaJid(chatId)) return null;
+
+  const firstEntry = Array.isArray(payload.presences) ? payload.presences[0] : null;
+  const rawPresence = String(
+    firstEntry?.lastKnownPresence ||
+      firstEntry?.presence ||
+      payload.lastKnownPresence ||
+      payload.presence ||
+      ''
+  )
+    .toLowerCase()
+    .trim();
+
+  if (rawPresence === 'composing' || rawPresence === 'typing') {
+    return { chatId, status: 'typing' };
+  }
+  if (rawPresence === 'recording') {
+    return { chatId, status: 'recording' };
+  }
+  if (rawPresence === 'available' || rawPresence === 'online') {
+    return { chatId, status: 'online' };
+  }
+  if (rawPresence === 'paused' || rawPresence === 'unavailable' || rawPresence === 'offline') {
+    return { chatId, status: 'paused' };
+  }
+  return null;
 }
 
 function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: string[] } {
@@ -490,6 +621,68 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         liveEvents.emit('conversations:update', { ack: ackValue, msgId: exactIds[0] });
       }
 
+      // 1b. Typing & Presence Updates (presence.update)
+      if (event === 'presence.update' && payload) {
+        const parsedPresence = extractWahaPresence(payload);
+        if (parsedPresence) {
+          const phoneCandidate = extractPhoneCandidatesFromWahaPayload({
+            from: parsedPresence.chatId,
+            ...payload,
+          })[0];
+          let matchedContactId: string | null = null;
+
+          if (phoneCandidate) {
+            const variants = Array.from(
+              new Set([
+                phoneCandidate,
+                `+${phoneCandidate}`,
+                phoneCandidate.startsWith('62') ? `0${phoneCandidate.slice(2)}` : '',
+              ].filter(Boolean))
+            );
+            const found = await db
+              .select({ id: contacts.id })
+              .from(contacts)
+              .where(inArray(contacts.nomorWhatsapp, variants))
+              .limit(1);
+            matchedContactId = found[0]?.id || null;
+          }
+
+          if (!matchedContactId) {
+            const idRow = await db
+              .select({ contactId: contactIdentities.contactId })
+              .from(contactIdentities)
+              .where(
+                and(
+                  eq(contactIdentities.channel, 'WHATSAPP'),
+                  eq(contactIdentities.externalId, parsedPresence.chatId)
+                )
+              )
+              .limit(1);
+            matchedContactId = idRow[0]?.contactId || null;
+          }
+
+          if (matchedContactId) {
+            const convCandidates = await db
+              .select({ id: conversations.id, wahaSession: conversations.wahaSession })
+              .from(conversations)
+              .where(and(eq(conversations.contactId, matchedContactId), eq(conversations.channel, 'WHATSAPP')))
+              .orderBy(desc(conversations.updatedAt));
+            const matchedConv =
+              (webhookSession
+                ? convCandidates.find((c) => c.wahaSession === webhookSession)
+                : undefined) || convCandidates[0];
+            if (matchedConv) {
+              liveEvents.emit('conversations:presence', {
+                conversationId: matchedConv.id,
+                presence: parsedPresence.status,
+                session: webhookSession || null,
+                updatedAt: new Date().toISOString(),
+              });
+            }
+          }
+        }
+      }
+
       // 2. Incoming Messages (message / message.any) - personal 1:1 chats (@c.us / @s.whatsapp.net / @lid)
       const isInboundMessageEvent = event === 'message' || event === 'message.any';
       const rawFrom = String(
@@ -554,29 +747,73 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           }
         }
 
-        const mediaUrl = payload.media?.url || payload.mediaUrl || payload._data?.mediaUrl || null;
-        const rawMime = String(
-          payload.media?.mimetype ||
-          payload._data?.mimetype ||
-          payload._data?.message?.imageMessage?.mimetype ||
-          payload._data?.message?.videoMessage?.mimetype ||
-          payload._data?.message?.audioMessage?.mimetype ||
-          payload._data?.message?.documentMessage?.mimetype ||
-          ''
-        );
-        const mediaType = rawMime.startsWith('image/')
-          ? 'image'
-          : rawMime.startsWith('video/')
-          ? 'video'
-          : rawMime.startsWith('audio/')
-          ? 'audio'
-          : payload.hasMedia || mediaUrl
-          ? 'document'
-          : null;
-        const mediaName = payload.media?.filename || payload._data?.filename || null;
+        const mediaMeta = extractInboundWahaMediaMeta(payload);
+        let mediaUrl: string | null = mediaMeta.rawMediaUrl;
+        const mediaType = mediaMeta.mediaType;
+        const mediaName = mediaMeta.mediaName;
+        const hasMedia = mediaMeta.hasMedia;
         const rawText = extractInboundWahaText(payload);
-        const hasMedia = Boolean(payload.hasMedia || mediaUrl || mediaType);
-        const body = rawText || (hasMedia ? '[Lampiran Media]' : '');
+
+        // Download & persist inbound WAHA media locally so files never disappear when WAHA purges /api/files/
+        if (hasMedia) {
+          if (mediaMeta.inlineBase64) {
+            try {
+              const saved = await saveBase64MediaFile({
+                base64: mediaMeta.inlineBase64,
+                mimeType: mediaMeta.mimetype || undefined,
+                fileName: mediaName || undefined,
+                maxBytes: 25 * 1024 * 1024,
+              });
+              mediaUrl = saved.relativeUrl;
+            } catch (err: any) {
+              console.warn('[WAHA Webhook] Gagal menyimpan base64 media masuk:', err?.message);
+            }
+          } else if (mediaMeta.rawMediaUrl) {
+            try {
+              const downloaded = await wahaService.downloadMedia(mediaMeta.rawMediaUrl);
+              const saved = await saveMediaBufferFile({
+                buffer: downloaded.buffer,
+                mimeType: mediaMeta.mimetype || downloaded.contentType,
+                fileName: mediaName || downloaded.filename,
+                maxBytes: 25 * 1024 * 1024,
+              });
+              mediaUrl = saved.relativeUrl;
+            } catch (err: any) {
+              console.warn(
+                '[WAHA Webhook] Gagal mengunduh media masuk ke disk, fallback ke proxy:',
+                err?.message
+              );
+            }
+          }
+        }
+
+        const mediaFallbackLabel = mediaMeta.isSticker
+          ? '[Stiker]'
+          : mediaType === 'image'
+          ? '[Gambar]'
+          : mediaType === 'video'
+          ? '[Video]'
+          : mediaType === 'audio'
+          ? '[Audio]'
+          : mediaType === 'document'
+          ? mediaName
+            ? `[Dokumen: ${mediaName}]`
+            : '[Dokumen]'
+          : '[Lampiran Media]';
+        const body = rawText || (hasMedia ? mediaFallbackLabel : '');
+
+        const quotedWahaId =
+          (typeof payload.replyTo === 'string' ? payload.replyTo : payload.replyTo?.id) ||
+          payload._data?.quotedStanzaID ||
+          payload._data?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+          payload._data?.Message?.extendedTextMessage?.contextInfo?.stanzaId ||
+          null;
+        const quotedRawBody =
+          payload.replyTo?.body ||
+          payload._data?.quotedMsg?.body ||
+          payload._data?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.conversation ||
+          payload._data?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text ||
+          null;
 
         if (!body && !hasMedia) {
           wahaService.recordWebhookEvent({
@@ -711,17 +948,23 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             lastMessageAt: now,
             firstInboundAt: now,
             lastInboundAt: now,
+            sessionStartedAt: now,
             unreadCount: 1,
             createdAt: now,
             updatedAt: now,
           });
         } else {
+          const isReopeningFromResolved = existingConv.status === 'RESOLVED';
           await db
             .update(conversations)
             .set({
               wahaSession: inboundSession || existingConv.wahaSession,
               externalThreadId: isLidSource ? rawFrom : existingConv.externalThreadId,
-              status: existingConv.status === 'RESOLVED' ? 'OPEN' : existingConv.status,
+              status: isReopeningFromResolved ? 'OPEN' : existingConv.status,
+              sessionStartedAt: isReopeningFromResolved
+                ? now
+                : existingConv.sessionStartedAt || existingConv.firstInboundAt || existingConv.createdAt,
+              resolvedAt: isReopeningFromResolved ? null : existingConv.resolvedAt,
               firstInboundAt: existingConv.firstInboundAt || now,
               lastInboundAt: now,
               lastMessage: body,
@@ -730,6 +973,23 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               updatedAt: now,
             })
             .where(eq(conversations.id, convId));
+        }
+
+        // Resolve quoted local message reference if inbound reply quotes an existing message
+        let replyToMessageId: string | null = null;
+        let replyToBody: string | null = quotedRawBody ? String(quotedRawBody).slice(0, 160) : null;
+        let replyToSender: string | null = null;
+        if (quotedWahaId) {
+          const quotedRows = await db
+            .select({ id: chatMessages.id, body: chatMessages.body, direction: chatMessages.direction })
+            .from(chatMessages)
+            .where(eq(chatMessages.wahaMessageId, String(quotedWahaId)))
+            .limit(1);
+          if (quotedRows[0]) {
+            replyToMessageId = quotedRows[0].id;
+            if (!replyToBody) replyToBody = quotedRows[0].body.slice(0, 160);
+            replyToSender = quotedRows[0].direction === 'OUTBOUND' ? 'Tim CS' : (contact.namaLengkap || 'Pelanggan');
+          }
         }
 
         // Create ChatMessage
@@ -745,6 +1005,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           mediaUrl,
           mediaType,
           mediaName,
+          replyToMessageId,
+          replyToBody,
+          replyToSender,
           wahaMessageId: msgId,
           status: 'DELIVERED',
           ackStatus: 2,
@@ -760,6 +1023,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           note: existingConv ? 'Pesan masuk ditambahkan ke inbox' : 'Percakapan baru dibuat di inbox',
         });
 
+        liveEvents.emit('conversations:presence', {
+          conversationId: convId,
+          presence: 'paused',
+          session: inboundSession || null,
+          updatedAt: now.toISOString(),
+        });
         liveEvents.emit('conversations:update', { conversationId: convId });
         liveEvents.emit('tracking:update', { conversationId: convId });
 
@@ -774,7 +1043,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             isNewConversation: !existingConv,
           });
         }
-      } else if (event && event !== 'message.ack' && event !== 'session.status') {
+      } else if (
+        event &&
+        event !== 'message.ack' &&
+        event !== 'session.status' &&
+        event !== 'presence.update'
+      ) {
         wahaService.recordWebhookEvent({
           receivedAt: new Date().toISOString(),
           event: String(event),

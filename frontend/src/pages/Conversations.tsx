@@ -30,17 +30,30 @@ import {
   AlertTriangle,
   GitMerge,
   Clock,
+  Reply,
+  Video,
+  Music,
+  Download,
+  Link2,
+  ListChecks,
+  ExternalLink,
+  Copy,
+  BarChart2,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
+import { getApiBaseUrl } from '../services/paths';
 import {
   AuthStatus,
   CannedResponse,
   ChannelAccount,
+  ChatMessage,
+  ChatMessageMetadata,
   Contact,
   Conversation,
-  ChatMessage,
+  ConversationNavigationTarget,
   CrmLabelItem,
+  InteractiveButtonItem,
   LicenseInfo,
   OmnichannelType,
   ProductItem,
@@ -63,20 +76,107 @@ import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBloc
 function resolveMediaUrl(url?: string | null): string {
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  const apiBase =
+    typeof window !== 'undefined' ? getApiBaseUrl(window.location.pathname) : './api';
   if (url.startsWith('/api/files/') || url.startsWith('/files/')) {
-    return `./api/conversations/media-proxy?url=${encodeURIComponent(url)}`;
+    return `${apiBase}/conversations/media-proxy?url=${encodeURIComponent(url)}`;
   }
-  if (url.startsWith('/api/')) return `.${url}`;
+  if (url.startsWith('/api/')) return `${apiBase}${url.slice('/api'.length)}`;
   if (url.startsWith('/')) return url;
   if (/^https?:\/\//i.test(url)) {
-    return `./api/conversations/media-proxy?url=${encodeURIComponent(url)}`;
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase();
+      if (
+        parsed.pathname.startsWith('/api/files/') ||
+        parsed.pathname.startsWith('/files/') ||
+        host === 'localhost' ||
+        host === '127.0.0.1' ||
+        host === '0.0.0.0'
+      ) {
+        return `${apiBase}/conversations/media-proxy?url=${encodeURIComponent(url)}`;
+      }
+      return url;
+    } catch {
+      return `${apiBase}/conversations/media-proxy?url=${encodeURIComponent(url)}`;
+    }
   }
   return url;
+}
+
+const FALLBACK_EXT_MIME: Record<string, string> = {
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.avi': 'video/x-msvideo',
+  '.3gp': 'video/3gpp',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.csv': 'text/csv',
+  '.txt': 'text/plain',
+  '.zip': 'application/zip',
+  '.rar': 'application/x-rar-compressed',
+};
+
+function inferAttachmentMime(file: File): string {
+  if (file.type && file.type.trim()) return file.type.trim();
+  const dotIdx = file.name.lastIndexOf('.');
+  if (dotIdx >= 0) {
+    const ext = file.name.slice(dotIdx).toLowerCase();
+    if (FALLBACK_EXT_MIME[ext]) return FALLBACK_EXT_MIME[ext];
+  }
+  return 'application/octet-stream';
+}
+
+function parseChatMessageMeta(msg: ChatMessage): ChatMessageMetadata | null {
+  if (!msg.metadataJson) return null;
+  try {
+    return JSON.parse(msg.metadataJson) as ChatMessageMetadata;
+  } catch {
+    return null;
+  }
+}
+
+function renderTextWithClickableLinks(text: string): React.ReactNode {
+  if (!text) return null;
+  const parts = text.split(/(https?:\/\/[^\s<>]+)/gi);
+  return parts.map((part, idx) => {
+    if (/^https?:\/\/[^\s<>]+$/i.test(part)) {
+      const clean = part.replace(/[.,);!?]+$/, '');
+      const trailing = part.slice(clean.length);
+      return (
+        <React.Fragment key={idx}>
+          <a
+            href={clean}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline text-indigo-700 hover:text-indigo-900 break-all"
+          >
+            {clean}
+          </a>
+          {trailing}
+        </React.Fragment>
+      );
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
 }
 
 interface ConversationsProps {
   licenseInfo?: LicenseInfo | null;
   currentUser?: AuthStatus['user'] | null;
+  targetConversation?: ConversationNavigationTarget | null;
+  onTargetHandled?: () => void;
   onOpenPlans?: () => void;
   onOpenSettings?: (section: 'quick_replies' | 'products' | 'labels') => void;
 }
@@ -96,6 +196,9 @@ function getAppBaseUrl(): string {
 }
 
 function readContactPanelPref(): boolean {
+  if (typeof window !== 'undefined' && window.innerWidth < 1280) {
+    return false;
+  }
   try {
     return localStorage.getItem(CONTACT_PANEL_KEY) !== 'closed';
   } catch {
@@ -106,6 +209,8 @@ function readContactPanelPref(): boolean {
 export const Conversations: React.FC<ConversationsProps> = ({
   licenseInfo,
   currentUser,
+  targetConversation,
+  onTargetHandled,
   onOpenPlans,
   onOpenSettings,
 }) => {
@@ -139,9 +244,39 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
   const [showContactPanel, setShowContactPanel] = useState<boolean>(readContactPanelPref);
 
-  // Composer enhancements: Internal note mode, Emoji picker, Product Quick Quote, File attachment
+  // Composer enhancements: Internal note mode, Emoji picker, Product Quick Quote, Link & Interactive, File attachment
   const [composerMode, setComposerMode] = useState<'REPLY' | 'NOTE'>('REPLY');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showLinkComposer, setShowLinkComposer] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkTitle, setLinkTitle] = useState('');
+  const [linkDesc, setLinkDesc] = useState('');
+  const [linkCaption, setLinkCaption] = useState('');
+  const [linkImageUrl, setLinkImageUrl] = useState('');
+  const [showInteractiveComposer, setShowInteractiveComposer] = useState(false);
+  const [interactiveTab, setInteractiveTab] = useState<'BUTTONS' | 'POLL'>('BUTTONS');
+  const [btnHeader, setBtnHeader] = useState('');
+  const [btnBody, setBtnBody] = useState('');
+  const [btnFooter, setBtnFooter] = useState('');
+  const [btnFallbackText, setBtnFallbackText] = useState(true);
+  const [btnItems, setBtnItems] = useState<InteractiveButtonItem[]>([
+    { type: 'reply', text: 'Ya, Lanjut' },
+    { type: 'reply', text: 'Tanya Admin' },
+  ]);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState<string[]>(['Pilihan 1', 'Pilihan 2']);
+  const [pollMultiple, setPollMultiple] = useState(false);
+  const [markingRead, setMarkingRead] = useState(false);
+  const [lightboxMedia, setLightboxMedia] = useState<{ url: string; name?: string | null } | null>(null);
+  const [presenceByConvId, setPresenceByConvId] = useState<
+    Record<string, { status: 'typing' | 'recording' | 'online' | 'paused'; expiresAt: number }>
+  >({});
+  const outboundTypingRef = useRef<{
+    convId: string;
+    active: boolean;
+    lastSentAt: number;
+    stopTimer: number | null;
+  }>({ convId: '', active: false, lastSentAt: 0, stopTimer: null });
   const [slaTargetMinutes, setSlaTargetMinutes] = useState<number>(15);
   const [productsList, setProductsList] = useState<ProductItem[]>([]);
   const [showProductPicker, setShowProductPicker] = useState(false);
@@ -156,16 +291,26 @@ export const Conversations: React.FC<ConversationsProps> = ({
     base64: string;
     mimetype: string;
     name: string;
-    isImage: boolean;
+    size?: number;
+    kind: 'image' | 'video' | 'audio' | 'document';
   } | null>(null);
+  const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replyInputRef = useRef<HTMLInputElement>(null);
 
   // Right panel: Labels & Contact Notes
   const [newLabel, setNewLabel] = useState('');
   const [contactNotesDraft, setContactNotesDraft] = useState('');
   const [savingMeta, setSavingMeta] = useState(false);
   const [sendingCsat, setSendingCsat] = useState(false);
+  const [expandedCsatId, setExpandedCsatId] = useState<string | null>(null);
+  const [highlightedCsatWindow, setHighlightedCsatWindow] = useState<{
+    token?: string | null;
+    startedAt?: string | null;
+    resolvedAt?: string | null;
+  } | null>(null);
 
+  const msgElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastAutoScrollRef = useRef<{ convId: string; lastMsgId: string | null }>({
     convId: '',
@@ -184,6 +329,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
     });
   };
 
+  const targetConvIdRef = useRef<string | null>(targetConversation?.conversationId || null);
+  targetConvIdRef.current = targetConversation?.conversationId || null;
+
   const fetchConversations = useCallback(async () => {
     if (!isLiveChatUnlocked) return;
     try {
@@ -191,6 +339,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setConversations(data);
       setListError(null);
       setSelectedConversation((prev) => {
+        if (targetConvIdRef.current) {
+          const targeted = data.find((c) => c.id === targetConvIdRef.current);
+          if (targeted) return targeted;
+        }
         if (!prev) return data.length > 0 ? data[0] : null;
         return data.find((c) => c.id === prev.id) || (data.length > 0 ? data[0] : null);
       });
@@ -207,7 +359,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setLoadingMessages(true);
     }
     try {
-      const data = await api.getConversationMessages(convId);
+      const isVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
+      const data = await api.getConversationMessages(convId, { markRead: isVisible });
       setMessages(data);
     } catch (err) {
       console.error('Error fetching messages:', err);
@@ -224,6 +377,45 @@ export const Conversations: React.FC<ConversationsProps> = ({
     const unsub = subscribeLiveEvent('conversations:update', () => {
       void fetchConversations();
     });
+    const unsubPresence = subscribeLiveEvent('conversations:presence', (evt: any) => {
+      const d = evt?.data || evt;
+      const convId = String(d?.conversationId || '').trim();
+      const status = String(d?.presence || '').toLowerCase();
+      if (!convId) return;
+      if (status === 'paused' || status === 'unavailable' || status === 'offline') {
+        setPresenceByConvId((prev) => {
+          if (!prev[convId]) return prev;
+          const next = { ...prev };
+          delete next[convId];
+          return next;
+        });
+        return;
+      }
+      if (status === 'typing' || status === 'recording' || status === 'online') {
+        const ttlMs = status === 'online' ? 12000 : 8500;
+        setPresenceByConvId((prev) => ({
+          ...prev,
+          [convId]: { status, expiresAt: Date.now() + ttlMs },
+        }));
+      }
+    });
+    const presencePruner = window.setInterval(() => {
+      const now = Date.now();
+      setPresenceByConvId((prev) => {
+        const keys = Object.keys(prev);
+        if (keys.length === 0) return prev;
+        let changed = false;
+        const next: typeof prev = {};
+        for (const k of keys) {
+          if (prev[k].expiresAt > now) {
+            next[k] = prev[k];
+          } else {
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 2000);
     // Fallback poll ensures inbound WAHA chats still appear promptly if SSE disconnects/buffers behind a proxy
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
@@ -232,6 +424,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }, 12000);
     return () => {
       unsub();
+      unsubPresence();
+      window.clearInterval(presencePruner);
       window.clearInterval(timer);
     };
   }, [fetchConversations, isLiveChatUnlocked]);
@@ -311,6 +505,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
       const unsub = subscribeLiveEvent('conversations:update', () => {
         void fetchMessages(convId, true);
       });
+      const onVis = () => {
+        if (document.visibilityState === 'visible') {
+          void fetchMessages(convId, true);
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
       const timer = window.setInterval(() => {
         if (document.visibilityState === 'visible') {
           void fetchMessages(convId, true);
@@ -318,7 +518,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
       }, 12000);
       return () => {
         unsub();
+        document.removeEventListener('visibilitychange', onVis);
         window.clearInterval(timer);
+        const st = outboundTypingRef.current;
+        if (st.stopTimer) {
+          window.clearTimeout(st.stopTimer);
+          st.stopTimer = null;
+        }
+        if (st.active && st.convId === convId) {
+          st.active = false;
+          void api.sendConversationTyping(convId, false, selectedSession || undefined).catch(() => {});
+        }
       };
     }
   }, [selectedConversation?.id, fetchMessages, isLiveChatUnlocked]);
@@ -330,35 +540,296 @@ export const Conversations: React.FC<ConversationsProps> = ({
   }, [selectedConversation?.contact?.notes, selectedConversation?.id]);
 
   useEffect(() => {
+    if (!targetConversation?.conversationId || conversations.length === 0) return;
+    const match = conversations.find((c) => c.id === targetConversation.conversationId);
+    if (!match) return;
+    setStatusFilter('ALL');
+    setChannelFilter('ALL');
+    setAccountFilter('ALL');
+    setSearch('');
+    setSelectedConversation(match);
+    if (targetConversation.csatToken || targetConversation.csatStartedAt || targetConversation.csatResolvedAt) {
+      setHighlightedCsatWindow({
+        token: targetConversation.csatToken || null,
+        startedAt: targetConversation.csatStartedAt || null,
+        resolvedAt: targetConversation.csatResolvedAt || null,
+      });
+    } else {
+      setHighlightedCsatWindow(null);
+    }
+    onTargetHandled?.();
+  }, [targetConversation, conversations, onTargetHandled]);
+
+  useEffect(() => {
     const convId = selectedConversation?.id || '';
+    if (convId && highlightedCsatWindow && messages.length > 0) {
+      const targetMsg =
+        (highlightedCsatWindow.token
+          ? messages.find((m) => m.body && m.body.includes(highlightedCsatWindow.token!))
+          : undefined) ||
+        (highlightedCsatWindow.resolvedAt
+          ? messages.find(
+              (m) =>
+                m.messageType === 'CSAT' &&
+                Math.abs(new Date(m.createdAt).getTime() - new Date(highlightedCsatWindow.resolvedAt!).getTime()) < 5 * 60 * 1000
+            )
+          : undefined);
+      if (targetMsg && msgElementRefs.current[targetMsg.id]) {
+        lastAutoScrollRef.current = {
+          convId,
+          lastMsgId: messages[messages.length - 1]?.id || null,
+        };
+        msgElementRefs.current[targetMsg.id]?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+        return;
+      }
+    }
     const lastMsgId = messages.length > 0 ? messages[messages.length - 1].id : null;
     const prev = lastAutoScrollRef.current;
     if (convId && (prev.convId !== convId || (lastMsgId && prev.lastMsgId !== lastMsgId))) {
       lastAutoScrollRef.current = { convId, lastMsgId };
       messagesEndRef.current?.scrollIntoView({ behavior: prev.convId === convId ? 'smooth' : 'auto' });
     }
-  }, [messages, selectedConversation?.id]);
+  }, [messages, selectedConversation?.id, highlightedCsatWindow]);
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (file.size > 8 * 1024 * 1024) {
-      toast.error('Ukuran berkas maksimal 8 MB');
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Ukuran berkas maksimal 10 MB');
       return;
     }
+    const mime = inferAttachmentMime(file);
+    const kind: 'image' | 'video' | 'audio' | 'document' = mime.startsWith('image/')
+      ? 'image'
+      : mime.startsWith('video/')
+      ? 'video'
+      : mime.startsWith('audio/')
+      ? 'audio'
+      : 'document';
     const reader = new FileReader();
     reader.onload = () => {
       const result = String(reader.result || '');
       setPendingAttachment({
         base64: result,
-        mimetype: file.type || 'application/octet-stream',
+        mimetype: mime,
         name: file.name,
-        isImage: file.type.startsWith('image/'),
+        size: file.size,
+        kind,
       });
       setComposerMode('REPLY');
     };
     reader.readAsDataURL(file);
+  };
+
+  const openComposerPicker = (
+    target: 'EMOJI' | 'CANNED' | 'PRODUCT' | 'LINK' | 'INTERACTIVE' | null
+  ) => {
+    setShowEmojiPicker((v) => (target === 'EMOJI' ? !v : false));
+    setShowCannedPicker((v) => (target === 'CANNED' ? !v : false));
+    setShowProductPicker((v) => (target === 'PRODUCT' ? !v : false));
+    setShowLinkComposer((v) => (target === 'LINK' ? !v : false));
+    setShowInteractiveComposer((v) => (target === 'INTERACTIVE' ? !v : false));
+  };
+
+  const stopOutboundTyping = useCallback(
+    (convId?: string) => {
+      const targetId = convId || outboundTypingRef.current.convId;
+      if (outboundTypingRef.current.stopTimer) {
+        window.clearTimeout(outboundTypingRef.current.stopTimer);
+        outboundTypingRef.current.stopTimer = null;
+      }
+      if (outboundTypingRef.current.active && targetId) {
+        outboundTypingRef.current.active = false;
+        void api
+          .sendConversationTyping(targetId, false, selectedSession || undefined)
+          .catch(() => {});
+      }
+    },
+    [selectedSession]
+  );
+
+  const handleReplyTextChange = (nextVal: string) => {
+    setInputText(nextVal);
+    if (
+      !selectedConversation ||
+      composerMode !== 'REPLY' ||
+      ((selectedConversation.channel || 'WHATSAPP').toUpperCase() !== 'WHATSAPP')
+    ) {
+      return;
+    }
+    const convId = selectedConversation.id;
+    const trimmed = nextVal.trim();
+    if (!trimmed) {
+      stopOutboundTyping(convId);
+      return;
+    }
+    const now = Date.now();
+    const st = outboundTypingRef.current;
+    st.convId = convId;
+    if (!st.active || now - st.lastSentAt > 4000) {
+      st.active = true;
+      st.lastSentAt = now;
+      void api.sendConversationTyping(convId, true, selectedSession || undefined).catch(() => {});
+    }
+    if (st.stopTimer) window.clearTimeout(st.stopTimer);
+    st.stopTimer = window.setTimeout(() => {
+      stopOutboundTyping(convId);
+    }, 3000);
+  };
+
+  const handleMarkRead = async () => {
+    if (!selectedConversation || markingRead) return;
+    setMarkingRead(true);
+    try {
+      const res = await api.markConversationRead(selectedConversation.id);
+      if ((selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP') {
+        if (res.seenSent) {
+          toast.success('Pesan ditandai dibaca & tanda seen dikirim ke WhatsApp');
+        } else if (res.error) {
+          toast.error(`Unread CRM direset, namun WhatsApp seen gagal: ${res.error}`);
+        } else {
+          toast.success('Percakapan ditandai sudah dibaca');
+        }
+      } else {
+        toast.success('Percakapan ditandai sudah dibaca');
+      }
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menandai dibaca');
+    } finally {
+      setMarkingRead(false);
+    }
+  };
+
+  const handleSendLinkMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isLiveChatUnlocked || !selectedConversation || sending) return;
+    const cleanUrl = linkUrl.trim();
+    if (!/^https?:\/\/\S+$/i.test(cleanUrl)) {
+      toast.error('URL wajib valid dan diawali http:// atau https://');
+      return;
+    }
+    setSending(true);
+    try {
+      const newMsg = await api.sendConversationMessage(selectedConversation.id, {
+        messageKind: 'LINK_PREVIEW',
+        session: selectedSession || undefined,
+        replyToMessageId: replyingToMessage?.id,
+        linkPreview: {
+          url: cleanUrl,
+          title: linkTitle.trim() || undefined,
+          description: linkDesc.trim() || undefined,
+          caption: linkCaption.trim() || undefined,
+          imageUrl: linkImageUrl.trim() || undefined,
+          highQuality: true,
+        },
+      });
+      setMessages((prev) => [...prev, newMsg]);
+      setReplyingToMessage(null);
+      setShowLinkComposer(false);
+      setLinkUrl('');
+      setLinkTitle('');
+      setLinkDesc('');
+      setLinkCaption('');
+      setLinkImageUrl('');
+      const meta = parseChatMessageMeta(newMsg);
+      if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+        toast.error(newMsg.errorMessage || 'Gagal mengirim tautan');
+      } else if (meta?.usedFallbackText) {
+        toast.success('Tautan terkirim dengan preview URL standar WhatsApp');
+      } else {
+        toast.success('Tautan & preview terkirim');
+      }
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengirim tautan');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSendInteractiveMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isLiveChatUnlocked || !selectedConversation || sending) return;
+    setSending(true);
+    try {
+      let newMsg: ChatMessage;
+      if (interactiveTab === 'POLL') {
+        const cleanQ = pollQuestion.trim();
+        const cleanOpts = pollOptions.map((o) => o.trim()).filter(Boolean);
+        if (!cleanQ || cleanOpts.length < 2) {
+          toast.error('Isi pertanyaan dan minimal 2 pilihan polling');
+          setSending(false);
+          return;
+        }
+        newMsg = await api.sendConversationMessage(selectedConversation.id, {
+          messageKind: 'POLL',
+          session: selectedSession || undefined,
+          replyToMessageId: replyingToMessage?.id,
+          poll: {
+            question: cleanQ,
+            options: cleanOpts,
+            multipleAnswers: pollMultiple,
+          },
+        });
+      } else {
+        const cleanBody = btnBody.trim();
+        const validBtns = btnItems
+          .filter((b) => b.text.trim())
+          .map((b) => ({
+            type: b.type,
+            text: b.text.trim(),
+            ...(b.type === 'url' ? { url: (b.url || '').trim() } : {}),
+            ...(b.type === 'call' ? { phoneNumber: (b.phoneNumber || '').trim() } : {}),
+            ...(b.type === 'copy' ? { copyCode: (b.copyCode || '').trim() } : {}),
+          }));
+        if (!cleanBody || validBtns.length === 0) {
+          toast.error('Isi pesan dan minimal 1 tombol wajib diisi');
+          setSending(false);
+          return;
+        }
+        newMsg = await api.sendConversationMessage(selectedConversation.id, {
+          messageKind: 'BUTTONS',
+          session: selectedSession || undefined,
+          replyToMessageId: replyingToMessage?.id,
+          interactiveButtons: {
+            header: btnHeader.trim() || undefined,
+            body: cleanBody,
+            footer: btnFooter.trim() || undefined,
+            fallbackTextOnUnsupported: btnFallbackText,
+            buttons: validBtns,
+          },
+        });
+      }
+      setMessages((prev) => [...prev, newMsg]);
+      setReplyingToMessage(null);
+      setShowInteractiveComposer(false);
+      if (interactiveTab === 'POLL') {
+        setPollQuestion('');
+        setPollOptions(['Pilihan 1', 'Pilihan 2']);
+      } else {
+        setBtnHeader('');
+        setBtnBody('');
+        setBtnFooter('');
+      }
+      const meta = parseChatMessageMeta(newMsg);
+      if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+        toast.error(newMsg.errorMessage || 'Gagal mengirim pesan interaktif');
+      } else if (meta?.usedFallbackText) {
+        toast.success('Terkirim sebagai pesan bernomor (tombol native dibatasi engine WAHA)');
+      } else {
+        toast.success(interactiveTab === 'POLL' ? 'Polling terkirim ke WhatsApp' : 'Tombol interaktif terkirim');
+      }
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengirim pesan interaktif');
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -383,6 +854,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
 
     if (!text && !pendingAttachment) return;
+    stopOutboundTyping(selectedConversation.id);
     setSending(true);
     try {
       const newMsg = await api.sendConversationMessage(selectedConversation.id, {
@@ -391,9 +863,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
         mediaBase64: pendingAttachment?.base64,
         mediaMimetype: pendingAttachment?.mimetype,
         mediaName: pendingAttachment?.name,
+        replyToMessageId: replyingToMessage?.id,
       });
       setInputText('');
       setPendingAttachment(null);
+      setReplyingToMessage(null);
       setShowEmojiPicker(false);
       setMessages((prev) => [...prev, newMsg]);
       if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
@@ -907,7 +1381,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 <button
                   key={conv.id}
                   type="button"
-                  onClick={() => setSelectedConversation(conv)}
+                  onClick={() => {
+                    if (selectedConversation?.id !== conv.id) {
+                      setHighlightedCsatWindow(null);
+                      setReplyingToMessage(null);
+                    }
+                    setSelectedConversation(conv);
+                  }}
                   className={`w-full p-3 text-left flex items-start gap-2.5 transition-colors ${
                     isSelected
                       ? 'bg-indigo-50/70 border-l-2 border-indigo-600'
@@ -934,7 +1414,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     </div>
 
                     <p className="text-[11px] text-gray-500 truncate mt-0.5">
-                      {conv.lastMessage || 'Tidak ada pesan terbaru'}
+                      {presenceByConvId[conv.id]?.status === 'typing' ? (
+                        <span className="text-emerald-600 font-medium italic">
+                          Sedang mengetik...
+                        </span>
+                      ) : presenceByConvId[conv.id]?.status === 'recording' ? (
+                        <span className="text-emerald-600 font-medium italic">
+                          Merekam pesan suara...
+                        </span>
+                      ) : (
+                        conv.lastMessage || 'Tidak ada pesan terbaru'
+                      )}
                     </p>
 
                     <div className="flex items-center flex-wrap gap-1 mt-1.5">
@@ -971,10 +1461,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           {conv.assignedAgentName}
                         </span>
                       )}
-                      {conv.csatRating && (
+                      {(conv.csatOverallScore ?? conv.csatRating) && (
                         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                           <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-500" />
-                          {conv.csatRating}
+                          {Number(conv.csatOverallScore ?? conv.csatRating).toFixed(1).replace(/\.0$/, '')}
                         </span>
                       )}
                       {convLabels.slice(0, 2).map((lbl) => (
@@ -1034,6 +1524,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                       <Smartphone className="w-2.5 h-2.5" />
                       {selectedConversation.wahaSession}
+                    </span>
+                  )}
+                  {presenceByConvId[selectedConversation.id]?.status && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      {presenceByConvId[selectedConversation.id].status === 'typing'
+                        ? 'Mengetik...'
+                        : presenceByConvId[selectedConversation.id].status === 'recording'
+                        ? 'Merekam audio...'
+                        : 'Online'}
                     </span>
                   )}
                   {(selectedConversation.channel === 'INSTAGRAM' || selectedConversation.channel === 'FACEBOOK') && (() => {
@@ -1203,6 +1703,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                 <button
                   type="button"
+                  onClick={handleMarkRead}
+                  disabled={markingRead}
+                  title="Tandai Dibaca & Kirim Centang Biru (Seen) ke WhatsApp"
+                  className="h-7 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 hover:text-indigo-700 text-[11px] font-medium inline-flex items-center gap-1 shrink-0 transition-colors disabled:opacity-50"
+                >
+                  <CheckCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                  <span className="hidden lg:inline">Dibaca</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleSendCsatCta}
                   disabled={sendingCsat}
                   title="Kirim Tautan Rating CSAT ke Pelanggan"
@@ -1228,150 +1739,581 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </div>
           </div>
 
+          {highlightedCsatWindow && (
+            <div className="px-4 py-1.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2 text-[11px] text-amber-900">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500 shrink-0" />
+                <span className="truncate font-medium">
+                  Menyorot sesi percakapan CSAT
+                  {highlightedCsatWindow.startedAt && (
+                    <>
+                      {' '}
+                      (
+                      {new Date(highlightedCsatWindow.startedAt).toLocaleString('id-ID', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                      {' → '}
+                      {highlightedCsatWindow.resolvedAt
+                        ? new Date(highlightedCsatWindow.resolvedAt).toLocaleTimeString('id-ID', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : 'Selesai'}
+                      )
+                    </>
+                  )}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHighlightedCsatWindow(null)}
+                className="text-amber-800 hover:text-amber-950 font-semibold shrink-0"
+              >
+                Tutup sorotan
+              </button>
+            </div>
+          )}
+
           <div className="flex-1 p-4 overflow-y-auto space-y-2.5">
             {loadingMessages && messages.length === 0 ? (
               <LoadingState message="Memuat pesan..." />
             ) : messages.length === 0 ? (
               <EmptyState title="Belum ada pesan" description="Kirim pesan pertama ke pelanggan ini." />
-            ) : (
-              messages.map((msg) => {
+            ) : (() => {
+              const orderedCsatSessions = [...(selectedConversation.csatHistory || [])].sort(
+                (a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime()
+              );
+
+              // Determine exact message index where each CSAT session closes (either its CSAT CTA bubble or last message before resolution)
+              const sessionEndIndexById = new Map<string, number>();
+              orderedCsatSessions.forEach((sess) => {
+                const tokenIdx = sess.token
+                  ? messages.findIndex((m) => m.body && m.body.includes(sess.token))
+                  : -1;
+                if (tokenIdx >= 0) {
+                  sessionEndIndexById.set(sess.id, tokenIdx);
+                  return;
+                }
+                const endMs = new Date(sess.conversationResolvedAt || sess.sentAt).getTime();
+                let lastIdx = -1;
+                messages.forEach((m, mIdx) => {
+                  if (new Date(m.createdAt).getTime() <= endMs + 5000) {
+                    lastIdx = mIdx;
+                  }
+                });
+                if (lastIdx >= 0) {
+                  sessionEndIndexById.set(sess.id, lastIdx);
+                }
+              });
+
+              const closingSessionsAtMsgIdx = new Map<
+                number,
+                Array<{ session: typeof orderedCsatSessions[number]; number: number }>
+              >();
+              orderedCsatSessions.forEach((sess, sIdx) => {
+                const endIdx = sessionEndIndexById.get(sess.id);
+                if (endIdx !== undefined) {
+                  const arr = closingSessionsAtMsgIdx.get(endIdx) || [];
+                  arr.push({ session: sess, number: sIdx + 1 });
+                  closingSessionsAtMsgIdx.set(endIdx, arr);
+                }
+              });
+
+              // Track session start divider indices: Sesi #1 at idx 0 (when multi/CSAT exists), and each message right after a closing CSAT bubble
+              const startBannerAtMsgIdx = new Map<
+                number,
+                { number: number; timestamp: string; label?: string }
+              >();
+              if (orderedCsatSessions.length > 0 && messages.length > 0) {
+                startBannerAtMsgIdx.set(0, {
+                  number: 1,
+                  timestamp:
+                    orderedCsatSessions[0].conversationStartedAt || messages[0].createdAt,
+                });
+                orderedCsatSessions.forEach((sess, sIdx) => {
+                  const endIdx = sessionEndIndexById.get(sess.id);
+                  if (endIdx !== undefined && endIdx + 1 < messages.length) {
+                    const nextSess = orderedCsatSessions[sIdx + 1];
+                    startBannerAtMsgIdx.set(endIdx + 1, {
+                      number: sIdx + 2,
+                      timestamp:
+                        nextSess?.conversationStartedAt || messages[endIdx + 1].createdAt,
+                      label: nextSess ? undefined : 'Sesi Berjalan',
+                    });
+                  }
+                });
+              }
+
+              const formatDividerTime = (iso: string) =>
+                new Date(iso).toLocaleString('id-ID', {
+                  day: '2-digit',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+
+              return messages.map((msg, msgIndex) => {
                 const isNote = msg.messageType === 'NOTE';
                 const isCsat = msg.messageType === 'CSAT';
                 const isOutbound = msg.direction === 'OUTBOUND';
                 const isFailed = isOutbound && (msg.status === 'FAILED' || msg.ackStatus < 0);
                 const isRead = msg.ackStatus >= 3;
                 const isDelivered = msg.ackStatus === 2;
+                const msgTs = new Date(msg.createdAt).getTime();
+                const matchesHighlightedToken = Boolean(
+                  highlightedCsatWindow?.token && msg.body?.includes(highlightedCsatWindow.token)
+                );
+                const matchesHighlightedWindow = Boolean(
+                  highlightedCsatWindow?.startedAt &&
+                    msgTs >= new Date(highlightedCsatWindow.startedAt).getTime() &&
+                    (!highlightedCsatWindow.resolvedAt ||
+                      msgTs <= new Date(highlightedCsatWindow.resolvedAt).getTime() + 60 * 1000)
+                );
+                const isCsatHighlighted = matchesHighlightedToken || matchesHighlightedWindow;
+                const startBanner = startBannerAtMsgIdx.get(msgIndex);
+                const closingSessions = closingSessionsAtMsgIdx.get(msgIndex) || [];
+
+                const startDividerNode = startBanner ? (
+                  <div className="flex items-center gap-2 py-1.5">
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white border border-gray-200 text-[10px] font-medium text-gray-600 shadow-2xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                      <span>
+                        Sesi #{startBanner.number} • Dibuka {formatDividerTime(startBanner.timestamp)}
+                        {startBanner.label ? ` (${startBanner.label})` : ''}
+                      </span>
+                    </span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+                ) : null;
+
+                const endDividerNodes = closingSessions.map(({ session, number }) => {
+                  const scoreVal = session.overallScore ?? session.rating;
+                  const endTime = session.conversationResolvedAt || session.sentAt;
+                  return (
+                    <div key={`end-${session.id}`} className="flex items-center gap-2 py-1.5">
+                      <div className="flex-1 h-px bg-emerald-200" />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setHighlightedCsatWindow({
+                            token: session.token,
+                            startedAt: session.conversationStartedAt || null,
+                            resolvedAt: endTime,
+                          })
+                        }
+                        title="Klik untuk menyorot pesan pada sesi CSAT ini"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-medium text-emerald-800 transition-colors"
+                      >
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>
+                          Batas Selesai Sesi #{number} • {formatDividerTime(endTime)}
+                        </span>
+                        {scoreVal ? (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-mono font-semibold">
+                            <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-500" />
+                            {Number(scoreVal).toFixed(1).replace(/\.0$/, '')}/5
+                          </span>
+                        ) : (
+                          <span className="text-[9px] text-gray-500">(Menunggu CSAT)</span>
+                        )}
+                      </button>
+                      <div className="flex-1 h-px bg-emerald-200" />
+                    </div>
+                  );
+                });
 
                 if (isNote) {
                   return (
-                    <div key={msg.id} className="flex justify-center">
-                      <div className="max-w-[92%] sm:max-w-[85%] rounded-lg px-3.5 py-2 text-xs border bg-amber-50 border-amber-200 text-amber-950 space-y-1 min-w-0">
-                        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-800">
-                          <StickyNote className="w-3 h-3" />
-                          <span>Catatan Internal (Tidak terkirim ke WhatsApp)</span>
-                        </div>
-                        <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.body}</div>
-                        <div className="text-[10px] text-amber-700/80 font-mono text-right">
-                          {new Date(msg.createdAt).toLocaleTimeString('id-ID', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                    <React.Fragment key={msg.id}>
+                      {startDividerNode}
+                      <div
+                        ref={(el) => {
+                          msgElementRefs.current[msg.id] = el;
+                        }}
+                        className="flex justify-center"
+                      >
+                        <div
+                          className={`max-w-[92%] sm:max-w-[85%] rounded-lg px-3.5 py-2 text-xs border bg-amber-50 border-amber-200 text-amber-950 space-y-1 min-w-0 ${
+                            isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-800">
+                            <StickyNote className="w-3 h-3" />
+                            <span>Catatan Internal (Tidak terkirim ke WhatsApp)</span>
+                          </div>
+                          <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.body}</div>
+                          <div className="text-[10px] text-amber-700/80 font-mono text-right">
+                            {new Date(msg.createdAt).toLocaleTimeString('id-ID', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </div>
                         </div>
                       </div>
-                    </div>
+                      {endDividerNodes}
+                    </React.Fragment>
                   );
                 }
 
                 return (
-                  <div
-                    key={msg.id}
-                    className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
-                  >
+                  <React.Fragment key={msg.id}>
+                    {startDividerNode}
                     <div
-                      className={`max-w-[88%] sm:max-w-[75%] min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
-                        isFailed
-                          ? 'bg-red-50/70 border-red-200 text-gray-900'
-                          : isCsat
-                          ? 'bg-amber-50/60 border-amber-200 text-gray-900'
-                          : isOutbound
-                          ? 'bg-indigo-50 border-indigo-200 text-gray-900'
-                          : 'bg-white border-gray-200 text-gray-900'
-                      }`}
+                      ref={(el) => {
+                        msgElementRefs.current[msg.id] = el;
+                      }}
+                      className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
                     >
-                      {isCsat && (
-                        <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700">
-                          <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
-                          <span>Permintaan Rating CSAT</span>
-                        </div>
-                      )}
-
-                      {msg.mediaUrl && msg.mediaType === 'image' && (
-                        <img
-                          src={resolveMediaUrl(msg.mediaUrl)}
-                          alt={msg.mediaName || 'Lampiran gambar'}
-                          className="max-w-full max-h-60 rounded border border-gray-200 object-contain bg-white"
-                        />
-                      )}
-
-                      {msg.mediaUrl && msg.mediaType === 'video' && (
-                        <video
-                          src={resolveMediaUrl(msg.mediaUrl)}
-                          controls
-                          className="max-w-full max-h-60 rounded border border-gray-200 bg-black"
-                        />
-                      )}
-
-                      {msg.mediaUrl && msg.mediaType === 'audio' && (
-                        <audio src={resolveMediaUrl(msg.mediaUrl)} controls className="w-full max-w-xs" />
-                      )}
-
-                      {msg.mediaType && !['image', 'video', 'audio'].includes(msg.mediaType) && (
-                        <div className="flex items-center gap-2 p-2 rounded bg-white/80 border border-gray-200 text-[11px]">
-                          <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
-                          <span className="font-mono truncate">{msg.mediaName || 'Dokumen'}</span>
-                          {msg.mediaUrl && (
-                            <a
-                              href={resolveMediaUrl(msg.mediaUrl)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-indigo-600 hover:underline ml-auto shrink-0"
-                            >
-                              Buka
-                            </a>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="whitespace-pre-wrap break-words">{msg.body}</div>
-
-                      {isFailed && (
-                        <div className="pt-1 border-t border-red-200/70 flex flex-wrap items-center justify-between gap-2 text-[10px] text-red-700">
-                          <span className="inline-flex items-center gap-1 font-medium">
-                            <AlertTriangle className="w-3 h-3 shrink-0" />
-                            <span className="break-words">
-                              {msg.errorMessage ? `Gagal: ${msg.errorMessage}` : 'Gagal mengirim pesan'}
-                            </span>
-                          </span>
+                      <div
+                        className={`group max-w-[88%] sm:max-w-[75%] min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
+                          isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
+                        } ${
+                          isFailed
+                            ? 'bg-red-50/70 border-red-200 text-gray-900'
+                            : isCsat
+                            ? 'bg-amber-50/60 border-amber-200 text-gray-900'
+                            : isOutbound
+                            ? 'bg-indigo-50 border-indigo-200 text-gray-900'
+                            : 'bg-white border-gray-200 text-gray-900'
+                        }`}
+                      >
+                        {(msg.replyToBody || msg.replyToMessageId) && (
                           <button
                             type="button"
-                            disabled={retryingMessageId === msg.id}
-                            onClick={() => void handleRetryMessage(msg.id)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50 shrink-0"
+                            onClick={() => {
+                              if (msg.replyToMessageId && msgElementRefs.current[msg.replyToMessageId]) {
+                                msgElementRefs.current[msg.replyToMessageId]?.scrollIntoView({
+                                  behavior: 'smooth',
+                                  block: 'center',
+                                });
+                              }
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 rounded bg-black/5 hover:bg-black/10 border-l-2 border-indigo-500 text-[11px] space-y-0.5 transition-colors"
                           >
-                            <RotateCcw className="w-2.5 h-2.5" />
-                            <span>{retryingMessageId === msg.id ? 'Mengirim...' : 'Kirim Ulang'}</span>
+                            <div className="font-semibold text-indigo-700 truncate">
+                              {msg.replyToSender || 'Pesan sebelumnya'}
+                            </div>
+                            <div className="text-gray-600 truncate">
+                              {msg.replyToBody || 'Pesan dikutip'}
+                            </div>
                           </button>
-                        </div>
-                      )}
-
-                      <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-gray-500 font-mono tabular-nums">
-                        {msg.wahaSession && (
-                          <span className="text-[9px] text-gray-400">{msg.wahaSession}</span>
                         )}
-                        <span>
-                          {new Date(msg.createdAt).toLocaleTimeString('id-ID', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
 
-                        {isOutbound && !isFailed && (
-                          <span>
-                            {isRead ? (
-                              <CheckCheck className="w-3.5 h-3.5 text-blue-600 inline" />
-                            ) : isDelivered ? (
-                              <CheckCheck className="w-3.5 h-3.5 text-gray-400 inline" />
-                            ) : (
-                              <Check className="w-3 h-3 text-gray-400 inline" />
+                        {isCsat && (
+                          <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700">
+                            <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                            <span>Permintaan Rating CSAT</span>
+                          </div>
+                        )}
+
+                        {msg.mediaUrl && msg.mediaType === 'image' && (
+                          <div className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setLightboxMedia({
+                                  url: resolveMediaUrl(msg.mediaUrl),
+                                  name: msg.mediaName,
+                                })
+                              }
+                              title="Klik untuk memperbesar gambar"
+                              className="block max-w-full rounded border border-gray-200 bg-white overflow-hidden hover:opacity-95 transition-opacity"
+                            >
+                              <img
+                                src={resolveMediaUrl(msg.mediaUrl)}
+                                alt={msg.mediaName || 'Lampiran gambar'}
+                                loading="lazy"
+                                className="max-w-full max-h-60 object-contain"
+                              />
+                            </button>
+                            <div className="flex items-center justify-end gap-2 text-[10px] text-gray-500">
+                              <a
+                                href={resolveMediaUrl(msg.mediaUrl)}
+                                download={msg.mediaName || 'gambar'}
+                                className="inline-flex items-center gap-0.5 hover:text-indigo-700"
+                              >
+                                <Download className="w-2.5 h-2.5" />
+                                <span>Unduh</span>
+                              </a>
+                            </div>
+                          </div>
+                        )}
+
+                        {msg.mediaUrl && msg.mediaType === 'video' && (
+                          <div className="space-y-1">
+                            <video
+                              src={resolveMediaUrl(msg.mediaUrl)}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              className="max-w-full max-h-60 rounded border border-gray-200 bg-black"
+                            />
+                            <div className="flex items-center justify-between gap-2 text-[10px] text-gray-500">
+                              <span className="font-mono truncate">{msg.mediaName || 'Video'}</span>
+                              <a
+                                href={resolveMediaUrl(msg.mediaUrl)}
+                                download={msg.mediaName || 'video.mp4'}
+                                className="inline-flex items-center gap-0.5 hover:text-indigo-700 shrink-0"
+                              >
+                                <Download className="w-2.5 h-2.5" />
+                                <span>Unduh</span>
+                              </a>
+                            </div>
+                          </div>
+                        )}
+
+                        {msg.mediaUrl && msg.mediaType === 'audio' && (
+                          <div className="space-y-1">
+                            <audio
+                              src={resolveMediaUrl(msg.mediaUrl)}
+                              controls
+                              preload="metadata"
+                              className="w-full max-w-xs"
+                            />
+                            <div className="flex items-center justify-between gap-2 text-[10px] text-gray-500">
+                              <span className="truncate">{msg.mediaName || 'Pesan Suara / Audio'}</span>
+                              <a
+                                href={resolveMediaUrl(msg.mediaUrl)}
+                                download={msg.mediaName || 'audio.ogg'}
+                                className="inline-flex items-center gap-0.5 hover:text-indigo-700 shrink-0"
+                              >
+                                <Download className="w-2.5 h-2.5" />
+                                <span>Unduh</span>
+                              </a>
+                            </div>
+                          </div>
+                        )}
+
+                        {!msg.mediaUrl && msg.messageType === 'MEDIA' && (
+                          <div className="px-2.5 py-1.5 rounded bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                            File media ({msg.mediaType || 'lampiran'}) tidak tersedia di server WAHA.
+                          </div>
+                        )}
+
+                        {msg.mediaType && !['image', 'video', 'audio'].includes(msg.mediaType) && (
+                          <div className="flex items-center gap-2 p-2 rounded bg-white/80 border border-gray-200 text-[11px]">
+                            <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
+                            <span className="font-mono truncate flex-1">{msg.mediaName || 'Dokumen'}</span>
+                            {msg.mediaUrl && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <a
+                                  href={resolveMediaUrl(msg.mediaUrl)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-indigo-600 hover:underline font-medium"
+                                >
+                                  Buka
+                                </a>
+                                <a
+                                  href={resolveMediaUrl(msg.mediaUrl)}
+                                  download={msg.mediaName || true}
+                                  title="Unduh Dokumen"
+                                  className="text-gray-600 hover:text-gray-900 inline-flex items-center gap-0.5"
+                                >
+                                  <Download className="w-3 h-3" />
+                                </a>
+                              </div>
                             )}
-                          </span>
+                          </div>
                         )}
+
+                        {(() => {
+                          const meta = parseChatMessageMeta(msg);
+                          if (meta?.linkPreview?.url) {
+                            return (
+                              <div className="space-y-1.5">
+                                {meta.linkPreview.caption && (
+                                  <div className="whitespace-pre-wrap break-words">
+                                    {renderTextWithClickableLinks(meta.linkPreview.caption)}
+                                  </div>
+                                )}
+                                <a
+                                  href={meta.linkPreview.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block rounded-md border border-indigo-200/80 bg-white/90 hover:bg-white p-2.5 transition-colors space-y-1"
+                                >
+                                  {meta.linkPreview.imageUrl && (
+                                    <img
+                                      src={meta.linkPreview.imageUrl}
+                                      alt={meta.linkPreview.title || 'Preview tautan'}
+                                      className="w-full max-h-36 object-cover rounded border border-gray-100 mb-1.5"
+                                    />
+                                  )}
+                                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700">
+                                    <Link2 className="w-3.5 h-3.5 shrink-0" />
+                                    <span className="truncate">
+                                      {meta.linkPreview.title || meta.linkPreview.url}
+                                    </span>
+                                    <ExternalLink className="w-3 h-3 shrink-0 ml-auto opacity-70" />
+                                  </div>
+                                  {meta.linkPreview.description && (
+                                    <p className="text-[11px] text-gray-600 line-clamp-2">
+                                      {meta.linkPreview.description}
+                                    </p>
+                                  )}
+                                  <div className="text-[10px] font-mono text-gray-500 truncate">
+                                    {meta.linkPreview.url}
+                                  </div>
+                                </a>
+                                {meta.usedFallbackText && (
+                                  <div className="text-[10px] text-gray-500 italic">
+                                    Terkirim dengan preview URL standar WhatsApp
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+                          if (meta?.interactiveButtons) {
+                            return (
+                              <div className="space-y-1.5">
+                                {meta.interactiveButtons.header && (
+                                  <div className="font-semibold text-gray-900">
+                                    {meta.interactiveButtons.header}
+                                  </div>
+                                )}
+                                <div className="whitespace-pre-wrap break-words">
+                                  {renderTextWithClickableLinks(meta.interactiveButtons.body)}
+                                </div>
+                                {meta.interactiveButtons.footer && (
+                                  <div className="text-[10px] text-gray-500">
+                                    {meta.interactiveButtons.footer}
+                                  </div>
+                                )}
+                                <div className="pt-1 border-t border-indigo-200/70 space-y-1">
+                                  {meta.interactiveButtons.buttons.map((b, bIdx) => (
+                                    <div
+                                      key={bIdx}
+                                      className="px-2 py-1 rounded bg-white/90 border border-indigo-200 text-[11px] font-medium text-indigo-700 flex items-center justify-between gap-2"
+                                    >
+                                      <span className="inline-flex items-center gap-1.5 truncate">
+                                        {b.type === 'url' ? (
+                                          <ExternalLink className="w-3 h-3 shrink-0" />
+                                        ) : b.type === 'call' ? (
+                                          <Phone className="w-3 h-3 shrink-0" />
+                                        ) : b.type === 'copy' ? (
+                                          <Copy className="w-3 h-3 shrink-0" />
+                                        ) : (
+                                          <Reply className="w-3 h-3 shrink-0" />
+                                        )}
+                                        <span className="truncate">{b.text}</span>
+                                      </span>
+                                      <span className="text-[9px] font-mono text-gray-500 truncate max-w-[140px]">
+                                        {b.url || b.phoneNumber || b.copyCode || 'Balas'}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                                {meta.usedFallbackText && (
+                                  <div className="text-[10px] text-amber-700 italic">
+                                    Terkirim via fallback teks terformat (tombol native dibatasi engine WAHA)
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+                          if (meta?.poll) {
+                            return (
+                              <div className="space-y-1.5">
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-700">
+                                  <BarChart2 className="w-3 h-3" />
+                                  <span>
+                                    Polling WhatsApp ({meta.poll.multipleAnswers ? 'Multi Pilihan' : '1 Pilihan'})
+                                  </span>
+                                </div>
+                                <div className="font-semibold text-gray-900">
+                                  {meta.poll.question}
+                                </div>
+                                <div className="space-y-1">
+                                  {meta.poll.options.map((opt, oIdx) => (
+                                    <div
+                                      key={oIdx}
+                                      className="px-2 py-1 rounded bg-white/90 border border-gray-200 text-[11px] text-gray-700 flex items-center gap-1.5"
+                                    >
+                                      <span className="w-4 h-4 rounded-full border border-indigo-300 text-[9px] font-mono flex items-center justify-center text-indigo-700 shrink-0">
+                                        {oIdx + 1}
+                                      </span>
+                                      <span className="truncate">{opt}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="whitespace-pre-wrap break-words">
+                              {renderTextWithClickableLinks(msg.body)}
+                            </div>
+                          );
+                        })()}
+
+                        {isFailed && (
+                          <div className="pt-1 border-t border-red-200/70 flex flex-wrap items-center justify-between gap-2 text-[10px] text-red-700">
+                            <span className="inline-flex items-center gap-1 font-medium">
+                              <AlertTriangle className="w-3 h-3 shrink-0" />
+                              <span className="break-words">
+                                {msg.errorMessage ? `Gagal: ${msg.errorMessage}` : 'Gagal mengirim pesan'}
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              disabled={retryingMessageId === msg.id}
+                              onClick={() => void handleRetryMessage(msg.id)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50 shrink-0"
+                            >
+                              <RotateCcw className="w-2.5 h-2.5" />
+                              <span>{retryingMessageId === msg.id ? 'Mengirim...' : 'Kirim Ulang'}</span>
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-gray-500 font-mono tabular-nums">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyingToMessage(msg);
+                              setComposerMode('REPLY');
+                              replyInputRef.current?.focus();
+                            }}
+                            title="Balas pesan ini"
+                            className="mr-auto opacity-80 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center gap-0.5 text-[10px] font-sans text-indigo-600 hover:text-indigo-800 transition-opacity"
+                          >
+                            <Reply className="w-3 h-3" />
+                            <span>Balas</span>
+                          </button>
+                          {msg.wahaSession && (
+                            <span className="text-[9px] text-gray-400">{msg.wahaSession}</span>
+                          )}
+                          <span>
+                            {new Date(msg.createdAt).toLocaleTimeString('id-ID', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+
+                          {isOutbound && !isFailed && (
+                            <span>
+                              {isRead ? (
+                                <CheckCheck className="w-3.5 h-3.5 text-blue-600 inline" />
+                              ) : isDelivered ? (
+                                <CheckCheck className="w-3.5 h-3.5 text-gray-400 inline" />
+                              ) : (
+                                <Check className="w-3 h-3 text-gray-400 inline" />
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                    {endDividerNodes}
+                  </React.Fragment>
                 );
-              })
-            )}
+              });
+            })()}
             <div ref={messagesEndRef} />
           </div>
 
@@ -1396,8 +2338,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   onClick={() => {
                     setComposerMode('NOTE');
                     setPendingAttachment(null);
-                    setShowCannedPicker(false);
-                    setShowProductPicker(false);
+                    openComposerPicker(null);
+                    stopOutboundTyping(selectedConversation.id);
                   }}
                   className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
                     composerMode === 'NOTE'
@@ -1428,20 +2370,65 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 );
               })()}
 
+            {replyingToMessage && composerMode === 'REPLY' && (
+              <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-gray-50 border border-gray-200 border-l-2 border-l-indigo-500 text-xs">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] font-semibold text-indigo-700 truncate flex items-center gap-1">
+                    <Reply className="w-3 h-3 shrink-0" />
+                    <span>
+                      Membalas{' '}
+                      {replyingToMessage.direction === 'OUTBOUND'
+                        ? 'Tim CS'
+                        : selectedConversation.contact?.nama_lengkap || 'Pelanggan'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-600 truncate">{replyingToMessage.body}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyingToMessage(null)}
+                  className="p-1 text-gray-400 hover:text-gray-700 shrink-0"
+                  aria-label="Batal balas pesan"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {pendingAttachment && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-indigo-50 border border-indigo-200 text-xs">
-                {pendingAttachment.isImage ? (
+                {pendingAttachment.kind === 'image' ? (
                   <img
                     src={pendingAttachment.base64}
                     alt={pendingAttachment.name}
-                    className="w-10 h-10 rounded object-cover border border-indigo-200"
+                    className="w-10 h-10 rounded object-cover border border-indigo-200 shrink-0"
                   />
+                ) : pendingAttachment.kind === 'video' ? (
+                  <div className="w-9 h-9 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                    <Video className="w-4 h-4" />
+                  </div>
+                ) : pendingAttachment.kind === 'audio' ? (
+                  <div className="w-9 h-9 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                    <Music className="w-4 h-4" />
+                  </div>
                 ) : (
-                  <FileText className="w-5 h-5 text-indigo-600 shrink-0" />
+                  <div className="w-9 h-9 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                    <FileText className="w-4 h-4" />
+                  </div>
                 )}
-                <span className="font-mono text-[11px] truncate flex-1">
-                  {pendingAttachment.name}
-                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-[11px] truncate text-gray-900">
+                    {pendingAttachment.name}
+                  </div>
+                  {pendingAttachment.size !== undefined && (
+                    <div className="text-[10px] text-gray-500 font-mono">
+                      {pendingAttachment.kind.toUpperCase()} •{' '}
+                      {pendingAttachment.size >= 1024 * 1024
+                        ? `${(pendingAttachment.size / (1024 * 1024)).toFixed(2)} MB`
+                        : `${Math.max(1, Math.round(pendingAttachment.size / 1024))} KB`}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => setPendingAttachment(null)}
@@ -1769,11 +2756,361 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               )}
 
+              {showLinkComposer && (
+                <form
+                  onSubmit={handleSendLinkMessage}
+                  className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 sm:w-96 max-w-[calc(100vw-2.5rem)] space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      <Link2 className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                      <span>Kirim Tautan (Link Preview)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowLinkComposer(false)}
+                      title="Tutup Form Tautan"
+                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <input
+                      type="url"
+                      required
+                      placeholder="https://contoh.com/promo (wajib)"
+                      value={linkUrl}
+                      onChange={(e) => setLinkUrl(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Judul kartu preview (opsional)"
+                      value={linkTitle}
+                      onChange={(e) => setLinkTitle(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Pesan pengantar / deskripsi tautan (opsional)"
+                      value={linkCaption}
+                      onChange={(e) => setLinkCaption(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Deskripsi singkat preview (opsional)"
+                      value={linkDesc}
+                      onChange={(e) => setLinkDesc(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                    />
+                    <input
+                      type="url"
+                      placeholder="URL gambar thumbnail preview (opsional)"
+                      value={linkImageUrl}
+                      onChange={(e) => setLinkImageUrl(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-1.5 pt-1">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setShowLinkComposer(false)}
+                    >
+                      Batal
+                    </Button>
+                    <Button type="submit" variant="primary" size="sm" isLoading={sending}>
+                      Kirim Tautan
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {showInteractiveComposer && (
+                <form
+                  onSubmit={handleSendInteractiveMessage}
+                  className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 sm:w-[26rem] max-w-[calc(100vw-2.5rem)] max-h-[70vh] overflow-y-auto space-y-2.5"
+                >
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
+                    <div className="inline-flex rounded border border-gray-200 p-0.5 bg-gray-50 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setInteractiveTab('BUTTONS')}
+                        className={`px-2 py-0.5 rounded font-medium ${
+                          interactiveTab === 'BUTTONS'
+                            ? 'bg-white text-indigo-700 shadow-2xs'
+                            : 'text-gray-600'
+                        }`}
+                      >
+                        Tombol Aksi
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInteractiveTab('POLL')}
+                        className={`px-2 py-0.5 rounded font-medium ${
+                          interactiveTab === 'POLL'
+                            ? 'bg-white text-indigo-700 shadow-2xs'
+                            : 'text-gray-600'
+                        }`}
+                      >
+                        Polling WA
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowInteractiveComposer(false)}
+                      title="Tutup Form Interaktif"
+                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {(selectedConversation.channel || 'WHATSAPP') !== 'WHATSAPP' && (
+                    <div className="px-2 py-1.5 rounded bg-amber-50 border border-amber-200 text-[10px] text-amber-800">
+                      Tombol interaktif &amp; polling WAHA hanya tersedia untuk percakapan WhatsApp.
+                    </div>
+                  )}
+
+                  {interactiveTab === 'BUTTONS' ? (
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        placeholder="Header judul (opsional)"
+                        value={btnHeader}
+                        onChange={(e) => setBtnHeader(e.target.value)}
+                        className="w-full px-2.5 py-1 bg-gray-50 border border-gray-200 rounded text-[11px]"
+                      />
+                      <textarea
+                        rows={2}
+                        required
+                        placeholder="Isi pesan utama (wajib)..."
+                        value={btnBody}
+                        onChange={(e) => setBtnBody(e.target.value)}
+                        className="w-full px-2.5 py-1 bg-gray-50 border border-gray-200 rounded text-[11px]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Footer catatan kecil (opsional)"
+                        value={btnFooter}
+                        onChange={(e) => setBtnFooter(e.target.value)}
+                        className="w-full px-2.5 py-1 bg-gray-50 border border-gray-200 rounded text-[11px]"
+                      />
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-semibold text-gray-600 uppercase">
+                            Daftar Tombol ({btnItems.length}/3)
+                          </span>
+                          {btnItems.length < 3 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setBtnItems((prev) => [...prev, { type: 'reply', text: '' }])
+                              }
+                              className="text-[10px] font-medium text-indigo-600 hover:underline inline-flex items-center gap-0.5"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Tambah Tombol
+                            </button>
+                          )}
+                        </div>
+                        {btnItems.map((b, idx) => (
+                          <div key={idx} className="p-2 rounded bg-gray-50 border border-gray-200 space-y-1">
+                            <div className="flex items-center gap-1">
+                              <select
+                                value={b.type}
+                                onChange={(e) => {
+                                  const nextType = e.target.value as InteractiveButtonItem['type'];
+                                  setBtnItems((prev) =>
+                                    prev.map((item, i) => (i === idx ? { ...item, type: nextType } : item))
+                                  );
+                                }}
+                                className="px-1.5 py-1 bg-white border border-gray-200 rounded text-[10px]"
+                              >
+                                <option value="reply">Balas Cepat</option>
+                                <option value="url">Buka Tautan</option>
+                                <option value="copy">Salin Kode</option>
+                                <option value="call">Telepon</option>
+                              </select>
+                              <input
+                                type="text"
+                                required
+                                placeholder="Label tombol"
+                                value={b.text}
+                                onChange={(e) =>
+                                  setBtnItems((prev) =>
+                                    prev.map((item, i) => (i === idx ? { ...item, text: e.target.value } : item))
+                                  )
+                                }
+                                className="flex-1 min-w-0 px-2 py-1 bg-white border border-gray-200 rounded text-[11px]"
+                              />
+                              {btnItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setBtnItems((prev) => prev.filter((_, i) => i !== idx))
+                                  }
+                                  className="p-1 text-gray-400 hover:text-red-600"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                            {b.type === 'url' && (
+                              <input
+                                type="url"
+                                required
+                                placeholder="https://..."
+                                value={b.url || ''}
+                                onChange={(e) =>
+                                  setBtnItems((prev) =>
+                                    prev.map((item, i) => (i === idx ? { ...item, url: e.target.value } : item))
+                                  )
+                                }
+                                className="w-full px-2 py-1 bg-white border border-gray-200 rounded text-[10px] font-mono"
+                              />
+                            )}
+                            {b.type === 'copy' && (
+                              <input
+                                type="text"
+                                required
+                                placeholder="Kode promo / teks disalin"
+                                value={b.copyCode || ''}
+                                onChange={(e) =>
+                                  setBtnItems((prev) =>
+                                    prev.map((item, i) => (i === idx ? { ...item, copyCode: e.target.value } : item))
+                                  )
+                                }
+                                className="w-full px-2 py-1 bg-white border border-gray-200 rounded text-[10px] font-mono"
+                              />
+                            )}
+                            {b.type === 'call' && (
+                              <input
+                                type="text"
+                                required
+                                placeholder="+62812..."
+                                value={b.phoneNumber || ''}
+                                onChange={(e) =>
+                                  setBtnItems((prev) =>
+                                    prev.map((item, i) => (i === idx ? { ...item, phoneNumber: e.target.value } : item))
+                                  )
+                                }
+                                className="w-full px-2 py-1 bg-white border border-gray-200 rounded text-[10px] font-mono"
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <label className="flex items-start gap-1.5 text-[10px] text-gray-600 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={btnFallbackText}
+                          onChange={(e) => setBtnFallbackText(e.target.checked)}
+                          className="mt-0.5 rounded border-gray-300 text-indigo-600"
+                        />
+                        <span>
+                          Fallback otomatis ke teks bernomor bila engine WhatsApp (mis. WEBJS) menolak tombol native.
+                        </span>
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        required
+                        placeholder="Pertanyaan polling..."
+                        value={pollQuestion}
+                        onChange={(e) => setPollQuestion(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px]"
+                      />
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-semibold text-gray-600 uppercase">
+                            Pilihan ({pollOptions.length}/12)
+                          </span>
+                          {pollOptions.length < 12 && (
+                            <button
+                              type="button"
+                              onClick={() => setPollOptions((prev) => [...prev, ''])}
+                              className="text-[10px] font-medium text-indigo-600 hover:underline inline-flex items-center gap-0.5"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Tambah Opsi
+                            </button>
+                          )}
+                        </div>
+                        {pollOptions.map((opt, idx) => (
+                          <div key={idx} className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              required
+                              placeholder={`Pilihan ${idx + 1}`}
+                              value={opt}
+                              onChange={(e) =>
+                                setPollOptions((prev) =>
+                                  prev.map((v, i) => (i === idx ? e.target.value : v))
+                                )
+                              }
+                              className="flex-1 min-w-0 px-2 py-1 bg-gray-50 border border-gray-200 rounded text-[11px]"
+                            />
+                            {pollOptions.length > 2 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPollOptions((prev) => prev.filter((_, i) => i !== idx))
+                                }
+                                className="p-1 text-gray-400 hover:text-red-600"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <label className="flex items-center gap-1.5 text-[10px] text-gray-600 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={pollMultiple}
+                          onChange={(e) => setPollMultiple(e.target.checked)}
+                          className="rounded border-gray-300 text-indigo-600"
+                        />
+                        <span>Izinkan pelanggan memilih lebih dari 1 opsi</span>
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-1.5 pt-1">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setShowInteractiveComposer(false)}
+                    >
+                      Batal
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      isLoading={sending}
+                      disabled={(selectedConversation.channel || 'WHATSAPP') !== 'WHATSAPP'}
+                    >
+                      {interactiveTab === 'POLL' ? 'Kirim Polling' : 'Kirim Tombol'}
+                    </Button>
+                  </div>
+                </form>
+              )}
+
               <form onSubmit={handleSendMessage} className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 min-w-0">
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar"
                 onChange={handleFilePick}
                 className="hidden"
               />
@@ -1781,11 +3118,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowEmojiPicker((v) => !v);
-                      setShowCannedPicker(false);
-                      setShowProductPicker(false);
-                    }}
+                    onClick={() => openComposerPicker('EMOJI')}
                     title="Sisipkan Emotikon"
                     className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
                   >
@@ -1795,11 +3128,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <>
                       <button
                         type="button"
-                        onClick={() => {
-                          setShowCannedPicker((v) => !v);
-                          setShowEmojiPicker(false);
-                          setShowProductPicker(false);
-                        }}
+                        onClick={() => openComposerPicker('CANNED')}
                         title="Balasan Cepat (Canned Responses)"
                         className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-amber-600 inline-flex items-center justify-center shrink-0"
                       >
@@ -1807,11 +3136,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setShowProductPicker((v) => !v);
-                          setShowCannedPicker(false);
-                          setShowEmojiPicker(false);
-                        }}
+                        onClick={() => openComposerPicker('PRODUCT')}
                         title="Sisipkan Katalog Produk (Quick Quote)"
                         className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
                       >
@@ -1819,8 +3144,24 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </button>
                       <button
                         type="button"
+                        onClick={() => openComposerPicker('LINK')}
+                        title="Kirim Tautan (Send Link Preview)"
+                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-sky-600 inline-flex items-center justify-center shrink-0"
+                      >
+                        <Link2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openComposerPicker('INTERACTIVE')}
+                        title="Kirim Tombol Interaktif / Polling WhatsApp"
+                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-emerald-600 inline-flex items-center justify-center shrink-0"
+                      >
+                        <ListChecks className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        title="Lampirkan Gambar atau Dokumen"
+                        title="Lampirkan Gambar, Video, Audio, atau Dokumen (maks. 10 MB)"
                         className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
                       >
                         <Paperclip className="w-4 h-4" />
@@ -1836,6 +3177,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </div>
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                 <input
+                  ref={replyInputRef}
                   type="text"
                   placeholder={
                     composerMode === 'NOTE'
@@ -1847,7 +3189,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         }...`
                   }
                   value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
+                  onChange={(e) => handleReplyTextChange(e.target.value)}
+                  onBlur={() => stopOutboundTyping(selectedConversation.id)}
                   className={`flex-1 min-w-0 h-9 px-3 border rounded-md text-[13px] placeholder-gray-400 focus:outline-none ${
                     composerMode === 'NOTE'
                       ? 'bg-amber-50/70 border-amber-200 focus:border-amber-500'
@@ -1886,16 +3229,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
             onClick={() => toggleContactPanel(false)}
             aria-hidden="true"
           />
-          <div className="absolute inset-y-0 right-0 z-30 w-full sm:w-80 xl:static xl:z-auto xl:w-80 border-l border-gray-200 bg-white p-4 flex flex-col shrink-0 overflow-y-auto min-h-0 shadow-xl xl:shadow-none">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+          <div className="absolute inset-y-0 right-0 z-30 w-full sm:w-80 xl:static xl:z-auto xl:w-80 border-l border-gray-200 bg-white px-4 pb-5 flex flex-col shrink-0 overflow-y-auto min-h-0 shadow-xl xl:shadow-none">
+          <div className="sticky top-0 z-10 bg-white/95 backdrop-blur -mx-4 px-4 py-3 mb-3 border-b border-gray-100 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
               Detail Kontak
             </span>
             <button
               type="button"
               onClick={() => toggleContactPanel(false)}
               title="Tutup Detail Kontak"
-              className="p-1 rounded hover:bg-gray-100 text-gray-500"
+              className="p-1.5 -mr-1 rounded-md hover:bg-gray-100 text-gray-500"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1905,7 +3248,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
             <div className="w-12 h-12 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-base flex items-center justify-center mx-auto mb-2 border border-indigo-200">
               {selectedConversation.contact.nama_lengkap.slice(0, 2).toUpperCase()}
             </div>
-            <h4 className="font-semibold text-gray-900 text-sm">
+            <h4 className="font-semibold text-gray-900 text-sm break-words">
               {selectedConversation.contact.nama_lengkap}
             </h4>
             {selectedConversation.contact.nama_panggilan && (
@@ -1914,9 +3257,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </span>
             )}
             {selectedConversation.wahaSession && (
-              <span className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <Smartphone className="w-3 h-3" />
-                Sesi: {selectedConversation.wahaSession}
+              <span className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 max-w-full truncate">
+                <Smartphone className="w-3 h-3 shrink-0" />
+                <span className="truncate">Sesi: {selectedConversation.wahaSession}</span>
               </span>
             )}
           </div>
@@ -2026,11 +3369,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   value={newLabel}
                   onChange={(e) => setNewLabel(e.target.value)}
                   placeholder="Tambah label..."
-                  className="flex-1 h-7 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                  className="flex-1 min-w-0 h-8 sm:h-7 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
                 />
                 <button
                   type="submit"
-                  className="h-7 px-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-[11px] font-medium"
+                  className="h-8 sm:h-7 px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-[11px] font-medium shrink-0"
                 >
                   Tambah
                 </button>
@@ -2074,60 +3417,118 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 )}
               </div>
               {selectedConversation.csatHistory && selectedConversation.csatHistory.length > 0 ? (
-                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
-                  {selectedConversation.csatHistory.map((csat) => (
-                    <div
-                      key={csat.id}
-                      className={`p-2 rounded-md border space-y-1 ${
-                        csat.rating
-                          ? 'bg-amber-50 border-amber-200'
-                          : 'bg-gray-50 border-gray-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        {csat.rating ? (
-                          <div className="flex items-center gap-0.5">
-                            {[1, 2, 3, 4, 5].map((s) => (
-                              <Star
-                                key={s}
-                                className={`w-3 h-3 ${
-                                  s <= (csat.rating || 0)
-                                    ? 'text-amber-400 fill-amber-400'
-                                    : 'text-gray-300'
-                                }`}
-                              />
-                            ))}
-                            <span className="text-[11px] font-semibold text-amber-900 ml-1">
-                              {csat.rating}/5
+                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-0.5">
+                  {selectedConversation.csatHistory.map((csat) => {
+                    const scoreVal = csat.overallScore ?? csat.rating;
+                    const hasDetails = Boolean(csat.criteriaDetails && csat.criteriaDetails.length > 0);
+                    const isOpen = expandedCsatId === csat.id;
+                    return (
+                      <div
+                        key={csat.id}
+                        onClick={() => hasDetails && setExpandedCsatId(isOpen ? null : csat.id)}
+                        className={`p-2 rounded-md border space-y-1 ${
+                          scoreVal
+                            ? 'bg-amber-50 border-amber-200'
+                            : 'bg-gray-50 border-gray-200'
+                        } ${hasDetails ? 'cursor-pointer hover:border-amber-300' : ''}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          {scoreVal ? (
+                            <div className="flex items-center gap-0.5">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star
+                                  key={s}
+                                  className={`w-3 h-3 ${
+                                    s <= Math.round(scoreVal)
+                                      ? 'text-amber-400 fill-amber-400'
+                                      : 'text-gray-300'
+                                  }`}
+                                />
+                              ))}
+                              <span className="text-[11px] font-semibold font-mono text-amber-900 ml-1">
+                                {Number(scoreVal).toFixed(2).replace(/\.?0+$/, '')}/5
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-medium text-gray-500">
+                              Menunggu penilaian
                             </span>
-                          </div>
-                        ) : (
-                          <span className="text-[10px] font-medium text-gray-500">
-                            Menunggu penilaian
+                          )}
+                          <span className="text-[10px] text-gray-400 shrink-0">
+                            {new Date(csat.submittedAt || csat.sentAt).toLocaleDateString('id-ID', {
+                              day: '2-digit',
+                              month: 'short',
+                            })}
                           </span>
+                        </div>
+                        {csat.profileName && (
+                          <div className="text-[10px] text-indigo-700 font-medium">
+                            Target: {csat.profileName}
+                          </div>
                         )}
-                        <span className="text-[10px] text-gray-400 shrink-0">
-                          {new Date(csat.submittedAt || csat.sentAt).toLocaleDateString('id-ID', {
-                            day: '2-digit',
-                            month: 'short',
-                          })}
-                        </span>
-                      </div>
-                      {csat.feedback && (
-                        <p className="text-[11px] text-amber-900 italic break-words">
-                          &ldquo;{csat.feedback}&rdquo;
-                        </p>
-                      )}
-                      <div className="text-[10px] text-gray-400 flex items-center justify-between gap-1">
-                        <span>
-                          {csat.triggerType === 'AUTO_RESOLVE' ? 'Saat Akhiri' : 'Kirim Manual'}
-                        </span>
-                        {csat.assignedAgentName && (
-                          <span className="truncate">{csat.assignedAgentName}</span>
+                        {(csat.conversationStartedAt || csat.conversationResolvedAt) && (
+                          <div className="text-[10px] text-gray-500 font-mono">
+                            Sesi:{' '}
+                            {csat.conversationStartedAt
+                              ? new Date(csat.conversationStartedAt).toLocaleString('id-ID', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : '-'}{' '}
+                            →{' '}
+                            {csat.conversationResolvedAt
+                              ? new Date(csat.conversationResolvedAt).toLocaleTimeString('id-ID', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })
+                              : new Date(csat.sentAt).toLocaleTimeString('id-ID', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                          </div>
                         )}
+                        {csat.feedback && (
+                          <p className="text-[11px] text-amber-900 italic break-words">
+                            &ldquo;{csat.feedback}&rdquo;
+                          </p>
+                        )}
+                        {hasDetails && isOpen && (
+                          <div className="pt-1.5 mt-1 border-t border-amber-200/80 space-y-0.5 text-[10px]">
+                            {csat.criteriaDetails!.map((cd) => (
+                              <div key={cd.key} className="flex items-center justify-between text-gray-700">
+                                <span className="truncate">{cd.label}</span>
+                                <span className="font-mono font-semibold text-amber-900 shrink-0">
+                                  {cd.score}/5
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="text-[10px] text-gray-400 flex items-center justify-between gap-1">
+                          <span>
+                            {csat.triggerType === 'AUTO_RESOLVE' ? 'Saat Akhiri' : 'Kirim Manual'}
+                            {hasDetails ? (isOpen ? ' • Sembunyikan' : ' • Detail skor') : ''}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setHighlightedCsatWindow({
+                                token: csat.token,
+                                startedAt: csat.conversationStartedAt || null,
+                                resolvedAt: csat.conversationResolvedAt || csat.sentAt || null,
+                              });
+                            }}
+                            className="text-indigo-600 hover:underline font-medium shrink-0"
+                          >
+                            Sorot di chat
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : selectedConversation.csatRating ? (
                 <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 space-y-1">
@@ -2322,6 +3723,47 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {lightboxMedia && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightboxMedia(null)}
+        >
+          <div
+            className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex items-center justify-between text-white text-xs">
+              <span className="font-mono truncate max-w-[70%]">
+                {lightboxMedia.name || 'Pratinjau Gambar'}
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={lightboxMedia.url}
+                  download={lightboxMedia.name || 'gambar'}
+                  className="px-2.5 py-1 rounded bg-white/15 hover:bg-white/25 text-white inline-flex items-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setLightboxMedia(null)}
+                  className="p-1.5 rounded bg-white/15 hover:bg-white/25 text-white"
+                  title="Tutup"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <img
+              src={lightboxMedia.url}
+              alt={lightboxMedia.name || 'Pratinjau Gambar'}
+              className="max-w-full max-h-[80vh] object-contain rounded shadow-2xl bg-black/40"
+            />
           </div>
         </div>
       )}

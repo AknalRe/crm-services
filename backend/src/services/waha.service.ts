@@ -7,6 +7,42 @@ import { systemSettings } from '../db/schema';
 import { licenseService } from './license.service';
 import { fromWahaChatId, isPhoneWahaJid, normalizePhoneNumber, toWahaChatId } from './phone.utils';
 
+export function resolveWahaMediaTargetUrl(
+  rawUrl?: string | null,
+  wahaBaseUrl?: string | null
+): URL | null {
+  const cleaned = String(rawUrl || '').trim();
+  const base = String(wahaBaseUrl || '').trim();
+  if (!cleaned || !base) return null;
+
+  let wahaOrigin = '';
+  try {
+    wahaOrigin = new URL(base).origin;
+  } catch {
+    return null;
+  }
+
+  if (cleaned.startsWith('/api/files/') || cleaned.startsWith('/files/')) {
+    return new URL(cleaned, wahaOrigin);
+  }
+  if (!/^https?:\/\//i.test(cleaned)) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(cleaned);
+    if (parsed.origin === wahaOrigin) {
+      return parsed;
+    }
+    if (parsed.pathname.startsWith('/api/files/') || parsed.pathname.startsWith('/files/')) {
+      return new URL(`${parsed.pathname}${parsed.search}`, wahaOrigin);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function isPrivateOrInternalUrl(rawUrl?: string | null): boolean {
   const trimmed = String(rawUrl || '').trim();
   if (!trimmed) return true;
@@ -40,6 +76,72 @@ export function isPrivateOrInternalUrl(rawUrl?: string | null): boolean {
   } catch {
     return true;
   }
+}
+
+export interface WahaInteractiveButtonInput {
+  type: 'reply' | 'url' | 'call' | 'copy';
+  text: string;
+  url?: string;
+  phoneNumber?: string;
+  copyCode?: string;
+}
+
+export interface WahaSendResult {
+  success: boolean;
+  messageId?: string;
+  sessionUsed?: string;
+  error?: string;
+  usedFallbackText?: boolean;
+  fallbackReason?: string;
+}
+
+export function formatLinkPreviewFallbackText(data: {
+  url: string;
+  title?: string;
+  description?: string;
+  caption?: string;
+}): string {
+  const parts: string[] = [];
+  const cleanTitle = (data.title || '').trim();
+  const cleanCaption = (data.caption || '').trim();
+  const cleanDesc = (data.description || '').trim();
+  const cleanUrl = data.url.trim();
+  if (cleanCaption) parts.push(cleanCaption);
+  if (cleanTitle && !cleanCaption.includes(cleanTitle)) parts.push(`*${cleanTitle}*`);
+  if (cleanDesc && cleanDesc !== cleanCaption) parts.push(cleanDesc);
+  if (cleanUrl && !parts.some((p) => p.includes(cleanUrl))) parts.push(cleanUrl);
+  return parts.join('\n').trim();
+}
+
+export function formatInteractiveButtonsFallbackText(data: {
+  header?: string;
+  body: string;
+  footer?: string;
+  buttons: WahaInteractiveButtonInput[];
+}): string {
+  const lines: string[] = [];
+  if (data.header?.trim()) lines.push(`*${data.header.trim()}*`);
+  if (data.body.trim()) lines.push(data.body.trim());
+  if (data.buttons.length > 0) {
+    lines.push('');
+    data.buttons.forEach((btn, idx) => {
+      const num = idx + 1;
+      if (btn.type === 'url' && btn.url) {
+        lines.push(`${num}. ${btn.text}: ${btn.url}`);
+      } else if (btn.type === 'call' && btn.phoneNumber) {
+        lines.push(`${num}. ${btn.text}: ${btn.phoneNumber}`);
+      } else if (btn.type === 'copy' && btn.copyCode) {
+        lines.push(`${num}. ${btn.text}: \`${btn.copyCode}\``);
+      } else {
+        lines.push(`${num}. ${btn.text}`);
+      }
+    });
+  }
+  if (data.footer?.trim()) {
+    lines.push('');
+    lines.push(`_${data.footer.trim()}_`);
+  }
+  return lines.join('\n').trim();
 }
 
 export interface WahaWebhookTelemetry {
@@ -671,7 +773,7 @@ export class WahaService {
       return false;
     }
 
-    const requiredEvents = ['message', 'message.ack', 'session.status'];
+    const requiredEvents = ['message', 'message.ack', 'session.status', 'presence.update'];
     let sessionData = existingSessionData;
     if (!sessionData) {
       try {
@@ -690,7 +792,13 @@ export class WahaService {
       if (wh.url.trim().replace(/\/+$/, '') !== normTarget) return false;
       const evs: string[] = Array.isArray(wh.events) ? wh.events : [];
       const hasInbound = evs.includes('message') || evs.includes('message.any');
-      return evs.includes('*') || (hasInbound && evs.includes('message.ack') && evs.includes('session.status'));
+      return (
+        evs.includes('*') ||
+        (hasInbound &&
+          evs.includes('message.ack') &&
+          evs.includes('session.status') &&
+          evs.includes('presence.update'))
+      );
     });
 
     if (hasValidWebhook) return true;
@@ -1133,11 +1241,26 @@ export class WahaService {
     }
   }
 
+  private isWahaFeatureUnsupported(err: any): boolean {
+    const status = err?.response?.status;
+    if (status === 404 || status === 405 || status === 501) return true;
+    const rawMsg = this.extractWahaError(err).toLowerCase();
+    if (
+      (status === 400 || status === 422 || status === 500) &&
+      /(not implemented|not supported|unsupported|deprecated|buttons?\s+(are|is)\s+(disabled|deprecated|unsupported)|cannot post)/i.test(
+        rawMsg
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   private async executeOutboundSend(
     phone: string,
     sessionName: string | undefined,
     sender: (client: AxiosInstance, targetSession: string, chatId: string) => Promise<any>
-  ): Promise<{ success: boolean; messageId?: string; sessionUsed?: string; error?: string }> {
+  ): Promise<WahaSendResult> {
     const chatId = toWahaChatId(phone);
     if (!chatId) {
       return {
@@ -1161,12 +1284,16 @@ export class WahaService {
         }
       }
 
-      const sendWithSession = async (sess: string) => {
+      const sendWithSession = async (sess: string): Promise<WahaSendResult> => {
         const resData = await sender(client, sess, chatId);
+        const payload = resData?.__wahaMeta ? resData.data : resData;
+        const meta = resData?.__wahaMeta || {};
         return {
           success: true,
-          messageId: this.extractOutboundMessageId(resData),
+          messageId: this.extractOutboundMessageId(payload),
           sessionUsed: sess,
+          ...(meta.usedFallbackText ? { usedFallbackText: true } : {}),
+          ...(meta.fallbackReason ? { fallbackReason: String(meta.fallbackReason) } : {}),
         };
       };
 
@@ -1210,31 +1337,260 @@ export class WahaService {
   }
 
   /**
+   * Mark customer WhatsApp messages as seen/read via WAHA
+   */
+  public async sendSeen(
+    phone: string,
+    sessionName?: string,
+    opts?: { messageIds?: string[] }
+  ): Promise<WahaSendResult> {
+    const cleanIds = (opts?.messageIds || []).map((id) => id.trim()).filter(Boolean);
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.post(
+          '/api/sendSeen',
+          {
+            session: targetSession,
+            chatId,
+            ...(cleanIds.length > 0 ? { messageId: cleanIds[0], messageIds: cleanIds } : {}),
+          },
+          { timeout: 5000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501) {
+          const fallbackRes = await client.post(
+            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/read`,
+            {},
+            { timeout: 5000 }
+          );
+          return fallbackRes.data;
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Send startTyping or stopTyping indicator to customer WhatsApp via WAHA
+   */
+  public async setTyping(
+    phone: string,
+    typing: boolean,
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      const endpoint = typing ? '/api/startTyping' : '/api/stopTyping';
+      const res = await client.post(
+        endpoint,
+        { session: targetSession, chatId },
+        { timeout: 4000 }
+      );
+      return res.data;
+    });
+  }
+
+  /**
    * Send WhatsApp text message
    */
   public async sendTextMessage(
     phone: string,
     text: string,
-    sessionName?: string
-  ): Promise<{ success: boolean; messageId?: string; sessionUsed?: string; error?: string }> {
+    sessionName?: string,
+    opts?: { replyTo?: string; linkPreview?: boolean; linkPreviewHighQuality?: boolean }
+  ): Promise<WahaSendResult> {
     return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
       const response = await client.post('/api/sendText', {
         session: targetSession,
         chatId,
         text,
+        ...(opts?.linkPreview !== undefined ? { linkPreview: opts.linkPreview } : {}),
+        ...(opts?.linkPreviewHighQuality !== undefined
+          ? { linkPreviewHighQuality: opts.linkPreviewHighQuality }
+          : {}),
+        ...(opts?.replyTo ? { reply_to: opts.replyTo } : {}),
       });
       return response.data;
     });
   }
 
   /**
-   * Send WhatsApp image, video, or document file via WAHA
+   * Send link with custom WhatsApp preview card (falls back to sendText linkPreview if unsupported)
+   */
+  public async sendLinkPreviewMessage(
+    phone: string,
+    data: {
+      url: string;
+      title?: string;
+      description?: string;
+      caption?: string;
+      imageUrl?: string;
+      highQuality?: boolean;
+      replyTo?: string;
+    },
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanUrl = data.url.trim();
+    const cleanCaption = (data.caption || '').trim();
+    const textWithUrl = cleanCaption
+      ? cleanCaption.includes(cleanUrl)
+        ? cleanCaption
+        : `${cleanCaption}\n${cleanUrl}`
+      : cleanUrl;
+    const hasCustomPreview = Boolean(
+      data.title?.trim() || data.description?.trim() || data.imageUrl?.trim()
+    );
+
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      if (hasCustomPreview) {
+        try {
+          const res = await client.post('/api/send/link-custom-preview', {
+            session: targetSession,
+            chatId,
+            text: textWithUrl,
+            linkPreviewHighQuality: data.highQuality !== false,
+            preview: {
+              url: cleanUrl,
+              title: data.title?.trim() || cleanUrl,
+              description: data.description?.trim() || '',
+              ...(data.imageUrl?.trim() ? { image: { url: data.imageUrl.trim() } } : {}),
+            },
+            ...(data.replyTo ? { reply_to: data.replyTo } : {}),
+          });
+          return res.data;
+        } catch (err: any) {
+          if (!this.isWahaFeatureUnsupported(err)) throw err;
+          const fallbackText = formatLinkPreviewFallbackText(data);
+          const fallbackRes = await client.post('/api/sendText', {
+            session: targetSession,
+            chatId,
+            text: fallbackText,
+            linkPreview: true,
+            linkPreviewHighQuality: true,
+            ...(data.replyTo ? { reply_to: data.replyTo } : {}),
+          });
+          return {
+            __wahaMeta: {
+              usedFallbackText: true,
+              fallbackReason: this.extractWahaError(err),
+            },
+            data: fallbackRes.data,
+          };
+        }
+      }
+
+      const res = await client.post('/api/sendText', {
+        session: targetSession,
+        chatId,
+        text: formatLinkPreviewFallbackText(data),
+        linkPreview: true,
+        linkPreviewHighQuality: data.highQuality !== false,
+        ...(data.replyTo ? { reply_to: data.replyTo } : {}),
+      });
+      return res.data;
+    });
+  }
+
+  /**
+   * Send interactive buttons via WAHA (optionally falling back to structured text when engine rejects buttons)
+   */
+  public async sendButtonsMessage(
+    phone: string,
+    data: {
+      header?: string;
+      body: string;
+      footer?: string;
+      buttons: WahaInteractiveButtonInput[];
+      replyTo?: string;
+      fallbackTextOnUnsupported?: boolean;
+    },
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const formattedButtons = data.buttons.map((b, idx) => {
+      if (b.type === 'url') {
+        return { type: 'url', text: b.text.trim(), url: (b.url || '').trim() };
+      }
+      if (b.type === 'call') {
+        return { type: 'call', text: b.text.trim(), phoneNumber: (b.phoneNumber || '').trim() };
+      }
+      if (b.type === 'copy') {
+        return { type: 'copy', text: b.text.trim(), copyCode: (b.copyCode || '').trim() };
+      }
+      return { type: 'reply', id: `btn_${idx + 1}`, text: b.text.trim() };
+    });
+
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.post('/api/sendButtons', {
+          session: targetSession,
+          chatId,
+          ...(data.header?.trim() ? { header: data.header.trim() } : {}),
+          body: data.body.trim(),
+          ...(data.footer?.trim() ? { footer: data.footer.trim() } : {}),
+          buttons: formattedButtons,
+          ...(data.replyTo ? { reply_to: data.replyTo } : {}),
+        });
+        return res.data;
+      } catch (err: any) {
+        if (data.fallbackTextOnUnsupported === false || !this.isWahaFeatureUnsupported(err)) {
+          throw err;
+        }
+        const fallbackText = formatInteractiveButtonsFallbackText(data);
+        const fallbackRes = await client.post('/api/sendText', {
+          session: targetSession,
+          chatId,
+          text: fallbackText,
+          linkPreview: true,
+          ...(data.replyTo ? { reply_to: data.replyTo } : {}),
+        });
+        return {
+          __wahaMeta: {
+            usedFallbackText: true,
+            fallbackReason: this.extractWahaError(err),
+          },
+          data: fallbackRes.data,
+        };
+      }
+    });
+  }
+
+  /**
+   * Send native WhatsApp Poll via WAHA
+   */
+  public async sendPollMessage(
+    phone: string,
+    data: {
+      question: string;
+      options: string[];
+      multipleAnswers?: boolean;
+      replyTo?: string;
+    },
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      const res = await client.post('/api/sendPoll', {
+        session: targetSession,
+        chatId,
+        poll: {
+          name: data.question.trim(),
+          options: data.options.map((o) => o.trim()).filter(Boolean),
+          multipleAnswers: Boolean(data.multipleAnswers),
+        },
+        ...(data.replyTo ? { reply_to: data.replyTo } : {}),
+      });
+      return res.data;
+    });
+  }
+
+  /**
+   * Send WhatsApp image, video, audio, or document file via WAHA
    */
   public async sendMediaMessage(
     phone: string,
-    file: { base64: string; mimetype: string; filename: string; caption?: string },
+    file: { base64: string; mimetype: string; filename: string; caption?: string; replyTo?: string },
     sessionName?: string
-  ): Promise<{ success: boolean; messageId?: string; sessionUsed?: string; error?: string }> {
+  ): Promise<WahaSendResult> {
     const cleanBase64 = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
     const isImage = file.mimetype.startsWith('image/');
     const isVideo = file.mimetype.startsWith('video/');
@@ -1249,24 +1605,72 @@ export class WahaService {
           data: cleanBase64,
         },
         caption: file.caption || '',
+        ...(file.replyTo ? { reply_to: file.replyTo } : {}),
       };
+      const mediaConfig = { timeout: 60000 };
 
       if (isImage) {
-        const res = await client.post('/api/sendImage', payload);
+        const res = await client.post('/api/sendImage', payload, mediaConfig);
         return res.data;
       }
       if (isVideo) {
         try {
-          const res = await client.post('/api/sendVideo', payload);
+          const res = await client.post('/api/sendVideo', payload, mediaConfig);
           return res.data;
         } catch (err: any) {
           const st = err?.response?.status;
-          if (st !== 404 && st !== 405) throw err;
+          if (st !== 404 && st !== 405 && st !== 501) throw err;
         }
       }
-      const res = await client.post('/api/sendFile', payload);
+      const res = await client.post('/api/sendFile', payload, mediaConfig);
       return res.data;
     });
+  }
+
+  /**
+   * Download inbound media file securely from configured WAHA server using unmasked X-Api-Key
+   */
+  public async downloadMedia(
+    rawUrl: string
+  ): Promise<{ buffer: Buffer; contentType: string; filename?: string }> {
+    const clean = String(rawUrl || '').trim();
+    if (!clean) {
+      const err: any = new Error('URL media WAHA tidak valid');
+      err.statusCode = 400;
+      throw err;
+    }
+    const conf = await this.getConfig(false);
+    if (!conf.baseUrl) {
+      const err: any = new Error('Base URL WAHA belum valid');
+      err.statusCode = 400;
+      throw err;
+    }
+    const targetUrl = resolveWahaMediaTargetUrl(clean, conf.baseUrl);
+    if (!targetUrl) {
+      const err: any = new Error(
+        'Hanya media dari server WAHA terkonfigurasi yang diizinkan melalui proxy'
+      );
+      err.statusCode = 403;
+      throw err;
+    }
+    const headers: Record<string, string> = {};
+    if (conf.apiKey && conf.apiKey.trim()) {
+      headers['X-Api-Key'] = conf.apiKey.trim();
+    }
+    const upstream = await axios.get(targetUrl.toString(), {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: 25000,
+    });
+    const contentType = String(
+      upstream.headers?.['content-type'] || 'application/octet-stream'
+    ).trim();
+    const pathName = targetUrl.pathname.split('/').pop() || undefined;
+    return {
+      buffer: Buffer.from(upstream.data),
+      contentType,
+      filename: pathName,
+    };
   }
 }
 

@@ -63,17 +63,37 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
     <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl bg-white rounded-lg border border-gray-200 p-5 sm:p-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-gray-200 pb-4">
-          <div className="min-w-0">
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${
+                  licenseInfo.status === 'SUSPENDED' || licenseInfo.status === 'EXPIRED'
+                    ? 'bg-red-50 text-red-700 border-red-200'
+                    : 'bg-gray-100 text-gray-700 border-gray-200'
+                }`}
+              >
+                {licenseInfo.status === 'EXPIRED'
+                  ? 'Kedaluwarsa'
+                  : licenseInfo.status === 'SUSPENDED'
+                  ? 'Disuspend'
+                  : 'Belum Aktif'}
+              </span>
+              {licenseInfo.plan && licenseInfo.status !== 'UNLICENSED' && (
+                <span className="text-[11px] text-gray-600 font-medium">
+                  Paket terakhir: <strong>{licenseInfo.plan}</strong>
+                </span>
+              )}
+            </div>
             <h1 className="text-base font-semibold text-gray-900">
-              Aktivasi Lisensi Reneo CRM
+              Aktivasi &amp; Perpanjangan Lisensi Reneo CRM
             </h1>
-            <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+            <p className="text-xs text-gray-500 leading-relaxed">
               {licenseInfo.status === 'EXPIRED'
-                ? 'Masa aktif lisensi CRM Anda telah berakhir. Perpanjang atau masukkan kunci lisensi baru untuk melanjutkan.'
-                : 'Akun CRM Anda sudah siap. Pilih paket lisensi (tersedia Trial 7 Hari) dan lakukan pembayaran, atau masukkan kunci lisensi yang sudah Anda terima.'}
+                ? 'Masa aktif lisensi CRM Anda telah berakhir. Lihat info lisensi untuk memperpanjang (tersedia multi-qty durasi) atau pasang kunci lisensi baru.'
+                : 'Akun CRM Anda sudah siap. Pilih paket lisensi (tersedia Trial 7 Hari atau langganan multi-bulan), atau masukkan kunci lisensi yang sudah Anda terima.'}
             </p>
             {user && (
-              <p className="text-[11px] text-gray-500 mt-1 break-all">
+              <p className="text-[11px] text-gray-500 break-all">
                 Akun terdaftar: <span className="font-medium text-gray-800">{user.name}</span> ({user.email})
               </p>
             )}
@@ -88,7 +108,7 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
                   size="sm"
                   onClick={onBackToLanding}
                 >
-                  Landing
+                  Halaman Utama
                 </Button>
               )}
               {onLogout && (
@@ -109,10 +129,12 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
           {/* Step 1: Pilih Lisensi & Bayar */}
           <div className="rounded-lg border border-gray-200 p-4 space-y-3 bg-gray-50/50">
             <div className="text-xs font-semibold text-gray-900">
-              1. Beli / Pilih Paket Lisensi
+              {licenseInfo.status === 'EXPIRED' ? '1. Info Lisensi & Perpanjang' : '1. Beli / Pilih Paket Lisensi'}
             </div>
             <p className="text-xs text-gray-500 leading-relaxed">
-              Lihat daftar paket lisensi resmi dari panel Reneo, lakukan pembayaran, dan dapatkan kunci aktivasi secara otomatis.
+              {licenseInfo.status === 'EXPIRED'
+                ? 'Periksa detail masa aktif terakhir dan perpanjang langsung untuk 1 bulan, 3 bulan, 6 bulan, atau lebih.'
+                : 'Lihat daftar paket lisensi resmi dari panel Reneo, pilih durasi langganan, dan dapatkan kunci aktivasi otomatis.'}
             </p>
             <Button
               type="button"
@@ -120,7 +142,7 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
               className="w-full"
               onClick={onOpenPlans}
             >
-              Pilih Paket &amp; Bayar
+              {licenseInfo.status === 'EXPIRED' ? 'Lihat Info & Perpanjang' : 'Pilih Paket & Durasi'}
             </Button>
           </div>
 

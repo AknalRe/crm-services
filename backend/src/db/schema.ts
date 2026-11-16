@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, integer, boolean, doublePrecision } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const contacts = pgTable('contacts', {
@@ -80,9 +80,11 @@ export const conversations = pgTable('conversations', {
   firstInboundAt: timestamp('first_inbound_at'),
   lastInboundAt: timestamp('last_inbound_at'),
   firstResponseAt: timestamp('first_response_at'),
+  sessionStartedAt: timestamp('session_started_at'),
   resolvedAt: timestamp('resolved_at'),
   csatToken: text('csat_token').unique(),
   csatRating: integer('csat_rating'),
+  csatOverallScore: doublePrecision('csat_overall_score'),
   csatFeedback: text('csat_feedback'),
   csatSubmittedAt: timestamp('csat_submitted_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -98,7 +100,7 @@ export const chatMessages = pgTable('chat_messages', {
     .references(() => contacts.id, { onDelete: 'cascade' })
     .notNull(),
   direction: text('direction').notNull(), // INBOUND or OUTBOUND
-  messageType: text('message_type').default('TEXT').notNull(), // TEXT, MEDIA, NOTE, CSAT
+  messageType: text('message_type').default('TEXT').notNull(), // TEXT, MEDIA, NOTE, CSAT, LINK, BUTTONS, POLL
   channel: text('channel').default('WHATSAPP').notNull(),
   externalMessageId: text('external_message_id'),
   wahaSession: text('waha_session'),
@@ -106,6 +108,10 @@ export const chatMessages = pgTable('chat_messages', {
   mediaUrl: text('media_url'),
   mediaType: text('media_type'), // image, document, audio, video
   mediaName: text('media_name'),
+  replyToMessageId: text('reply_to_message_id'),
+  replyToBody: text('reply_to_body'),
+  replyToSender: text('reply_to_sender'),
+  metadataJson: text('metadata_json'),
   wahaMessageId: text('waha_message_id').unique(),
   status: text('status').default('PENDING').notNull(),
   ackStatus: integer('ack_status').default(0).notNull(),
@@ -175,8 +181,15 @@ export const csatResponses = pgTable('csat_responses', {
   assignedAgentName: text('assigned_agent_name'),
   token: text('token').notNull().unique(),
   triggerType: text('trigger_type').default('MANUAL').notNull(), // MANUAL | AUTO_RESOLVE
+  profileId: text('profile_id'),
+  profileName: text('profile_name'),
+  snapshotJson: text('snapshot_json'),
+  criteriaScoresJson: text('criteria_scores_json'),
   rating: integer('rating'),
+  overallScore: doublePrecision('overall_score'),
   feedback: text('feedback'),
+  conversationStartedAt: timestamp('conversation_started_at'),
+  conversationResolvedAt: timestamp('conversation_resolved_at'),
   sentAt: timestamp('sent_at').defaultNow().notNull(),
   submittedAt: timestamp('submitted_at'),
 });

@@ -1,13 +1,20 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { and, eq, desc, asc, gt } from 'drizzle-orm';
-import axios from 'axios';
 import { db } from '../db';
 import { conversations, chatMessages, contacts, contactIdentities, crmAgents, cannedResponses, csatResponses } from '../db/schema';
-import { wahaService } from '../services/waha.service';
+import { wahaService, WahaInteractiveButtonInput, WahaSendResult, formatInteractiveButtonsFallbackText, formatLinkPreviewFallbackText } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { OmnichannelType, sendOutboundChannelMessage } from '../services/channel.service';
+import {
+  buildCsatSnapshot,
+  DEFAULT_CSAT_CTA_TEMPLATE,
+  extractCsatCriteriaDetails,
+  parseCsatSurveyConfig,
+  resolveCsatProfileForConversation,
+} from '../services/csat.service';
 import { getSettingMap, requirePermission } from './auth';
+import { readUploadedMediaAsDataUri, saveBase64MediaFile } from './media';
 import crypto from 'crypto';
 
 const VALID_STATUSES = new Set(['OPEN', 'PENDING', 'RESOLVED']);
@@ -73,6 +80,14 @@ async function sendCsatCtaForConversation(
   opts: { session?: string; baseUrl?: string; customMessage?: string; triggerType?: 'MANUAL' | 'AUTO_RESOLVE' }
 ) {
   const settings = await getSettingMap();
+  const surveyConfig = parseCsatSurveyConfig(settings.csat_survey_config);
+  const matchedProfile = resolveCsatProfileForConversation(surveyConfig, {
+    channel: conv.channel,
+    wahaSession: opts.session?.trim() || conv.wahaSession,
+    labels: conv.labels,
+  });
+  const snapshot = buildCsatSnapshot(matchedProfile);
+
   const token = crypto.randomBytes(12).toString('hex');
   const configuredBase = (settings.csat_base_url || '').trim().replace(/\/+$/, '');
   const runtimeBase = (opts.baseUrl || '').trim().replace(/\/+$/, '');
@@ -80,7 +95,11 @@ async function sendCsatCtaForConversation(
   const csatUrl = base
     ? `${base.replace(/\/csat$/i, '')}/csat?token=${token}`
     : `/csat?token=${token}`;
-  const template = (opts.customMessage || '').trim() || settings.csat_template || DEFAULT_CSAT_TEMPLATE;
+  const template =
+    (opts.customMessage || '').trim() ||
+    (matchedProfile.ctaTemplate || '').trim() ||
+    settings.csat_template ||
+    DEFAULT_CSAT_CTA_TEMPLATE;
   const namaPanggilan = contact.namaPanggilan || contact.namaLengkap;
   const ctaBody = template
     .replace(/\{nama_panggilan\}/gi, namaPanggilan)
@@ -117,6 +136,9 @@ async function sendCsatCtaForConversation(
 
   const effectiveSession = sendResult.sessionUsed || targetSession || null;
   const now = new Date();
+  const cycleStartedAt = conv.sessionStartedAt || conv.firstInboundAt || conv.createdAt || now;
+  const cycleResolvedAt =
+    conv.resolvedAt || (opts.triggerType === 'AUTO_RESOLVE' ? now : null);
   await db.insert(csatResponses).values({
     id: crypto.randomUUID(),
     conversationId: conv.id,
@@ -126,6 +148,11 @@ async function sendCsatCtaForConversation(
     assignedAgentName: conv.assignedAgentName || null,
     token,
     triggerType: opts.triggerType || 'MANUAL',
+    profileId: matchedProfile.id,
+    profileName: matchedProfile.name,
+    snapshotJson: JSON.stringify(snapshot),
+    conversationStartedAt: cycleStartedAt,
+    conversationResolvedAt: cycleResolvedAt,
     sentAt: now,
   });
 
@@ -168,6 +195,76 @@ async function sendCsatCtaForConversation(
     csatUrl,
     csatToken: token,
   };
+}
+
+const lastSeenSentByConv = new Map<string, string>();
+
+type OutboundMessageKind = 'TEXT' | 'MEDIA' | 'LINK_PREVIEW' | 'BUTTONS' | 'POLL';
+
+interface OutboundLinkPreviewPayload {
+  url: string;
+  title?: string;
+  description?: string;
+  caption?: string;
+  imageUrl?: string;
+  highQuality?: boolean;
+}
+
+interface OutboundButtonsPayload {
+  header?: string;
+  body: string;
+  footer?: string;
+  fallbackTextOnUnsupported?: boolean;
+  buttons: WahaInteractiveButtonInput[];
+}
+
+interface OutboundPollPayload {
+  question: string;
+  options: string[];
+  multipleAnswers?: boolean;
+}
+
+function buildPollFallbackDisplayText(poll: OutboundPollPayload): string {
+  const lines = [`[Polling] ${poll.question.trim()}`];
+  poll.options.forEach((opt, idx) => {
+    lines.push(`${idx + 1}. ${opt}`);
+  });
+  return lines.join('\n');
+}
+
+async function markWhatsAppConversationSeen(
+  conv: typeof conversations.$inferSelect,
+  contact: typeof contacts.$inferSelect,
+  messagesList: Array<typeof chatMessages.$inferSelect>,
+  force = false
+): Promise<{ seenSent: boolean; error?: string }> {
+  if (((conv.channel || 'WHATSAPP').toUpperCase()) !== 'WHATSAPP') {
+    return { seenSent: false };
+  }
+  const inboundIds = messagesList
+    .filter((m) => m.direction === 'INBOUND' && Boolean(m.wahaMessageId))
+    .slice(-10)
+    .map((m) => String(m.wahaMessageId).trim())
+    .filter(Boolean);
+  if (inboundIds.length === 0) return { seenSent: false };
+
+  const latestId = inboundIds[inboundIds.length - 1];
+  if (!force && lastSeenSentByConv.get(conv.id) === latestId) {
+    return { seenSent: false };
+  }
+  lastSeenSentByConv.set(conv.id, latestId);
+
+  const targetWa = await resolveWhatsAppTarget(conv, contact);
+  if (!targetWa) return { seenSent: false };
+
+  const res = await wahaService.sendSeen(targetWa, conv.wahaSession || undefined, {
+    messageIds: inboundIds,
+  });
+  if (!res.success) {
+    if (force) lastSeenSentByConv.delete(conv.id);
+    return { seenSent: false, error: res.error };
+  }
+  return { seenSent: true };
 }
 
 export default async function conversationsRouter(fastify: FastifyInstance) {
@@ -338,7 +435,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET proxy inbound WAHA media safely so internal Docker/localhost WAHA URLs render in browser
+  // GET proxy inbound WAHA media safely using unmasked X-Api-Key so internal Docker/localhost WAHA URLs render in browser
   fastify.get('/media-proxy', async (req: FastifyRequest<{
     Querystring: { url?: string };
   }>, reply: FastifyReply) => {
@@ -347,52 +444,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       if (!rawUrl) {
         return reply.status(400).send({ success: false, error: 'Invalid media url' });
       }
-      const wahaCfg = await wahaService.getConfig(true);
-      let wahaOrigin = '';
-      try {
-        wahaOrigin = new URL(wahaCfg.baseUrl).origin;
-      } catch {
-        return reply.status(400).send({ success: false, error: 'Base URL WAHA belum valid' });
-      }
-
-      let targetUrl: URL;
-      if (rawUrl.startsWith('/api/files/') || rawUrl.startsWith('/files/')) {
-        targetUrl = new URL(rawUrl, wahaOrigin);
-      } else if (/^https?:\/\//i.test(rawUrl)) {
-        targetUrl = new URL(rawUrl);
-        const host = targetUrl.hostname.toLowerCase();
-        const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
-        if (
-          isLoopback &&
-          (targetUrl.pathname.startsWith('/api/files/') || targetUrl.pathname.startsWith('/files/'))
-        ) {
-          targetUrl = new URL(`${targetUrl.pathname}${targetUrl.search}`, wahaOrigin);
-        }
-      } else {
-        return reply.status(400).send({ success: false, error: 'Invalid media url' });
-      }
-
-      if (!wahaOrigin || targetUrl.origin !== wahaOrigin) {
-        return reply.status(403).send({
-          success: false,
-          error: 'Hanya media dari server WAHA terkonfigurasi yang diizinkan melalui proxy',
-        });
-      }
-      const headers: Record<string, string> = {};
-      if (wahaCfg.apiKey) {
-        headers['X-Api-Key'] = wahaCfg.apiKey;
-      }
-      const upstream = await axios.get(targetUrl.toString(), {
-        headers,
-        responseType: 'arraybuffer',
-        timeout: 15000,
-      });
-      const contentType = upstream.headers['content-type'] || 'application/octet-stream';
-      reply.header('Content-Type', contentType);
+      const downloaded = await wahaService.downloadMedia(rawUrl);
+      reply.header('Content-Type', downloaded.contentType);
       reply.header('Cache-Control', 'private, max-age=3600');
-      return reply.send(Buffer.from(upstream.data));
+      return reply.send(downloaded.buffer);
     } catch (error: any) {
-      return reply.status(502).send({ success: false, error: error.message || 'Gagal memuat media' });
+      const status = error?.statusCode || error?.response?.status || 502;
+      return reply.status(status).send({ success: false, error: error.message || 'Gagal memuat media' });
     }
   });
 
@@ -412,10 +470,27 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .select()
         .from(csatResponses)
         .orderBy(desc(csatResponses.sentAt));
-      const csatByConv = new Map<string, typeof csatRows>();
+      const csatByConv = new Map<string, Array<any>>();
       for (const cr of csatRows) {
         const list = csatByConv.get(cr.conversationId) || [];
-        list.push(cr);
+        const criteriaDetails = extractCsatCriteriaDetails(cr);
+        list.push({
+          id: cr.id,
+          conversationId: cr.conversationId,
+          wahaSession: cr.wahaSession,
+          assignedAgentName: cr.assignedAgentName,
+          token: cr.token,
+          triggerType: cr.triggerType,
+          profileName: cr.profileName || null,
+          rating: cr.rating,
+          overallScore: cr.overallScore ?? cr.rating ?? null,
+          criteriaDetails,
+          feedback: cr.feedback,
+          conversationStartedAt: cr.conversationStartedAt || null,
+          conversationResolvedAt: cr.conversationResolvedAt || null,
+          sentAt: cr.sentAt,
+          submittedAt: cr.submittedAt,
+        });
         csatByConv.set(cr.conversationId, list);
       }
 
@@ -438,6 +513,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         resolvedAt: r.conv.resolvedAt,
         csatToken: r.conv.csatToken,
         csatRating: r.conv.csatRating,
+        csatOverallScore: r.conv.csatOverallScore ?? r.conv.csatRating ?? null,
         csatFeedback: r.conv.csatFeedback,
         csatSubmittedAt: r.conv.csatSubmittedAt,
         csatHistory: csatByConv.get(r.conv.id) || [],
@@ -464,7 +540,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   });
 
   // GET messages for conversation
-  fastify.get('/:id/messages', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  fastify.get('/:id/messages', async (
+    req: FastifyRequest<{
+      Params: { id: string };
+      Querystring: { markRead?: string; forceSeen?: string };
+    }>,
+    reply: FastifyReply
+  ) => {
     try {
       const messages = await db
         .select()
@@ -472,13 +554,110 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .where(eq(chatMessages.conversationId, req.params.id))
         .orderBy(asc(chatMessages.createdAt));
 
-      // Reset unread count only when needed without mutating conversation sort timestamp
+      const shouldMarkRead =
+        req.query?.markRead !== 'false' && req.query?.markRead !== '0';
+      if (shouldMarkRead) {
+        const convRows = await db
+          .select({ conv: conversations, contact: contacts })
+          .from(conversations)
+          .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+          .where(eq(conversations.id, req.params.id))
+          .limit(1);
+        const row = convRows[0];
+        if (row?.conv) {
+          if ((row.conv.unreadCount ?? 0) > 0) {
+            await db
+              .update(conversations)
+              .set({ unreadCount: 0 })
+              .where(and(eq(conversations.id, req.params.id), gt(conversations.unreadCount, 0)));
+            liveEvents.emit('conversations:update', {
+              conversationId: req.params.id,
+              unreadReset: true,
+            });
+          }
+          if (row.contact) {
+            void markWhatsAppConversationSeen(
+              row.conv,
+              row.contact,
+              messages,
+              req.query?.forceSeen === '1'
+            ).catch(() => {});
+          }
+        }
+      }
+
+      return reply.send({ success: true, data: messages });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST mark conversation as read & send WhatsApp seen receipt
+  fastify.post('/:id/read', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    try {
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(eq(conversations.id, req.params.id))
+        .limit(1);
+      const row = convRows[0];
+      if (!row?.conv || !row.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
       await db
         .update(conversations)
         .set({ unreadCount: 0 })
-        .where(and(eq(conversations.id, req.params.id), gt(conversations.unreadCount, 0)));
+        .where(eq(conversations.id, row.conv.id));
 
-      return reply.send({ success: true, data: messages });
+      const messages = await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, row.conv.id))
+        .orderBy(asc(chatMessages.createdAt));
+      const seenRes = await markWhatsAppConversationSeen(row.conv, row.contact, messages, true);
+
+      liveEvents.emit('conversations:update', {
+        conversationId: row.conv.id,
+        unreadReset: true,
+      });
+
+      return reply.send({ success: true, data: seenRes });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST send typing status (startTyping / stopTyping) via WAHA
+  fastify.post('/:id/typing', async (
+    req: FastifyRequest<{
+      Params: { id: string };
+      Body: { typing?: boolean; session?: string };
+    }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(eq(conversations.id, req.params.id))
+        .limit(1);
+      const row = convRows[0];
+      if (!row?.conv || !row.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+      if (((row.conv.channel || 'WHATSAPP').toUpperCase()) !== 'WHATSAPP') {
+        return reply.send({ success: true, skipped: true });
+      }
+      const targetWa = await resolveWhatsAppTarget(row.conv, row.contact);
+      if (!targetWa) {
+        return reply.send({ success: false, skipped: true });
+      }
+      const targetSession = req.body?.session?.trim() || row.conv.wahaSession || undefined;
+      const res = await wahaService.setTyping(targetWa, Boolean(req.body?.typing), targetSession);
+      return reply.send({ success: res.success, error: res.error });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }
@@ -510,10 +689,14 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const targetSession = req.body?.session?.trim() || existingRows[0]?.wahaSession || null;
 
       if (existingRows[0]) {
+        const isReopeningFromResolved = existingRows[0].status === 'RESOLVED';
         const updated = await db
           .update(conversations)
           .set({
             status: 'OPEN',
+            sessionStartedAt: isReopeningFromResolved
+              ? now
+              : existingRows[0].sessionStartedAt || existingRows[0].firstInboundAt || existingRows[0].createdAt,
             resolvedAt: null,
             wahaSession: targetSession,
             updatedAt: now,
@@ -531,6 +714,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           contactId: contact.id,
           channel: 'WHATSAPP',
           status: 'OPEN',
+          sessionStartedAt: now,
           wahaSession: targetSession,
           unreadCount: 0,
           createdAt: now,
@@ -578,7 +762,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           return reply.status(400).send({ success: false, error: 'Status percakapan tidak valid' });
         }
         convUpdate.status = nextStatus;
-        convUpdate.resolvedAt = nextStatus === 'RESOLVED' ? (existing.resolvedAt || now) : null;
+        if (nextStatus === 'RESOLVED') {
+          convUpdate.resolvedAt = existing.status === 'RESOLVED' ? (existing.resolvedAt || now) : now;
+          if (!existing.sessionStartedAt) {
+            convUpdate.sessionStartedAt = existing.firstInboundAt || existing.createdAt;
+          }
+        } else {
+          convUpdate.resolvedAt = null;
+          if (existing.status === 'RESOLVED') {
+            convUpdate.sessionStartedAt = now;
+          }
+        }
       }
 
       if (req.body?.labels !== undefined) {
@@ -747,7 +941,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // POST send reply message (text and/or media attachment)
+  // POST send reply message (text, media attachment, link preview, interactive buttons, or poll)
   fastify.post('/:id/messages', async (req: FastifyRequest<{
     Params: { id: string };
     Body: {
@@ -756,13 +950,90 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       mediaBase64?: string;
       mediaMimetype?: string;
       mediaName?: string;
+      replyToMessageId?: string;
+      messageKind?: OutboundMessageKind;
+      linkPreview?: OutboundLinkPreviewPayload;
+      interactiveButtons?: OutboundButtonsPayload;
+      poll?: OutboundPollPayload;
     };
   }>, reply: FastifyReply) => {
     try {
       const bodyText = (req.body?.body || '').trim();
-      const { session, mediaBase64, mediaMimetype, mediaName } = req.body || {};
+      const {
+        session,
+        mediaBase64,
+        mediaMimetype,
+        mediaName,
+        replyToMessageId,
+        messageKind,
+        linkPreview,
+        interactiveButtons,
+        poll,
+      } = req.body || {};
 
-      if (!bodyText && !mediaBase64) {
+      const inferredKind: OutboundMessageKind =
+        messageKind ||
+        (linkPreview
+          ? 'LINK_PREVIEW'
+          : interactiveButtons
+          ? 'BUTTONS'
+          : poll
+          ? 'POLL'
+          : mediaBase64
+          ? 'MEDIA'
+          : 'TEXT');
+
+      if (inferredKind === 'LINK_PREVIEW') {
+        const rawUrl = String(linkPreview?.url || '').trim();
+        if (!/^https?:\/\/\S+$/i.test(rawUrl)) {
+          return reply.status(400).send({
+            success: false,
+            error: 'URL tautan wajib valid dan diawali http:// atau https://',
+          });
+        }
+      } else if (inferredKind === 'BUTTONS') {
+        const cleanBody = String(interactiveButtons?.body || '').trim();
+        const validButtons = Array.isArray(interactiveButtons?.buttons)
+          ? interactiveButtons!.buttons.filter((b) => b && String(b.text || '').trim())
+          : [];
+        if (!cleanBody || validButtons.length === 0 || validButtons.length > 3) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Isi pesan dan 1 hingga 3 tombol interaktif wajib diisi',
+          });
+        }
+        for (const b of validButtons) {
+          if (b.type === 'url' && !/^https?:\/\/\S+$/i.test(String(b.url || '').trim())) {
+            return reply.status(400).send({
+              success: false,
+              error: `URL pada tombol "${b.text}" wajib diawali http:// atau https://`,
+            });
+          }
+          if (b.type === 'call' && !String(b.phoneNumber || '').trim()) {
+            return reply.status(400).send({
+              success: false,
+              error: `Nomor telepon pada tombol "${b.text}" wajib diisi`,
+            });
+          }
+          if (b.type === 'copy' && !String(b.copyCode || '').trim()) {
+            return reply.status(400).send({
+              success: false,
+              error: `Kode salin pada tombol "${b.text}" wajib diisi`,
+            });
+          }
+        }
+      } else if (inferredKind === 'POLL') {
+        const cleanQ = String(poll?.question || '').trim();
+        const cleanOpts = Array.isArray(poll?.options)
+          ? poll!.options.map((o) => String(o || '').trim()).filter(Boolean)
+          : [];
+        if (!cleanQ || cleanOpts.length < 2 || cleanOpts.length > 12) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Pertanyaan polling dan 2 hingga 12 pilihan wajib diisi',
+          });
+        }
+      } else if (!bodyText && !mediaBase64) {
         return reply.status(400).send({ success: false, error: 'Pesan atau lampiran tidak boleh kosong' });
       }
 
@@ -780,17 +1051,66 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
       }
 
+      // Resolve optional quoted message reference in the same conversation
+      let quotedLocalId: string | null = null;
+      let quotedBodyText: string | null = null;
+      let quotedSenderLabel: string | null = null;
+      let quotedWahaId: string | undefined;
+      if (replyToMessageId && replyToMessageId.trim()) {
+        const quotedRows = await db
+          .select()
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.id, replyToMessageId.trim()),
+              eq(chatMessages.conversationId, conversation.conv.id)
+            )
+          )
+          .limit(1);
+        if (quotedRows[0]) {
+          quotedLocalId = quotedRows[0].id;
+          quotedBodyText = quotedRows[0].body.slice(0, 160);
+          quotedSenderLabel =
+            quotedRows[0].direction === 'OUTBOUND'
+              ? 'Tim CS'
+              : conversation.contact.namaLengkap || 'Pelanggan';
+          quotedWahaId = quotedRows[0].wahaMessageId || undefined;
+        }
+      }
+
       const targetSession = session?.trim() || conversation.conv.wahaSession || undefined;
       const convChannel = ((conversation.conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
-      let sendResult: { success: boolean; messageId?: string; sessionUsed?: string; error?: string };
+      let sendResult: WahaSendResult;
       let mediaType: string | null = null;
       let storedMediaUrl: string | null = null;
+      let persistedMessageType: 'TEXT' | 'MEDIA' | 'LINK' | 'BUTTONS' | 'POLL' = 'TEXT';
+      let persistedBody = bodyText;
+      let metadataRecord: Record<string, any> | null = null;
 
       if (convChannel !== 'WHATSAPP') {
-        if (!bodyText) {
+        if (inferredKind === 'LINK_PREVIEW' && linkPreview) {
+          persistedMessageType = 'LINK';
+          persistedBody = formatLinkPreviewFallbackText({
+            url: linkPreview.url,
+            title: linkPreview.title,
+            description: linkPreview.description,
+            caption: bodyText || linkPreview.caption,
+          });
+          metadataRecord = {
+            kind: 'LINK',
+            linkPreview: {
+              url: linkPreview.url.trim(),
+              title: linkPreview.title?.trim() || undefined,
+              description: linkPreview.description?.trim() || undefined,
+              caption: (bodyText || linkPreview.caption || '').trim() || undefined,
+              imageUrl: linkPreview.imageUrl?.trim() || undefined,
+            },
+            usedFallbackText: true,
+          };
+        } else if (!bodyText) {
           return reply.status(400).send({
             success: false,
-            error: `Pengiriman pesan di ${convChannel} saat ini mendukung balasan teks`,
+            error: `Pengiriman pesan di ${convChannel} saat ini mendukung balasan teks & tautan`,
           });
         }
         const out = await sendOutboundChannelMessage({
@@ -798,7 +1118,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           channelAccountId: conversation.conv.channelAccountId,
           contactId: conversation.conv.contactId,
           externalThreadId: conversation.conv.externalThreadId,
-          text: bodyText,
+          text: persistedBody,
         });
         sendResult = { success: true, messageId: out.externalMessageId || undefined };
       } else {
@@ -809,7 +1129,104 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             error: 'Kontak ini belum memiliki nomor WhatsApp atau WhatsApp ID (@lid)',
           });
         }
-        if (mediaBase64 && mediaMimetype) {
+        if (inferredKind === 'LINK_PREVIEW' && linkPreview) {
+          persistedMessageType = 'LINK';
+          const effectiveCaption = (bodyText || linkPreview.caption || '').trim();
+          persistedBody = formatLinkPreviewFallbackText({
+            url: linkPreview.url,
+            title: linkPreview.title,
+            description: linkPreview.description,
+            caption: effectiveCaption,
+          });
+          sendResult = await wahaService.sendLinkPreviewMessage(
+            targetWa,
+            {
+              url: linkPreview.url.trim(),
+              title: linkPreview.title?.trim() || undefined,
+              description: linkPreview.description?.trim() || undefined,
+              caption: effectiveCaption || undefined,
+              imageUrl: linkPreview.imageUrl?.trim() || undefined,
+              highQuality: linkPreview.highQuality !== false,
+              replyTo: quotedWahaId,
+            },
+            targetSession
+          );
+          metadataRecord = {
+            kind: 'LINK',
+            linkPreview: {
+              url: linkPreview.url.trim(),
+              title: linkPreview.title?.trim() || undefined,
+              description: linkPreview.description?.trim() || undefined,
+              caption: effectiveCaption || undefined,
+              imageUrl: linkPreview.imageUrl?.trim() || undefined,
+            },
+            ...(sendResult.usedFallbackText ? { usedFallbackText: true } : {}),
+            ...(sendResult.fallbackReason ? { fallbackReason: sendResult.fallbackReason } : {}),
+          };
+        } else if (inferredKind === 'BUTTONS' && interactiveButtons) {
+          persistedMessageType = 'BUTTONS';
+          const cleanButtons = interactiveButtons.buttons
+            .filter((b) => b && String(b.text || '').trim())
+            .map((b) => ({
+              type: b.type,
+              text: b.text.trim(),
+              ...(b.url ? { url: b.url.trim() } : {}),
+              ...(b.phoneNumber ? { phoneNumber: b.phoneNumber.trim() } : {}),
+              ...(b.copyCode ? { copyCode: b.copyCode.trim() } : {}),
+            }));
+          persistedBody = formatInteractiveButtonsFallbackText({
+            header: interactiveButtons.header,
+            body: interactiveButtons.body,
+            footer: interactiveButtons.footer,
+            buttons: cleanButtons,
+          });
+          sendResult = await wahaService.sendButtonsMessage(
+            targetWa,
+            {
+              header: interactiveButtons.header?.trim() || undefined,
+              body: interactiveButtons.body.trim(),
+              footer: interactiveButtons.footer?.trim() || undefined,
+              buttons: cleanButtons,
+              fallbackTextOnUnsupported: interactiveButtons.fallbackTextOnUnsupported,
+              replyTo: quotedWahaId,
+            },
+            targetSession
+          );
+          metadataRecord = {
+            kind: 'BUTTONS',
+            interactiveButtons: {
+              header: interactiveButtons.header?.trim() || undefined,
+              body: interactiveButtons.body.trim(),
+              footer: interactiveButtons.footer?.trim() || undefined,
+              fallbackTextOnUnsupported: interactiveButtons.fallbackTextOnUnsupported,
+              buttons: cleanButtons,
+            },
+            ...(sendResult.usedFallbackText ? { usedFallbackText: true } : {}),
+            ...(sendResult.fallbackReason ? { fallbackReason: sendResult.fallbackReason } : {}),
+          };
+        } else if (inferredKind === 'POLL' && poll) {
+          persistedMessageType = 'POLL';
+          const cleanOptions = poll.options.map((o) => o.trim()).filter(Boolean);
+          const cleanPoll: OutboundPollPayload = {
+            question: poll.question.trim(),
+            options: cleanOptions,
+            multipleAnswers: Boolean(poll.multipleAnswers),
+          };
+          persistedBody = buildPollFallbackDisplayText(cleanPoll);
+          sendResult = await wahaService.sendPollMessage(
+            targetWa,
+            {
+              ...cleanPoll,
+              replyTo: quotedWahaId,
+            },
+            targetSession
+          );
+          metadataRecord = {
+            kind: 'POLL',
+            poll: cleanPoll,
+          };
+        } else if (mediaBase64 && mediaMimetype) {
+          persistedMessageType = 'MEDIA';
           mediaType = mediaMimetype.startsWith('image/')
             ? 'image'
             : mediaMimetype.startsWith('video/')
@@ -817,10 +1234,21 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             : mediaMimetype.startsWith('audio/')
             ? 'audio'
             : 'document';
-          if (mediaType === 'image') {
-            storedMediaUrl = mediaBase64.startsWith('data:')
-              ? mediaBase64
-              : `data:${mediaMimetype};base64,${mediaBase64}`;
+          try {
+            const savedMedia = await saveBase64MediaFile({
+              base64: mediaBase64,
+              mimeType: mediaMimetype,
+              fileName: mediaName,
+            });
+            storedMediaUrl = savedMedia.relativeUrl;
+          } catch (saveErr: any) {
+            if (mediaType === 'image') {
+              storedMediaUrl = mediaBase64.startsWith('data:')
+                ? mediaBase64
+                : `data:${mediaMimetype};base64,${mediaBase64}`;
+            } else {
+              console.warn('[Conversations] Gagal menyimpan berkas lampiran ke disk:', saveErr?.message);
+            }
           }
           sendResult = await wahaService.sendMediaMessage(
             targetWa,
@@ -829,6 +1257,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               mimetype: mediaMimetype,
               filename: mediaName || 'attachment',
               caption: bodyText,
+              replyTo: quotedWahaId,
             },
             targetSession
           );
@@ -836,14 +1265,16 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           sendResult = await wahaService.sendTextMessage(
             targetWa,
             bodyText,
-            targetSession
+            targetSession,
+            quotedWahaId ? { replyTo: quotedWahaId } : undefined
           );
         }
       }
 
       const now = new Date();
       const messageId = crypto.randomUUID();
-      const displayBody = bodyText || (mediaName ? `[Lampiran: ${mediaName}]` : '[Lampiran Media]');
+      const displayBody =
+        persistedBody || (mediaName ? `[Lampiran: ${mediaName}]` : '[Lampiran Media]');
       const effectiveSession = sendResult.sessionUsed || targetSession || null;
       const sendErrorMsg = sendResult.success ? null : (sendResult.error || 'Gagal mengirim pesan WhatsApp');
 
@@ -854,7 +1285,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           conversationId: conversation.conv.id,
           contactId: conversation.conv.contactId,
           direction: 'OUTBOUND',
-          messageType: mediaType ? 'MEDIA' : 'TEXT',
+          messageType: persistedMessageType,
           channel: convChannel,
           externalMessageId: convChannel === 'WHATSAPP' ? null : (sendResult.messageId || null),
           wahaSession: convChannel === 'WHATSAPP' ? effectiveSession : null,
@@ -862,6 +1293,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           mediaUrl: storedMediaUrl,
           mediaType,
           mediaName: mediaName || null,
+          replyToMessageId: quotedLocalId,
+          replyToBody: quotedBodyText,
+          replyToSender: quotedSenderLabel,
+          metadataJson: metadataRecord ? JSON.stringify(metadataRecord) : null,
           wahaMessageId: convChannel === 'WHATSAPP' && sendResult.success ? (sendResult.messageId || null) : null,
           status: sendResult.success ? 'SENT' : 'FAILED',
           ackStatus: sendResult.success ? 1 : -1,
@@ -931,7 +1366,15 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const targetSession = req.body?.session?.trim() || msg.wahaSession || conversation.conv.wahaSession || undefined;
       const convChannel = ((conversation.conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
-      let sendResult: { success: boolean; messageId?: string; sessionUsed?: string; error?: string };
+      let sendResult: WahaSendResult;
+      let parsedMeta: Record<string, any> | null = null;
+      if (msg.metadataJson) {
+        try {
+          parsedMeta = JSON.parse(msg.metadataJson);
+        } catch {
+          parsedMeta = null;
+        }
+      }
 
       if (convChannel !== 'WHATSAPP') {
         const out = await sendOutboundChannelMessage({
@@ -950,32 +1393,81 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             error: 'Kontak ini belum memiliki nomor WhatsApp atau WhatsApp ID (@lid)',
           });
         }
-        if (msg.messageType === 'MEDIA') {
-          if (!msg.mediaUrl || !msg.mediaUrl.startsWith('data:')) {
+        let retryWahaReplyTo: string | undefined;
+        if (msg.replyToMessageId) {
+          const quotedRows = await db
+            .select({ wahaMessageId: chatMessages.wahaMessageId })
+            .from(chatMessages)
+            .where(eq(chatMessages.id, msg.replyToMessageId))
+            .limit(1);
+          retryWahaReplyTo = quotedRows[0]?.wahaMessageId || undefined;
+        }
+        if (msg.messageType === 'LINK' && parsedMeta?.linkPreview?.url) {
+          sendResult = await wahaService.sendLinkPreviewMessage(
+            targetWa,
+            {
+              ...parsedMeta.linkPreview,
+              replyTo: retryWahaReplyTo,
+            },
+            targetSession
+          );
+        } else if (msg.messageType === 'BUTTONS' && parsedMeta?.interactiveButtons?.body) {
+          sendResult = await wahaService.sendButtonsMessage(
+            targetWa,
+            {
+              ...parsedMeta.interactiveButtons,
+              replyTo: retryWahaReplyTo,
+            },
+            targetSession
+          );
+        } else if (msg.messageType === 'POLL' && parsedMeta?.poll?.question) {
+          sendResult = await wahaService.sendPollMessage(
+            targetWa,
+            {
+              ...parsedMeta.poll,
+              replyTo: retryWahaReplyTo,
+            },
+            targetSession
+          );
+        } else if (msg.messageType === 'MEDIA') {
+          const loaded = msg.mediaUrl ? await readUploadedMediaAsDataUri(msg.mediaUrl) : null;
+          if (!loaded) {
             return reply.status(400).send({
               success: false,
               error: 'Lampiran berkas tidak tersimpan untuk kirim ulang. Unggah ulang berkas melalui kolom balas.',
             });
           }
-          const mimeMatch = msg.mediaUrl.match(/^data:([^;]+);base64,/);
           sendResult = await wahaService.sendMediaMessage(
             targetWa,
             {
-              base64: msg.mediaUrl,
-              mimetype: mimeMatch?.[1] || 'image/png',
+              base64: loaded.dataUri,
+              mimetype: loaded.mimetype,
               filename: msg.mediaName || 'attachment',
               caption: msg.body.startsWith('[Lampiran:') ? '' : msg.body,
+              replyTo: retryWahaReplyTo,
             },
             targetSession
           );
         } else {
-          sendResult = await wahaService.sendTextMessage(targetWa, msg.body, targetSession);
+          sendResult = await wahaService.sendTextMessage(
+            targetWa,
+            msg.body,
+            targetSession,
+            retryWahaReplyTo ? { replyTo: retryWahaReplyTo } : undefined
+          );
         }
       }
 
       const now = new Date();
       const effectiveSession = sendResult.sessionUsed || targetSession || null;
       const sendErrorMsg = sendResult.success ? null : (sendResult.error || 'Gagal mengirim ulang pesan WhatsApp');
+      const nextMetaJson = parsedMeta
+        ? JSON.stringify({
+            ...parsedMeta,
+            ...(sendResult.usedFallbackText ? { usedFallbackText: true } : {}),
+            ...(sendResult.fallbackReason ? { fallbackReason: sendResult.fallbackReason } : {}),
+          })
+        : msg.metadataJson;
 
       const [updated] = await db
         .update(chatMessages)
@@ -983,6 +1475,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           wahaSession: convChannel === 'WHATSAPP' ? effectiveSession : null,
           wahaMessageId: convChannel === 'WHATSAPP' && sendResult.success ? (sendResult.messageId || null) : null,
           externalMessageId: convChannel === 'WHATSAPP' ? null : (sendResult.messageId || null),
+          metadataJson: nextMetaJson,
           status: sendResult.success ? 'SENT' : 'FAILED',
           ackStatus: sendResult.success ? 1 : -1,
           errorMessage: sendErrorMsg,

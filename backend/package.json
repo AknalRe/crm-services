@@ -1,13 +1,13 @@
 {
   "name": "crm-backend",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "description": "CRM Services WhatsApp Broadcast & Management API with Fastify and Drizzle ORM",
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --watch src --exec ts-node src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "node -r ts-node/register --test src/services/ai.service.test.ts src/services/mcpClient.service.test.ts src/services/waha.service.test.ts",
+    "test": "node -r ts-node/register --test src/services/ai.service.test.ts src/services/csat.service.test.ts src/services/mcpClient.service.test.ts src/services/waha.service.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

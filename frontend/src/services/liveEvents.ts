@@ -1,7 +1,10 @@
+import { getApiBaseUrl } from './paths';
+
 type LiveEventType =
   | 'waha:status'
   | 'tracking:update'
   | 'conversations:update'
+  | 'conversations:presence'
   | 'license:update'
   | 'sla:breach'
   | 'csat:low'
@@ -17,13 +20,14 @@ let activeSubscribers = 0;
 function ensureConnected() {
   if (eventSource || typeof window === 'undefined' || activeSubscribers <= 0) return;
 
-  const es = new EventSource('./api/events');
+  const es = new EventSource(`${getApiBaseUrl(window.location.pathname)}/events`);
   eventSource = es;
 
   const eventTypes: LiveEventType[] = [
     'waha:status',
     'tracking:update',
     'conversations:update',
+    'conversations:presence',
     'license:update',
     'sla:breach',
     'csat:low',

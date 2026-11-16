@@ -3,7 +3,43 @@ import { sql, desc, eq, gte, isNotNull, or } from 'drizzle-orm';
 import { db } from '../db';
 import { contacts, campaigns, campaignRecipients, conversations, csatResponses } from '../db/schema';
 import { formatCampaign, formatRecipient } from './broadcasts';
+import { CsatCriterionScoreDetail, extractCsatCriteriaDetails } from '../services/csat.service';
 import { getSettingMap, requirePermission } from './auth';
+
+type CriterionAggMap = Map<
+  string,
+  { key: string; label: string; sum: number; count: number; distribution: Record<number, number> }
+>;
+
+function accumulateCriteria(map: CriterionAggMap, details: CsatCriterionScoreDetail[]) {
+  for (const d of details) {
+    const bucket = map.get(d.key) || {
+      key: d.key,
+      label: d.label,
+      sum: 0,
+      count: 0,
+      distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    };
+    bucket.label = d.label || bucket.label;
+    bucket.sum += d.score;
+    bucket.count += 1;
+    const rounded = Math.max(1, Math.min(5, Math.round(d.score)));
+    bucket.distribution[rounded] = (bucket.distribution[rounded] || 0) + 1;
+    map.set(d.key, bucket);
+  }
+}
+
+function serializeCriteriaSummary(map: CriterionAggMap) {
+  return Array.from(map.values())
+    .map((c) => ({
+      key: c.key,
+      label: c.label,
+      average: Number((c.sum / c.count).toFixed(2)),
+      count: c.count,
+      distribution: c.distribution,
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
 
 const DEFAULT_SLA_TARGET_MINUTES = 15;
 
@@ -120,9 +156,21 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       let csatSum = 0;
       let csatCount = 0;
       const csatDistribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      const globalCriteriaMap: CriterionAggMap = new Map();
+      const profileMap = new Map<
+        string,
+        { profileId: string; profileName: string; sum: number; count: number; criteriaMap: CriterionAggMap }
+      >();
       const sessionMap = new Map<
         string,
-        { session: string; count: number; resolvedCount: number; csatSum: number; csatCount: number }
+        {
+          session: string;
+          count: number;
+          resolvedCount: number;
+          csatSum: number;
+          csatCount: number;
+          criteriaMap: CriterionAggMap;
+        }
       >();
       const channelMap = new Map<
         string,
@@ -138,16 +186,25 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           slaMeasuredCount: number;
           csatSum: number;
           csatCount: number;
+          criteriaMap: CriterionAggMap;
         }
       >();
 
       const recentCsatList: Array<{
+        id: string;
         conversationId: string;
+        token?: string | null;
         contactName: string;
         phone: string;
         wahaSession: string | null;
+        agentName: string | null;
+        profileName: string | null;
         rating: number;
+        overallScore: number;
+        criteriaDetails: CsatCriterionScoreDetail[];
         feedback: string | null;
+        conversationStartedAt?: Date | null;
+        conversationResolvedAt?: Date | null;
         submittedAt: Date | null;
       }> = [];
 
@@ -179,8 +236,9 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         };
         chEntry.count += 1;
         if (st === 'RESOLVED') chEntry.resolvedCount += 1;
-        if (c.csatRating) {
-          chEntry.csatSum += c.csatRating;
+        const legacyScore = c.csatOverallScore ?? c.csatRating;
+        if (legacyScore) {
+          chEntry.csatSum += legacyScore;
           chEntry.csatCount += 1;
         }
         channelMap.set(ch, chEntry);
@@ -205,15 +263,21 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         }
 
         if (!convIdsWithCsatRows.has(c.id) && c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
-          csatSum += c.csatRating;
+          const scoreVal = c.csatOverallScore ?? c.csatRating;
+          csatSum += scoreVal;
           csatCount++;
           csatDistribution[c.csatRating] = (csatDistribution[c.csatRating] || 0) + 1;
           recentCsatList.push({
+            id: c.id,
             conversationId: c.id,
             contactName: row.contact?.namaLengkap || row.contact?.nomorWhatsapp || 'Pelanggan',
             phone: row.contact?.nomorWhatsapp || '',
             wahaSession: c.wahaSession,
+            agentName: c.assignedAgentName || null,
+            profileName: 'Umum (Default)',
             rating: c.csatRating,
+            overallScore: scoreVal,
+            criteriaDetails: [],
             feedback: c.csatFeedback,
             submittedAt: c.csatSubmittedAt,
           });
@@ -226,11 +290,12 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           resolvedCount: 0,
           csatSum: 0,
           csatCount: 0,
+          criteriaMap: new Map(),
         };
         prevSess.count++;
         if (st === 'RESOLVED') prevSess.resolvedCount++;
         if (!convIdsWithCsatRows.has(c.id) && c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
-          prevSess.csatSum += c.csatRating;
+          prevSess.csatSum += c.csatOverallScore ?? c.csatRating;
           prevSess.csatCount++;
         }
         sessionMap.set(sessKey, prevSess);
@@ -244,6 +309,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           slaMeasuredCount: 0,
           csatSum: 0,
           csatCount: 0,
+          criteriaMap: new Map(),
         };
         prevAgent.count++;
         if (st === 'RESOLVED') prevAgent.resolvedCount++;
@@ -256,7 +322,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           if (frtSec <= slaTargetSeconds) prevAgent.slaMetCount++;
         }
         if (!convIdsWithCsatRows.has(c.id) && c.csatRating && c.csatRating >= 1 && c.csatRating <= 5) {
-          prevAgent.csatSum += c.csatRating;
+          prevAgent.csatSum += c.csatOverallScore ?? c.csatRating;
           prevAgent.csatCount++;
         }
         agentMap.set(agentKey, prevAgent);
@@ -265,31 +331,63 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       for (const r of csatRows) {
         if (!r.rating || r.rating < 1 || r.rating > 5) continue;
         const meta = convMetaMap.get(r.conversationId);
-        csatSum += r.rating;
+        const scoreVal =
+          typeof r.overallScore === 'number' && Number.isFinite(r.overallScore)
+            ? r.overallScore
+            : r.rating;
+        const criteriaDetails = extractCsatCriteriaDetails(r);
+
+        csatSum += scoreVal;
         csatCount++;
         csatDistribution[r.rating] = (csatDistribution[r.rating] || 0) + 1;
+        accumulateCriteria(globalCriteriaMap, criteriaDetails);
+
+        const profId = r.profileId || 'default';
+        const profName = r.profileName || 'Umum (Default)';
+        const profEntry = profileMap.get(profId) || {
+          profileId: profId,
+          profileName: profName,
+          sum: 0,
+          count: 0,
+          criteriaMap: new Map(),
+        };
+        profEntry.sum += scoreVal;
+        profEntry.count += 1;
+        accumulateCriteria(profEntry.criteriaMap, criteriaDetails);
+        profileMap.set(profId, profEntry);
+
         recentCsatList.push({
+          id: r.id,
           conversationId: r.conversationId,
+          token: r.token,
           contactName: meta?.contactName || 'Pelanggan',
           phone: meta?.phone || '',
           wahaSession: r.wahaSession || meta?.wahaSession || null,
+          agentName: r.assignedAgentName || null,
+          profileName: profName,
           rating: r.rating,
+          overallScore: Number(scoreVal.toFixed(2)),
+          criteriaDetails,
           feedback: r.feedback || null,
+          conversationStartedAt: r.conversationStartedAt || null,
+          conversationResolvedAt: r.conversationResolvedAt || null,
           submittedAt: r.submittedAt || null,
         });
 
         const sessKey = r.wahaSession || meta?.wahaSession || 'Default';
         const sessEntry = sessionMap.get(sessKey);
         if (sessEntry) {
-          sessEntry.csatSum += r.rating;
+          sessEntry.csatSum += scoreVal;
           sessEntry.csatCount++;
+          accumulateCriteria(sessEntry.criteriaMap, criteriaDetails);
         }
 
         const agentKey = r.assignedAgentId || 'unassigned';
         const agentEntry = agentMap.get(agentKey);
         if (agentEntry) {
-          agentEntry.csatSum += r.rating;
+          agentEntry.csatSum += scoreVal;
           agentEntry.csatCount++;
+          accumulateCriteria(agentEntry.criteriaMap, criteriaDetails);
         }
       }
 
@@ -314,12 +412,22 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         csatCount,
         csatAverage: csatCount > 0 ? Number((csatSum / csatCount).toFixed(2)) : null,
         csatDistribution,
-        recentCsat: recentCsatList.slice(0, 6),
+        csatByCriterion: serializeCriteriaSummary(globalCriteriaMap),
+        csatByProfile: Array.from(profileMap.values()).map((p) => ({
+          profileId: p.profileId,
+          profileName: p.profileName,
+          average: Number((p.sum / p.count).toFixed(2)),
+          count: p.count,
+          criteria: serializeCriteriaSummary(p.criteriaMap),
+        })),
+        recentCsat: recentCsatList.slice(0, 12),
         bySession: Array.from(sessionMap.values()).map((s) => ({
           session: s.session,
           count: s.count,
           resolvedCount: s.resolvedCount,
+          csatCount: s.csatCount,
           avgCsat: s.csatCount > 0 ? Number((s.csatSum / s.csatCount).toFixed(2)) : null,
+          csatCriteria: serializeCriteriaSummary(s.criteriaMap),
         })),
         byChannel: Array.from(channelMap.values()).map((ch) => ({
           channel: ch.channel,
@@ -332,7 +440,9 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           count: a.count,
           resolvedCount: a.resolvedCount,
           slaRate: a.slaMeasuredCount > 0 ? Math.round((a.slaMetCount / a.slaMeasuredCount) * 100) : null,
+          csatCount: a.csatCount,
           avgCsat: a.csatCount > 0 ? Number((a.csatSum / a.csatCount).toFixed(2)) : null,
+          csatCriteria: serializeCriteriaSummary(a.criteriaMap),
         })),
       };
 
@@ -431,6 +541,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               slaMet: number;
               csatSum: number;
               csatCount: number;
+              criteriaMap: CriterionAggMap;
             }
           >();
           const ensure = (name: string) => {
@@ -447,6 +558,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
                 slaMet: 0,
                 csatSum: 0,
                 csatCount: 0,
+                criteriaMap: new Map(),
               };
               map.set(name, item);
             }
@@ -475,14 +587,23 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               ag.resCount++;
             }
           }
+          const criterionLabels = new Map<string, string>();
           for (const c of csatRows) {
             if (typeof c.rating === 'number') {
               const ag = ensure(c.assignedAgentName || 'Belum Ditugaskan');
-              ag.csatSum += c.rating;
+              const scoreVal =
+                typeof c.overallScore === 'number' && Number.isFinite(c.overallScore)
+                  ? c.overallScore
+                  : c.rating;
+              ag.csatSum += scoreVal;
               ag.csatCount++;
+              const details = extractCsatCriteriaDetails(c);
+              accumulateCriteria(ag.criteriaMap, details);
+              for (const d of details) criterionLabels.set(d.key, d.label);
             }
           }
 
+          const allCriterionKeys = Array.from(criterionLabels.entries());
           const csv = toCsv(
             [
               'Nama Agent',
@@ -493,6 +614,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               'Kepatuhan SLA (%)',
               'Rata-rata CSAT',
               'Jumlah Penilaian CSAT',
+              ...allCriterionKeys.map(([, label]) => `CSAT - ${label}`),
             ],
             Array.from(map.values()).map((a) => [
               a.name,
@@ -503,12 +625,31 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               a.frtCount > 0 ? Math.round((a.slaMet / a.frtCount) * 100) : '',
               a.csatCount > 0 ? (a.csatSum / a.csatCount).toFixed(2) : '',
               a.csatCount,
+              ...allCriterionKeys.map(([key]) => {
+                const entry = a.criteriaMap.get(key);
+                return entry && entry.count > 0 ? (entry.sum / entry.count).toFixed(2) : '';
+              }),
             ])
           );
           reply.header('Content-Type', 'text/csv; charset=utf-8');
           reply.header('Content-Disposition', 'attachment; filename="laporan-performa-agent-crm.csv"');
           return reply.send(csv);
         }
+
+        const allRatedCsat = await db
+          .select()
+          .from(csatResponses)
+          .where(isNotNull(csatResponses.rating))
+          .orderBy(desc(csatResponses.submittedAt));
+        const latestCsatByConv = new Map<string, CsatCriterionScoreDetail[]>();
+        const convCriterionLabels = new Map<string, string>();
+        for (const r of allRatedCsat) {
+          if (latestCsatByConv.has(r.conversationId)) continue;
+          const details = extractCsatCriteriaDetails(r);
+          latestCsatByConv.set(r.conversationId, details);
+          for (const d of details) convCriterionLabels.set(d.key, d.label);
+        }
+        const convCriterionCols = Array.from(convCriterionLabels.entries());
 
         // Default: conversations
         const csv = toCsv(
@@ -526,6 +667,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             'FRT (detik)',
             'Waktu Selesai',
             'Rating CSAT',
+            ...convCriterionCols.map(([, label]) => `CSAT - ${label}`),
           ],
           convRows.map(({ conv, contact }) => {
             const frtSec =
@@ -537,6 +679,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
                     )
                   )
                 : '';
+            const details = latestCsatByConv.get(conv.id) || [];
             return [
               conv.id,
               contact?.namaLengkap || '',
@@ -550,7 +693,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               conv.firstResponseAt ? new Date(conv.firstResponseAt).toISOString() : '',
               frtSec,
               conv.resolvedAt ? new Date(conv.resolvedAt).toISOString() : '',
-              conv.csatRating ?? '',
+              conv.csatOverallScore ?? conv.csatRating ?? '',
+              ...convCriterionCols.map(([key]) => details.find((d) => d.key === key)?.score ?? ''),
             ];
           })
         );

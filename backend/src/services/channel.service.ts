@@ -153,17 +153,23 @@ export async function upsertInboundChannelMessage(params: {
       lastMessageAt: now,
       firstInboundAt: now,
       lastInboundAt: now,
+      sessionStartedAt: now,
       unreadCount: 1,
       createdAt: now,
       updatedAt: now,
     });
   } else {
+    const isReopeningFromResolved = existing.status === 'RESOLVED';
     await db
       .update(conversations)
       .set({
         externalThreadId: externalThreadId || existing.externalThreadId,
         contextTitle: contextTitle || existing.contextTitle,
-        status: existing.status === 'RESOLVED' ? 'OPEN' : existing.status,
+        status: isReopeningFromResolved ? 'OPEN' : existing.status,
+        sessionStartedAt: isReopeningFromResolved
+          ? now
+          : existing.sessionStartedAt || existing.firstInboundAt || existing.createdAt,
+        resolvedAt: isReopeningFromResolved ? null : existing.resolvedAt,
         firstInboundAt: existing.firstInboundAt || now,
         lastInboundAt: now,
         lastMessage: body,

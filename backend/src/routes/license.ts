@@ -142,6 +142,7 @@ export default async function licenseRouter(fastify: FastifyInstance) {
   fastify.post<{
     Body: {
       planSlug: string;
+      quantity?: number;
       buyerName?: string;
       buyerEmail?: string;
       buyerPhone?: string;

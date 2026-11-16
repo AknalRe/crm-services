@@ -117,12 +117,66 @@ export interface Conversation {
   resolvedAt?: string | null;
   csatToken?: string | null;
   csatRating?: number | null;
+  csatOverallScore?: number | null;
   csatFeedback?: string | null;
   csatSubmittedAt?: string | null;
   csatHistory?: CsatHistoryItem[];
   createdAt: string;
   updatedAt: string;
   contact: Contact;
+}
+
+export interface CsatCriterionScoreDetail {
+  key: string;
+  label: string;
+  score: number;
+}
+
+export interface CsatCriterionAggregate {
+  key: string;
+  label: string;
+  average: number;
+  count: number;
+  distribution?: Record<number, number>;
+}
+
+export interface CsatCriterion {
+  key: string;
+  label: string;
+  description?: string;
+  required: boolean;
+  isActive: boolean;
+}
+
+export interface CsatTextConfig {
+  brandName: string;
+  title: string;
+  subtitle: string;
+  greetingText: string;
+  scaleLabels: Record<string, string>;
+  feedbackLabel: string;
+  feedbackPlaceholder: string;
+  requireFeedbackOnLow: boolean;
+  submitButtonText: string;
+  thankYouTitle: string;
+  thankYouMessage: string;
+}
+
+export interface CsatTargetProfile {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  isActive: boolean;
+  matchWahaSessions: string[];
+  matchChannels: string[];
+  matchLabels: string[];
+  ctaTemplate?: string;
+  texts: CsatTextConfig;
+  criteria: CsatCriterion[];
+}
+
+export interface CsatSurveyConfig {
+  profiles: CsatTargetProfile[];
 }
 
 export interface CsatHistoryItem {
@@ -132,10 +186,55 @@ export interface CsatHistoryItem {
   assignedAgentName?: string | null;
   token: string;
   triggerType: string;
+  profileName?: string | null;
   rating?: number | null;
+  overallScore?: number | null;
+  criteriaDetails?: CsatCriterionScoreDetail[];
   feedback?: string | null;
+  conversationStartedAt?: string | null;
+  conversationResolvedAt?: string | null;
   sentAt: string;
   submittedAt?: string | null;
+}
+
+export interface ConversationNavigationTarget {
+  conversationId: string;
+  csatToken?: string | null;
+  csatStartedAt?: string | null;
+  csatResolvedAt?: string | null;
+}
+
+export interface InteractiveButtonItem {
+  type: 'reply' | 'url' | 'call' | 'copy';
+  text: string;
+  url?: string;
+  phoneNumber?: string;
+  copyCode?: string;
+}
+
+export interface ChatMessageMetadata {
+  kind?: 'LINK' | 'BUTTONS' | 'POLL';
+  usedFallbackText?: boolean;
+  fallbackReason?: string;
+  linkPreview?: {
+    url: string;
+    title?: string;
+    description?: string;
+    caption?: string;
+    imageUrl?: string;
+  };
+  interactiveButtons?: {
+    header?: string;
+    body: string;
+    footer?: string;
+    fallbackTextOnUnsupported?: boolean;
+    buttons: InteractiveButtonItem[];
+  };
+  poll?: {
+    question: string;
+    options: string[];
+    multipleAnswers?: boolean;
+  };
 }
 
 export interface ChatMessage {
@@ -143,12 +242,16 @@ export interface ChatMessage {
   conversationId: string;
   contactId: string;
   direction: 'INBOUND' | 'OUTBOUND';
-  messageType?: 'TEXT' | 'MEDIA' | 'NOTE' | 'CSAT';
+  messageType?: 'TEXT' | 'MEDIA' | 'NOTE' | 'CSAT' | 'LINK' | 'BUTTONS' | 'POLL';
   wahaSession?: string | null;
   body: string;
   mediaUrl?: string | null;
   mediaType?: 'image' | 'document' | 'audio' | 'video' | null;
   mediaName?: string | null;
+  replyToMessageId?: string | null;
+  replyToBody?: string | null;
+  replyToSender?: string | null;
+  metadataJson?: string | null;
   wahaMessageId?: string | null;
   status: string;
   ackStatus: number;
@@ -174,20 +277,38 @@ export interface ConversationAnalytics {
   csatCount: number;
   csatAverage: number | null;
   csatDistribution: Record<number, number>;
+  csatByCriterion?: CsatCriterionAggregate[];
+  csatByProfile?: Array<{
+    profileId: string;
+    profileName: string;
+    average: number;
+    count: number;
+    criteria: CsatCriterionAggregate[];
+  }>;
   recentCsat: Array<{
+    id?: string;
     conversationId: string;
+    token?: string | null;
     contactName: string;
     phone: string;
     wahaSession: string | null;
+    agentName?: string | null;
+    profileName?: string | null;
     rating: number;
+    overallScore?: number;
+    criteriaDetails?: CsatCriterionScoreDetail[];
     feedback: string | null;
+    conversationStartedAt?: string | null;
+    conversationResolvedAt?: string | null;
     submittedAt: string | null;
   }>;
   bySession: Array<{
     session: string;
     count: number;
     resolvedCount: number;
+    csatCount?: number;
     avgCsat: number | null;
+    csatCriteria?: CsatCriterionAggregate[];
   }>;
   byChannel?: Array<{
     channel: string;
@@ -200,7 +321,9 @@ export interface ConversationAnalytics {
     count: number;
     resolvedCount: number;
     slaRate: number | null;
+    csatCount?: number;
     avgCsat: number | null;
+    csatCriteria?: CsatCriterionAggregate[];
   }>;
 }
 
@@ -362,12 +485,15 @@ export interface CrmSlaCsatSettings {
   csatAutoOnResolve: boolean;
   slaTargetMinutes: number;
   csatBaseUrl?: string;
+  csatSurveyConfig?: CsatSurveyConfig;
 }
 
 export interface LicenseInfo {
-  status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'GRACE_PERIOD' | 'UNLICENSED';
+  status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'SUSPENDED' | 'GRACE_PERIOD' | 'UNLICENSED';
   plan: string;
   period: 'monthly' | 'quarterly' | 'annual' | 'trial';
+  startedAt?: string;
+  priceAmount?: number;
   expiresAt: string;
   daysLeft: number;
   isExpired: boolean;
@@ -377,6 +503,7 @@ export interface LicenseInfo {
   publicUrls?: string[];
   features: {
     unlimitedBroadcast: boolean;
+    maxBroadcastPerMonth?: number;
     birthdayAutomation: boolean;
     liveChatCrm: boolean;
     multiSession: boolean;
@@ -384,6 +511,8 @@ export interface LicenseInfo {
     maxContacts: number;
     multiAgent?: boolean;
     maxAgents?: number;
+    apiAccess?: boolean;
+    supportPriority?: string;
   };
 }
 

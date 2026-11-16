@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import QRCodeModal from './components/QRCodeModal';
-import { PlansModal } from './components/PlansModal';
+import { PlansModal, PlansModalView } from './components/PlansModal';
 import { SetupLoginGate } from './components/SetupLoginGate';
 import { LicenseActivationScreen } from './components/LicenseActivationScreen';
 import { ToastProvider } from './components/ui/ToastProvider';
@@ -25,7 +25,20 @@ import PublicChannelConnectPage from './pages/PublicChannelConnectPage';
 import LandingPage from './pages/LandingPage';
 import api from './services/api';
 import { subscribeLiveEvent } from './services/liveEvents';
-import { AuthStatus, WahaStatus, LicenseInfo, SettingsSection } from './types';
+import {
+  getAppRootPath,
+  getLoginPath,
+  isConnectChannelPathname,
+  isCsatPathname,
+  isLoginPathname,
+} from './services/paths';
+import {
+  AuthStatus,
+  WahaStatus,
+  LicenseInfo,
+  SettingsSection,
+  ConversationNavigationTarget,
+} from './types';
 
 const VALID_TABS = new Set([
   'dashboard',
@@ -101,19 +114,51 @@ function AppShell() {
     initialLoc.settingsSection
   );
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [showLoginGate, setShowLoginGate] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return (
-      window.location.hash === '#login' ||
-      new URLSearchParams(window.location.search).get('login') === '1'
-    );
+  const [currentPathname, setCurrentPathname] = useState<string>(() => {
+    if (typeof window === 'undefined') return '/';
+    return window.location.pathname;
   });
+  const [showLandingPage, setShowLandingPage] = useState(false);
+
+  const rootPath = getAppRootPath(currentPathname);
+  const loginPath = getLoginPath(currentPathname);
+  const isLoginRoute = isLoginPathname(currentPathname);
+
+  const navigatePath = (targetPathname: string, hash = '', replace = false) => {
+    if (typeof window === 'undefined') return;
+    const nextUrl = `${targetPathname}${hash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (currentUrl !== nextUrl) {
+      if (replace) {
+        window.history.replaceState(null, '', nextUrl);
+      } else {
+        window.history.pushState(null, '', nextUrl);
+      }
+    }
+    setCurrentPathname(targetPathname);
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(window.location.search);
+    if (window.location.hash === '#login' || searchParams.get('login') === '1') {
+      navigatePath(getLoginPath(window.location.pathname), '', true);
+    } else if (/\/login\/+$/i.test(window.location.pathname)) {
+      navigatePath(getLoginPath(window.location.pathname), window.location.hash, true);
+    }
+
+    const onPopState = () => {
+      setCurrentPathname(window.location.pathname);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const syncHash = (tab: string, section: SettingsSection) => {
     if (typeof window === 'undefined') return;
     const targetHash = tab === 'settings' ? `#settings/${section}` : `#${tab}`;
     if (window.location.hash !== targetHash) {
-      window.history.replaceState(null, '', targetHash);
+      window.history.replaceState(null, '', `${window.location.pathname}${targetHash}`);
     }
   };
 
@@ -144,8 +189,14 @@ function AppShell() {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [qrSessionName, setQrSessionName] = useState<string | undefined>(undefined);
   const [isPlansModalOpen, setIsPlansModalOpen] = useState(false);
+  const [plansInitialView, setPlansInitialView] = useState<PlansModalView>('overview');
+  const openPlansModal = (mode: PlansModalView = 'overview') => {
+    setPlansInitialView(mode);
+    setIsPlansModalOpen(true);
+  };
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [preselectedContactIds, setPreselectedContactIds] = useState<string[]>([]);
+  const [targetConversation, setTargetConversation] = useState<ConversationNavigationTarget | null>(null);
   const [prefillPost, setPrefillPost] = useState<{
     channel?: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
     caption?: string;
@@ -196,6 +247,12 @@ function AppShell() {
   useEffect(() => {
     fetchAuthStatus();
   }, []);
+
+  useEffect(() => {
+    if (authStatus?.authenticated && isLoginRoute) {
+      navigatePath(rootPath, '', true);
+    }
+  }, [authStatus?.authenticated, isLoginRoute, rootPath]);
 
   useEffect(() => {
     if (!authStatus?.authenticated) return;
@@ -312,6 +369,11 @@ function AppShell() {
     }
   };
 
+  const openLandingPage = () => {
+    setShowLandingPage(true);
+    navigatePath(rootPath, '', true);
+  };
+
   if (!authChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F5F6FA] text-gray-600 text-sm">
@@ -321,15 +383,13 @@ function AppShell() {
   }
 
   if (!authStatus?.authenticated) {
-    if (!showLoginGate) {
+    if (!isLoginRoute) {
       return (
         <LandingPage
           initialized={Boolean(authStatus?.initialized)}
+          authenticated={false}
           onEnterLogin={() => {
-            setShowLoginGate(true);
-            if (typeof window !== 'undefined') {
-              window.history.replaceState(null, '', '#login');
-            }
+            navigatePath(loginPath);
           }}
         />
       );
@@ -339,18 +399,28 @@ function AppShell() {
       <SetupLoginGate
         initialized={Boolean(authStatus?.initialized)}
         onAuthenticated={(user) => {
-          setShowLoginGate(false);
+          setShowLandingPage(false);
           setAuthStatus({
             initialized: true,
             authenticated: true,
             user,
           });
+          navigatePath(rootPath, '', true);
         }}
         onBackToLanding={() => {
-          setShowLoginGate(false);
-          if (typeof window !== 'undefined' && window.location.hash === '#login') {
-            window.history.replaceState(null, '', window.location.pathname + window.location.search);
-          }
+          navigatePath(rootPath);
+        }}
+      />
+    );
+  }
+
+  if (showLandingPage) {
+    return (
+      <LandingPage
+        initialized={Boolean(authStatus?.initialized)}
+        authenticated={true}
+        onEnterLogin={() => {
+          setShowLandingPage(false);
         }}
       />
     );
@@ -363,26 +433,17 @@ function AppShell() {
           licenseInfo={licenseInfo}
           user={authStatus.user ?? null}
           onLicenseUpdated={fetchLicenseStatus}
-          onOpenPlans={() => setIsPlansModalOpen(true)}
-          onBackToLanding={async () => {
-            try {
-              await api.logoutAuth();
-            } catch {
-              // ignore
-            }
-            if (typeof window !== 'undefined') {
-              window.history.replaceState(null, '', window.location.pathname + window.location.search);
-            }
-            setShowLoginGate(false);
-            setAuthStatus({ initialized: true, authenticated: false, user: null });
-          }}
+          onOpenPlans={() => openPlansModal(licenseInfo.status === 'UNLICENSED' ? 'plans' : 'overview')}
+          onBackToLanding={openLandingPage}
           onLogout={async () => {
             try {
               await api.logoutAuth();
             } catch {
               // ignore
             }
+            setShowLandingPage(false);
             setAuthStatus({ initialized: true, authenticated: false, user: null });
+            navigatePath(loginPath, '', true);
           }}
         />
         <PlansModal
@@ -391,6 +452,7 @@ function AppShell() {
           currentLicense={licenseInfo}
           onLicenseUpdated={fetchLicenseStatus}
           defaultBuyer={authStatus.user ?? undefined}
+          initialView={plansInitialView}
         />
       </>
     );
@@ -408,13 +470,16 @@ function AppShell() {
         onSelectSettingsSection={setSettingsSection}
         licenseInfo={licenseInfo}
         user={authStatus?.user}
+        onOpenLanding={openLandingPage}
         onLogout={async () => {
           try {
             await api.logoutAuth();
           } catch {
             // ignore
           }
+          setShowLandingPage(false);
           setAuthStatus({ initialized: true, authenticated: false, user: null });
+          navigatePath(loginPath, '', true);
         }}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
@@ -425,14 +490,22 @@ function AppShell() {
           title={getPageTitle()}
           licenseInfo={licenseInfo}
           onRefresh={handleGlobalRefresh}
-          onOpenPlans={() => setIsPlansModalOpen(true)}
+          onOpenPlans={() => openPlansModal('overview')}
+          onOpenLanding={openLandingPage}
           onMenuClick={() => setIsSidebarOpen(true)}
           isRefreshing={isRefreshing}
         />
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-2.5 sm:p-5 lg:p-6">
           <div className="w-full min-w-0">
-            {currentTab === 'dashboard' && <Dashboard onNavigate={setCurrentTab} />}
+            {currentTab === 'dashboard' && (
+              <Dashboard
+                onNavigate={(tab, target) => {
+                  setTargetConversation(target || null);
+                  setCurrentTab(tab);
+                }}
+              />
+            )}
             {currentTab === 'contacts' && (
               <Contacts
                 onStartBroadcastWithContacts={handleStartBroadcastWithContacts}
@@ -477,7 +550,9 @@ function AppShell() {
               <Conversations
                 licenseInfo={licenseInfo}
                 currentUser={authStatus?.user}
-                onOpenPlans={() => setIsPlansModalOpen(true)}
+                targetConversation={targetConversation}
+                onTargetHandled={() => setTargetConversation(null)}
+                onOpenPlans={() => openPlansModal('plans')}
                 onOpenSettings={(sec) => {
                   setSettingsSection(sec);
                   setCurrentTab('settings', sec);
@@ -491,7 +566,7 @@ function AppShell() {
                 currentUser={authStatus?.user}
                 activeSection={settingsSection}
                 onSectionChange={setSettingsSection}
-                onOpenPlans={() => setIsPlansModalOpen(true)}
+                onOpenPlans={() => openPlansModal('plans')}
                 onRefreshStatus={fetchWahaStatus}
                 onOpenQr={(sessionName?: string) => {
                   setQrSessionName(sessionName);
@@ -519,6 +594,7 @@ function AppShell() {
         currentLicense={licenseInfo}
         onLicenseUpdated={fetchLicenseStatus}
         defaultBuyer={authStatus.user ?? undefined}
+        initialView={plansInitialView}
       />
     </div>
   );
@@ -526,9 +602,9 @@ function AppShell() {
 
 export function App() {
   const isCsatRoute =
-    typeof window !== 'undefined' && /\/csat\/?$/i.test(window.location.pathname);
+    typeof window !== 'undefined' && isCsatPathname(window.location.pathname);
   const isConnectChannelRoute =
-    typeof window !== 'undefined' && /\/connect-channel\/?$/i.test(window.location.pathname);
+    typeof window !== 'undefined' && isConnectChannelPathname(window.location.pathname);
 
   if (isCsatRoute) {
     return (

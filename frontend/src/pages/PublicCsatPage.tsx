@@ -1,14 +1,29 @@
 import React, { useEffect, useState } from 'react';
 import { Star, CheckCircle2, AlertCircle } from 'lucide-react';
 import api from '../services/api';
+import { CsatCriterion, CsatCriterionScoreDetail, CsatTextConfig } from '../types';
 import { Button } from '../components/ui/Button';
 
-const RATING_LABELS: Record<number, string> = {
-  1: 'Sangat Kurang',
-  2: 'Kurang Memuaskan',
-  3: 'Cukup Baik',
-  4: 'Memuaskan',
-  5: 'Sangat Memuaskan',
+const DEFAULT_SCALE_LABELS: Record<string, string> = {
+  '1': 'Sangat Kurang',
+  '2': 'Kurang Memuaskan',
+  '3': 'Cukup Baik',
+  '4': 'Memuaskan',
+  '5': 'Sangat Memuaskan',
+};
+
+const DEFAULT_TEXTS: CsatTextConfig = {
+  brandName: 'Layanan Pelanggan',
+  title: 'Penilaian Layanan Pelanggan',
+  subtitle: 'Customer Satisfaction (CSAT)',
+  greetingText: 'Halo, bagaimana pengalaman Anda dengan layanan kami?',
+  scaleLabels: DEFAULT_SCALE_LABELS,
+  feedbackLabel: 'Saran atau Masukan (Opsional)',
+  feedbackPlaceholder: 'Ceritakan pengalaman Anda...',
+  requireFeedbackOnLow: false,
+  submitButtonText: 'Kirim Penilaian',
+  thankYouTitle: 'Terima kasih!',
+  thankYouMessage: 'Penilaian Anda sangat membantu kami meningkatkan kualitas layanan.',
 };
 
 export const PublicCsatPage: React.FC = () => {
@@ -17,9 +32,15 @@ export const PublicCsatPage: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [contactName, setContactName] = useState('Pelanggan');
-  const [rating, setRating] = useState<number>(0);
-  const [hoverRating, setHoverRating] = useState<number>(0);
+  const [agentName, setAgentName] = useState<string | null>(null);
+  const [texts, setTexts] = useState<CsatTextConfig>(DEFAULT_TEXTS);
+  const [criteria, setCriteria] = useState<CsatCriterion[]>([]);
+  const [criteriaScores, setCriteriaScores] = useState<Record<string, number>>({});
+  const [hoverScores, setHoverScores] = useState<Record<string, number>>({});
+  const [submittedOverall, setSubmittedOverall] = useState<number>(0);
+  const [submittedDetails, setSubmittedDetails] = useState<CsatCriterionScoreDetail[]>([]);
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -35,8 +56,24 @@ export const PublicCsatPage: React.FC = () => {
       .getPublicCsat(token)
       .then((data) => {
         setContactName(data.contactName || 'Pelanggan');
+        setAgentName(data.agentName || null);
+        if (data.texts) setTexts(data.texts);
+        const crits = Array.isArray(data.criteria) && data.criteria.length > 0
+          ? data.criteria
+          : [
+              {
+                key: 'umum',
+                label: 'Kepuasan Layanan',
+                required: true,
+                isActive: true,
+              },
+            ];
+        setCriteria(crits);
+
         if (data.alreadyRated && data.rating) {
-          setRating(data.rating);
+          setSubmittedOverall(data.overallScore ?? data.rating);
+          if (data.criteriaScores) setCriteriaScores(data.criteriaScores);
+          if (data.criteriaDetails) setSubmittedDetails(data.criteriaDetails);
           setFeedback(data.feedback || '');
           setSubmitted(true);
         }
@@ -50,29 +87,68 @@ export const PublicCsatPage: React.FC = () => {
       .finally(() => setLoading(false));
   }, [token]);
 
+  const filledValues = criteria
+    .map((c) => criteriaScores[c.key])
+    .filter((v): v is number => typeof v === 'number' && v >= 1 && v <= 5);
+  const liveAverage =
+    filledValues.length > 0
+      ? Number((filledValues.reduce((a, b) => a + b, 0) / filledValues.length).toFixed(2))
+      : 0;
+  const missingRequired = criteria.some((c) => c.required && !criteriaScores[c.key]);
+  const requiresComment = Boolean(texts.requireFeedbackOnLow && liveAverage > 0 && liveAverage <= 2);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || rating < 1 || rating > 5 || submitting) return;
+    if (!token || missingRequired || submitting) return;
+    if (requiresComment && !feedback.trim()) {
+      setSubmitError('Mohon tuliskan saran atau masukan untuk membantu kami memperbaiki layanan.');
+      return;
+    }
     setSubmitting(true);
+    setSubmitError(null);
     try {
-      await api.submitPublicCsat(token, { rating, feedback: feedback.trim() || undefined });
+      const res = await api.submitPublicCsat(token, {
+        criteriaScores,
+        rating: liveAverage > 0 ? Math.round(liveAverage) : undefined,
+        feedback: feedback.trim() || undefined,
+      });
+      const resultData = res?.data;
+      setSubmittedOverall(resultData?.overallScore ?? liveAverage);
+      setSubmittedDetails(
+        Array.isArray(resultData?.criteriaDetails)
+          ? resultData.criteriaDetails
+          : criteria
+              .filter((c) => criteriaScores[c.key])
+              .map((c) => ({ key: c.key, label: c.label, score: criteriaScores[c.key] }))
+      );
       setSubmitted(true);
-      setError(null);
     } catch (err: any) {
-      setError(err?.response?.data?.error || 'Gagal menyimpan penilaian.');
+      setSubmitError(err?.response?.data?.error || 'Gagal menyimpan penilaian.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const displayRating = hoverRating || rating;
+  const scaleMap = texts.scaleLabels || DEFAULT_SCALE_LABELS;
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
+      <div className="w-full max-w-lg bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
         <div className="pb-4 border-b border-gray-200">
-          <h1 className="text-base font-semibold text-gray-900">Penilaian Layanan Pelanggan</h1>
-          <p className="text-xs text-gray-500">Customer Satisfaction (CSAT)</p>
+          {texts.brandName && (
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-0.5">
+              {texts.brandName}
+            </div>
+          )}
+          <h1 className="text-base font-semibold text-gray-900">{texts.title}</h1>
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-0.5">
+            <p className="text-xs text-gray-500">{texts.subtitle}</p>
+            {agentName && (
+              <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px] font-medium border border-gray-200">
+                Dilayani oleh: {agentName}
+              </span>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -83,79 +159,149 @@ export const PublicCsatPage: React.FC = () => {
             <span>{error}</span>
           </div>
         ) : submitted ? (
-          <div className="py-6 text-center space-y-3">
+          <div className="py-4 text-center space-y-4">
             <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-6 h-6" />
             </div>
-            <h2 className="text-base font-semibold text-gray-900">
-              Terima kasih, {contactName}!
-            </h2>
-            <p className="text-xs text-gray-500">
-              Penilaian Anda sangat membantu kami meningkatkan kualitas layanan.
-            </p>
-            <div className="flex items-center justify-center gap-1 pt-1">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <Star
-                  key={star}
-                  className={`w-6 h-6 ${
-                    star <= rating ? 'text-amber-400 fill-amber-400' : 'text-gray-200'
-                  }`}
-                />
-              ))}
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-gray-900">{texts.thankYouTitle}</h2>
+              <p className="text-xs text-gray-500">{texts.thankYouMessage}</p>
             </div>
+
+            <div className="p-3.5 rounded-lg bg-amber-50/70 border border-amber-200 space-y-2">
+              <div className="text-[11px] text-amber-800 font-medium">Nilai Rata-rata Keseluruhan</div>
+              <div className="flex items-center justify-center gap-1.5">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star
+                    key={star}
+                    className={`w-6 h-6 ${
+                      star <= Math.round(submittedOverall)
+                        ? 'text-amber-400 fill-amber-400'
+                        : 'text-gray-200'
+                    }`}
+                  />
+                ))}
+                <span className="ml-1.5 text-sm font-mono font-bold text-amber-900">
+                  {submittedOverall.toFixed(1)} / 5.0
+                </span>
+              </div>
+              {submittedDetails.length > 0 && (
+                <div className="pt-2 border-t border-amber-200/80 space-y-1 text-left">
+                  {submittedDetails.map((d) => (
+                    <div key={d.key} className="flex items-center justify-between text-xs text-gray-700">
+                      <span>{d.label}</span>
+                      <span className="inline-flex items-center gap-1 font-mono font-semibold text-amber-900">
+                        <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                        {d.score}/5
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {feedback && (
-              <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-3 mt-2">
+              <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-md p-3">
                 "{feedback}"
               </p>
             )}
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <p className="text-sm text-gray-800">
-                Halo <strong>{contactName}</strong>, bagaimana pengalaman Anda dengan layanan kami?
-              </p>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <p className="text-sm text-gray-800 leading-relaxed">{texts.greetingText}</p>
+
+            <div className="space-y-3">
+              {criteria.map((crit) => {
+                const selected = criteriaScores[crit.key] || 0;
+                const hovered = hoverScores[crit.key] || 0;
+                const displayVal = hovered || selected;
+                return (
+                  <div
+                    key={crit.key}
+                    className="p-3.5 rounded-lg border border-gray-200 bg-gray-50/50 space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-semibold text-gray-900">
+                          {crit.label}
+                          {crit.required && <span className="text-red-500 ml-0.5">*</span>}
+                        </div>
+                        {crit.description && (
+                          <p className="text-[11px] text-gray-500 mt-0.5">{crit.description}</p>
+                        )}
+                      </div>
+                      {displayVal > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-medium shrink-0">
+                          {scaleMap[String(displayVal)] || `${displayVal}/5`}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onMouseEnter={() =>
+                            setHoverScores((prev) => ({ ...prev, [crit.key]: star }))
+                          }
+                          onMouseLeave={() =>
+                            setHoverScores((prev) => ({ ...prev, [crit.key]: 0 }))
+                          }
+                          onClick={() =>
+                            setCriteriaScores((prev) => ({ ...prev, [crit.key]: star }))
+                          }
+                          className="p-1 rounded-md hover:bg-amber-50 transition-colors focus:outline-none"
+                          aria-label={`${crit.label}: ${star} bintang`}
+                        >
+                          <Star
+                            className={`w-7 h-7 transition-colors ${
+                              star <= displayVal
+                                ? 'text-amber-400 fill-amber-400'
+                                : 'text-gray-300'
+                            }`}
+                          />
+                        </button>
+                      ))}
+                      <span className="ml-auto text-[11px] font-mono text-gray-400">
+                        {selected > 0 ? `${selected}/5` : '-'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="text-center space-y-2">
-              <div className="flex items-center justify-center gap-2">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    type="button"
-                    onMouseEnter={() => setHoverRating(star)}
-                    onMouseLeave={() => setHoverRating(0)}
-                    onClick={() => setRating(star)}
-                    className="p-1.5 rounded-lg hover:bg-amber-50 transition-colors focus:outline-none"
-                    aria-label={`Beri ${star} bintang`}
-                  >
-                    <Star
-                      className={`w-8 h-8 transition-colors ${
-                        star <= displayRating
-                          ? 'text-amber-400 fill-amber-400'
-                          : 'text-gray-300'
-                      }`}
-                    />
-                  </button>
-                ))}
+            {liveAverage > 0 && criteria.length > 1 && (
+              <div className="px-3.5 py-2.5 rounded-lg bg-indigo-50/70 border border-indigo-200 flex items-center justify-between text-xs">
+                <span className="font-medium text-indigo-900">Rata-rata Penilaian Anda</span>
+                <span className="font-mono font-bold text-indigo-700">
+                  {liveAverage.toFixed(2)} / 5.0
+                </span>
               </div>
-              <p className="text-xs font-medium text-indigo-700 min-h-[18px]">
-                {displayRating > 0 ? RATING_LABELS[displayRating] : 'Pilih jumlah bintang (1 - 5)'}
-              </p>
-            </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                Saran atau Masukan (Opsional)
+                {texts.feedbackLabel}
+                {requiresComment && <span className="text-red-600 ml-1">(Wajib)</span>}
               </label>
               <textarea
                 rows={3}
+                required={requiresComment}
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
-                placeholder="Ceritakan pengalaman Anda..."
+                placeholder={texts.feedbackPlaceholder}
                 className="w-full p-3 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
               />
             </div>
+
+            {submitError && (
+              <div className="p-2.5 rounded-md bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{submitError}</span>
+              </div>
+            )}
 
             <Button
               type="submit"
@@ -163,10 +309,14 @@ export const PublicCsatPage: React.FC = () => {
               size="md"
               className="w-full justify-center"
               isLoading={submitting}
-              disabled={rating < 1}
+              disabled={missingRequired}
             >
-              Kirim Penilaian
+              {texts.submitButtonText || 'Kirim Penilaian'}
             </Button>
+
+            <div className="text-[10px] text-center text-gray-400">
+              Kepada {contactName} • Skala 1 (Terendah) hingga 5 (Terbaik)
+            </div>
           </form>
         )}
       </div>

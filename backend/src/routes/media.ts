@@ -12,7 +12,29 @@ const MIME_EXT: Record<string, string> = {
   'image/webp': '.webp',
   'image/gif': '.gif',
   'video/mp4': '.mp4',
+  'video/quicktime': '.mov',
+  'video/webm': '.webm',
+  'video/x-msvideo': '.avi',
+  'video/3gpp': '.3gp',
+  'audio/mpeg': '.mp3',
+  'audio/mp3': '.mp3',
+  'audio/ogg': '.ogg',
+  'audio/wav': '.wav',
+  'audio/mp4': '.m4a',
+  'audio/aac': '.aac',
+  'audio/opus': '.opus',
   'application/pdf': '.pdf',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.ms-excel': '.xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/vnd.ms-powerpoint': '.ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+  'text/csv': '.csv',
+  'text/plain': '.txt',
+  'application/zip': '.zip',
+  'application/x-zip-compressed': '.zip',
+  'application/x-rar-compressed': '.rar',
 };
 
 const EXT_MIME: Record<string, string> = {
@@ -22,13 +44,122 @@ const EXT_MIME: Record<string, string> = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.avi': 'video/x-msvideo',
+  '.3gp': 'video/3gpp',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.opus': 'audio/opus',
   '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.csv': 'text/csv',
+  '.txt': 'text/plain',
+  '.zip': 'application/zip',
+  '.rar': 'application/x-rar-compressed',
 };
+
+function normalizeMimeBase(raw?: string | null): string {
+  return String(raw || '').split(';')[0].trim().toLowerCase();
+}
 
 function ensureUploadsDir() {
   if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
+}
+
+export async function saveMediaBufferFile(params: {
+  buffer: Buffer;
+  mimeType?: string;
+  fileName?: string;
+  maxBytes?: number;
+  fallbackExt?: string;
+}): Promise<{ filename: string; relativeUrl: string; mimeType: string }> {
+  const mimeType = normalizeMimeBase(params.mimeType);
+  const maxBytes = params.maxBytes ?? 10 * 1024 * 1024;
+  if (!params.buffer || params.buffer.length === 0) {
+    throw new Error('File kosong');
+  }
+  if (params.buffer.length > maxBytes) {
+    const mb = Math.round(maxBytes / (1024 * 1024));
+    throw new Error(`Ukuran file maksimal ${mb} MB`);
+  }
+
+  const extFromName = path.extname(String(params.fileName || '')).toLowerCase();
+  const ext =
+    MIME_EXT[mimeType] ||
+    (EXT_MIME[extFromName] ? extFromName : params.fallbackExt || '.bin');
+  const safeName = `${Date.now()}_${crypto.randomUUID().slice(0, 8)}${ext}`;
+
+  ensureUploadsDir();
+  await fs.promises.writeFile(path.join(UPLOADS_DIR, safeName), params.buffer);
+
+  return {
+    filename: safeName,
+    relativeUrl: `/api/media/files/${safeName}`,
+    mimeType: mimeType || EXT_MIME[ext] || 'application/octet-stream',
+  };
+}
+
+export async function saveBase64MediaFile(params: {
+  base64: string;
+  mimeType?: string;
+  fileName?: string;
+  maxBytes?: number;
+  fallbackExt?: string;
+}): Promise<{ filename: string; relativeUrl: string; mimeType: string }> {
+  const dataUriMatch = String(params.base64 || '')
+    .trim()
+    .match(/^data:([^;]+)(?:;[^,]*)?;base64,(.*)$/is);
+  const inferredMime = dataUriMatch?.[1] || params.mimeType;
+  const cleanBase64 = (dataUriMatch ? dataUriMatch[2] : String(params.base64 || '')).trim();
+  if (!cleanBase64) {
+    throw new Error('Data file base64 wajib diisi');
+  }
+  const buffer = Buffer.from(cleanBase64, 'base64');
+  return saveMediaBufferFile({
+    buffer,
+    mimeType: params.mimeType || inferredMime,
+    fileName: params.fileName,
+    maxBytes: params.maxBytes,
+    fallbackExt: params.fallbackExt,
+  });
+}
+
+export async function readUploadedMediaAsDataUri(
+  mediaUrl: string,
+  fallbackMimeType?: string
+): Promise<{ dataUri: string; mimetype: string } | null> {
+  const trimmed = String(mediaUrl || '').trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('data:')) {
+    const mimeMatch = trimmed.match(/^data:([^;]+);base64,/);
+    return {
+      dataUri: trimmed,
+      mimetype: mimeMatch?.[1] || fallbackMimeType || 'application/octet-stream',
+    };
+  }
+  const match = trimmed.match(/\/api\/media\/files\/([a-zA-Z0-9._-]+)$/);
+  if (!match) return null;
+  const filename = match[1];
+  const filePath = path.join(UPLOADS_DIR, filename);
+  if (!fs.existsSync(filePath)) return null;
+  const ext = path.extname(filename).toLowerCase();
+  const mimetype = fallbackMimeType || EXT_MIME[ext] || 'application/octet-stream';
+  const buf = await fs.promises.readFile(filePath);
+  return {
+    dataUri: `data:${mimetype};base64,${buf.toString('base64')}`,
+    mimetype,
+  };
 }
 
 function resolveMediaAppPrefix(req: FastifyRequest): string {
@@ -109,7 +240,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
     }
   );
 
-  // Public file serving endpoint so Meta/Telegram servers and browser previews can fetch media
+  // Public file serving endpoint with HTTP Range support so browser images, video, audio & docs render reliably
   fastify.get<{ Params: { filename: string } }>(
     '/files/:filename',
     async (req: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
@@ -122,12 +253,31 @@ export default async function mediaRouter(fastify: FastifyInstance) {
         if (!fs.existsSync(filePath)) {
           return reply.status(404).send({ success: false, error: 'File not found' });
         }
+        const stat = await fs.promises.stat(filePath);
+        const totalSize = stat.size;
         const ext = path.extname(filename).toLowerCase();
         const contentType = EXT_MIME[ext] || 'application/octet-stream';
-        const buffer = await fs.promises.readFile(filePath);
         reply.header('Content-Type', contentType);
+        reply.header('Accept-Ranges', 'bytes');
         reply.header('Cache-Control', 'public, max-age=86400');
-        return reply.send(buffer);
+
+        const rangeHeader = String(req.headers.range || '').trim();
+        const rangeMatch = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+        if (rangeMatch && totalSize > 0) {
+          const start = rangeMatch[1] ? Math.min(Number(rangeMatch[1]), totalSize - 1) : 0;
+          const end = rangeMatch[2]
+            ? Math.min(Number(rangeMatch[2]), totalSize - 1)
+            : totalSize - 1;
+          if (!Number.isNaN(start) && !Number.isNaN(end) && start <= end) {
+            reply.status(206);
+            reply.header('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+            reply.header('Content-Length', String(end - start + 1));
+            return reply.send(fs.createReadStream(filePath, { start, end }));
+          }
+        }
+
+        reply.header('Content-Length', String(totalSize));
+        return reply.send(fs.createReadStream(filePath));
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });
       }
@@ -142,30 +292,12 @@ export default async function mediaRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('broadcasts', 'conversations') },
     async (req, reply) => {
       try {
-        const mimeType = String(req.body?.mimeType || '').trim().toLowerCase();
-        const base64Raw = String(req.body?.base64 || '').trim();
-        if (!base64Raw) {
-          return reply.status(400).send({ success: false, error: 'Data file base64 wajib diisi' });
-        }
-
-        const cleanBase64 = base64Raw.replace(/^data:[^;]+;base64,/, '');
-        const buffer = Buffer.from(cleanBase64, 'base64');
-        if (buffer.length === 0) {
-          return reply.status(400).send({ success: false, error: 'File kosong' });
-        }
-        if (buffer.length > 10 * 1024 * 1024) {
-          return reply.status(400).send({
-            success: false,
-            error: 'Ukuran file maksimal 10 MB',
-          });
-        }
-
-        const extFromName = path.extname(String(req.body?.fileName || '')).toLowerCase();
-        const ext = MIME_EXT[mimeType] || (EXT_MIME[extFromName] ? extFromName : '.png');
-        const safeName = `${Date.now()}_${crypto.randomUUID().slice(0, 8)}${ext}`;
-
-        ensureUploadsDir();
-        await fs.promises.writeFile(path.join(UPLOADS_DIR, safeName), buffer);
+        const saved = await saveBase64MediaFile({
+          base64: req.body?.base64 || '',
+          mimeType: req.body?.mimeType,
+          fileName: req.body?.fileName,
+          fallbackExt: '.png',
+        });
 
         const proto =
           (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() ||
@@ -176,7 +308,8 @@ export default async function mediaRouter(fastify: FastifyInstance) {
           req.headers.host ||
           'localhost';
         const appPrefix = resolveMediaAppPrefix(req);
-        const relativeUrl = `/api/media/files/${safeName}`;
+        const relativeUrl = saved.relativeUrl;
+        const safeName = saved.filename;
         const url = `${proto}://${host}${appPrefix}${relativeUrl}`;
 
         return reply.status(201).send({

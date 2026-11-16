@@ -8,6 +8,11 @@ import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { notifyAlertWebhook } from '../services/automation.service';
+import {
+  DEFAULT_CSAT_CTA_TEMPLATE,
+  parseCsatSurveyConfig,
+  sanitizeCsatSurveyConfig,
+} from '../services/csat.service';
 import { requirePermission } from './auth';
 import { resolveRequestPublicBase } from './waha';
 
@@ -35,12 +40,11 @@ export default async function settingsRouter(fastify: FastifyInstance) {
           waha: wahaConfig,
           birthday: list[0] || null,
           crm: {
-            csatTemplate:
-              settingMap.csat_template ||
-              'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}',
+            csatTemplate: settingMap.csat_template || DEFAULT_CSAT_CTA_TEMPLATE,
             csatAutoOnResolve: settingMap.csat_auto_on_resolve === 'true',
             slaTargetMinutes,
             csatBaseUrl: settingMap.csat_base_url || '',
+            csatSurveyConfig: parseCsatSurveyConfig(settingMap.csat_survey_config),
           },
         },
       });
@@ -314,6 +318,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         csatAutoOnResolve?: boolean;
         slaTargetMinutes?: number;
         csatBaseUrl?: string;
+        csatSurveyConfig?: unknown;
       };
       const now = new Date();
       const pairs: Array<[string, string]> = [];
@@ -349,6 +354,11 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         pairs.push(['csat_base_url', csatBaseUrl]);
       }
 
+      if (body.csatSurveyConfig !== undefined) {
+        const sanitizedSurvey = sanitizeCsatSurveyConfig(body.csatSurveyConfig);
+        pairs.push(['csat_survey_config', JSON.stringify(sanitizedSurvey)]);
+      }
+
       for (const [key, value] of pairs) {
         await db
           .insert(systemSettings)
@@ -369,12 +379,11 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         success: true,
         message: 'Pengaturan CSAT & SLA berhasil disimpan',
         data: {
-          csatTemplate:
-            map.csat_template ||
-            'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}',
+          csatTemplate: map.csat_template || DEFAULT_CSAT_CTA_TEMPLATE,
           csatAutoOnResolve: map.csat_auto_on_resolve === 'true',
           slaTargetMinutes,
           csatBaseUrl: map.csat_base_url || '',
+          csatSurveyConfig: parseCsatSurveyConfig(map.csat_survey_config),
         },
       });
     } catch (error: any) {

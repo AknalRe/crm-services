@@ -14,6 +14,9 @@ import {
   ShieldCheck,
   Smartphone,
   Download,
+  ChevronDown,
+  ChevronRight,
+  X,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { Button } from '../components/ui/Button';
@@ -21,10 +24,10 @@ import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, ErrorState, EmptyState } from '../components/ui/StateBlocks';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { DashboardStats } from '../types';
+import { ConversationNavigationTarget, DashboardStats } from '../types';
 
 interface DashboardProps {
-  onNavigate: (tab: string) => void;
+  onNavigate: (tab: string, target?: ConversationNavigationTarget) => void;
 }
 
 function formatDurationShort(seconds: number | null | undefined): string {
@@ -44,6 +47,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exportingType, setExportingType] = useState<'agents' | 'conversations' | 'broadcasts' | null>(null);
+  const [showCsatDetailsModal, setShowCsatDetailsModal] = useState(false);
+  const [expandedCriterionKey, setExpandedCriterionKey] = useState<string | null>(null);
+  const [expandedReviewId, setExpandedReviewId] = useState<string | null>(null);
+  const [expandedAgentName, setExpandedAgentName] = useState<string | null>(null);
 
   const handleExport = async (type: 'agents' | 'conversations' | 'broadcasts') => {
     setExportingType(type);
@@ -143,6 +150,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     csatCount: 0,
     csatAverage: null,
     csatDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+    csatByCriterion: [],
+    csatByProfile: [],
     recentCsat: [],
     bySession: [],
   };
@@ -489,22 +498,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
         <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col justify-between space-y-4">
           <div>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-start justify-between gap-2 mb-3">
               <div>
                 <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
                   <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
                   <span>Hasil Rating CSAT</span>
                 </h3>
-                <p className="text-xs text-gray-500 mt-0.5">Kepuasan pelanggan dari tautan CTA</p>
+                <p className="text-xs text-gray-500 mt-0.5">Skor total &amp; rata-rata kepuasan pelanggan</p>
               </div>
-              <div className="text-right">
-                <span className="text-xl font-bold text-gray-900 font-mono tabular-nums">
-                  {convAnalytics.csatAverage !== null ? convAnalytics.csatAverage.toFixed(1) : '-'}
+              <button
+                type="button"
+                onClick={() => setShowCsatDetailsModal(true)}
+                title="Klik untuk melihat detail nilai per kriteria & target survei"
+                className="text-right group rounded-md px-2 py-1 -mr-2 -mt-1 hover:bg-amber-50 transition-colors cursor-pointer"
+              >
+                <span className="text-xl font-bold text-gray-900 group-hover:text-amber-700 font-mono tabular-nums">
+                  {convAnalytics.csatAverage !== null ? convAnalytics.csatAverage.toFixed(2) : '-'}
                 </span>
                 <span className="text-[11px] text-gray-400 block">
                   / 5.0 ({convAnalytics.csatCount} nilai)
                 </span>
-              </div>
+                {(convAnalytics.csatByCriterion?.length || 0) > 0 && (
+                  <span className="text-[10px] text-indigo-600 font-medium inline-flex items-center gap-0.5 mt-0.5">
+                    Rincian kriteria ({convAnalytics.csatByCriterion?.length})
+                    <ChevronRight className="w-3 h-3" />
+                  </span>
+                )}
+              </button>
             </div>
 
             <div className="space-y-1.5">
@@ -536,32 +556,126 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </div>
 
           <div className="pt-3 border-t border-gray-200 space-y-2">
-            <span className="text-[11px] font-semibold text-gray-600 block">Ulasan Terbaru</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-gray-600">Ulasan Terbaru</span>
+              {((convAnalytics.csatByCriterion?.length || 0) > 0 || (convAnalytics.csatByProfile?.length || 0) > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setShowCsatDetailsModal(true)}
+                  className="text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
+                >
+                  Lihat Detail Kriteria
+                </button>
+              )}
+            </div>
             {convAnalytics.recentCsat.length === 0 ? (
               <p className="text-[11px] text-gray-400">
                 Belum ada ulasan CSAT masuk. Kirim tautan CSAT dari Live Chat CRM.
               </p>
             ) : (
-              <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                {convAnalytics.recentCsat.map((item) => (
-                  <div
-                    key={item.conversationId}
-                    className="p-2 rounded bg-amber-50/60 border border-amber-200 text-[11px]"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-gray-900 truncate">
-                        {item.contactName}
-                      </span>
-                      <span className="inline-flex items-center gap-0.5 font-mono font-semibold text-amber-800 shrink-0">
-                        <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
-                        {item.rating}
-                      </span>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {convAnalytics.recentCsat.map((item) => {
+                  const rowKey = item.id || item.conversationId;
+                  const hasDetails = Boolean(item.criteriaDetails && item.criteriaDetails.length > 0);
+                  const hasMeta = Boolean(hasDetails || item.profileName || item.agentName || item.conversationStartedAt);
+                  const isExpanded = expandedReviewId === rowKey;
+                  const scoreVal = item.overallScore ?? item.rating;
+                  const openTargetConversation = () => {
+                    onNavigate('conversations', {
+                      conversationId: item.conversationId,
+                      csatToken: item.token || null,
+                      csatStartedAt: item.conversationStartedAt || null,
+                      csatResolvedAt: item.conversationResolvedAt || null,
+                    });
+                  };
+                  return (
+                    <div
+                      key={rowKey}
+                      onClick={() => {
+                        if (hasMeta) {
+                          setExpandedReviewId(isExpanded ? null : rowKey);
+                        } else {
+                          openTargetConversation();
+                        }
+                      }}
+                      className="p-2 rounded bg-amber-50/60 border border-amber-200 text-[11px] cursor-pointer hover:bg-amber-50 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-gray-900 truncate min-w-0 flex-1">
+                          {item.contactName}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="inline-flex items-center gap-0.5 font-mono font-semibold text-amber-800">
+                            <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                            {typeof scoreVal === 'number' ? scoreVal.toFixed(1).replace(/\.0$/, '') : item.rating}
+                            {hasMeta && (
+                              isExpanded
+                                ? <ChevronDown className="w-3 h-3 ml-0.5 text-amber-700" />
+                                : <ChevronRight className="w-3 h-3 ml-0.5 text-amber-700" />
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openTargetConversation();
+                            }}
+                            title="Buka Percakapan Terkait di Live Chat CRM"
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-[10px] font-medium whitespace-nowrap"
+                          >
+                            <span>Buka Chat</span>
+                            <ArrowUpRight className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </div>
+                      {item.feedback && (
+                        <p className="text-gray-600 truncate mt-0.5 italic">"{item.feedback}"</p>
+                      )}
+                      {isExpanded && (
+                        <div className="mt-1.5 pt-1.5 border-t border-amber-200/80 space-y-1 text-[10px]">
+                          {(item.profileName || item.agentName) && (
+                            <div className="flex flex-wrap items-center justify-between gap-1 text-gray-500">
+                              {item.profileName && <span>Target: {item.profileName}</span>}
+                              {item.agentName && <span>Agent: {item.agentName}</span>}
+                            </div>
+                          )}
+                          {(item.conversationStartedAt || item.conversationResolvedAt) && (
+                            <div className="text-gray-500 font-mono">
+                              Sesi:{' '}
+                              {item.conversationStartedAt
+                                ? new Date(item.conversationStartedAt).toLocaleString('id-ID', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })
+                                : '-'}{' '}
+                              →{' '}
+                              {item.conversationResolvedAt
+                                ? new Date(item.conversationResolvedAt).toLocaleTimeString('id-ID', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })
+                                : 'Berlangsung'}
+                            </div>
+                          )}
+                          {hasDetails && (
+                            <div className="grid grid-cols-1 gap-0.5">
+                              {item.criteriaDetails!.map((cd) => (
+                                <div key={cd.key} className="flex items-center justify-between text-gray-700">
+                                  <span className="truncate">{cd.label}</span>
+                                  <span className="font-mono font-semibold text-amber-900 shrink-0">
+                                    {cd.score}/5
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {item.feedback && (
-                      <p className="text-gray-600 truncate mt-0.5 italic">"{item.feedback}"</p>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -575,38 +689,71 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <div>
               <h3 className="font-semibold text-gray-900 text-sm">Performa Percakapan per Agent</h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                Ringkasan jumlah obrolan, tingkat selesai, kepatuhan SLA, dan rata-rata CSAT masing-masing agent
+                Ringkasan obrolan, kepatuhan SLA, dan rata-rata CSAT. Klik agent atau nilai CSAT untuk melihat rincian per kriteria.
               </p>
             </div>
           </div>
           <div className="sm:hidden divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden">
-            {convAnalytics.byAgent.map((ag) => (
-              <div key={ag.agentName} className="p-3 bg-white space-y-2 text-xs">
-                <div className="font-semibold text-gray-900 truncate">{ag.agentName}</div>
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <div className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
-                    <span className="text-gray-500">Obrolan</span>
-                    <span className="font-mono font-semibold text-gray-900 tabular-nums">{ag.count}</span>
+            {convAnalytics.byAgent.map((ag) => {
+              const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
+              const isOpen = expandedAgentName === ag.agentName;
+              return (
+                <div key={ag.agentName} className="p-3 bg-white space-y-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-gray-900 truncate">{ag.agentName}</span>
+                    {hasCrit && (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedAgentName(isOpen ? null : ag.agentName)}
+                        className="text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5"
+                      >
+                        Detail CSAT
+                        {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                      </button>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between bg-emerald-50/70 px-2 py-1 rounded">
-                    <span className="text-emerald-700">Selesai</span>
-                    <span className="font-mono font-semibold text-emerald-800 tabular-nums">{ag.resolvedCount}</span>
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
+                      <span className="text-gray-500">Obrolan</span>
+                      <span className="font-mono font-semibold text-gray-900 tabular-nums">{ag.count}</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-emerald-50/70 px-2 py-1 rounded">
+                      <span className="text-emerald-700">Selesai</span>
+                      <span className="font-mono font-semibold text-emerald-800 tabular-nums">{ag.resolvedCount}</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
+                      <span className="text-gray-500">SLA</span>
+                      <span className="font-mono font-semibold text-gray-900 tabular-nums">
+                        {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
+                      </span>
+                    </div>
+                    <div
+                      onClick={() => hasCrit && setExpandedAgentName(isOpen ? null : ag.agentName)}
+                      className={`flex items-center justify-between bg-amber-50/70 px-2 py-1 rounded ${
+                        hasCrit ? 'cursor-pointer' : ''
+                      }`}
+                    >
+                      <span className="text-amber-800">CSAT</span>
+                      <span className="font-mono font-semibold text-amber-900 tabular-nums">
+                        {ag.avgCsat !== null ? `${ag.avgCsat}/5` : '-'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
-                    <span className="text-gray-500">SLA</span>
-                    <span className="font-mono font-semibold text-gray-900 tabular-nums">
-                      {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between bg-amber-50/70 px-2 py-1 rounded">
-                    <span className="text-amber-800">CSAT</span>
-                    <span className="font-mono font-semibold text-amber-900 tabular-nums">
-                      {ag.avgCsat !== null ? `${ag.avgCsat}/5` : '-'}
-                    </span>
-                  </div>
+                  {isOpen && hasCrit && (
+                    <div className="p-2 rounded bg-amber-50/50 border border-amber-200 space-y-1 text-[11px]">
+                      {ag.csatCriteria!.map((crit) => (
+                        <div key={crit.key} className="flex items-center justify-between gap-2">
+                          <span className="text-gray-700">{crit.label}</span>
+                          <span className="font-mono font-semibold text-amber-900">
+                            {crit.average.toFixed(2)}/5 ({crit.count})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
@@ -620,19 +767,65 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {convAnalytics.byAgent.map((ag) => (
-                  <tr key={ag.agentName} className="hover:bg-gray-50/70">
-                    <td className="py-2 pr-3 font-medium text-gray-900">{ag.agentName}</td>
-                    <td className="py-2 px-3 font-mono">{ag.count}</td>
-                    <td className="py-2 px-3 font-mono text-emerald-700">{ag.resolvedCount}</td>
-                    <td className="py-2 px-3 font-mono">
-                      {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
-                    </td>
-                    <td className="py-2 pl-3 font-mono text-right">
-                      {ag.avgCsat !== null ? `${ag.avgCsat}/5` : '-'}
-                    </td>
-                  </tr>
-                ))}
+                {convAnalytics.byAgent.map((ag) => {
+                  const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
+                  const isOpen = expandedAgentName === ag.agentName;
+                  return (
+                    <React.Fragment key={ag.agentName}>
+                      <tr
+                        onClick={() => hasCrit && setExpandedAgentName(isOpen ? null : ag.agentName)}
+                        className={hasCrit ? 'hover:bg-amber-50/40 cursor-pointer' : 'hover:bg-gray-50/70'}
+                      >
+                        <td className="py-2 pr-3 font-medium text-gray-900">
+                          <span className="inline-flex items-center gap-1">
+                            {hasCrit &&
+                              (isOpen ? (
+                                <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                              ) : (
+                                <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                              ))}
+                            <span>{ag.agentName}</span>
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-mono">{ag.count}</td>
+                        <td className="py-2 px-3 font-mono text-emerald-700">{ag.resolvedCount}</td>
+                        <td className="py-2 px-3 font-mono">
+                          {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
+                        </td>
+                        <td className="py-2 pl-3 font-mono text-right">
+                          {ag.avgCsat !== null ? (
+                            <span className={hasCrit ? 'text-indigo-700 font-semibold underline decoration-dotted' : ''}>
+                              {ag.avgCsat}/5{ag.csatCount ? ` (${ag.csatCount})` : ''}
+                            </span>
+                          ) : (
+                            '-'
+                          )}
+                        </td>
+                      </tr>
+                      {isOpen && hasCrit && (
+                        <tr className="bg-amber-50/40">
+                          <td colSpan={5} className="px-4 py-2.5">
+                            <div className="flex flex-wrap gap-2">
+                              {ag.csatCriteria!.map((crit) => (
+                                <div
+                                  key={crit.key}
+                                  className="px-2.5 py-1 rounded bg-white border border-amber-200 text-[11px] flex items-center gap-2"
+                                >
+                                  <span className="text-gray-700 font-medium">{crit.label}:</span>
+                                  <span className="font-mono font-bold text-amber-800 inline-flex items-center gap-0.5">
+                                    <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                                    {crit.average.toFixed(2)}/5
+                                  </span>
+                                  <span className="text-[10px] text-gray-400">({crit.count})</span>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -816,6 +1009,147 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+
+      {showCsatDetailsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setShowCsatDetailsModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                  <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
+                  <span>Rincian Skor CSAT Per Kriteria &amp; Target</span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Skor rata-rata total:{' '}
+                  <strong className="font-mono text-gray-900">
+                    {convAnalytics.csatAverage !== null ? convAnalytics.csatAverage.toFixed(2) : '-'} / 5.0
+                  </strong>{' '}
+                  dari {convAnalytics.csatCount} penilaian. Klik kriteria untuk melihat sebaran bintang.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCsatDetailsModal(false)}
+                className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                aria-label="Tutup detail CSAT"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-5 text-xs">
+              {/* Breakdown per Kriteria */}
+              <div className="space-y-2.5">
+                <h4 className="font-semibold text-gray-900 text-xs uppercase tracking-wider text-[11px]">
+                  Skor Rata-rata per Parameter / Aspek
+                </h4>
+                {!convAnalytics.csatByCriterion || convAnalytics.csatByCriterion.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-3">
+                    Belum ada data penilaian per kriteria (masih menggunakan rating tunggal atau belum ada ulasan masuk).
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {convAnalytics.csatByCriterion.map((crit) => {
+                      const pct = Math.min(100, Math.round((crit.average / 5) * 100));
+                      const isExpanded = expandedCriterionKey === crit.key;
+                      return (
+                        <div
+                          key={crit.key}
+                          onClick={() => setExpandedCriterionKey(isExpanded ? null : crit.key)}
+                          className="p-3 rounded-lg border border-gray-200 bg-gray-50/70 hover:bg-amber-50/40 cursor-pointer space-y-2 transition-colors"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-gray-900 inline-flex items-center gap-1">
+                              {isExpanded ? (
+                                <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
+                              ) : (
+                                <ChevronRight className="w-3.5 h-3.5 text-gray-500" />
+                              )}
+                              <span>{crit.label}</span>
+                              <span className="font-mono text-[10px] text-gray-400 font-normal">
+                                ({crit.key})
+                              </span>
+                            </span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-[11px] text-gray-500">{crit.count} penilai</span>
+                              <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-mono font-bold">
+                                {crit.average.toFixed(2)} / 5
+                              </span>
+                            </div>
+                          </div>
+                          <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-amber-400 rounded-full transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          {isExpanded && crit.distribution && (
+                            <div className="pt-2 border-t border-gray-200 grid grid-cols-5 gap-1.5 text-[10px]">
+                              {[5, 4, 3, 2, 1].map((s) => (
+                                <div
+                                  key={s}
+                                  className="px-2 py-1 rounded bg-white border border-gray-200 flex items-center justify-between"
+                                >
+                                  <span className="font-mono text-gray-600">{s}★</span>
+                                  <span className="font-mono font-semibold text-gray-900">
+                                    {crit.distribution?.[s] || 0}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Breakdown per Target Profile */}
+              {convAnalytics.csatByProfile && convAnalytics.csatByProfile.length > 0 && (
+                <div className="space-y-2.5 pt-2 border-t border-gray-200">
+                  <h4 className="font-semibold text-gray-900 text-[11px] uppercase tracking-wider">
+                    Skor per Target Survei
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {convAnalytics.csatByProfile.map((prof) => (
+                      <div
+                        key={prof.profileId}
+                        className="p-3 rounded-lg border border-gray-200 bg-white space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-gray-900 truncate">{prof.profileName}</span>
+                          <span className="font-mono font-bold text-indigo-700 shrink-0">
+                            {prof.average.toFixed(2)}/5 ({prof.count})
+                          </span>
+                        </div>
+                        {prof.criteria.length > 0 && (
+                          <div className="space-y-1 pt-1 border-t border-gray-100 text-[11px]">
+                            {prof.criteria.map((c) => (
+                              <div key={c.key} className="flex items-center justify-between text-gray-600">
+                                <span className="truncate">{c.label}</span>
+                                <span className="font-mono font-semibold text-gray-900">
+                                  {c.average.toFixed(2)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

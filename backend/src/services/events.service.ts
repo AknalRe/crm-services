@@ -4,6 +4,7 @@ export type LiveEventType =
   | 'waha:status'
   | 'tracking:update'
   | 'conversations:update'
+  | 'conversations:presence'
   | 'license:update'
   | 'sla:breach'
   | 'csat:low'
