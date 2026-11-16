@@ -218,7 +218,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
                 placeholder="URL Webhook Alert (opsional, mis. https://hooks.slack.com/...)"
                 value={slaAlertWebhookUrl}
                 onChange={(e) => setSlaAlertWebhookUrl(e.target.value)}
-                className="flex-1 min-w-0 h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+                className="w-full flex-none sm:flex-1 min-w-0 h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
               />
               <Button
                 type="button"

@@ -639,7 +639,7 @@ export const AiKnowledgeBooksPanel: React.FC<AiKnowledgeBooksPanelProps> = ({
                 placeholder="URL Referensi (opsional)"
                 value={kbUrl}
                 onChange={(e) => setKbUrl(e.target.value)}
-                className="flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
+                className="w-full flex-none sm:flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
               />
               <Button type="submit" variant="primary" size="sm" isLoading={savingKb}>
                 Tambah Materi

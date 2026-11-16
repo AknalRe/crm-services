@@ -70,7 +70,7 @@ export const SocialFeed: React.FC = () => {
         onSubmit={handleSubmit}
         className="bg-white rounded-lg border border-gray-200 p-4 flex flex-col sm:flex-row gap-2.5"
       >
-        <div className="relative flex-1">
+        <div className="relative w-full flex-none sm:flex-1 min-w-0">
           <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"

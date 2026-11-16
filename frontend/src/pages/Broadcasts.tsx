@@ -100,8 +100,10 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
     api
       .getWahaSessions()
       .then((res) => {
-        setWahaSessions(res.sessions || []);
-        setSelectedSession(res.activeSession || '');
+        const list = res.sessions || [];
+        setWahaSessions(list);
+        const workingCount = list.filter((s) => s.status === 'WORKING').length;
+        setSelectedSession(workingCount > 1 ? '__ALL_ACTIVE__' : res.activeSession || '');
       })
       .catch(() => {});
     api
@@ -397,6 +399,12 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                       onChange={(e) => setSelectedSession(e.target.value)}
                       className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
                     >
+                      {wahaSessions.filter((s) => s.status === 'WORKING').length > 1 && (
+                        <option value="__ALL_ACTIVE__">
+                          Semua Sesi Aktif (Rotasi Otomatis •{' '}
+                          {wahaSessions.filter((s) => s.status === 'WORKING').length} sesi)
+                        </option>
+                      )}
                       {wahaSessions.map((s) => (
                         <option key={s.name} value={s.name}>
                           {s.name} ({s.status})
@@ -578,7 +586,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                         e.target.value = '';
                       }
                     }}
-                    className="flex-1 min-w-0 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700 focus:outline-none focus:border-indigo-500"
+                    className="w-full flex-none sm:flex-1 min-w-0 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700 focus:outline-none focus:border-indigo-500"
                   >
                     <option value="">-- Pilih template siaran tersimpan --</option>
                     {messageTemplates

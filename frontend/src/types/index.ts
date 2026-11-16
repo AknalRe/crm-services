@@ -285,6 +285,15 @@ export interface WahaStatus {
     mode?: 'INTERNAL' | 'EXTERNAL';
     internalLocked?: boolean;
     hasApiKey?: boolean;
+    externalConfig?: {
+      baseUrl: string;
+      apiKey?: string;
+      hasApiKey?: boolean;
+    };
+    internalConfig?: {
+      baseUrl: string;
+      hasApiKey?: boolean;
+    };
   };
 }
 

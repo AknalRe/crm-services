@@ -4,6 +4,7 @@ import { contacts, campaigns, campaignRecipients, contactIdentities } from '../d
 import { broadcastQueue } from './queue.service';
 import { licenseService } from './license.service';
 import { OmnichannelType } from './channel.service';
+import { wahaService } from './waha.service';
 import crypto from 'crypto';
 
 export interface CreateCampaignDTO {
@@ -231,8 +232,26 @@ export class BroadcastService {
     const baseInitialDelay =
       isScheduled && scheduleDate ? Math.max(0, scheduleDate.getTime() - Date.now()) : 0;
 
+    let rotationPool: string[] = [];
+    if (normalizedChannel === 'WHATSAPP' && sessionName === '__ALL_ACTIVE__') {
+      try {
+        const listed = await wahaService.listSessions();
+        rotationPool = listed.sessions
+          .filter((s) => s.status === 'WORKING')
+          .map((s) => s.name);
+      } catch {
+        rotationPool = [];
+      }
+    }
+
     for (let i = 0; i < insertedRecipients.length; i++) {
       const recipient = insertedRecipients[i];
+      const assignedSession =
+        rotationPool.length > 0
+          ? rotationPool[i % rotationPool.length]
+          : sessionName === '__ALL_ACTIVE__'
+          ? undefined
+          : sessionName;
 
       const batchNumber = Math.floor(i / safeBatchSize);
       const delayForBatch = batchNumber * (safeIntervalSeconds * 1000);
@@ -249,7 +268,7 @@ export class BroadcastService {
           contactId: recipient.contactId,
           phone: recipient.phone,
           message: recipient.personalizedMessage,
-          sessionName,
+          sessionName: assignedSession,
           channel: normalizedChannel,
           channelAccountId: normalizedChannel === 'WHATSAPP' ? null : channelAccountId,
         },

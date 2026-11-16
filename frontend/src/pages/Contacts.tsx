@@ -408,7 +408,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       {/* Action Header */}
       <div className="bg-white rounded-lg border border-gray-200 p-4 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         <div className="flex flex-1 flex-col sm:flex-row sm:items-center gap-2 min-w-0">
-          <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-0 sm:min-w-[200px] lg:max-w-md">
+          <form onSubmit={handleSearchSubmit} className="relative w-full flex-none sm:flex-1 min-w-0 sm:min-w-[200px] lg:max-w-md">
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"

@@ -4,6 +4,7 @@ import {
   Globe,
   Trash2,
   Edit3,
+  Search,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -45,6 +46,37 @@ interface SettingsProps {
   onOpenQr: (sessionName?: string) => void;
 }
 
+const WAHA_DRAFT_STORAGE_KEY = 'reneo_crm_waha_draft_v1';
+
+interface WahaUiDraft {
+  configMode?: 'INTERNAL' | 'EXTERNAL';
+  baseUrl?: string;
+}
+
+function readWahaUiDraft(): WahaUiDraft | null {
+  try {
+    const raw = window.sessionStorage.getItem(WAHA_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeWahaUiDraft(patch: WahaUiDraft | null) {
+  try {
+    if (!patch) {
+      window.sessionStorage.removeItem(WAHA_DRAFT_STORAGE_KEY);
+      return;
+    }
+    const prev = readWahaUiDraft() || {};
+    window.sessionStorage.setItem(WAHA_DRAFT_STORAGE_KEY, JSON.stringify({ ...prev, ...patch }));
+  } catch {
+    // Ignore storage quota / privacy mode errors
+  }
+}
+
 export const Settings: React.FC<SettingsProps> = ({
   wahaStatus,
   licenseInfo,
@@ -60,8 +92,11 @@ export const Settings: React.FC<SettingsProps> = ({
     licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.multiSession
   );
   const maxSessions = licenseInfo?.features?.maxSessions || 1;
-  const [configMode, setConfigMode] = useState<'INTERNAL' | 'EXTERNAL'>('INTERNAL');
-  const [baseUrl, setBaseUrl] = useState('');
+  const initialDraftRef = useRef<WahaUiDraft | null>(readWahaUiDraft());
+  const [configMode, setConfigMode] = useState<'INTERNAL' | 'EXTERNAL'>(
+    initialDraftRef.current?.configMode || 'INTERNAL'
+  );
+  const [baseUrl, setBaseUrl] = useState(initialDraftRef.current?.baseUrl || '');
   const [apiKey, setApiKey] = useState('');
   const [session, setSession] = useState('default');
   const [saving, setSaving] = useState(false);
@@ -71,14 +106,20 @@ export const Settings: React.FC<SettingsProps> = ({
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [testingExternal, setTestingExternal] = useState(false);
+  const [activatingInternal, setActivatingInternal] = useState(false);
   const [externalTestResult, setExternalTestResult] = useState<{ ok: boolean; text: string } | null>(null);
-  const draftExternalRef = useRef(false);
-  const lastServerKeyRef = useRef('');
+  const externalDirtyRef = useRef(Boolean(initialDraftRef.current?.baseUrl !== undefined));
+  const tabUserPickedRef = useRef(Boolean(initialDraftRef.current?.configMode));
+  const lastServerModeRef = useRef<string>('');
+  const lastExternalKeyRef = useRef<string>('');
   const [newSessionName, setNewSessionName] = useState('');
+  const [sessionSearch, setSessionSearch] = useState('');
+  const [inspectedSessionName, setInspectedSessionName] = useState<string>('');
   const [creatingSession, setCreatingSession] = useState(false);
   const [sessionBusyName, setSessionBusyName] = useState<string | null>(null);
 
   const [testPhone, setTestPhone] = useState('');
+  const [testSession, setTestSession] = useState('');
   const [testMessage, setTestMessage] = useState('Halo, ini adalah pesan uji coba dari CRM WhatsApp.');
   const [testSending, setTestSending] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -223,25 +264,44 @@ export const Settings: React.FC<SettingsProps> = ({
 
   useEffect(() => {
     if (wahaStatus?.config) {
-      const mode = wahaStatus.config.mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
-      const serverKey = `${mode}|${wahaStatus.config.baseUrl || ''}|${wahaStatus.config.session || 'default'}`;
-      if (draftExternalRef.current && mode === 'INTERNAL') {
-        return;
-      }
-      if (serverKey !== lastServerKeyRef.current) {
-        lastServerKeyRef.current = serverKey;
+      const mode: 'INTERNAL' | 'EXTERNAL' =
+        wahaStatus.config.mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+
+      if (!tabUserPickedRef.current) {
         setConfigMode(mode);
-        setBaseUrl(wahaStatus.config.baseUrl || '');
-        setApiKey(wahaStatus.config.apiKey || '');
-        setSession(wahaStatus.config.session || 'default');
-      } else {
-        setSession(wahaStatus.config.session || 'default');
+        lastServerModeRef.current = mode;
+      } else if (lastServerModeRef.current && lastServerModeRef.current !== mode) {
+        setConfigMode(mode);
+        tabUserPickedRef.current = false;
+        lastServerModeRef.current = mode;
+      } else if (!lastServerModeRef.current) {
+        lastServerModeRef.current = mode;
+      }
+
+      setSession(wahaStatus.config.session || 'default');
+
+      const ext = wahaStatus.config.externalConfig ?? (
+        mode === 'EXTERNAL'
+          ? {
+              baseUrl: wahaStatus.config.baseUrl || '',
+              apiKey: wahaStatus.config.apiKey || '',
+            }
+          : null
+      );
+      if (ext && !externalDirtyRef.current) {
+        const extKey = `${ext.baseUrl || ''}|${ext.apiKey || ''}`;
+        if (extKey !== lastExternalKeyRef.current) {
+          lastExternalKeyRef.current = extKey;
+          setBaseUrl(ext.baseUrl || '');
+          setApiKey(ext.apiKey || '');
+        }
       }
     }
   }, [wahaStatus]);
 
   useEffect(() => {
-    if (configMode === 'EXTERNAL' && wahaStatus?.config?.mode !== 'EXTERNAL') {
+    const serverMode = wahaStatus?.config?.mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+    if (wahaStatus?.config && configMode !== serverMode) {
       return;
     }
     fetchSessions();
@@ -277,26 +337,26 @@ export const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const handleSelectMode = async (mode: 'INTERNAL' | 'EXTERNAL') => {
+  const handleSelectMode = (mode: 'INTERNAL' | 'EXTERNAL') => {
+    tabUserPickedRef.current = true;
     setConfigMode(mode);
     setExternalTestResult(null);
-    if (mode === 'INTERNAL') {
-      draftExternalRef.current = false;
-      try {
-        await api.updateWahaSettings({ mode: 'INTERNAL', session });
-        toast.success('Mode WAHA Internal otomatis diaktifkan dan dikunci.');
-        await Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()]);
-      } catch (err: any) {
-        toast.error(err.response?.data?.error || 'Gagal mengaktifkan mode WAHA Internal');
-      }
-    } else {
-      draftExternalRef.current = true;
-      if (wahaStatus?.config?.mode === 'INTERNAL') {
-        setBaseUrl('');
-        setApiKey('');
-        setSession('default');
-        setSessionsError(null);
-      }
+    writeWahaUiDraft({ configMode: mode });
+  };
+
+  const handleActivateInternalMode = async () => {
+    if (activatingInternal) return;
+    setActivatingInternal(true);
+    try {
+      await api.updateWahaSettings({ mode: 'INTERNAL' });
+      tabUserPickedRef.current = false;
+      writeWahaUiDraft(null);
+      toast.success('Mode WAHA Internal otomatis diaktifkan.');
+      await Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()]);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengaktifkan mode WAHA Internal');
+    } finally {
+      setActivatingInternal(false);
     }
   };
 
@@ -346,9 +406,10 @@ export const Settings: React.FC<SettingsProps> = ({
         mode: 'EXTERNAL',
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
-        session: session.trim() || 'default',
       });
-      draftExternalRef.current = false;
+      externalDirtyRef.current = false;
+      tabUserPickedRef.current = false;
+      writeWahaUiDraft(null);
       setExternalTestResult(null);
       toast.success('Konfigurasi WAHA eksternal berhasil disimpan.');
       await Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()]);
@@ -365,10 +426,11 @@ export const Settings: React.FC<SettingsProps> = ({
     if (!clean || creatingSession) return;
     setCreatingSession(true);
     try {
-      const result = await api.createWahaSession(clean, true);
+      const result = await api.createWahaSession(clean, configMode === 'INTERNAL');
       const actualName = result?.name || clean;
       setNewSessionName('');
-      toast.success(`Sesi "${actualName}" berhasil ditambahkan dan diaktifkan.`);
+      setInspectedSessionName(actualName);
+      toast.success(`Sesi "${actualName}" berhasil ditambahkan dan dijalankan.`);
       await Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()]);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal menambahkan sesi WhatsApp');
@@ -381,10 +443,25 @@ export const Settings: React.FC<SettingsProps> = ({
     setSessionBusyName(targetName);
     try {
       await api.setActiveWahaSession(targetName);
-      toast.success(`Sesi aktif beralih ke "${targetName}".`);
+      setInspectedSessionName(targetName);
+      toast.success(`Sesi default CRM ditetapkan ke "${targetName}".`);
       await Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()]);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Gagal mengganti sesi aktif');
+      toast.error(err.response?.data?.error || 'Gagal menetapkan sesi default');
+    } finally {
+      setSessionBusyName(null);
+    }
+  };
+
+  const handleQuickStartSession = async (targetName: string) => {
+    setSessionBusyName(targetName);
+    try {
+      await api.startWahaSession(targetName);
+      setInspectedSessionName(targetName);
+      toast.success(`Sesi "${targetName}" dijalankan.`);
+      await Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()]);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || `Gagal menjalankan sesi "${targetName}"`);
     } finally {
       setSessionBusyName(null);
     }
@@ -398,6 +475,7 @@ export const Settings: React.FC<SettingsProps> = ({
       await api.deleteWahaSession(targetName);
       toast.info(`Sesi "${targetName}" dihapus.`);
       setConfirmDeleteSession(null);
+      if (inspectedSessionName === targetName) setInspectedSessionName('');
       await Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()]);
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal menghapus sesi');
@@ -408,7 +486,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleStartSession = async () => {
     if (sessionActionLoading) return;
-    const targetSession = wahaStatus?.activeSession || wahaStatus?.config?.session || session;
+    const targetSession = inspectedSession;
     setSessionActionLoading(true);
     try {
       await api.startWahaSession(targetSession);
@@ -423,7 +501,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleConfirmSessionAction = async () => {
     if (!confirmAction || sessionActionLoading) return;
-    const targetSession = wahaStatus?.activeSession || wahaStatus?.config?.session || session;
+    const targetSession = inspectedSession;
     setSessionActionLoading(true);
     try {
       if (confirmAction === 'stop') {
@@ -449,9 +527,18 @@ export const Settings: React.FC<SettingsProps> = ({
     setTestSending(true);
     setTestResult(null);
     try {
-      const res = await api.sendTestMessage(testPhone.trim(), testMessage.trim());
+      const targetTestSession =
+        (testSession && sessions.some((s) => s.name === testSession) ? testSession : '') ||
+        inspectedSession ||
+        undefined;
+      const res = await api.sendTestMessage(testPhone.trim(), testMessage.trim(), targetTestSession);
       if (res.success) {
-        setTestResult({ ok: true, text: 'Pesan uji coba berhasil terkirim.' });
+        setTestResult({
+          ok: true,
+          text: targetTestSession
+            ? `Pesan uji coba berhasil terkirim via sesi ${targetTestSession}.`
+            : 'Pesan uji coba berhasil terkirim.',
+        });
         toast.success('Pesan uji coba terkirim.');
       } else {
         setTestResult({ ok: false, text: `Gagal: ${res.data?.error || 'Periksa koneksi WAHA'}` });
@@ -463,21 +550,48 @@ export const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const isExternalDraft = configMode === 'EXTERNAL' && wahaStatus?.config?.mode !== 'EXTERNAL';
+  const savedMode: 'INTERNAL' | 'EXTERNAL' =
+    wahaStatus?.config?.mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+  const isPendingModeSwitch = Boolean(wahaStatus?.config && configMode !== savedMode);
+  const internalDisplayUrl =
+    wahaStatus?.config?.internalConfig?.baseUrl ||
+    (savedMode === 'INTERNAL' ? wahaStatus?.config?.baseUrl : '') ||
+    '';
+  const internalHasKey =
+    wahaStatus?.config?.internalConfig?.hasApiKey ??
+    (savedMode === 'INTERNAL' ? Boolean(wahaStatus?.config?.hasApiKey) : false);
   const liveActiveSession = wahaStatus?.activeSession || wahaStatus?.config?.session || session;
-  const activeSessionItem = isExternalDraft
+  const inspectedSession =
+    !isPendingModeSwitch && inspectedSessionName && sessions.some((s) => s.name === inspectedSessionName)
+      ? inspectedSessionName
+      : liveActiveSession;
+  const activeSessionItem = isPendingModeSwitch
     ? undefined
-    : sessions.find((s) => s.name === liveActiveSession);
+    : sessions.find((s) => s.name === inspectedSession);
+  const workingSessionsCount = sessions.filter((s) => s.status === 'WORKING').length;
+  const filteredSessions = sessionSearch.trim()
+    ? sessions.filter((s) => {
+        const q = sessionSearch.trim().toLowerCase();
+        return (
+          s.name.toLowerCase().includes(q) ||
+          (s.me?.pushName || '').toLowerCase().includes(q) ||
+          (s.me?.id || '').toLowerCase().includes(q)
+        );
+      })
+    : sessions;
   const effectiveSessionStatus = (
     wahaStatus && !wahaStatus.connected
       ? 'OFFLINE'
-      : wahaStatus?.sessionStatus || activeSessionItem?.status || 'STOPPED'
+      : activeSessionItem?.status || wahaStatus?.sessionStatus || 'STOPPED'
   ).toUpperCase();
   const isActiveWorking = wahaStatus?.connected && effectiveSessionStatus === 'WORKING';
   const isServerOffline = effectiveSessionStatus === 'OFFLINE';
   const canStopOrLogout =
     !isServerOffline && effectiveSessionStatus !== 'STOPPED' && effectiveSessionStatus !== 'NOT_FOUND';
-  const connectedMe = activeSessionItem?.me || wahaStatus?.details?.me || null;
+  const connectedMe =
+    activeSessionItem?.me ||
+    (inspectedSession === liveActiveSession ? wahaStatus?.details?.me : null) ||
+    null;
   const connectedPhone = connectedMe?.id
     ? String(connectedMe.id).split('@')[0].split(':')[0]
     : '';
@@ -601,9 +715,16 @@ export const Settings: React.FC<SettingsProps> = ({
                     : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
                 }`}
               >
-                <div className="flex items-center gap-2 font-semibold text-xs mb-1 text-gray-900">
-                  <Server className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>WAHA Internal (Otomatis)</span>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-2 font-semibold text-xs text-gray-900">
+                    <Server className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>WAHA Internal (Otomatis)</span>
+                  </div>
+                  {wahaStatus?.config && savedMode === 'INTERNAL' && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                      Aktif
+                    </span>
+                  )}
                 </div>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
                   Terhubung otomatis ke runtime WAHA internal Reneo dengan dukungan multi-sesi.
@@ -619,9 +740,16 @@ export const Settings: React.FC<SettingsProps> = ({
                     : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
                 }`}
               >
-                <div className="flex items-center gap-2 font-semibold text-xs mb-1 text-gray-900">
-                  <Globe className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>WAHA Eksternal</span>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-2 font-semibold text-xs text-gray-900">
+                    <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>WAHA Eksternal</span>
+                  </div>
+                  {wahaStatus?.config && savedMode === 'EXTERNAL' && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                      Aktif
+                    </span>
+                  )}
                 </div>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
                   Gunakan URL dan API Key gateway WAHA eksternal milik Anda sendiri dengan dukungan multi-sesi.
@@ -630,49 +758,70 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
 
             {configMode === 'INTERNAL' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Base URL WAHA Internal
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    readOnly
-                    value={baseUrl || 'Terhubung otomatis dari environment'}
-                    className="w-full h-9 px-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-md text-[13px] font-mono cursor-not-allowed"
-                  />
+              <div className="space-y-3 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Base URL WAHA Internal
+                    </label>
+                    <input
+                      type="text"
+                      disabled
+                      readOnly
+                      value={internalDisplayUrl || 'Terhubung otomatis dari environment'}
+                      className="w-full h-9 px-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-md text-[13px] font-mono cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      API Key WAHA Internal
+                    </label>
+                    <input
+                      type="text"
+                      disabled
+                      readOnly
+                      value={internalHasKey ? '•••••••• (Dikelola otomatis)' : 'Tidak memerlukan API key'}
+                      className="w-full h-9 px-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-md text-[13px] font-mono cursor-not-allowed"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    API Key WAHA Internal
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    readOnly
-                    value={wahaStatus?.config?.hasApiKey ? '•••••••• (Dikelola otomatis)' : 'Tidak memerlukan API key'}
-                    className="w-full h-9 px-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-md text-[13px] font-mono cursor-not-allowed"
-                  />
-                </div>
+                {savedMode !== 'INTERNAL' && (
+                  <div className="pt-2 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] text-amber-800">
+                      Mode aktif saat ini masih <strong>WAHA Eksternal</strong>. Pengaturan eksternal Anda tetap tersimpan jika hanya melihat tab ini.
+                    </span>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      isLoading={activatingInternal}
+                      onClick={() => void handleActivateInternalMode()}
+                    >
+                      Simpan &amp; Aktifkan WAHA Internal
+                    </Button>
+                  </div>
+                )}
               </div>
             ) : (
               <form onSubmit={handleSaveWahaSettings} className="space-y-3.5 pt-1">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Base URL Server WAHA <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="https://wa.domainanda.com"
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Base URL Server WAHA <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="https://wa.domainanda.com"
+                      value={baseUrl}
+                      onChange={(e) => {
+                        externalDirtyRef.current = true;
+                        setBaseUrl(e.target.value);
+                        writeWahaUiDraft({ configMode: 'EXTERNAL', baseUrl: e.target.value });
+                      }}
+                      className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">
                       API Key / Secret Token (Opsional)
@@ -681,26 +830,15 @@ export const Settings: React.FC<SettingsProps> = ({
                       type="password"
                       placeholder="Kosongkan jika tanpa auth"
                       value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
+                      onChange={(e) => {
+                        externalDirtyRef.current = true;
+                        setApiKey(e.target.value);
+                      }}
                       className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
                     />
                     <span className="text-[11px] text-gray-400 mt-1 block">
                       Dikirim via header <code className="font-mono">X-Api-Key</code>
                     </span>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Nama Sesi Aktif Default
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="default"
-                      value={session}
-                      onChange={(e) => setSession(e.target.value)}
-                      className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                    />
                   </div>
                 </div>
 
@@ -726,7 +864,9 @@ export const Settings: React.FC<SettingsProps> = ({
                     Tes Koneksi WAHA
                   </Button>
                   <Button type="submit" variant="primary" isLoading={saving}>
-                    Simpan Konfigurasi WAHA
+                    {savedMode !== 'EXTERNAL'
+                      ? 'Simpan & Aktifkan WAHA Eksternal'
+                      : 'Simpan Konfigurasi WAHA'}
                   </Button>
                 </div>
               </form>
@@ -741,6 +881,11 @@ export const Settings: React.FC<SettingsProps> = ({
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-gray-100 text-gray-700 border border-gray-200 tabular-nums">
                       {sessions.length}/{maxSessions} sesi
                     </span>
+                    {workingSessionsCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 tabular-nums">
+                        {workingSessionsCount} Aktif Bersamaan
+                      </span>
+                    )}
                     {!isMultiSessionAllowed && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                         Terkunci (1 Sesi)
@@ -748,12 +893,10 @@ export const Settings: React.FC<SettingsProps> = ({
                     )}
                   </div>
                   <p className="text-[11px] text-gray-500 mt-0.5">
-                    {configMode === 'EXTERNAL'
-                      ? 'Kelola satu atau beberapa sesi di server WAHA eksternal (multi-sesi mendukung WAHA Plus sesuai kuota paket).'
-                      : 'Tambahkan beberapa sesi dan pilih sesi aktif yang dipakai untuk pengiriman CRM.'}
+                    Semua sesi berstatus WORKING aktif bersamaan untuk terima chat, balas Live Chat, dan siaran otomatis. Klik satu baris untuk mengontrolnya di panel kanan.
                   </p>
                 </div>
-                {!isExternalDraft && (
+                {!isPendingModeSwitch && (
                   <div className="flex items-center gap-2 shrink-0">
                     {!isMultiSessionAllowed && onOpenPlans && (
                       <Button
@@ -778,9 +921,9 @@ export const Settings: React.FC<SettingsProps> = ({
                 )}
               </div>
 
-              {isExternalDraft ? (
+              {isPendingModeSwitch ? (
                 <div className="p-3 rounded-md bg-sky-50/70 border border-sky-200 text-xs text-sky-900">
-                  Isi Base URL (dan API Key bila ada), lalu klik <strong>Simpan Konfigurasi WAHA</strong> untuk mengaktifkan dan mengelola multi-sesi pada server WAHA eksternal Anda.
+                  Mode aktif di server saat ini masih <strong>WAHA {savedMode === 'EXTERNAL' ? 'Eksternal' : 'Internal'}</strong>. Klik tombol <strong>Simpan &amp; Aktifkan</strong> di atas terlebih dahulu jika Anda ingin berpindah dan mengelola sesi di server <strong>WAHA {configMode === 'EXTERNAL' ? 'Eksternal' : 'Internal'}</strong>.
                 </div>
               ) : (
                 <>
@@ -796,18 +939,14 @@ export const Settings: React.FC<SettingsProps> = ({
                       )}
                     </div>
                   ) : (
-                    <form onSubmit={handleCreateSession} className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
+                    <form onSubmit={handleCreateSession} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                       <input
                         type="text"
-                        placeholder={
-                          configMode === 'EXTERNAL'
-                            ? 'Nama sesi baru (WAHA Plus: cs-1, sales; WAHA Core: default)'
-                            : 'Nama sesi baru (contoh: cs-1, sales-utama)'
-                        }
+                        placeholder="Tambah nama sesi baru (contoh: cs-1, sales)"
                         value={newSessionName}
                         onChange={(e) => setNewSessionName(e.target.value)}
                         disabled={sessions.length >= maxSessions}
-                        className="flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                        className="w-full flex-none sm:flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
                       />
                       <Button
                         type="submit"
@@ -815,11 +954,24 @@ export const Settings: React.FC<SettingsProps> = ({
                         size="md"
                         isLoading={creatingSession}
                         disabled={!newSessionName.trim() || sessions.length >= maxSessions}
-                        className="shrink-0"
+                        className="w-full sm:w-auto shrink-0"
                       >
                         Tambah Sesi
                       </Button>
                     </form>
+                  )}
+
+                  {sessions.length > 1 && (
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Cari nama sesi, nama akun, atau nomor WhatsApp..."
+                        value={sessionSearch}
+                        onChange={(e) => setSessionSearch(e.target.value)}
+                        className="w-full h-9 pl-8 pr-3 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:bg-white focus:border-indigo-500"
+                      />
+                    </div>
                   )}
 
                   {sessionsError && (
@@ -837,9 +989,14 @@ export const Settings: React.FC<SettingsProps> = ({
                             ? 'Daftar sesi tidak dapat dimuat karena koneksi WAHA bermasalah.'
                             : `Belum ada sesi terdaftar di server WAHA. Sesi target saat ini: ${liveActiveSession}`}
                       </div>
+                    ) : filteredSessions.length === 0 ? (
+                      <div className="p-3 text-xs text-gray-500 text-center bg-gray-50">
+                        Tidak ada sesi yang cocok dengan "{sessionSearch.trim()}".
+                      </div>
                     ) : (
-                      sessions.map((item) => {
-                        const isActive = item.name === liveActiveSession;
+                      filteredSessions.map((item) => {
+                        const isDefaultFallback = item.name === liveActiveSession;
+                        const isInspected = item.name === inspectedSession;
                         const isWorking = item.status === 'WORKING';
                         const isBusy = sessionBusyName === item.name;
                         const accountLabel = item.me?.pushName || item.me?.id?.split('@')[0];
@@ -848,14 +1005,12 @@ export const Settings: React.FC<SettingsProps> = ({
                         return (
                           <div
                             key={item.name}
-                            onClick={() => {
-                              if (!isActive && !isBusy) void handleSwitchActiveSession(item.name);
-                            }}
-                            className={`flex flex-wrap items-center justify-between gap-2.5 px-3.5 py-2.5 text-xs ${
-                              isActive ? 'bg-indigo-50/40' : 'bg-white hover:bg-gray-50 cursor-pointer'
+                            onClick={() => setInspectedSessionName(item.name)}
+                            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 text-xs cursor-pointer transition-colors ${
+                              isInspected ? 'bg-indigo-50/40' : 'bg-white hover:bg-gray-50'
                             }`}
                           >
-                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                               <span className="font-mono font-semibold text-gray-900 truncate">
                                 {item.name}
                               </span>
@@ -869,15 +1024,20 @@ export const Settings: React.FC<SettingsProps> = ({
                               >
                                 {statusMeta.rowLabel}
                               </span>
-                              {isActive && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200">
+                              {isWorking && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                   Aktif
+                                </span>
+                              )}
+                              {isDefaultFallback && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  Default
                                 </span>
                               )}
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end" onClick={(e) => e.stopPropagation()}>
-                              {!isActive && (
+                            <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end shrink-0" onClick={(e) => e.stopPropagation()}>
+                              {!isDefaultFallback && (
                                 <Button
                                   type="button"
                                   variant="secondary"
@@ -885,18 +1045,29 @@ export const Settings: React.FC<SettingsProps> = ({
                                   disabled={isBusy}
                                   onClick={() => handleSwitchActiveSession(item.name)}
                                 >
-                                  Pilih Aktif
+                                  Jadikan Default
                                 </Button>
                               )}
                               {!isWorking && (
-                                <Button
-                                  type="button"
-                                  variant="secondary"
-                                  size="sm"
-                                  onClick={() => onOpenQr(item.name)}
-                                >
-                                  Scan QR
-                                </Button>
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    disabled={isBusy}
+                                    onClick={() => void handleQuickStartSession(item.name)}
+                                  >
+                                    Start
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => onOpenQr(item.name)}
+                                  >
+                                    Scan QR
+                                  </Button>
+                                </>
                               )}
                               {canDelete && (
                                 <Button
@@ -922,13 +1093,32 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+          <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
             <div>
               <h3 className="font-semibold text-gray-900 text-sm">Kirim Pesan Uji Coba</h3>
               <p className="text-xs text-gray-500 mt-0.5">
                 Verifikasi pengiriman pesan langsung ke nomor WhatsApp tujuan.
               </p>
             </div>
+
+            {sessions.length > 1 && (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Sesi WhatsApp Pengirim
+                </label>
+                <select
+                  value={testSession || inspectedSession}
+                  onChange={(e) => setTestSession(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+                >
+                  {sessions.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} ({s.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="flex flex-col sm:flex-row sm:items-end gap-3">
               <div className="sm:w-48 md:w-52 shrink-0">
@@ -945,7 +1135,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 />
               </div>
 
-              <div className="flex-1 min-w-0">
+              <div className="w-full flex-none sm:flex-1 min-w-0">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Isi Pesan Uji Coba
                 </label>
@@ -984,15 +1174,34 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
 
         <div className="space-y-5">
-          <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
             <div>
               <h3 className="font-semibold text-gray-900 text-sm">
                 Status Sesi WhatsApp
               </h3>
               <p className="text-[11px] text-gray-500 mt-0.5">
-                Menampilkan status sesi aktif WhatsApp yang saat ini dipakai oleh CRM.
+                Semua sesi berstatus WORKING aktif bersamaan. Pilih sesi di bawah untuk kontrol Start, Stop, atau Logout.
               </p>
             </div>
+
+            {sessions.length > 1 && !isPendingModeSwitch && (
+              <div>
+                <label className="block text-[11px] font-medium text-gray-600 mb-1">
+                  Sesi yang Dikontrol ({workingSessionsCount}/{sessions.length} Aktif)
+                </label>
+                <select
+                  value={inspectedSession}
+                  onChange={(e) => setInspectedSessionName(e.target.value)}
+                  className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+                >
+                  {sessions.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} ({s.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="p-4 rounded-md bg-gray-50 border border-gray-200 text-center space-y-1.5">
               <span
@@ -1002,7 +1211,7 @@ export const Settings: React.FC<SettingsProps> = ({
               </span>
 
               <div className="text-xs text-gray-600 pt-1">
-                Session: <strong className="font-mono text-gray-900">{liveActiveSession}</strong>
+                Session: <strong className="font-mono text-gray-900">{inspectedSession}</strong>
               </div>
               {isActiveWorking && (connectedPushName || connectedPhone) && (
                 <div className="text-[11px] text-emerald-700 font-medium">
@@ -1012,19 +1221,19 @@ export const Settings: React.FC<SettingsProps> = ({
                   ) : null}
                 </div>
               )}
-              {wahaStatus?.connected && (wahaStatus.totalSessions ?? 0) > 1 && (
-                <div className="text-[11px] text-gray-500">
-                  {wahaStatus.connectedSessions ?? 0} dari {wahaStatus.totalSessions} sesi aktif di server
+              {wahaStatus?.connected && workingSessionsCount > 1 && (
+                <div className="text-[11px] text-emerald-700 font-medium">
+                  {workingSessionsCount} dari {sessions.length} sesi aktif bersamaan
                 </div>
               )}
               <div className="text-[11px] text-gray-500 font-mono truncate">
-                {wahaStatus?.config?.baseUrl || baseUrl || '-'}
+                {wahaStatus?.config?.baseUrl || '-'}
               </div>
             </div>
 
-            {isExternalDraft && (
+            {isPendingModeSwitch && (
               <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800 leading-relaxed">
-                Status di atas masih berasal dari konfigurasi aktif sebelumnya (<strong className="font-mono">{wahaStatus?.config?.mode || 'INTERNAL'}</strong>). Simpan konfigurasi WAHA Eksternal terlebih dahulu untuk menerapkan perubahan.
+                Anda sedang meninjau tab <strong className="font-mono">WAHA {configMode}</strong>. Status aktif di server saat ini masih <strong className="font-mono">WAHA {savedMode}</strong> sampai tombol <strong>Simpan &amp; Aktifkan</strong> ditekan.
               </div>
             )}
 
@@ -1036,13 +1245,13 @@ export const Settings: React.FC<SettingsProps> = ({
 
             {wahaStatus?.connected && effectiveSessionStatus === 'NOT_FOUND' && (
               <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800 leading-relaxed">
-                Sesi <strong className="font-mono">{liveActiveSession}</strong> belum terdaftar di server WAHA. Klik <strong>Buka Scanner QR</strong> atau <strong>Start Sesi</strong> untuk membuatnya, atau pilih sesi lain di daftar kiri.
+                Sesi <strong className="font-mono">{inspectedSession}</strong> belum terdaftar di server WAHA. Klik <strong>Buka Scanner QR</strong> atau <strong>Start Sesi</strong> untuk membuatnya, atau pilih sesi lain di daftar kiri.
               </div>
             )}
 
             {wahaStatus?.connected && effectiveSessionStatus === 'FAILED' && (
               <div className="p-3 rounded-md bg-red-50 border border-red-200 text-[11px] text-red-700 leading-relaxed">
-                Sesi <strong className="font-mono">{liveActiveSession}</strong> gagal berjalan di server WAHA. Klik <strong>Buka Scanner QR</strong> atau <strong>Start Sesi</strong> untuk memulihkan sesi.
+                Sesi <strong className="font-mono">{inspectedSession}</strong> gagal berjalan di server WAHA. Klik <strong>Buka Scanner QR</strong> atau <strong>Start Sesi</strong> untuk memulihkan sesi.
               </div>
             )}
 
@@ -1053,7 +1262,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   size="md"
                   className="w-full"
                   disabled={isServerOffline || sessionActionLoading}
-                  onClick={() => onOpenQr(liveActiveSession)}
+                  onClick={() => onOpenQr(inspectedSession)}
                 >
                   Buka Scanner QR WhatsApp
                 </Button>
@@ -1487,11 +1696,15 @@ export const Settings: React.FC<SettingsProps> = ({
         onClose={() => setConfirmAction(null)}
         onConfirm={handleConfirmSessionAction}
         isLoading={sessionActionLoading}
-        title={confirmAction === 'logout' ? 'Logout Sesi WhatsApp?' : 'Hentikan Sesi WhatsApp?'}
+        title={
+          confirmAction === 'logout'
+            ? `Logout Sesi "${inspectedSession}"?`
+            : `Hentikan Sesi "${inspectedSession}"?`
+        }
         description={
           confirmAction === 'logout'
-            ? 'Anda harus melakukan scan QR ulang untuk menghubungkan kembali WhatsApp setelah logout.'
-            : 'Sesi WhatsApp akan dihentikan sementara dan pesan tidak dapat dikirim hingga sesi dijalankan kembali.'
+            ? `Sesi "${inspectedSession}" akan keluar dari perangkat tertaut dan perlu scan QR ulang untuk terhubung kembali.`
+            : `Sesi "${inspectedSession}" akan dihentikan sementara dan tidak dapat mengirim pesan hingga dijalankan kembali.`
         }
         confirmLabel={confirmAction === 'logout' ? 'Ya, Logout' : 'Ya, Hentikan'}
         variant="danger"

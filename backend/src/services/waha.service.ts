@@ -12,6 +12,15 @@ export interface WahaConfig {
   mode?: 'INTERNAL' | 'EXTERNAL';
   internalLocked?: boolean;
   hasApiKey?: boolean;
+  externalConfig?: {
+    baseUrl: string;
+    apiKey?: string;
+    hasApiKey?: boolean;
+  };
+  internalConfig?: {
+    baseUrl: string;
+    hasApiKey?: boolean;
+  };
 }
 
 export interface WahaSessionInfo {
@@ -191,32 +200,44 @@ export class WahaService {
       const mode: 'INTERNAL' | 'EXTERNAL' =
         modeSetting?.value === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
 
+      const savedExternalUrl = (urlSetting?.value || '').trim();
+      const savedExternalKey = keySetting?.value || '';
+      const externalConfig = {
+        baseUrl: savedExternalUrl,
+        apiKey: maskSecret ? (savedExternalKey ? '••••••••' : '') : savedExternalKey,
+        hasApiKey: Boolean(savedExternalKey && savedExternalKey.trim() !== ''),
+      };
+
+      const internalUrl = config.waha.baseUrl;
+      const internalRawKey = config.waha.apiKey;
+      const internalConfig = {
+        baseUrl: internalUrl,
+        hasApiKey: Boolean(internalRawKey && internalRawKey.trim() !== ''),
+      };
+
       if (mode === 'INTERNAL') {
-        const baseUrl = internalEnv
-          ? config.waha.baseUrl
-          : urlSetting?.value || config.waha.baseUrl;
-        const rawApiKey = internalEnv
-          ? config.waha.apiKey
-          : keySetting?.value || config.waha.apiKey;
         const session = sessionSetting?.value || config.waha.session || 'default';
         return {
-          baseUrl,
-          apiKey: maskSecret ? (rawApiKey ? '••••••••' : '') : rawApiKey,
+          baseUrl: internalUrl,
+          apiKey: maskSecret ? (internalRawKey ? '••••••••' : '') : internalRawKey,
           session,
           mode: 'INTERNAL',
           internalLocked: true,
-          hasApiKey: Boolean(rawApiKey && rawApiKey.trim() !== ''),
+          hasApiKey: internalConfig.hasApiKey,
+          externalConfig,
+          internalConfig,
         };
       }
 
-      const rawApiKey = keySetting?.value || '';
       return {
-        baseUrl: (urlSetting?.value || '').trim(),
-        apiKey: maskSecret ? (rawApiKey ? '••••••••' : '') : rawApiKey,
+        baseUrl: savedExternalUrl,
+        apiKey: maskSecret ? (savedExternalKey ? '••••••••' : '') : savedExternalKey,
         session: (sessionSetting?.value || '').trim() || 'default',
         mode: 'EXTERNAL',
         internalLocked: false,
-        hasApiKey: Boolean(rawApiKey && rawApiKey.trim() !== ''),
+        hasApiKey: externalConfig.hasApiKey,
+        externalConfig,
+        internalConfig,
       };
     } catch {
       return {
@@ -263,13 +284,23 @@ export class WahaService {
       overrides?.mode || stored.mode || 'INTERNAL';
     const targetUrl =
       targetMode === 'INTERNAL'
-        ? stored.baseUrl
-        : (overrides?.baseUrl !== undefined ? overrides.baseUrl : stored.baseUrl).trim();
+        ? stored.internalConfig?.baseUrl || stored.baseUrl
+        : (
+            overrides?.baseUrl !== undefined
+              ? overrides.baseUrl
+              : stored.externalConfig?.baseUrl || stored.baseUrl
+          ).trim();
+    const savedExtKey =
+      stored.externalConfig?.apiKey !== undefined
+        ? stored.externalConfig.apiKey
+        : stored.mode === 'EXTERNAL'
+          ? stored.apiKey
+          : '';
     const targetKey =
       targetMode === 'INTERNAL'
         ? stored.apiKey
         : overrides?.apiKey === undefined || overrides.apiKey === '••••••••'
-          ? stored.apiKey
+          ? savedExtKey
           : overrides.apiKey;
 
     const client = this.createHttpClient(targetUrl, targetKey, 10000);
@@ -332,8 +363,14 @@ export class WahaService {
         }))
         .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
 
+      let resolvedActiveSession = session;
       let sessionData: any = ownedList.find((s) => s.name === session)?.raw || null;
-      if (!sessionData && session) {
+      if (!sessionData && currentConfig.mode === 'EXTERNAL' && ownedList.length > 0) {
+        const preferred = ownedList.find((s) => s.status === 'WORKING') || ownedList[0];
+        sessionData = preferred.raw;
+        resolvedActiveSession = preferred.name;
+        currentConfig.session = preferred.name;
+      } else if (!sessionData && session) {
         try {
           const res = await client.get(`/api/sessions/${encodeURIComponent(session)}`);
           sessionData = res.data;
@@ -358,7 +395,7 @@ export class WahaService {
       return {
         connected: true,
         sessionStatus: status,
-        activeSession: session,
+        activeSession: resolvedActiveSession,
         connectedSessions,
         totalSessions: sessionSummaries.length,
         sessions: sessionSummaries,
@@ -578,6 +615,7 @@ export class WahaService {
    * List sessions belonging to this CRM instance (scoped in shared internal WAHA mode)
    */
   public async listSessions(): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
+    const conf = await this.getConfig();
     const { client, session, ownerPrefix } = await this.getClient();
     try {
       const rawList = await this.fetchRawSessionList(client);
@@ -588,7 +626,11 @@ export class WahaService {
           me: item.me || null,
         }))
         .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
-      return { sessions, activeSession: session };
+      let activeSession = session;
+      if (conf.mode === 'EXTERNAL' && sessions.length > 0 && !sessions.some((s) => s.name === session)) {
+        activeSession = sessions.find((s) => s.status === 'WORKING')?.name || sessions[0].name;
+      }
+      return { sessions, activeSession };
     } catch (err: any) {
       throw this.wrapWahaError(err, 'Gagal mengambil daftar sesi WAHA');
     }

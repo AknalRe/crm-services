@@ -324,3 +324,94 @@ test('testConnection reuses stored secret when masked placeholder is submitted',
   assert.equal(res.tier, 'PLUS');
   assert.equal(res.sessionCount, 1);
 });
+
+test('External WAHA falls back from stale/default DB session to active WORKING sessions', async (t) => {
+  stubWahaEnvSession(t, 'renaldi');
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://wagt.example.com',
+    apiKey: 'secret',
+    session: 'renaldi',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  axios.create = (() =>
+    ({
+      get: async (url: string) => {
+        if (url.startsWith('/api/sessions?all=true')) {
+          return {
+            data: [
+              { name: 'HRIS_MINTI', status: 'WORKING', me: { id: '628222@c.us', pushName: 'Admin' } },
+              { name: 'HRIS_HR', status: 'WORKING', me: { id: '628111@c.us', pushName: 'Clarice' } },
+            ],
+          };
+        }
+        throw new Error(`Unexpected GET ${url}`);
+      },
+      put: async () => ({ data: {} }),
+    }) as any) as any;
+
+  const status = await wahaService.getStatus();
+  assert.equal(status.connected, true);
+  assert.equal(status.sessionStatus, 'WORKING');
+  assert.equal(status.activeSession, 'HRIS_MINTI');
+  assert.equal(status.connectedSessions, 2);
+  assert.equal(status.totalSessions, 2);
+
+  const listed = await wahaService.listSessions();
+  assert.equal(listed.activeSession, 'HRIS_MINTI');
+  assert.equal(listed.sessions.length, 2);
+});
+
+test('testConnection uses saved externalConfig key (not internal key) when active mode is INTERNAL', async (t) => {
+  stubGetConfig(t, {
+    mode: 'INTERNAL',
+    baseUrl: 'http://reneo-waha:3000',
+    apiKey: 'internal-container-key',
+    session: 'renaldi',
+    internalLocked: true,
+    hasApiKey: true,
+    externalConfig: {
+      baseUrl: 'https://wagt.example.com',
+      apiKey: 'external-saved-key',
+      hasApiKey: true,
+    },
+    internalConfig: {
+      baseUrl: 'http://reneo-waha:3000',
+      hasApiKey: true,
+    },
+  });
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  let sentKey = '';
+  axios.create = ((cfg: any) => {
+    sentKey = cfg?.headers?.['X-Api-Key'] || '';
+    return {
+      get: async (url: string) => {
+        if (url.startsWith('/api/sessions')) return { data: [{ name: 'HRIS_HR', status: 'WORKING' }] };
+        return { data: {} };
+      },
+    } as any;
+  }) as any;
+
+  const res = await wahaService.testConnection({
+    mode: 'EXTERNAL',
+    baseUrl: 'https://wagt.example.com',
+    apiKey: '••••••••',
+  });
+
+  assert.equal(sentKey, 'external-saved-key');
+  assert.equal(res.connected, true);
+  assert.equal(res.sessionCount, 1);
+});
+

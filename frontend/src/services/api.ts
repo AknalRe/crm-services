@@ -237,8 +237,12 @@ export const api = {
     const res = await client.post('/settings/waha/test', data || {});
     return res.data.data;
   },
-  sendTestMessage: async (phone: string, message: string): Promise<any> => {
-    const res = await client.post('/waha/send-test', { phone, message });
+  sendTestMessage: async (phone: string, message: string, session?: string): Promise<any> => {
+    const res = await client.post('/waha/send-test', {
+      phone,
+      message,
+      ...(session ? { session } : {}),
+    });
     return res.data;
   },
 
