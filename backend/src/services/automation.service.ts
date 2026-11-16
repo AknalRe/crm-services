@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import axios from 'axios';
-import { asc, eq, and, isNull, isNotNull, sql } from 'drizzle-orm';
+import { asc, desc, eq, and, ne, isNull, isNotNull, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   autoReplyRules,
@@ -11,7 +11,11 @@ import {
   webhookDeliveries,
 } from '../db/schema';
 import { getSettingMap } from '../routes/auth';
-import { generateAiAgentReply } from '../routes/aiAgent';
+import {
+  AiConversationTurn,
+  generateAiAgentReply,
+  getAiAgentConfig,
+} from './ai.service';
 import { wahaService } from './waha.service';
 import { OmnichannelType, sendOutboundChannelMessage } from './channel.service';
 import { liveEvents } from './events.service';
@@ -325,13 +329,53 @@ export async function handleInboundAutomation(params: {
     // 4. AI Agent DM Auto-Reply (if enabled + autoReplyDm)
     if (inboundBody.trim()) {
       try {
-        const aiResult = await generateAiAgentReply(inboundBody.trim());
-        if (aiResult.config.enabled && aiResult.config.autoReplyDm && aiResult.reply) {
-          await sendAutoReplyMessage({
-            ...replyBase,
-            text: aiResult.reply,
+        const aiCfg = await getAiAgentConfig();
+        if (aiCfg.enabled && aiCfg.autoReplyDm) {
+          const recentRows = await db
+            .select({
+              direction: chatMessages.direction,
+              body: chatMessages.body,
+            })
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.conversationId, conversationId),
+                ne(chatMessages.messageType, 'NOTE')
+              )
+            )
+            .orderBy(desc(chatMessages.createdAt))
+            .limit(7);
+
+          const trimmedInbound = inboundBody.trim();
+          const priorTurnsRaw = recentRows.slice(
+            recentRows[0]?.direction === 'INBOUND' &&
+              String(recentRows[0]?.body || '').trim() === trimmedInbound
+              ? 1
+              : 0
+          );
+          const history: AiConversationTurn[] = priorTurnsRaw
+            .slice(0, 6)
+            .reverse()
+            .filter((r) => Boolean(String(r.body || '').trim()))
+            .map((r) => ({
+              role: r.direction === 'OUTBOUND' ? 'assistant' : 'user',
+              content: String(r.body || '').trim(),
+            }));
+
+          const aiResult = await generateAiAgentReply(trimmedInbound, {
+            configOverride: aiCfg,
+            history,
+            conversationId,
+            contactName: contact.namaPanggilan || contact.namaLengkap || null,
+            channel,
           });
-          return;
+          if (aiResult.reply) {
+            await sendAutoReplyMessage({
+              ...replyBase,
+              text: aiResult.reply,
+            });
+            return;
+          }
         }
       } catch (aiErr: any) {
         console.warn('[AutomationService] AI auto-reply skipped:', aiErr.message);

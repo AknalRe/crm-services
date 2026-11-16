@@ -393,12 +393,70 @@ export async function initDb() {
     `;
 
     await sql`
+      CREATE TABLE IF NOT EXISTS ai_knowledge_books (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        category TEXT NOT NULL DEFAULT 'GENERAL',
+        source_type TEXT NOT NULL DEFAULT 'MANUAL',
+        source_url TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
       CREATE TABLE IF NOT EXISTS ai_knowledge_items (
         id TEXT PRIMARY KEY,
+        book_id TEXT REFERENCES ai_knowledge_books(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
         category TEXT NOT NULL DEFAULT 'FAQ',
         content TEXT NOT NULL,
         source_url TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      ALTER TABLE ai_knowledge_items
+      ADD COLUMN IF NOT EXISTS book_id TEXT REFERENCES ai_knowledge_books(id) ON DELETE CASCADE;
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS ai_skills (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT,
+        category TEXT NOT NULL DEFAULT 'CUSTOM',
+        trigger_hint TEXT,
+        instructions TEXT NOT NULL,
+        linked_tools TEXT NOT NULL DEFAULT '[]',
+        source_type TEXT NOT NULL DEFAULT 'MANUAL',
+        source_url TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS ai_mcp_servers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        transport TEXT NOT NULL DEFAULT 'HTTP',
+        endpoint_url TEXT NOT NULL,
+        auth_type TEXT NOT NULL DEFAULT 'NONE',
+        auth_header_name TEXT NOT NULL DEFAULT 'X-API-Key',
+        auth_token TEXT,
+        cached_tools TEXT NOT NULL DEFAULT '[]',
+        disabled_tools TEXT NOT NULL DEFAULT '[]',
+        last_synced_at TIMESTAMP,
+        last_error TEXT,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()

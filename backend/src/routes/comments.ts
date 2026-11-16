@@ -4,6 +4,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { channelAccounts, commentAutomations, socialComments } from '../db/schema';
+import { generateAiAgentReply, getAiAgentConfig } from '../services/ai.service';
 import { requirePermission } from './auth';
 
 async function sendCommentReplyApi(
@@ -67,7 +68,32 @@ export async function applyCommentAutomations(
       if (!kw) return false;
       return rule.matchType === 'EXACT' ? contentLower === kw : contentLower.includes(kw);
     });
-    if (!matched) return;
+    if (!matched) {
+      if (!comment.replyText) {
+        const aiCfg = await getAiAgentConfig();
+        const ageMs = Date.now() - new Date(comment.createdAt).getTime();
+        if (aiCfg.enabled && aiCfg.autoReplyComment && ageMs <= 24 * 60 * 60 * 1000) {
+          try {
+            const aiRes = await generateAiAgentReply(comment.content, {
+              configOverride: aiCfg,
+              contactName: comment.authorName,
+              channel: comment.channel,
+              isComment: true,
+            });
+            if (aiRes.reply) {
+              await sendCommentReplyApi(acc, comment, aiRes.reply);
+              await db
+                .update(socialComments)
+                .set({ replyText: aiRes.reply, repliedAt: new Date(), status: 'DONE' })
+                .where(eq(socialComments.id, comment.id));
+            }
+          } catch (aiErr: any) {
+            console.warn('[CommentAutomation] AI reply failed:', aiErr?.message);
+          }
+        }
+      }
+      return;
+    }
 
     let executed = false;
 

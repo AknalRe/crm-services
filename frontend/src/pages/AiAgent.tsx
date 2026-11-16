@@ -1,107 +1,466 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Trash2 } from 'lucide-react';
 import api from '../services/api';
-import { AiAgentConfig, AiKnowledgeItem } from '../types';
-import { Button } from '../components/ui/Button';
-import { ConfirmModal } from '../components/ui/ConfirmModal';
+import {
+  AiAgentConfig,
+  AiFallbackTarget,
+  AiKnowledgeBook,
+  AiKnowledgeBookPreset,
+  AiKnowledgeItem,
+  AiMcpServer,
+  AiModelOption,
+  AiProviderCatalogEntry,
+  AiProviderId,
+  AiSkill,
+  AiSkillPreset,
+  AiSlotVerifyResult,
+  AiTestResult,
+  BuiltinCrmTool,
+  ExternalAiProviderId,
+} from '../types';
 import { useToast } from '../components/ui/ToastProvider';
-import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
+import { LoadingState, ErrorState } from '../components/ui/StateBlocks';
+import { AiModelConfigPanel } from '../components/ai/AiModelConfigPanel';
+import { AiPersonalityPromptPanel } from '../components/ai/AiPersonalityPromptPanel';
+import { AiKnowledgeBooksPanel } from '../components/ai/AiKnowledgeBooksPanel';
+import { AiSkillsMcpPanel } from '../components/ai/AiSkillsMcpPanel';
+import { AiTestSimulatorPanel } from '../components/ai/AiTestSimulatorPanel';
+
+const FALLBACK_CATALOG: AiProviderCatalogEntry[] = [
+  {
+    id: 'OPENAI',
+    label: 'OpenAI',
+    protocol: 'openai',
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4o-mini',
+    requiresApiKey: true,
+    requiresBaseUrl: false,
+    supportsModelFetch: true,
+    apiKeyPlaceholder: 'sk-...',
+    baseUrlPlaceholder: 'https://api.openai.com/v1',
+    recommendedModels: [
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+      { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+      { id: 'gpt-4o', label: 'GPT-4o' },
+    ],
+  },
+  {
+    id: 'GEMINI',
+    label: 'Google Gemini',
+    protocol: 'gemini',
+    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModel: 'gemini-2.5-flash',
+    requiresApiKey: true,
+    requiresBaseUrl: false,
+    supportsModelFetch: true,
+    apiKeyPlaceholder: 'AIza...',
+    baseUrlPlaceholder: 'https://generativelanguage.googleapis.com/v1beta',
+    recommendedModels: [
+      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+    ],
+  },
+  {
+    id: 'ANTHROPIC',
+    label: 'Anthropic (Claude)',
+    protocol: 'anthropic',
+    defaultBaseUrl: 'https://api.anthropic.com/v1',
+    defaultModel: 'claude-sonnet-4-20250514',
+    requiresApiKey: true,
+    requiresBaseUrl: false,
+    supportsModelFetch: true,
+    apiKeyPlaceholder: 'sk-ant-...',
+    baseUrlPlaceholder: 'https://api.anthropic.com/v1',
+    recommendedModels: [
+      { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+      { id: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku' },
+    ],
+  },
+  {
+    id: 'OPENROUTER',
+    label: 'OpenRouter',
+    protocol: 'openai',
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'openai/gpt-4o-mini',
+    requiresApiKey: true,
+    requiresBaseUrl: false,
+    supportsModelFetch: true,
+    apiKeyPlaceholder: 'sk-or-v1-...',
+    baseUrlPlaceholder: 'https://openrouter.ai/api/v1',
+    recommendedModels: [
+      { id: 'openai/gpt-4o-mini', label: 'OpenAI: GPT-4o Mini' },
+      { id: 'google/gemini-2.5-flash', label: 'Google: Gemini 2.5 Flash' },
+    ],
+  },
+  {
+    id: 'GROQ',
+    label: 'Groq',
+    protocol: 'openai',
+    defaultBaseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: 'llama-3.3-70b-versatile',
+    requiresApiKey: true,
+    requiresBaseUrl: false,
+    supportsModelFetch: true,
+    apiKeyPlaceholder: 'gsk_...',
+    baseUrlPlaceholder: 'https://api.groq.com/openai/v1',
+    recommendedModels: [
+      { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versatile' },
+      { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant' },
+    ],
+  },
+  {
+    id: 'DEEPSEEK',
+    label: 'DeepSeek',
+    protocol: 'openai',
+    defaultBaseUrl: 'https://api.deepseek.com/v1',
+    defaultModel: 'deepseek-chat',
+    requiresApiKey: true,
+    requiresBaseUrl: false,
+    supportsModelFetch: true,
+    apiKeyPlaceholder: 'sk-...',
+    baseUrlPlaceholder: 'https://api.deepseek.com/v1',
+    recommendedModels: [
+      { id: 'deepseek-chat', label: 'DeepSeek Chat (V3)' },
+      { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1)' },
+    ],
+  },
+  {
+    id: 'CUSTOM_OPENAI',
+    label: 'Custom OpenAI-Compatible (Ollama / LiteLLM / Gateway)',
+    protocol: 'openai',
+    defaultBaseUrl: '',
+    defaultModel: 'llama3.1',
+    requiresApiKey: false,
+    requiresBaseUrl: true,
+    supportsModelFetch: true,
+    apiKeyPlaceholder: 'Opsional (kosongkan untuk Ollama lokal)',
+    baseUrlPlaceholder: 'http://host.docker.internal:11434/v1',
+    recommendedModels: [{ id: 'llama3.1', label: 'llama3.1' }],
+  },
+  {
+    id: 'LOCAL_KB',
+    label: 'Knowledge Matcher (Lokal)',
+    protocol: 'local',
+    defaultBaseUrl: '',
+    defaultModel: 'local-kb-matcher',
+    requiresApiKey: false,
+    requiresBaseUrl: false,
+    supportsModelFetch: false,
+    apiKeyPlaceholder: '',
+    baseUrlPlaceholder: '',
+    recommendedModels: [{ id: 'local-kb-matcher', label: 'Knowledge Matcher (Lokal)' }],
+  },
+];
+
+const DEFAULT_FORM_CONFIG: AiAgentConfig = {
+  enabled: false,
+  name: 'Asisten CRM',
+  persona: 'Ramah, ringkas, profesional, dan selalu merujuk pada Knowledge Book perusahaan.',
+  personality: {
+    roleTitle: 'Customer Service & Konsultan CRM',
+    tone: 'PROFESSIONAL',
+    language: 'MATCH_USER',
+    responseLength: 'CONCISE',
+    emojiUsage: 'MINIMAL',
+    greetingStyle: '',
+    closingStyle: '',
+  },
+  positivePrompt: '',
+  negativePrompt: '',
+  enabledBuiltinTools: ['crm_search_products', 'crm_search_knowledge'],
+  autoReplyDm: false,
+  autoReplyComment: false,
+  provider: 'LOCAL_KB',
+  model: 'local-kb-matcher',
+  baseUrl: '',
+  apiKey: '',
+  fallbacks: [],
+  fallbackToLocalKb: true,
+  temperature: 0.4,
+  maxTokens: 800,
+  timeoutMs: 15000,
+};
+
+type AiTabId = 'personality' | 'models' | 'knowledge' | 'skills-mcp' | 'simulator';
+
+function normalizeConfigState(cfg?: Partial<AiAgentConfig> | null): AiAgentConfig {
+  return {
+    ...DEFAULT_FORM_CONFIG,
+    ...cfg,
+    personality: {
+      ...DEFAULT_FORM_CONFIG.personality,
+      ...(cfg?.personality || {}),
+    },
+    enabledBuiltinTools: Array.isArray(cfg?.enabledBuiltinTools)
+      ? cfg.enabledBuiltinTools
+      : DEFAULT_FORM_CONFIG.enabledBuiltinTools,
+    fallbacks: Array.isArray(cfg?.fallbacks) ? cfg.fallbacks : [],
+  };
+}
 
 export const AiAgent: React.FC = () => {
   const toast = useToast();
-  const [config, setConfig] = useState<AiAgentConfig>({
-    enabled: false,
-    name: 'Asisten CRM',
-    persona: '',
-    autoReplyDm: false,
-    autoReplyComment: false,
-    provider: 'LOCAL_KB',
-    model: 'gpt-4o-mini',
-    apiKey: '',
-  });
+  const [activeTab, setActiveTab] = useState<AiTabId>('personality');
+  const [catalog, setCatalog] = useState<AiProviderCatalogEntry[]>(FALLBACK_CATALOG);
+  const [config, setConfig] = useState<AiAgentConfig>(DEFAULT_FORM_CONFIG);
+
+  const [books, setBooks] = useState<AiKnowledgeBook[]>([]);
+  const [bookPresets, setBookPresets] = useState<AiKnowledgeBookPreset[]>([]);
   const [knowledge, setKnowledge] = useState<AiKnowledgeItem[]>([]);
+
+  const [skills, setSkills] = useState<AiSkill[]>([]);
+  const [skillPresets, setSkillPresets] = useState<AiSkillPreset[]>([]);
+  const [builtinTools, setBuiltinTools] = useState<BuiltinCrmTool[]>([]);
+  const [mcpServers, setMcpServers] = useState<AiMcpServer[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<AiKnowledgeItem | null>(null);
-  const [deletingKb, setDeletingKb] = useState(false);
 
-  const [kbTitle, setKbTitle] = useState('');
-  const [kbCategory, setKbCategory] = useState<'FAQ' | 'CATALOG' | 'POLICY' | 'WEB'>('FAQ');
-  const [kbContent, setKbContent] = useState('');
-  const [kbUrl, setKbUrl] = useState('');
-  const [savingKb, setSavingKb] = useState(false);
+  const [fetchedModelsMap, setFetchedModelsMap] = useState<Record<string, AiModelOption[]>>({});
+  const [manualModelSlots, setManualModelSlots] = useState<Record<string, boolean>>({});
+  const [fetchingSlotId, setFetchingSlotId] = useState<string | null>(null);
+  const [verifyingSlotId, setVerifyingSlotId] = useState<string | null>(null);
+  const [verifyResults, setVerifyResults] = useState<Record<string, AiSlotVerifyResult | null>>({});
 
   const [testMessage, setTestMessage] = useState('');
-  const [testReply, setTestReply] = useState('');
+  const [testResult, setTestResult] = useState<AiTestResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cfg, kb] = await Promise.all([api.getAiAgentConfig(), api.getAiKnowledge()]);
-      setConfig(cfg);
-      setKnowledge(kb || []);
+      const [
+        providers,
+        cfg,
+        bookList,
+        bookCat,
+        kbItems,
+        skillList,
+        skillCat,
+        mcpData,
+      ] = await Promise.all([
+        api.getAiProviders().catch(() => FALLBACK_CATALOG),
+        api.getAiAgentConfig(),
+        api.getAiKnowledgeBooks().catch(() => []),
+        api.getAiKnowledgeBooksCatalog().catch(() => []),
+        api.getAiKnowledge(),
+        api.getAiSkills().catch(() => []),
+        api.getAiSkillsCatalog().catch(() => []),
+        api.getAiMcpServers().catch(() => ({ builtinTools: [], servers: [] })),
+      ]);
+      if (providers && providers.length > 0) setCatalog(providers);
+      setConfig(normalizeConfigState(cfg));
+      setBooks(bookList || []);
+      setBookPresets(bookCat || []);
+      setKnowledge(kbItems || []);
+      setSkills(skillList || []);
+      setSkillPresets(skillCat || []);
+      setBuiltinTools(mcpData.builtinTools || []);
+      setMcpServers(mcpData.servers || []);
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Gagal memuat Agent AI & Knowledge Base');
+      setError(err.response?.data?.error || 'Gagal memuat Agent AI, Knowledge Book & Skill');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadAll();
+    void loadAll();
   }, [loadAll]);
+
+  const refreshKnowledgeOnly = useCallback(async () => {
+    const [bookList, kbItems] = await Promise.all([
+      api.getAiKnowledgeBooks(),
+      api.getAiKnowledge(),
+    ]);
+    setBooks(bookList || []);
+    setKnowledge(kbItems || []);
+  }, []);
+
+  const refreshSkillsAndMcpOnly = useCallback(async () => {
+    const [skillList, mcpData] = await Promise.all([
+      api.getAiSkills(),
+      api.getAiMcpServers(),
+    ]);
+    setSkills(skillList || []);
+    setBuiltinTools(mcpData.builtinTools || []);
+    setMcpServers(mcpData.servers || []);
+  }, []);
+
+  const collectExtraCandidates = useCallback(() => {
+    const candidates: Array<{ provider: AiProviderId; baseUrl?: string; apiKey?: string }> = [];
+    if (config.provider !== 'LOCAL_KB' && config.apiKey?.trim()) {
+      candidates.push({
+        provider: config.provider,
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey.trim(),
+      });
+    }
+    for (const fb of config.fallbacks) {
+      if (fb.apiKey?.trim()) {
+        candidates.push({
+          provider: fb.provider,
+          baseUrl: fb.baseUrl,
+          apiKey: fb.apiKey.trim(),
+        });
+      }
+    }
+    return candidates;
+  }, [config.apiKey, config.baseUrl, config.fallbacks, config.provider]);
+
+  const handleFetchModels = async (slot: {
+    slotId: string;
+    provider: AiProviderId;
+    baseUrl?: string;
+    apiKey?: string;
+    clearApiKey?: boolean;
+    currentModel?: string;
+    onSelectDefault?: (firstId: string) => void;
+  }) => {
+    setFetchingSlotId(slot.slotId);
+    try {
+      const res = await api.fetchAiProviderModels({
+        slotId: slot.slotId,
+        provider: slot.provider,
+        baseUrl: slot.baseUrl,
+        apiKey: slot.apiKey,
+        clearApiKey: slot.clearApiKey,
+        extraCandidates: collectExtraCandidates(),
+      });
+      const cacheKey = `${slot.slotId}:${slot.provider}:${(slot.baseUrl || '').trim()}`;
+      setFetchedModelsMap((prev) => ({ ...prev, [cacheKey]: res.models || [] }));
+      setManualModelSlots((prev) => ({ ...prev, [slot.slotId]: false }));
+
+      if (res.models.length > 0 && slot.onSelectDefault) {
+        const currentExists = res.models.some((m) => m.id === slot.currentModel);
+        const providerDefault = catalog.find((c) => c.id === slot.provider)?.defaultModel;
+        if (!currentExists && (!slot.currentModel || slot.currentModel === providerDefault)) {
+          slot.onSelectDefault(res.models[0].id);
+        }
+      }
+
+      toast.success(
+        res.source === 'api'
+          ? `Berhasil memuat ${res.models.length} model dari API provider`
+          : `Menampilkan ${res.models.length} model rekomendasi`
+      );
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Gagal memuat daftar model');
+    } finally {
+      setFetchingSlotId(null);
+    }
+  };
+
+  const handleVerifySlot = async (slot: {
+    slotId: string;
+    provider: AiProviderId;
+    model: string;
+    baseUrl?: string;
+    apiKey?: string;
+    clearApiKey?: boolean;
+  }) => {
+    setVerifyingSlotId(slot.slotId);
+    setVerifyResults((prev) => ({ ...prev, [slot.slotId]: null }));
+    try {
+      const res = await api.verifyAiProviderSlot({
+        slotId: slot.slotId,
+        provider: slot.provider,
+        model: slot.model,
+        baseUrl: slot.baseUrl,
+        apiKey: slot.apiKey,
+        clearApiKey: slot.clearApiKey,
+        timeoutMs: config.timeoutMs,
+        extraCandidates: collectExtraCandidates(),
+      });
+      setVerifyResults((prev) => ({ ...prev, [slot.slotId]: res }));
+      if (res.ok) {
+        toast.success(`${res.providerLabel} (${res.model}) terhubung (${res.durationMs}ms)`);
+      } else {
+        toast.error(res.error || 'Uji koneksi provider gagal');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menguji koneksi provider AI');
+    } finally {
+      setVerifyingSlotId(null);
+    }
+  };
+
+  const handleAddFallback = () => {
+    if (config.fallbacks.length >= 10) {
+      toast.error('Maksimal 10 rute fallback AI');
+      return;
+    }
+    const usedProviders = new Set<AiProviderId>([
+      config.provider,
+      ...config.fallbacks.map((f) => f.provider),
+    ]);
+    const externalOptions = catalog.filter((c) => c.id !== 'LOCAL_KB');
+    const suggested =
+      externalOptions.find((c) => !usedProviders.has(c.id)) ||
+      externalOptions.find((c) => c.id === 'GEMINI') ||
+      externalOptions[0];
+
+    const fallbackId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `fb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+    const nextFallback: AiFallbackTarget = {
+      id: fallbackId,
+      enabled: true,
+      provider: (suggested?.id || 'GEMINI') as ExternalAiProviderId,
+      model: suggested?.defaultModel || 'gemini-2.5-flash',
+      baseUrl: '',
+      apiKey: '',
+      hasApiKey: false,
+      apiKeyPreview: '',
+    };
+
+    setConfig((prev) => ({
+      ...prev,
+      fallbacks: [...prev.fallbacks, nextFallback],
+    }));
+  };
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingConfig(true);
     try {
       const saved = await api.saveAiAgentConfig(config);
-      setConfig(saved);
-      toast.success('Pengaturan Agent AI disimpan');
+      setConfig(normalizeConfigState(saved));
+      toast.success('Konfigurasi Agent AI disimpan');
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Gagal menyimpan konfigurasi');
+      toast.error(err.response?.data?.error || 'Gagal menyimpan konfigurasi Agent AI');
     } finally {
       setSavingConfig(false);
     }
   };
 
-  const handleAddKb = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!kbTitle.trim() || !kbContent.trim()) return;
-    setSavingKb(true);
+  const handleSaveBuiltinTools = async (nextTools: string[]) => {
+    setConfig((prev) => ({ ...prev, enabledBuiltinTools: nextTools }));
     try {
-      const created = await api.createAiKnowledge({
-        title: kbTitle.trim(),
-        category: kbCategory,
-        content: kbContent.trim(),
-        sourceUrl: kbUrl.trim() || null,
-      });
-      setKnowledge((prev) => [created, ...prev]);
-      setKbTitle('');
-      setKbContent('');
-      setKbUrl('');
-      toast.success('Knowledge Base ditambahkan');
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Gagal menambahkan knowledge');
-    } finally {
-      setSavingKb(false);
+      const saved = await api.saveAiAgentConfig({ enabledBuiltinTools: nextTools });
+      setConfig((prev) => ({
+        ...prev,
+        enabledBuiltinTools: saved.enabledBuiltinTools || nextTools,
+      }));
+      toast.success('Akses Tool Internal CRM diperbarui');
+    } catch {
+      toast.error('Gagal menyimpan konfigurasi tool CRM');
     }
   };
 
-  const handleDeleteKb = async (id: string) => {
-    setDeletingKb(true);
+  const handleToggleAgentEnabled = async (checked: boolean) => {
+    setConfig((prev) => ({ ...prev, enabled: checked }));
     try {
-      await api.deleteAiKnowledge(id);
-      setKnowledge((prev) => prev.filter((k) => k.id !== id));
-      setDeleteTarget(null);
-      toast.success('Item Knowledge Base dihapus');
+      const saved = await api.saveAiAgentConfig({ enabled: checked });
+      setConfig((prev) => ({ ...prev, enabled: saved.enabled }));
+      toast.success(checked ? 'Agent AI diaktifkan' : 'Agent AI dinonaktifkan');
     } catch {
-      toast.error('Gagal menghapus item knowledge');
-    } finally {
-      setDeletingKb(false);
+      toast.error('Gagal mengubah status aktif Agent AI');
     }
   };
 
@@ -109,268 +468,191 @@ export const AiAgent: React.FC = () => {
     e.preventDefault();
     if (!testMessage.trim()) return;
     setTesting(true);
+    setTestError(null);
     try {
-      const res = await api.testAiAgent(testMessage.trim());
-      setTestReply(res.reply);
+      const res = await api.testAiAgent(testMessage.trim(), config);
+      setTestResult(res);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Gagal menguji balasan AI');
+      const attempts = err.response?.data?.data?.attempts;
+      if (Array.isArray(attempts)) {
+        setTestResult({
+          reply: '',
+          source: config.provider,
+          providerLabel: config.provider,
+          model: config.model,
+          fallbackUsed: false,
+          attempts,
+        });
+      } else {
+        setTestResult(null);
+      }
+      const msg = err.response?.data?.error || 'Gagal menguji balasan AI';
+      setTestError(msg);
+      toast.error(msg);
     } finally {
       setTesting(false);
     }
   };
 
-  if (loading) return <LoadingState message="Memuat Agent AI & Knowledge Base..." />;
+  if (loading) return <LoadingState message="Memuat Agent AI, Knowledge Book & Skill..." />;
   if (error) return <ErrorState message={error} onRetry={loadAll} />;
 
+  const activeSkillsCount = skills.filter((s) => s.isActive).length;
+  const activeMcpCount = mcpServers.filter((s) => s.isActive).length;
+  const activeBooksCount = books.filter((b) => b.isActive).length;
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-lg font-semibold text-gray-900">Agent AI</h1>
-        <p className="text-xs text-gray-500 mt-0.5">
-          Agent AI membalas DM dan komentar pelanggan menggunakan Knowledge Base (FAQ, katalog produk, dan halaman web).
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        <form
-          onSubmit={handleSaveConfig}
-          className="lg:col-span-5 bg-white rounded-lg border border-gray-200 p-5 space-y-3.5 h-fit"
-        >
-          <div className="flex items-center justify-between pb-2.5 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-900">Konfigurasi Agent</h2>
-            <label className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700">
-              <input
-                type="checkbox"
-                checked={config.enabled}
-                onChange={(e) => setConfig((c) => ({ ...c, enabled: e.target.checked }))}
-                className="rounded border-gray-300"
-              />
-              Aktif
-            </label>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Nama Agent</label>
-            <input
-              type="text"
-              value={config.name}
-              onChange={(e) => setConfig((c) => ({ ...c, name: e.target.value }))}
-              className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Persona & Gaya Bahasa</label>
-            <textarea
-              rows={2}
-              value={config.persona}
-              onChange={(e) => setConfig((c) => ({ ...c, persona: e.target.value }))}
-              className="w-full p-2.5 bg-white border border-gray-200 rounded-md text-xs"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Provider</label>
-              <select
-                value={config.provider}
-                onChange={(e) => setConfig((c) => ({ ...c, provider: e.target.value as any }))}
-                className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs"
-              >
-                <option value="LOCAL_KB">Knowledge Matcher (Lokal)</option>
-                <option value="OPENAI">OpenAI API</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Model</label>
-              <input
-                type="text"
-                value={config.model}
-                onChange={(e) => setConfig((c) => ({ ...c, model: e.target.value }))}
-                className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
-              />
-            </div>
-          </div>
-
-          {config.provider === 'OPENAI' && (
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                API Key {config.hasApiKey ? '(Sudah tersimpan)' : ''}
-              </label>
-              <input
-                type="password"
-                placeholder="sk-..."
-                value={config.apiKey || ''}
-                onChange={(e) => setConfig((c) => ({ ...c, apiKey: e.target.value }))}
-                className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono"
-              />
-            </div>
-          )}
-
-          <div className="space-y-1.5 pt-1">
-            <label className="flex items-center gap-2 text-xs text-gray-700">
-              <input
-                type="checkbox"
-                checked={config.autoReplyDm}
-                onChange={(e) => setConfig((c) => ({ ...c, autoReplyDm: e.target.checked }))}
-              />
-              <span>Balas DM masuk secara otomatis</span>
-            </label>
-            <label className="flex items-center gap-2 text-xs text-gray-700">
-              <input
-                type="checkbox"
-                checked={config.autoReplyComment}
-                onChange={(e) =>
-                  setConfig((c) => ({ ...c, autoReplyComment: e.target.checked }))
-                }
-              />
-              <span>Balas komentar masuk secara otomatis</span>
-            </label>
-          </div>
-
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            isLoading={savingConfig}
-          >
-            Simpan Pengaturan
-          </Button>
-        </form>
-
-        <div className="lg:col-span-7 space-y-5">
-          <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3.5">
-            <h2 className="text-sm font-semibold text-gray-900">
-              Knowledge Base ({knowledge.length})
-            </h2>
-
-            <form onSubmit={handleAddKb} className="space-y-2.5 pb-3 border-b border-gray-100">
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                <input
-                  type="text"
-                  required
-                  placeholder="Judul FAQ / Produk / Kebijakan..."
-                  value={kbTitle}
-                  onChange={(e) => setKbTitle(e.target.value)}
-                  className="sm:col-span-8 h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
-                />
-                <select
-                  value={kbCategory}
-                  onChange={(e) => setKbCategory(e.target.value as any)}
-                  className="sm:col-span-4 h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs"
-                >
-                  <option value="FAQ">FAQ</option>
-                  <option value="CATALOG">Katalog Produk</option>
-                  <option value="POLICY">Kebijakan</option>
-                  <option value="WEB">Halaman Web</option>
-                </select>
-              </div>
-              <textarea
-                rows={2}
-                required
-                placeholder="Isi jawaban atau informasi produk..."
-                value={kbContent}
-                onChange={(e) => setKbContent(e.target.value)}
-                className="w-full p-2.5 bg-white border border-gray-200 rounded-md text-xs"
-              />
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="url"
-                  placeholder="URL Referensi (opsional)"
-                  value={kbUrl}
-                  onChange={(e) => setKbUrl(e.target.value)}
-                  className="flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
-                />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="sm"
-                  isLoading={savingKb}
-                >
-                  Tambah Knowledge
-                </Button>
-              </div>
-            </form>
-
-            {knowledge.length === 0 ? (
-              <EmptyState
-                title="Knowledge Base masih kosong"
-                description="Tambahkan FAQ, katalog produk, atau informasi layanan agar Agent AI bisa menjawab dengan akurat."
-              />
-            ) : (
-              <div className="divide-y divide-gray-200">
-                {knowledge.map((k) => (
-                  <div key={k.id} className="py-2.5 flex items-start justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700">
-                          {k.category}
-                        </span>
-                        <span className="text-xs font-semibold text-gray-900">{k.title}</span>
-                      </div>
-                      <p className="text-xs text-gray-600 whitespace-pre-wrap">{k.content}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteTarget(k)}
-                      className="p-1 text-gray-400 hover:text-rose-600 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                      title="Hapus"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <form
-            onSubmit={handleTest}
-            className="bg-white rounded-lg border border-gray-200 p-5 space-y-3"
-          >
-            <h3 className="text-xs font-semibold text-gray-900">Uji Balasan Agent</h3>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Ketik contoh pertanyaan pelanggan..."
-                value={testMessage}
-                onChange={(e) => setTestMessage(e.target.value)}
-                className="flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
-              />
-              <Button
-                type="submit"
-                variant="secondary"
-                size="sm"
-                isLoading={testing}
-              >
-                Uji
-              </Button>
-            </div>
-            {testReply && (
-              <div className="p-3 rounded bg-indigo-50/50 border border-indigo-100 text-xs text-gray-800 whitespace-pre-wrap">
-                {testReply}
-              </div>
-            )}
-          </form>
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">Agent AI</h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Kelola kepribadian &amp; prompt (positif/negatif), model API + fallback, Knowledge Book, Skill, dan Tool MCP.
+          </p>
         </div>
+
+        <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-200 bg-white text-xs font-medium text-gray-800 self-start sm:self-auto">
+          <input
+            type="checkbox"
+            checked={config.enabled}
+            onChange={(e) => void handleToggleAgentEnabled(e.target.checked)}
+            className="rounded border-gray-300"
+          />
+          <span>{config.enabled ? 'Agent AI Aktif' : 'Agent AI Nonaktif'}</span>
+        </label>
       </div>
 
-      <ConfirmModal
-        isOpen={Boolean(deleteTarget)}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={() => {
-          if (deleteTarget) void handleDeleteKb(deleteTarget.id);
-        }}
-        isLoading={deletingKb}
-        title="Hapus Item Knowledge Base?"
-        description={
-          deleteTarget
-            ? `Materi "${deleteTarget.title}" akan dihapus dan tidak lagi dipakai oleh Agent AI.`
-            : ''
-        }
-        confirmLabel="Hapus"
-        variant="danger"
-      />
+      <div className="flex items-center gap-5 border-b border-gray-200 overflow-x-auto">
+        {(
+          [
+            { id: 'personality', label: 'Personality & Prompt' },
+            {
+              id: 'models',
+              label: `Model AI & Fallback (${1 + config.fallbacks.length})`,
+            },
+            {
+              id: 'knowledge',
+              label: `Knowledge Book (${activeBooksCount}/${books.length})`,
+            },
+            {
+              id: 'skills-mcp',
+              label: `Skill (${activeSkillsCount}) & MCP (${activeMcpCount})`,
+            },
+            { id: 'simulator', label: 'Uji Balasan AI' },
+          ] as Array<{ id: AiTabId; label: string }>
+        ).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`pb-2.5 text-xs font-medium border-b-2 whitespace-nowrap transition-colors ${
+              activeTab === tab.id
+                ? 'border-indigo-600 text-indigo-700'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'personality' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <div className="lg:col-span-7">
+            <AiPersonalityPromptPanel
+              config={config}
+              savingConfig={savingConfig}
+              onChangeConfig={(patch) => setConfig((prev) => ({ ...prev, ...patch }))}
+              onSave={handleSaveConfig}
+            />
+          </div>
+          <div className="lg:col-span-5">
+            <AiTestSimulatorPanel
+              testMessage={testMessage}
+              onTestMessageChange={setTestMessage}
+              testing={testing}
+              testResult={testResult}
+              testError={testError}
+              onSubmitTest={handleTest}
+              providerLabelFallback={config.provider}
+            />
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'models' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <div className="lg:col-span-7">
+            <AiModelConfigPanel
+              config={config}
+              catalog={catalog}
+              savingConfig={savingConfig}
+              fetchedModelsMap={fetchedModelsMap}
+              manualModelSlots={manualModelSlots}
+              fetchingSlotId={fetchingSlotId}
+              verifyingSlotId={verifyingSlotId}
+              verifyResults={verifyResults}
+              onChangeConfig={setConfig}
+              onClearVerifyResult={(slotId) =>
+                setVerifyResults((prev) => ({ ...prev, [slotId]: null }))
+              }
+              onToggleManualModel={(slotId, manual) =>
+                setManualModelSlots((prev) => ({ ...prev, [slotId]: manual }))
+              }
+              onFetchModels={(slot) => void handleFetchModels(slot)}
+              onVerifySlot={(slot) => void handleVerifySlot(slot)}
+              onAddFallback={handleAddFallback}
+              onSave={handleSaveConfig}
+            />
+          </div>
+          <div className="lg:col-span-5">
+            <AiTestSimulatorPanel
+              testMessage={testMessage}
+              onTestMessageChange={setTestMessage}
+              testing={testing}
+              testResult={testResult}
+              testError={testError}
+              onSubmitTest={handleTest}
+              providerLabelFallback={config.provider}
+            />
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'knowledge' && (
+        <AiKnowledgeBooksPanel
+          books={books}
+          bookPresets={bookPresets}
+          knowledge={knowledge}
+          onRefreshKnowledge={refreshKnowledgeOnly}
+        />
+      )}
+
+      {activeTab === 'skills-mcp' && (
+        <AiSkillsMcpPanel
+          config={config}
+          skills={skills}
+          skillPresets={skillPresets}
+          builtinTools={builtinTools}
+          mcpServers={mcpServers}
+          onRefreshSkillsAndMcp={refreshSkillsAndMcpOnly}
+          onSaveBuiltinTools={handleSaveBuiltinTools}
+        />
+      )}
+
+      {activeTab === 'simulator' && (
+        <div className="max-w-3xl">
+          <AiTestSimulatorPanel
+            testMessage={testMessage}
+            onTestMessageChange={setTestMessage}
+            testing={testing}
+            testResult={testResult}
+            testError={testError}
+            onSubmitTest={handleTest}
+            providerLabelFallback={config.provider}
+          />
+        </div>
+      )}
     </div>
   );
 };

@@ -736,6 +736,11 @@ export const api = {
     await client.delete(`/automations/${id}`);
   },
 
+  getAiProviders: async (): Promise<import('../types').AiProviderCatalogEntry[]> => {
+    const res = await client.get('/ai-agent/providers');
+    return res.data.data || [];
+  },
+
   getAiAgentConfig: async (): Promise<import('../types').AiAgentConfig> => {
     const res = await client.get('/ai-agent/config');
     return res.data.data;
@@ -748,12 +753,111 @@ export const api = {
     return res.data.data;
   },
 
-  getAiKnowledge: async (): Promise<import('../types').AiKnowledgeItem[]> => {
-    const res = await client.get('/ai-agent/knowledge');
+  fetchAiProviderModels: async (data: {
+    slotId?: string;
+    provider: import('../types').AiProviderId;
+    baseUrl?: string;
+    apiKey?: string;
+    clearApiKey?: boolean;
+    extraCandidates?: Array<{
+      provider: import('../types').AiProviderId;
+      baseUrl?: string;
+      apiKey?: string;
+    }>;
+  }): Promise<{ models: import('../types').AiModelOption[]; source: 'api' | 'recommended' }> => {
+    const res = await client.post('/ai-agent/models', data);
+    return res.data.data;
+  },
+
+  verifyAiProviderSlot: async (data: {
+    slotId?: string;
+    provider: import('../types').AiProviderId;
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    clearApiKey?: boolean;
+    timeoutMs?: number;
+    extraCandidates?: Array<{
+      provider: import('../types').AiProviderId;
+      baseUrl?: string;
+      apiKey?: string;
+    }>;
+  }): Promise<import('../types').AiSlotVerifyResult> => {
+    const res = await client.post('/ai-agent/verify-slot', data);
+    return res.data.data;
+  },
+
+  getAiKnowledgeBooksCatalog: async (): Promise<import('../types').AiKnowledgeBookPreset[]> => {
+    const res = await client.get('/ai-agent/knowledge-books/catalog');
+    return res.data.data || [];
+  },
+
+  getAiKnowledgeBooks: async (): Promise<import('../types').AiKnowledgeBook[]> => {
+    const res = await client.get('/ai-agent/knowledge-books');
+    return res.data.data || [];
+  },
+
+  createAiKnowledgeBook: async (data: {
+    title: string;
+    description?: string | null;
+    category?: string;
+  }): Promise<import('../types').AiKnowledgeBook> => {
+    const res = await client.post('/ai-agent/knowledge-books', data);
+    return res.data.data;
+  },
+
+  installAiKnowledgeBookPreset: async (
+    presetId: string
+  ): Promise<import('../types').AiKnowledgeBook> => {
+    const res = await client.post('/ai-agent/knowledge-books/install-preset', { presetId });
+    return res.data.data;
+  },
+
+  installAiKnowledgeBookUrl: async (data: {
+    url: string;
+    title?: string;
+    category?: string;
+  }): Promise<import('../types').AiKnowledgeBook> => {
+    const res = await client.post('/ai-agent/knowledge-books/install-url', data);
+    return res.data.data;
+  },
+
+  installAiKnowledgeBookMarkdown: async (data: {
+    title: string;
+    description?: string;
+    category?: string;
+    rawText: string;
+  }): Promise<import('../types').AiKnowledgeBook> => {
+    const res = await client.post('/ai-agent/knowledge-books/install-markdown', data);
+    return res.data.data;
+  },
+
+  installAiKnowledgeBookCatalog: async (): Promise<import('../types').AiKnowledgeBook> => {
+    const res = await client.post('/ai-agent/knowledge-books/install-catalog');
+    return res.data.data;
+  },
+
+  updateAiKnowledgeBook: async (
+    id: string,
+    data: Partial<{ title: string; description: string | null; category: string; isActive: boolean }>
+  ): Promise<import('../types').AiKnowledgeBook> => {
+    const res = await client.patch(`/ai-agent/knowledge-books/${id}`, data);
+    return res.data.data;
+  },
+
+  deleteAiKnowledgeBook: async (id: string): Promise<void> => {
+    await client.delete(`/ai-agent/knowledge-books/${id}`);
+  },
+
+  getAiKnowledge: async (bookId?: string): Promise<import('../types').AiKnowledgeItem[]> => {
+    const res = await client.get('/ai-agent/knowledge', {
+      params: bookId ? { bookId } : undefined,
+    });
     return res.data.data || [];
   },
 
   createAiKnowledge: async (data: {
+    bookId?: string | null;
     title: string;
     category: string;
     content: string;
@@ -766,6 +870,7 @@ export const api = {
   updateAiKnowledge: async (
     id: string,
     data: Partial<{
+      bookId: string | null;
       title: string;
       category: string;
       content: string;
@@ -781,8 +886,126 @@ export const api = {
     await client.delete(`/ai-agent/knowledge/${id}`);
   },
 
-  testAiAgent: async (message: string): Promise<{ reply: string; source: string }> => {
-    const res = await client.post('/ai-agent/test', { message });
+  getAiSkillsCatalog: async (): Promise<import('../types').AiSkillPreset[]> => {
+    const res = await client.get('/ai-agent/skills/catalog');
+    return res.data.data || [];
+  },
+
+  getAiSkills: async (): Promise<import('../types').AiSkill[]> => {
+    const res = await client.get('/ai-agent/skills');
+    return res.data.data || [];
+  },
+
+  createAiSkill: async (data: {
+    name: string;
+    description?: string | null;
+    category?: string;
+    triggerHint?: string | null;
+    instructions: string;
+    linkedTools?: string[];
+  }): Promise<import('../types').AiSkill> => {
+    const res = await client.post('/ai-agent/skills', data);
+    return res.data.data;
+  },
+
+  installAiSkillPreset: async (slug: string): Promise<import('../types').AiSkill> => {
+    const res = await client.post('/ai-agent/skills/install-preset', { slug });
+    return res.data.data;
+  },
+
+  installAiSkillMarkdown: async (data: {
+    rawMarkdown?: string;
+    sourceUrl?: string;
+    name?: string;
+    linkedTools?: string[];
+  }): Promise<import('../types').AiSkill> => {
+    const res = await client.post('/ai-agent/skills/install-markdown', data);
+    return res.data.data;
+  },
+
+  updateAiSkill: async (
+    id: string,
+    data: Partial<{
+      name: string;
+      description: string | null;
+      category: string;
+      triggerHint: string | null;
+      instructions: string;
+      linkedTools: string[];
+      isActive: boolean;
+    }>
+  ): Promise<import('../types').AiSkill> => {
+    const res = await client.patch(`/ai-agent/skills/${id}`, data);
+    return res.data.data;
+  },
+
+  deleteAiSkill: async (id: string): Promise<void> => {
+    await client.delete(`/ai-agent/skills/${id}`);
+  },
+
+  getAiMcpServers: async (): Promise<{
+    builtinTools: import('../types').BuiltinCrmTool[];
+    servers: import('../types').AiMcpServer[];
+  }> => {
+    const res = await client.get('/ai-agent/mcp-servers');
+    return res.data.data;
+  },
+
+  testAiMcpConnection: async (data: {
+    name?: string;
+    endpointUrl: string;
+    authType: 'NONE' | 'BEARER' | 'HEADER';
+    authHeaderName?: string;
+    authToken?: string;
+  }): Promise<{ ok: boolean; toolsCount: number; tools: import('../types').McpToolDescriptor[] }> => {
+    const res = await client.post('/ai-agent/mcp-servers/test-connection', data);
+    return res.data.data;
+  },
+
+  createAiMcpServer: async (data: {
+    name: string;
+    description?: string | null;
+    endpointUrl: string;
+    authType: 'NONE' | 'BEARER' | 'HEADER';
+    authHeaderName?: string;
+    authToken?: string;
+  }): Promise<{ server: import('../types').AiMcpServer; warning?: string }> => {
+    const res = await client.post('/ai-agent/mcp-servers', data);
+    return { server: res.data.data, warning: res.data.warning };
+  },
+
+  updateAiMcpServer: async (
+    id: string,
+    data: Partial<{
+      name: string;
+      description: string | null;
+      endpointUrl: string;
+      authType: 'NONE' | 'BEARER' | 'HEADER';
+      authHeaderName: string;
+      authToken: string;
+      clearAuthToken: boolean;
+      disabledTools: string[];
+      isActive: boolean;
+    }>
+  ): Promise<import('../types').AiMcpServer> => {
+    const res = await client.patch(`/ai-agent/mcp-servers/${id}`, data);
+    return res.data.data;
+  },
+
+  discoverAiMcpServer: async (id: string): Promise<import('../types').AiMcpServer> => {
+    const res = await client.post(`/ai-agent/mcp-servers/${id}/discover`);
+    return res.data.data;
+  },
+
+  deleteAiMcpServer: async (id: string): Promise<void> => {
+    await client.delete(`/ai-agent/mcp-servers/${id}`);
+  },
+
+  testAiAgent: async (
+    message: string,
+    draftConfig?: Partial<import('../types').AiAgentConfig>
+  ): Promise<import('../types').AiTestResult> => {
+    const res = await client.post('/ai-agent/test', { message, draftConfig });
     return res.data.data;
   },
 

@@ -345,12 +345,59 @@ export const commentAutomations = pgTable('comment_automations', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const aiKnowledgeBooks = pgTable('ai_knowledge_books', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  description: text('description'),
+  category: text('category').default('GENERAL').notNull(), // GENERAL | FAQ | CATALOG | POLICY | SOP | WEB
+  sourceType: text('source_type').default('MANUAL').notNull(), // MANUAL | PRESET | URL | CATALOG_SYNC | MARKDOWN
+  sourceUrl: text('source_url'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export const aiKnowledgeItems = pgTable('ai_knowledge_items', {
   id: text('id').primaryKey(),
+  bookId: text('book_id').references(() => aiKnowledgeBooks.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   category: text('category').default('FAQ').notNull(), // FAQ | CATALOG | POLICY | WEB
   content: text('content').notNull(),
   sourceUrl: text('source_url'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const aiSkills = pgTable('ai_skills', {
+  id: text('id').primaryKey(),
+  slug: text('slug').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description'),
+  category: text('category').default('CUSTOM').notNull(), // CRM | SALES | SUPPORT | OPERATIONS | CUSTOM
+  triggerHint: text('trigger_hint'),
+  instructions: text('instructions').notNull(),
+  linkedTools: text('linked_tools').default('[]').notNull(),
+  sourceType: text('source_type').default('MANUAL').notNull(), // MANUAL | PRESET | URL | MARKDOWN
+  sourceUrl: text('source_url'),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const aiMcpServers = pgTable('ai_mcp_servers', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  transport: text('transport').default('HTTP').notNull(),
+  endpointUrl: text('endpoint_url').notNull(),
+  authType: text('auth_type').default('NONE').notNull(), // NONE | BEARER | HEADER
+  authHeaderName: text('auth_header_name').default('X-API-Key').notNull(),
+  authToken: text('auth_token'),
+  cachedTools: text('cached_tools').default('[]').notNull(),
+  disabledTools: text('disabled_tools').default('[]').notNull(),
+  lastSyncedAt: timestamp('last_synced_at'),
+  lastError: text('last_error'),
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

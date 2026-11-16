@@ -563,20 +563,151 @@ export interface CommentAutomationItem {
   updatedAt: string;
 }
 
+export type AiProviderId =
+  | 'OPENAI'
+  | 'GEMINI'
+  | 'ANTHROPIC'
+  | 'OPENROUTER'
+  | 'GROQ'
+  | 'DEEPSEEK'
+  | 'CUSTOM_OPENAI'
+  | 'LOCAL_KB';
+
+export type ExternalAiProviderId = Exclude<AiProviderId, 'LOCAL_KB'>;
+
+export interface AiModelOption {
+  id: string;
+  label: string;
+  source?: 'api' | 'recommended';
+}
+
+export interface AiProviderCatalogEntry {
+  id: AiProviderId;
+  label: string;
+  protocol: 'openai' | 'gemini' | 'anthropic' | 'local';
+  defaultBaseUrl: string;
+  defaultModel: string;
+  requiresApiKey: boolean;
+  requiresBaseUrl: boolean;
+  supportsModelFetch: boolean;
+  apiKeyPlaceholder: string;
+  baseUrlPlaceholder: string;
+  recommendedModels: AiModelOption[];
+}
+
+export interface AiFallbackTarget {
+  id: string;
+  enabled: boolean;
+  provider: ExternalAiProviderId;
+  model: string;
+  baseUrl?: string;
+  hasApiKey?: boolean;
+  apiKeyPreview?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+}
+
+export interface AiPersonalityProfile {
+  roleTitle: string;
+  tone: 'PROFESSIONAL' | 'FRIENDLY' | 'FORMAL' | 'CASUAL' | 'EMPATHETIC';
+  language: 'INDONESIAN' | 'ENGLISH' | 'BILINGUAL' | 'MATCH_USER';
+  responseLength: 'CONCISE' | 'BALANCED' | 'DETAILED';
+  emojiUsage: 'NONE' | 'MINIMAL' | 'MODERATE';
+  greetingStyle: string;
+  closingStyle: string;
+}
+
 export interface AiAgentConfig {
   enabled: boolean;
   name: string;
   persona: string;
+  personality: AiPersonalityProfile;
+  positivePrompt: string;
+  negativePrompt: string;
+  enabledBuiltinTools: string[];
   autoReplyDm: boolean;
   autoReplyComment: boolean;
-  provider: 'OPENAI' | 'GEMINI' | 'LOCAL_KB';
+  provider: AiProviderId;
   model: string;
+  baseUrl?: string;
   hasApiKey?: boolean;
+  apiKeyPreview?: string;
   apiKey?: string;
+  clearApiKey?: boolean;
+  fallbacks: AiFallbackTarget[];
+  fallbackToLocalKb: boolean;
+  temperature: number;
+  maxTokens: number;
+  timeoutMs: number;
+}
+
+export interface AiAttemptTrace {
+  role: 'PRIMARY' | 'FALLBACK' | 'LOCAL_KB';
+  slotId: string;
+  slotLabel: string;
+  provider: AiProviderId;
+  providerLabel: string;
+  model: string;
+  ok: boolean;
+  durationMs: number;
+  error?: string;
+}
+
+export interface AiToolCallTrace {
+  toolName: string;
+  displayName: string;
+  source: 'CRM' | 'MCP';
+  serverName?: string;
+  ok: boolean;
+  durationMs: number;
+  summary: string;
+}
+
+export interface AiTestResult {
+  reply: string;
+  source: AiProviderId;
+  providerLabel: string;
+  model: string;
+  fallbackUsed: boolean;
+  attempts: AiAttemptTrace[];
+  toolCalls?: AiToolCallTrace[];
+}
+
+export interface AiSlotVerifyResult {
+  ok: boolean;
+  provider: AiProviderId;
+  providerLabel: string;
+  model: string;
+  durationMs: number;
+  replyPreview?: string;
+  error?: string;
+}
+
+export interface AiKnowledgeBook {
+  id: string;
+  title: string;
+  description?: string | null;
+  category: string;
+  sourceType: 'MANUAL' | 'PRESET' | 'URL' | 'CATALOG_SYNC' | 'MARKDOWN';
+  sourceUrl?: string | null;
+  isActive: boolean;
+  itemCount?: number;
+  activeItemCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiKnowledgeBookPreset {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  chapters: Array<{ title: string; category: string; content: string }>;
 }
 
 export interface AiKnowledgeItem {
   id: string;
+  bookId?: string | null;
   title: string;
   category: 'FAQ' | 'CATALOG' | 'POLICY' | 'WEB';
   content: string;
@@ -584,6 +715,63 @@ export interface AiKnowledgeItem {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AiSkill {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  category: 'CRM' | 'SALES' | 'SUPPORT' | 'OPERATIONS' | 'CUSTOM';
+  triggerHint?: string | null;
+  instructions: string;
+  linkedTools: string[];
+  sourceType: 'MANUAL' | 'PRESET' | 'URL' | 'MARKDOWN';
+  sourceUrl?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiSkillPreset {
+  slug: string;
+  name: string;
+  description: string;
+  category: 'CRM' | 'SALES' | 'SUPPORT' | 'OPERATIONS' | 'CUSTOM';
+  triggerHint: string;
+  instructions: string;
+  linkedTools: string[];
+}
+
+export interface BuiltinCrmTool {
+  name: string;
+  label: string;
+  description: string;
+}
+
+export interface McpToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: Record<string, any>;
+}
+
+export interface AiMcpServer {
+  id: string;
+  name: string;
+  description?: string | null;
+  transport: string;
+  endpointUrl: string;
+  authType: 'NONE' | 'BEARER' | 'HEADER';
+  authHeaderName: string;
+  hasAuthToken?: boolean;
+  authTokenPreview?: string;
+  authToken?: string;
+  clearAuthToken?: boolean;
+  cachedTools: McpToolDescriptor[];
+  disabledTools: string[];
+  lastSyncedAt?: string | null;
+  lastError?: string | null;
+  isActive: boolean;
 }
 
 
