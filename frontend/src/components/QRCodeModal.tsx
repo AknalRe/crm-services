@@ -99,17 +99,21 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
             setQrCode(retryRes.qr);
           } else {
             setQrCode(null);
+            if (retryRes.error) setError(retryRes.error);
           }
           return;
-        } catch {
-          // Lanjutkan tampilkan status FAILED bila pemulihan gagal
+        } catch (recoverErr: any) {
+          setError(recoverErr?.response?.data?.error || qrRes.error || 'Sesi WAHA gagal dipulihkan.');
         }
       }
       setStatus(qrRes.status);
       if (qrRes.qr && qrRes.qr.startsWith('data:image/')) {
         setQrCode(qrRes.qr);
-      } else if (qrRes.status === 'FAILED' || qrRes.status === 'STOPPED') {
-        setQrCode(null);
+      } else {
+        if (qrRes.error) setError(qrRes.error);
+        if (qrRes.status === 'FAILED' || qrRes.status === 'STOPPED') {
+          setQrCode(null);
+        }
       }
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || 'Gagal memuat QR Code');

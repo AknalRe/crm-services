@@ -91,7 +91,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       const data = await wahaService.listSessions();
       return reply.send({ success: true, data });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 
@@ -102,14 +102,23 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     try {
       const { name, setActive = true } = req.body || {};
       const clean = (name || '').trim();
+      if (!clean || !/^[a-zA-Z0-9_-]+$/.test(clean)) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Nama sesi hanya boleh huruf, angka, tanda hubung (-), atau underscore (_)',
+        });
+      }
       const lic = await licenseService.assertLicenseActive();
+      const resolvedTarget = await wahaService.resolveSessionName(clean);
 
       let existingCount = 0;
       let alreadyExists = false;
       try {
         const listed = await wahaService.listSessions();
         existingCount = listed.sessions.length;
-        alreadyExists = listed.sessions.some((s) => s.name === clean);
+        alreadyExists = listed.sessions.some(
+          (s) => s.name === clean || s.name === resolvedTarget
+        );
       } catch {
         // Ignore if WAHA hasn't returned sessions yet
       }
@@ -134,7 +143,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       }
 
       const result = await wahaService.createAndStartSession(clean, setActive);
-      liveEvents.emit('waha:status', { action: 'create', session: clean });
+      liveEvents.emit('waha:status', { action: 'create', session: resolvedTarget });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
@@ -150,7 +159,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       liveEvents.emit('waha:status', { action: 'switch', session: active });
       return reply.send({ success: true, data: { activeSession: active } });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     }
   });
 
@@ -163,7 +172,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       liveEvents.emit('waha:status', { action: 'delete', session: req.params.name });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 
@@ -175,7 +184,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       const qrData = await wahaService.getQrCode(req.query?.session);
       return reply.send({ success: true, data: qrData });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 
@@ -188,7 +197,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       liveEvents.emit('waha:status', { action: 'start', session: req.body?.session });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 
@@ -201,7 +210,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       liveEvents.emit('waha:status', { action: 'stop', session: req.body?.session });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 
@@ -214,7 +223,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       liveEvents.emit('waha:status', { action: 'logout', session: req.body?.session });
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 

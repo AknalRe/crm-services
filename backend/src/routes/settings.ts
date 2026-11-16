@@ -6,6 +6,7 @@ import { systemSettings, birthdaySettings, autoReplyRules, webhookDeliveries } f
 import { BirthdayService } from '../services/birthday.service';
 import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
+import { liveEvents } from '../services/events.service';
 import { notifyAlertWebhook } from '../services/automation.service';
 import { requirePermission } from './auth';
 
@@ -87,9 +88,22 @@ export default async function settingsRouter(fastify: FastifyInstance) {
           });
       }
 
+      liveEvents.emit('waha:status', { action: 'settings', mode });
       return reply.send({ success: true, message: 'Pengaturan WAHA berhasil disimpan' });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST test WAHA connection (supports testing unsaved external URL & API Key)
+  fastify.post<{
+    Body: { mode?: 'INTERNAL' | 'EXTERNAL'; baseUrl?: string; apiKey?: string };
+  }>('/waha/test', { preHandler: requirePermission('settings') }, async (req, reply: FastifyReply) => {
+    try {
+      const result = await wahaService.testConnection(req.body || {});
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 502).send({ success: false, error: error.message });
     }
   });
 

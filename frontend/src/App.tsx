@@ -152,12 +152,14 @@ function AppShell() {
     mediaUrl?: string;
   } | null>(null);
 
-  const fetchWahaStatus = async () => {
+  const fetchWahaStatus = async (): Promise<WahaStatus | null> => {
     try {
       const status = await api.getWahaStatus();
       setWahaStatus(status);
+      return status;
     } catch (err) {
       console.error('Failed to get WAHA status:', err);
+      return null;
     }
   };
 

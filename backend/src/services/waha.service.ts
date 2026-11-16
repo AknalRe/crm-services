@@ -76,6 +76,106 @@ export class WahaService {
     }
   }
 
+  private createHttpClient(baseUrl: string, apiKey?: string, timeoutMs = 30000): AxiosInstance {
+    const cleanBaseUrl = (baseUrl || '').trim().replace(/\/+$/, '');
+    if (!cleanBaseUrl || !/^https?:\/\//i.test(cleanBaseUrl)) {
+      const err: any = new Error(
+        'Base URL WAHA belum dikonfigurasi atau tidak valid (harus diawali http:// atau https://).'
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+
+    if (apiKey && apiKey.trim() !== '') {
+      headers['X-Api-Key'] = apiKey.trim();
+      headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+    }
+
+    return axios.create({
+      baseURL: cleanBaseUrl,
+      headers,
+      timeout: timeoutMs,
+    });
+  }
+
+  private extractWahaError(err: any, fallbackPrefix?: string): string {
+    const status = err?.response?.status;
+    const rawMsg =
+      err?.response?.data?.message ||
+      err?.response?.data?.error ||
+      (typeof err?.response?.data === 'string' ? err.response.data : '') ||
+      err?.message ||
+      'Terjadi kesalahan pada server WAHA';
+
+    const msg = String(rawMsg).trim();
+    if (status === 401 || status === 403) {
+      return `Autentikasi WAHA gagal (${status}): API Key tidak valid atau ditolak server WAHA.${msg ? ` (${msg})` : ''}`;
+    }
+    if (err?.code === 'ECONNREFUSED') {
+      return `Koneksi ke server WAHA ditolak (ECONNREFUSED). Pastikan container/service WAHA sedang berjalan.`;
+    }
+    if (err?.code === 'ENOTFOUND' || err?.code === 'EAI_AGAIN') {
+      return `Hostname server WAHA tidak ditemukan (${err.code}). Periksa kembali Base URL WAHA.`;
+    }
+    if (err?.code === 'ETIMEDOUT' || err?.code === 'ECONNABORTED') {
+      return `Koneksi ke server WAHA timeout (${err.code}). Server tidak merespons tepat waktu.`;
+    }
+    return fallbackPrefix && !msg.toLowerCase().includes(fallbackPrefix.toLowerCase())
+      ? `${fallbackPrefix}: ${msg}`
+      : msg;
+  }
+
+  private wrapWahaError(err: any, fallbackPrefix?: string): Error {
+    const wrapped: any = new Error(this.extractWahaError(err, fallbackPrefix));
+    wrapped.statusCode = err?.statusCode || err?.response?.status || 502;
+    return wrapped;
+  }
+
+  private isWahaCoreSingleSessionError(err: any): boolean {
+    const status = err?.response?.status;
+    if (status !== 400 && status !== 403 && status !== 422) return false;
+    const msg = String(
+      err?.response?.data?.message || err?.response?.data?.error || err?.message || ''
+    ).toLowerCase();
+    return (
+      msg.includes('waha core') ||
+      msg.includes("only 'default' session") ||
+      msg.includes('only one session') ||
+      msg.includes('upgrade to waha plus')
+    );
+  }
+
+  private async fetchRawSessionList(client: AxiosInstance): Promise<any[]> {
+    const normalize = (data: any): any[] => {
+      if (Array.isArray(data)) return data;
+      if (Array.isArray(data?.sessions)) return data.sessions;
+      return [];
+    };
+
+    try {
+      const res = await client.get('/api/sessions?all=true');
+      return normalize(res.data);
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 400 || status === 404 || status === 405) {
+        const res = await client.get('/api/sessions');
+        return normalize(res.data);
+      }
+      throw err;
+    }
+  }
+
+  public async resolveSessionName(inputName: string): Promise<string> {
+    const conf = await this.getConfig();
+    const ownerPrefix = this.getOwnerPrefix(conf.mode);
+    return this.resolveOwnedSessionName(inputName, ownerPrefix);
+  }
+
   /**
    * Get active WAHA configuration (internal mode locks URL & API key to env when configured)
    */
@@ -111,9 +211,9 @@ export class WahaService {
 
       const rawApiKey = keySetting?.value || '';
       return {
-        baseUrl: urlSetting?.value || '',
+        baseUrl: (urlSetting?.value || '').trim(),
         apiKey: maskSecret ? (rawApiKey ? '••••••••' : '') : rawApiKey,
-        session: sessionSetting?.value || config.waha.session || 'default',
+        session: (sessionSetting?.value || '').trim() || 'default',
         mode: 'EXTERNAL',
         internalLocked: false,
         hasApiKey: Boolean(rawApiKey && rawApiKey.trim() !== ''),
@@ -138,23 +238,69 @@ export class WahaService {
     const ownerPrefix = this.getOwnerPrefix(conf.mode);
     const activeSession =
       ownerPrefix && !this.isOwnedSession(conf.session, ownerPrefix) ? ownerPrefix : conf.session;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-
-    if (conf.apiKey && conf.apiKey.trim() !== '') {
-      headers['X-Api-Key'] = conf.apiKey;
-      headers['Authorization'] = `Bearer ${conf.apiKey}`;
-    }
-
-    const client = axios.create({
-      baseURL: conf.baseUrl.replace(/\/+$/, ''),
-      headers,
-      timeout: 30000,
-    });
-
+    const client = this.createHttpClient(conf.baseUrl, conf.apiKey, 30000);
     return { client, session: activeSession, ownerPrefix };
+  }
+
+  /**
+   * Test connection against either current stored config or draft external credentials
+   */
+  public async testConnection(overrides?: {
+    mode?: 'INTERNAL' | 'EXTERNAL';
+    baseUrl?: string;
+    apiKey?: string;
+  }): Promise<{
+    connected: boolean;
+    mode: 'INTERNAL' | 'EXTERNAL';
+    baseUrl: string;
+    version?: string | null;
+    tier?: string | null;
+    sessionCount: number;
+    sessions: Array<{ name: string; status: string }>;
+  }> {
+    const stored = await this.getConfig(false);
+    const targetMode: 'INTERNAL' | 'EXTERNAL' =
+      overrides?.mode || stored.mode || 'INTERNAL';
+    const targetUrl =
+      targetMode === 'INTERNAL'
+        ? stored.baseUrl
+        : (overrides?.baseUrl !== undefined ? overrides.baseUrl : stored.baseUrl).trim();
+    const targetKey =
+      targetMode === 'INTERNAL'
+        ? stored.apiKey
+        : overrides?.apiKey === undefined || overrides.apiKey === '••••••••'
+          ? stored.apiKey
+          : overrides.apiKey;
+
+    const client = this.createHttpClient(targetUrl, targetKey, 10000);
+    const ownerPrefix = this.getOwnerPrefix(targetMode);
+
+    try {
+      const rawList = await this.fetchRawSessionList(client);
+      const sessions = rawList
+        .map((item: any) => ({
+          name: String(item.name || 'default'),
+          status: String(item.status || 'UNKNOWN'),
+        }))
+        .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
+
+      const verRes = await client
+        .get('/api/version')
+        .catch(() => client.get('/api/server/version'))
+        .catch(() => null);
+
+      return {
+        connected: true,
+        mode: targetMode,
+        baseUrl: targetUrl.replace(/\/+$/, ''),
+        version: verRes?.data?.version ? String(verRes.data.version) : null,
+        tier: verRes?.data?.tier ? String(verRes.data.tier) : null,
+        sessionCount: sessions.length,
+        sessions,
+      };
+    } catch (err: any) {
+      throw this.wrapWahaError(err, 'Tes koneksi WAHA gagal');
+    }
   }
 
   /**
@@ -177,11 +323,7 @@ export class WahaService {
       const { client, session, ownerPrefix } = await this.getClient();
       currentConfig.session = session;
 
-      const resAll = await client
-        .get('/api/sessions?all=true')
-        .catch(() => client.get('/api/sessions'))
-        .catch(() => null);
-      const rawList = Array.isArray(resAll?.data) ? resAll.data : [];
+      const rawList = await this.fetchRawSessionList(client);
       const ownedList: Array<{ name: string; status: string; raw: any }> = rawList
         .map((item: any) => ({
           name: String(item.name || 'default'),
@@ -191,31 +333,19 @@ export class WahaService {
         .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
 
       let sessionData: any = ownedList.find((s) => s.name === session)?.raw || null;
-      if (!sessionData) {
+      if (!sessionData && session) {
         try {
           const res = await client.get(`/api/sessions/${encodeURIComponent(session)}`);
           sessionData = res.data;
         } catch (err: any) {
-          if (err.response?.status === 404 && ownedList.length === 0) {
-            return {
-              connected: true,
-              sessionStatus: 'NOT_FOUND',
-              activeSession: session,
-              connectedSessions: 0,
-              totalSessions: 1,
-              sessions: [{ name: session, status: 'STOPPED' }],
-              webhookUrl: config.webhookUrl,
-              config: currentConfig,
-            };
+          if (err?.response?.status !== 404) {
+            throw err;
           }
         }
       }
 
       const status = sessionData?.status || 'NOT_FOUND';
-      const sessionSummaries =
-        ownedList.length > 0
-          ? ownedList.map((s) => ({ name: s.name, status: s.status }))
-          : [{ name: session, status: status === 'NOT_FOUND' ? 'STOPPED' : status }];
+      const sessionSummaries = ownedList.map((s) => ({ name: s.name, status: s.status }));
       const connectedSessions = sessionSummaries.filter((s) => s.status === 'WORKING').length;
 
       // Ensure active/QR sessions have CRM's current webhook URL + message.ack subscribed
@@ -244,7 +374,7 @@ export class WahaService {
         connectedSessions: 0,
         totalSessions: 0,
         sessions: [],
-        error: err.response?.data?.message || err.message,
+        error: this.extractWahaError(err),
         webhookUrl: config.webhookUrl,
         config: currentConfig,
       };
@@ -324,24 +454,34 @@ export class WahaService {
       ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
       : session;
     this.assertOwnedSession(targetSession, ownerPrefix);
-    const webhookConfigs = [
-      {
-        url: config.webhookUrl,
-        events: ['message', 'message.ack', 'session.status'],
-      },
-    ];
+    const webhookConfigs = config.webhookUrl
+      ? [
+          {
+            url: config.webhookUrl,
+            events: ['message', 'message.ack', 'session.status'],
+          },
+        ]
+      : [];
 
     try {
       const createRes = await client.post('/api/sessions', {
         name: targetSession,
         start: true,
-        config: { webhooks: webhookConfigs },
+        ...(webhookConfigs.length > 0 ? { config: { webhooks: webhookConfigs } } : {}),
       });
       return createRes.data;
     } catch (err: any) {
+      if (this.isWahaCoreSingleSessionError(err)) {
+        const coreErr: any = new Error(
+          `Server WAHA ini menggunakan WAHA Core yang hanya mendukung 1 sesi bernama 'default'. Gunakan WAHA Plus untuk multi-sesi atau gunakan sesi 'default'.`
+        );
+        coreErr.statusCode = 422;
+        throw coreErr;
+      }
+
       const status = err?.response?.status;
       if (status === 409 || status === 422 || status === 404 || status === 405) {
-        if (status === 409 || status === 422) {
+        if ((status === 409 || status === 422) && webhookConfigs.length > 0) {
           await client
             .put(`/api/sessions/${encodeURIComponent(targetSession)}`, {
               config: { webhooks: webhookConfigs },
@@ -351,21 +491,34 @@ export class WahaService {
         try {
           const startRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/start`);
           return startRes.data;
-        } catch {
+        } catch (startErr: any) {
           try {
             const restartRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/restart`);
             return restartRes.data;
-          } catch {
-            await client.post('/api/sessions/stop', { name: targetSession }).catch(() => { });
-            const legacyRes = await client.post('/api/sessions/start', {
-              name: targetSession,
-              config: { webhooks: webhookConfigs },
-            });
-            return legacyRes.data;
+          } catch (restartErr: any) {
+            await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/stop`).catch(() => { });
+            try {
+              const startAfterStopRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/start`);
+              return startAfterStopRes.data;
+            } catch {
+              await client.post('/api/sessions/stop', { name: targetSession }).catch(() => { });
+              try {
+                const legacyRes = await client.post('/api/sessions/start', {
+                  name: targetSession,
+                  ...(webhookConfigs.length > 0 ? { config: { webhooks: webhookConfigs } } : {}),
+                });
+                return legacyRes.data;
+              } catch (legacyErr: any) {
+                throw this.wrapWahaError(
+                  startErr?.response ? startErr : restartErr?.response ? restartErr : legacyErr,
+                  `Gagal memulai sesi "${targetSession}"`
+                );
+              }
+            }
           }
         }
       }
-      throw err;
+      throw this.wrapWahaError(err, `Gagal memulai sesi "${targetSession}"`);
     }
   }
 
@@ -374,10 +527,25 @@ export class WahaService {
    */
   public async stopSession(sessionName?: string): Promise<any> {
     const { client, session, ownerPrefix } = await this.getClient();
-    const targetSession = sessionName ? sessionName.trim() : session;
+    const targetSession = sessionName
+      ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
+      : session;
     this.assertOwnedSession(targetSession, ownerPrefix);
-    const response = await client.post('/api/sessions/stop', { name: targetSession });
-    return response.data;
+    try {
+      const response = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/stop`);
+      return response.data;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404 || status === 405) {
+        try {
+          const response = await client.post('/api/sessions/stop', { name: targetSession });
+          return response.data;
+        } catch (legacyErr: any) {
+          throw this.wrapWahaError(legacyErr, `Gagal menghentikan sesi "${targetSession}"`);
+        }
+      }
+      throw this.wrapWahaError(err, `Gagal menghentikan sesi "${targetSession}"`);
+    }
   }
 
   /**
@@ -385,10 +553,25 @@ export class WahaService {
    */
   public async logoutSession(sessionName?: string): Promise<any> {
     const { client, session, ownerPrefix } = await this.getClient();
-    const targetSession = sessionName ? sessionName.trim() : session;
+    const targetSession = sessionName
+      ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
+      : session;
     this.assertOwnedSession(targetSession, ownerPrefix);
-    const response = await client.post('/api/sessions/logout', { name: targetSession });
-    return response.data;
+    try {
+      const response = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/logout`);
+      return response.data;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404 || status === 405) {
+        try {
+          const response = await client.post('/api/sessions/logout', { name: targetSession });
+          return response.data;
+        } catch (legacyErr: any) {
+          throw this.wrapWahaError(legacyErr, `Gagal logout sesi "${targetSession}"`);
+        }
+      }
+      throw this.wrapWahaError(err, `Gagal logout sesi "${targetSession}"`);
+    }
   }
 
   /**
@@ -396,23 +579,19 @@ export class WahaService {
    */
   public async listSessions(): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
     const { client, session, ownerPrefix } = await this.getClient();
-    const res = await client.get('/api/sessions?all=true').catch(() => client.get('/api/sessions'));
-    const rawList = Array.isArray(res.data) ? res.data : [];
-    const sessions: WahaSessionInfo[] = rawList
-      .map((item: any) => ({
-        name: String(item.name || 'default'),
-        status: String(item.status || 'UNKNOWN'),
-        me: item.me || null,
-      }))
-      .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
-    if (sessions.length === 0 && session) {
-      sessions.push({
-        name: session,
-        status: 'STOPPED',
-        me: null,
-      });
+    try {
+      const rawList = await this.fetchRawSessionList(client);
+      const sessions: WahaSessionInfo[] = rawList
+        .map((item: any) => ({
+          name: String(item.name || 'default'),
+          status: String(item.status || 'UNKNOWN'),
+          me: item.me || null,
+        }))
+        .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
+      return { sessions, activeSession: session };
+    } catch (err: any) {
+      throw this.wrapWahaError(err, 'Gagal mengambil daftar sesi WAHA');
     }
-    return { sessions, activeSession: session };
   }
 
   /**
@@ -464,22 +643,29 @@ export class WahaService {
       throw new Error('Nama sesi wajib diisi');
     }
     const { client, session: currentActive, ownerPrefix } = await this.getClient();
-    this.assertOwnedSession(clean, ownerPrefix);
+    const targetSession = this.resolveOwnedSessionName(clean, ownerPrefix);
+    this.assertOwnedSession(targetSession, ownerPrefix);
     let result: any;
     try {
-      const res = await client.delete(`/api/sessions/${encodeURIComponent(clean)}`);
+      const res = await client.delete(`/api/sessions/${encodeURIComponent(targetSession)}`);
       result = res.data;
     } catch {
-      await client.post('/api/sessions/stop', { name: clean }).catch(() => null);
-      const res = await client.post('/api/sessions/logout', { name: clean }).catch(() => ({ data: { ok: true } }));
+      await client
+        .post(`/api/sessions/${encodeURIComponent(targetSession)}/stop`)
+        .catch(() => client.post('/api/sessions/stop', { name: targetSession }))
+        .catch(() => null);
+      const res = await client
+        .post(`/api/sessions/${encodeURIComponent(targetSession)}/logout`)
+        .catch(() => client.post('/api/sessions/logout', { name: targetSession }))
+        .catch(() => ({ data: { ok: true } }));
       result = res.data;
     }
 
-    if (currentActive === clean) {
+    if (currentActive === targetSession || currentActive === clean) {
       const fallback = ownerPrefix || 'default';
       try {
         const remaining = await this.listSessions();
-        const nextSession = remaining.sessions.find((s) => s.name !== clean)?.name || fallback;
+        const nextSession = remaining.sessions.find((s) => s.name !== targetSession)?.name || fallback;
         await this.setActiveSession(nextSession);
       } catch {
         await this.setActiveSession(fallback).catch(() => null);
@@ -492,7 +678,7 @@ export class WahaService {
   /**
    * Get QR Code for scanning
    */
-  public async getQrCode(sessionName?: string): Promise<{ qr?: string; status: string }> {
+  public async getQrCode(sessionName?: string): Promise<{ qr?: string; status: string; error?: string }> {
     const { client, session, ownerPrefix } = await this.getClient();
     const targetSession = sessionName
       ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
@@ -500,6 +686,7 @@ export class WahaService {
     this.assertOwnedSession(targetSession, ownerPrefix);
 
     let currentStatus = 'UNKNOWN';
+    let startError: string | undefined;
     try {
       try {
         const sRes = await client.get(`/api/sessions/${encodeURIComponent(targetSession)}`);
@@ -507,6 +694,8 @@ export class WahaService {
       } catch (err: any) {
         if (err?.response?.status === 404) {
           currentStatus = 'NOT_FOUND';
+        } else {
+          throw err;
         }
       }
 
@@ -514,13 +703,29 @@ export class WahaService {
         return { status: 'WORKING' };
       }
 
-      if (currentStatus === 'STOPPED' || currentStatus === 'NOT_FOUND' || currentStatus === 'UNKNOWN') {
-        await this.startSession(targetSession).catch(() => { });
+      if (
+        currentStatus === 'STOPPED' ||
+        currentStatus === 'NOT_FOUND' ||
+        currentStatus === 'UNKNOWN' ||
+        currentStatus === 'FAILED'
+      ) {
+        try {
+          if (currentStatus === 'FAILED') {
+            await client
+              .post(`/api/sessions/${encodeURIComponent(targetSession)}/restart`)
+              .catch(() => this.startSession(targetSession));
+          } else {
+            await this.startSession(targetSession);
+          }
+        } catch (err: any) {
+          startError = this.extractWahaError(err);
+        }
+
         try {
           const sRes = await client.get(`/api/sessions/${encodeURIComponent(targetSession)}`);
           currentStatus = sRes.data?.status || 'STARTING';
         } catch {
-          currentStatus = 'STARTING';
+          currentStatus = startError ? currentStatus : 'STARTING';
         }
       }
 
@@ -541,7 +746,11 @@ export class WahaService {
             : `data:${parsed.mimetype || 'image/png'};base64,${rawData}`;
           return { qr: qrDataUrl, status: 'SCAN_QR_CODE' };
         }
-        return { status: currentStatus !== 'UNKNOWN' ? currentStatus : 'STARTING', qr: undefined };
+        return {
+          status: currentStatus !== 'UNKNOWN' ? currentStatus : 'STARTING',
+          qr: undefined,
+          ...(startError ? { error: startError } : {}),
+        };
       }
       const mime = contentType.split(';')[0].trim() || 'image/png';
       const base64 = Buffer.from(imgRes.data, 'binary').toString('base64');
@@ -549,10 +758,11 @@ export class WahaService {
         qr: `data:${mime};base64,${base64}`,
         status: 'SCAN_QR_CODE',
       };
-    } catch {
+    } catch (err: any) {
       return {
         status: currentStatus !== 'UNKNOWN' ? currentStatus : 'FAILED',
         qr: undefined,
+        error: startError || this.extractWahaError(err),
       };
     }
   }

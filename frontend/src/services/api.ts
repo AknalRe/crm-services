@@ -180,7 +180,7 @@ export const api = {
     const res = await client.get('/waha/status');
     return res.data.data;
   },
-  getWahaQr: async (session?: string): Promise<{ qr?: string; status: string }> => {
+  getWahaQr: async (session?: string): Promise<{ qr?: string; status: string; error?: string }> => {
     const res = await client.get('/waha/qr', { params: session ? { session } : undefined });
     return res.data.data;
   },
@@ -220,6 +220,22 @@ export const api = {
   }): Promise<any> => {
     const res = await client.post('/settings/waha', data);
     return res.data;
+  },
+  testWahaConnection: async (data?: {
+    mode?: 'INTERNAL' | 'EXTERNAL';
+    baseUrl?: string;
+    apiKey?: string;
+  }): Promise<{
+    connected: boolean;
+    mode: 'INTERNAL' | 'EXTERNAL';
+    baseUrl: string;
+    version?: string | null;
+    tier?: string | null;
+    sessionCount: number;
+    sessions: Array<{ name: string; status: string }>;
+  }> => {
+    const res = await client.post('/settings/waha/test', data || {});
+    return res.data.data;
   },
   sendTestMessage: async (phone: string, message: string): Promise<any> => {
     const res = await client.post('/waha/send-test', { phone, message });
