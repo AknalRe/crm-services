@@ -427,30 +427,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* User Card */}
       {user && (
         <div className="p-3 border-t border-[#1E2438]">
-          <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-[#181D2D] border border-[#242B42]">
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-medium text-white truncate">{user.name}</p>
-              <p className="text-[10px] text-gray-400 truncate">{user.email}</p>
-            </div>
-            <span
-              className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase shrink-0 ${
-                user.role === 'AGENT'
-                  ? 'bg-sky-950/70 text-sky-300 border border-sky-800/60'
-                  : 'bg-indigo-950/70 text-indigo-300 border border-indigo-800/60'
-              }`}
-            >
-              {user.role === 'AGENT' ? 'Agent' : 'Admin'}
-            </span>
-            {onLogout && (
-              <button
-                type="button"
-                onClick={onLogout}
-                title="Keluar / Ganti Akun"
-                className="p-1 rounded text-gray-400 hover:text-red-300 hover:bg-red-950/40 shrink-0 transition-colors"
+          <div className="px-2.5 py-2 rounded-md bg-[#181D2D] border border-[#242B42] space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-white truncate min-w-0 flex-1">{user.name}</p>
+              <span
+                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase shrink-0 ${
+                  user.role === 'AGENT'
+                    ? 'bg-sky-950/70 text-sky-300 border border-sky-800/60'
+                    : 'bg-indigo-950/70 text-indigo-300 border border-indigo-800/60'
+                }`}
               >
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
-            )}
+                {user.role === 'AGENT' ? 'Agent' : 'Admin'}
+              </span>
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  title="Keluar / Ganti Akun"
+                  aria-label="Keluar / Ganti Akun"
+                  className="p-1 rounded text-gray-400 hover:text-red-300 hover:bg-red-950/40 shrink-0 transition-colors"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-400 truncate" title={user.email}>
+              {user.email}
+            </p>
           </div>
         </div>
       )}

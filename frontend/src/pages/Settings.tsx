@@ -2,13 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Server,
   Globe,
-  Lock,
-  Check,
   Trash2,
-  Users,
   Edit3,
-  Bot,
-  Smartphone,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -85,6 +80,7 @@ export const Settings: React.FC<SettingsProps> = ({
   const [sessionActionLoading, setSessionActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'stop' | 'logout' | null>(null);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
+  const [webhookCopied, setWebhookCopied] = useState(false);
 
   // Multi-Agent state (ADMIN only)
   const isAdmin = !currentUser || currentUser.role !== 'AGENT';
@@ -383,15 +379,70 @@ export const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const isConnected = wahaStatus?.connected && wahaStatus?.sessionStatus === 'WORKING';
-  const isScanRequired = wahaStatus?.sessionStatus === 'SCAN_QR_CODE';
+  const activeSessionItem = sessions.find((s) => s.name === session);
+  const effectiveSessionStatus = (
+    activeSessionItem?.status ||
+    wahaStatus?.sessionStatus ||
+    'STOPPED'
+  ).toUpperCase();
+
+  const getSessionStatusMeta = (raw?: string | null) => {
+    const st = String(raw || 'STOPPED').toUpperCase();
+    if (st === 'WORKING') {
+      return {
+        rowLabel: 'WORKING',
+        cardLabel: 'ONLINE / TERHUBUNG',
+        cls: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      };
+    }
+    if (st === 'SCAN_QR_CODE') {
+      return {
+        rowLabel: 'SCAN QR',
+        cardLabel: 'PERLU SCAN QR',
+        cls: 'bg-amber-50 text-amber-800 border-amber-200',
+      };
+    }
+    if (st === 'STARTING') {
+      return {
+        rowLabel: 'STARTING',
+        cardLabel: 'MEMULAI SESI...',
+        cls: 'bg-sky-50 text-sky-700 border-sky-200',
+      };
+    }
+    if (st === 'FAILED') {
+      return {
+        rowLabel: 'FAILED',
+        cardLabel: 'GAGAL / FAILED',
+        cls: 'bg-red-50 text-red-700 border-red-200',
+      };
+    }
+    return {
+      rowLabel: st,
+      cardLabel: 'TERHENTI / STOPPED',
+      cls: 'bg-gray-100 text-gray-700 border-gray-200',
+    };
+  };
+
+  const activeStatusMeta = getSessionStatusMeta(effectiveSessionStatus);
+  const webhookUrlValue = wahaStatus?.webhookUrl || `${window.location.origin}/api/waha/webhook`;
+
+  const handleCopyWebhook = async () => {
+    try {
+      await navigator.clipboard.writeText(webhookUrlValue);
+      setWebhookCopied(true);
+      toast.success('URL Webhook disalin.');
+      setTimeout(() => setWebhookCopied(false), 1800);
+    } catch {
+      toast.error('Gagal menyalin URL Webhook.');
+    }
+  };
 
   return (
     <div className="space-y-5">
       {settingsTab === 'whatsapp' && (
       <div className="space-y-5">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-gray-900">Koneksi Layanan WhatsApp (WAHA)</h1>
           <p className="text-xs text-gray-500 mt-0.5">
@@ -403,24 +454,26 @@ export const Settings: React.FC<SettingsProps> = ({
           variant="secondary"
           size="md"
           onClick={onRefreshStatus}
+          className="self-start sm:self-auto shrink-0"
         >
           Periksa Koneksi
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
         <div className="lg:col-span-2 space-y-5">
           <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-2.5">
               <div>
                 <h3 className="font-semibold text-gray-900 text-sm">Mode Koneksi WhatsApp</h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  WAHA Internal terkonfigurasi otomatis dari server dan terkunci. Anda cukup mengelola sesi WhatsApp.
+                  {configMode === 'INTERNAL'
+                    ? 'WAHA Internal terkonfigurasi otomatis dari server dan terkunci. Anda cukup mengelola sesi WhatsApp.'
+                    : 'Hubungkan ke server atau gateway WAHA eksternal menggunakan Base URL dan API Key.'}
                 </p>
               </div>
               {configMode === 'INTERNAL' && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
-                  <Lock className="w-3 h-3" />
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
                   Terkunci Otomatis
                 </span>
               )}
@@ -437,7 +490,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 }`}
               >
                 <div className="flex items-center gap-2 font-semibold text-xs mb-1 text-gray-900">
-                  <Server className="w-4 h-4 text-indigo-600" />
+                  <Server className="w-4 h-4 text-indigo-600 shrink-0" />
                   <span>WAHA Internal (Otomatis)</span>
                 </div>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
@@ -455,7 +508,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 }`}
               >
                 <div className="flex items-center gap-2 font-semibold text-xs mb-1 text-gray-900">
-                  <Globe className="w-4 h-4 text-blue-600" />
+                  <Globe className="w-4 h-4 text-blue-600 shrink-0" />
                   <span>WAHA Eksternal</span>
                 </div>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
@@ -494,17 +547,16 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
 
                 {/* Multi-Session Management */}
-                <div className="pt-3 border-t border-gray-200 space-y-3">
+                <div className="pt-3.5 border-t border-gray-200 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <h4 className="text-xs font-semibold text-gray-900">Daftar Sesi WhatsApp (Multi-Sesi)</h4>
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-gray-100 text-gray-700 border border-gray-200 tabular-nums">
                           {sessions.length}/{maxSessions} sesi
                         </span>
                         {!isMultiSessionAllowed && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                            <Lock className="w-2.5 h-2.5" />
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                             Terkunci (1 Sesi)
                           </span>
                         )}
@@ -513,7 +565,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         Tambahkan beberapa sesi dan pilih sesi aktif yang dipakai untuk pengiriman CRM.
                       </p>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-2 shrink-0">
                       {!isMultiSessionAllowed && onOpenPlans && (
                         <Button
                           type="button"
@@ -526,7 +578,7 @@ export const Settings: React.FC<SettingsProps> = ({
                       )}
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="secondary"
                         size="sm"
                         onClick={fetchSessions}
                         isLoading={sessionsLoading}
@@ -548,7 +600,7 @@ export const Settings: React.FC<SettingsProps> = ({
                       )}
                     </div>
                   ) : (
-                    <form onSubmit={handleCreateSession} className="flex flex-col sm:flex-row gap-2">
+                    <form onSubmit={handleCreateSession} className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
                       <input
                         type="text"
                         placeholder="Nama sesi baru (contoh: cs-1, sales-utama)"
@@ -563,6 +615,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         size="md"
                         isLoading={creatingSession}
                         disabled={!newSessionName.trim() || sessions.length >= maxSessions}
+                        className="shrink-0"
                       >
                         Tambah Sesi
                       </Button>
@@ -582,13 +635,14 @@ export const Settings: React.FC<SettingsProps> = ({
                         const isWorking = item.status === 'WORKING';
                         const isBusy = sessionBusyName === item.name;
                         const accountLabel = item.me?.pushName || item.me?.id?.split('@')[0];
+                        const statusMeta = getSessionStatusMeta(item.status);
                         return (
                           <div
                             key={item.name}
                             onClick={() => {
                               if (!isActive && !isBusy) void handleSwitchActiveSession(item.name);
                             }}
-                            className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-xs ${
+                            className={`flex flex-wrap items-center justify-between gap-2.5 px-3.5 py-2.5 text-xs ${
                               isActive ? 'bg-indigo-50/40' : 'bg-white hover:bg-gray-50 cursor-pointer'
                             }`}
                           >
@@ -602,19 +656,12 @@ export const Settings: React.FC<SettingsProps> = ({
                                 </span>
                               )}
                               <span
-                                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                                  isWorking
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                    : item.status === 'SCAN_QR_CODE'
-                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : 'bg-gray-100 text-gray-600 border-gray-200'
-                                }`}
+                                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${statusMeta.cls}`}
                               >
-                                {item.status}
+                                {statusMeta.rowLabel}
                               </span>
                               {isActive && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-100 text-indigo-700">
-                                  <Check className="w-3 h-3" />
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200">
                                   Aktif
                                 </span>
                               )}
@@ -728,8 +775,8 @@ export const Settings: React.FC<SettingsProps> = ({
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-              <div className="sm:col-span-4">
+            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+              <div className="sm:w-48 md:w-52 shrink-0">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Nomor WhatsApp Tujuan
                 </label>
@@ -743,7 +790,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 />
               </div>
 
-              <div className="sm:col-span-5">
+              <div className="flex-1 min-w-0">
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Isi Pesan Uji Coba
                 </label>
@@ -756,17 +803,15 @@ export const Settings: React.FC<SettingsProps> = ({
                 />
               </div>
 
-              <div className="sm:col-span-3 flex justify-end">
-                <Button
-                  type="submit"
-                  variant="secondary"
-                  size="md"
-                  isLoading={testSending}
-                  className="w-full sm:w-auto"
-                >
-                  Kirim Pesan Tes
-                </Button>
-              </div>
+              <Button
+                type="submit"
+                variant="secondary"
+                size="md"
+                isLoading={testSending}
+                className="w-full sm:w-auto shrink-0"
+              >
+                Kirim Pesan Tes
+              </Button>
             </div>
 
             {testResult && (
@@ -796,25 +841,15 @@ export const Settings: React.FC<SettingsProps> = ({
 
             <div className="p-4 rounded-md bg-gray-50 border border-gray-200 text-center space-y-1.5">
               <span
-                className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold border ${
-                  isConnected
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : isScanRequired
-                    ? 'bg-amber-50 text-amber-800 border-amber-200'
-                    : 'bg-red-50 text-red-800 border-red-200'
-                }`}
+                className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold border ${activeStatusMeta.cls}`}
               >
-                {isConnected
-                  ? 'ONLINE / CONNECTED'
-                  : isScanRequired
-                  ? 'PERLU SCAN QR'
-                  : 'OFFLINE / STOPPED'}
+                {activeStatusMeta.cardLabel}
               </span>
 
               <div className="text-xs text-gray-600 pt-1">
                 Session: <strong className="font-mono text-gray-900">{session}</strong>
               </div>
-              <div className="text-[11px] text-gray-400 font-mono truncate">
+              <div className="text-[11px] text-gray-500 font-mono truncate">
                 {baseUrl}
               </div>
             </div>
@@ -822,16 +857,17 @@ export const Settings: React.FC<SettingsProps> = ({
             <div className="space-y-2">
               <Button
                 variant="primary"
+                size="md"
                 className="w-full"
                 onClick={() => onOpenQr()}
               >
                 Buka Scanner QR WhatsApp
               </Button>
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="grid grid-cols-2 gap-2">
                 <Button
                   variant="secondary"
-                  size="sm"
+                  size="md"
                   onClick={handleStartSession}
                   isLoading={sessionActionLoading}
                 >
@@ -840,7 +876,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
                 <Button
                   variant="secondary"
-                  size="sm"
+                  size="md"
                   onClick={() => setConfirmAction('stop')}
                   disabled={sessionActionLoading}
                 >
@@ -849,9 +885,9 @@ export const Settings: React.FC<SettingsProps> = ({
               </div>
 
               <Button
-                variant="ghost"
-                size="sm"
-                className="w-full text-red-600 hover:bg-red-50 hover:text-red-700"
+                variant="secondary"
+                size="md"
+                className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
                 onClick={() => setConfirmAction('logout')}
                 disabled={sessionActionLoading}
               >
@@ -861,14 +897,24 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
 
           <div className="bg-white rounded-lg border border-gray-200 p-5 text-xs space-y-2.5">
-            <h3 className="text-gray-900 font-semibold">Webhook Tracking Otomatis</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-gray-900 font-semibold text-sm">Webhook Tracking Otomatis</h3>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleCopyWebhook()}
+              >
+                {webhookCopied ? 'Tersalin' : 'Salin'}
+              </Button>
+            </div>
             <p className="text-gray-500 text-[11px] leading-relaxed">
               WAHA mengirimkan event <code className="font-mono text-gray-800">message.ack</code> ke endpoint backend CRM:
             </p>
             <div className="bg-gray-50 p-2.5 rounded-md font-mono text-[11px] text-gray-800 break-all select-all border border-gray-200">
-              {wahaStatus?.webhookUrl || `${window.location.origin}/api/waha/webhook`}
+              {webhookUrlValue}
             </div>
-            <p className="text-[11px] text-gray-400">
+            <p className="text-[11px] text-gray-500">
               Event ini mencatat status pesan sampai (Centang Dua) dan dibaca (Centang Biru).
             </p>
           </div>
@@ -893,10 +939,9 @@ export const Settings: React.FC<SettingsProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100">
             <div>
               <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-sm font-semibold text-gray-900">Manajemen Akun & Agent</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Manajemen Akun &amp; Agent</h3>
                 {agentQuota && (
-                  <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-[11px] font-mono">
+                  <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px] font-mono border border-gray-200">
                     {agentQuota.currentCount}/{agentQuota.maxAgents} akun
                   </span>
                 )}
@@ -972,7 +1017,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     value={agentName}
                     onChange={(e) => setAgentName(e.target.value)}
                     placeholder="Nama Agent"
-                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs"
+                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
                   />
                 </div>
                 <div>
@@ -983,7 +1028,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     value={agentEmail}
                     onChange={(e) => setAgentEmail(e.target.value)}
                     placeholder="agent@domain.com"
-                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs"
+                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
                   />
                 </div>
                 <div>
@@ -997,7 +1042,7 @@ export const Settings: React.FC<SettingsProps> = ({
                     value={agentPassword}
                     onChange={(e) => setAgentPassword(e.target.value)}
                     placeholder="Min. 6 karakter"
-                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs"
+                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
                   />
                 </div>
                 <div>
@@ -1005,7 +1050,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   <select
                     value={agentRole}
                     onChange={(e) => setAgentRole(e.target.value as 'ADMIN' | 'AGENT')}
-                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded text-xs"
+                    className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs"
                   >
                     <option value="AGENT">AGENT (Terbatas)</option>
                     <option value="ADMIN">ADMIN (Akses Penuh)</option>
