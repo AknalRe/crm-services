@@ -86,10 +86,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
           slaAlertWebhookUrl: slaAlertWebhookUrl.trim(),
         }),
         api.updateCrmSettings({
-          csatTemplate,
-          csatAutoOnResolve,
           slaTargetMinutes,
-          csatBaseUrl,
         }),
       ]);
       toast.success('Pengaturan Routing Agent, Target SLA & Webhook Alert disimpan');
@@ -133,7 +130,6 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
       const saved = await api.updateCrmSettings({
         csatTemplate,
         csatAutoOnResolve,
-        slaTargetMinutes,
         csatBaseUrl,
       });
       setCsatTemplate(saved.csatTemplate);

@@ -31,6 +31,16 @@ function ensureUploadsDir() {
   }
 }
 
+function resolveMediaAppPrefix(req: FastifyRequest): string {
+  const rawPrefix = String(req.headers['x-forwarded-prefix'] || '').split(',')[0].trim();
+  if (rawPrefix && /^\/app\/[^/]+/i.test(rawPrefix)) {
+    return rawPrefix.replace(/\/+$/, '');
+  }
+  const referer = String(req.headers.referer || '').trim();
+  const refMatch = referer.match(/https?:\/\/[^/]+(\/app\/[^/]+)/i);
+  return refMatch ? refMatch[1] : '';
+}
+
 export default async function mediaRouter(fastify: FastifyInstance) {
   // List all uploaded media files in uploads/
   fastify.get(
@@ -48,6 +58,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
           (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() ||
           req.headers.host ||
           'localhost';
+        const appPrefix = resolveMediaAppPrefix(req);
 
         const items = await Promise.all(
           entries
@@ -60,7 +71,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
               const relativeUrl = `/api/media/files/${e.name}`;
               return {
                 filename: e.name,
-                url: `${proto}://${host}${relativeUrl}`,
+                url: `${proto}://${host}${appPrefix}${relativeUrl}`,
                 relativeUrl,
                 mimeType,
                 mediaKind: mimeType.startsWith('video/') ? 'video' : 'image',
@@ -164,8 +175,9 @@ export default async function mediaRouter(fastify: FastifyInstance) {
           (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() ||
           req.headers.host ||
           'localhost';
+        const appPrefix = resolveMediaAppPrefix(req);
         const relativeUrl = `/api/media/files/${safeName}`;
-        const url = `${proto}://${host}${relativeUrl}`;
+        const url = `${proto}://${host}${appPrefix}${relativeUrl}`;
 
         return reply.status(201).send({
           success: true,

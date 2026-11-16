@@ -134,7 +134,13 @@ export default async function productsRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings', 'conversations') },
     async (req, reply) => {
       try {
-        await db.delete(products).where(eq(products.id, req.params.id));
+        const deleted = await db
+          .delete(products)
+          .where(eq(products.id, req.params.id))
+          .returning();
+        if (!deleted[0]) {
+          return reply.status(404).send({ success: false, error: 'Produk tidak ditemukan' });
+        }
         return reply.send({ success: true });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });

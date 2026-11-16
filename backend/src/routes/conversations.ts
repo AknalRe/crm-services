@@ -15,24 +15,38 @@ const DEFAULT_CSAT_TEMPLATE =
   'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}';
 
 function resolveRequestAppBaseUrl(req: FastifyRequest): string {
+  const rawPrefix = String(req.headers['x-forwarded-prefix'] || '').split(',')[0].trim();
+  const fwdPrefix =
+    rawPrefix && /^\/app\/[^/]+/i.test(rawPrefix) ? rawPrefix.replace(/\/+$/, '') : '';
+  const fwdHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  if (fwdHost) {
+    const proto = fwdProto || (req.protocol === 'https' ? 'https' : 'http');
+    let appPrefix = fwdPrefix;
+    if (!appPrefix) {
+      const referer = String(req.headers.referer || '').trim();
+      const m = referer.match(/https?:\/\/[^/]+(\/app\/[^/]+)/i);
+      if (m) appPrefix = m[1];
+    }
+    return `${proto}://${fwdHost}${appPrefix}`;
+  }
+
   const referer = String(req.headers.referer || '').trim();
   if (referer) {
     try {
       const u = new URL(referer);
       if (u.protocol === 'http:' || u.protocol === 'https:') {
         const appMatch = u.pathname.match(/^(\/app\/[^/]+)/i);
-        return `${u.origin}${appMatch ? appMatch[1] : ''}`;
+        return `${u.origin}${appMatch ? appMatch[1] : fwdPrefix}`;
       }
     } catch {
       // ignore invalid referer
     }
   }
-  const fwdHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
-  const host = fwdHost || String(req.headers.host || '').trim();
+  const host = String(req.headers.host || '').trim();
   if (!host) return '';
-  const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
   const proto = fwdProto || (req.protocol === 'https' ? 'https' : 'http');
-  return `${proto}://${host}`;
+  return `${proto}://${host}${fwdPrefix}`;
 }
 
 async function sendCsatCtaForConversation(

@@ -138,7 +138,13 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings') },
     async (req, reply) => {
       try {
-        await db.delete(channelAccounts).where(eq(channelAccounts.id, req.params.id));
+        const deleted = await db
+          .delete(channelAccounts)
+          .where(eq(channelAccounts.id, req.params.id))
+          .returning();
+        if (!deleted[0]) {
+          return reply.status(404).send({ success: false, error: 'Akun channel tidak ditemukan' });
+        }
         return reply.send({ success: true });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });
@@ -182,13 +188,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           for (const ch of changes) {
             const val = ch.value || {};
             const phoneNumberId = String(val.metadata?.phone_number_id || '');
+            const waActive = allAccounts.filter(
+              (a) => a.isActive && a.channel === 'WHATSAPP_CLOUD'
+            );
             const waAccount =
-              allAccounts.find(
-                (a) =>
-                  a.isActive &&
-                  a.channel === 'WHATSAPP_CLOUD' &&
-                  a.accountId === phoneNumberId
-              ) || allAccounts.find((a) => a.isActive && a.channel === 'WHATSAPP_CLOUD');
+              waActive.find((a) => a.accountId === phoneNumberId) ||
+              (waActive.length === 1 ? waActive[0] : undefined);
             if (!waAccount) continue;
 
             const waContacts: any[] = Array.isArray(val.contacts) ? val.contacts : [];
@@ -230,10 +235,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
             ? 'THREADS'
             : 'FACEBOOK';
 
+        const channelAccountsActive = allAccounts.filter(
+          (a) => a.isActive && a.channel === channelGuess
+        );
         const account =
-          allAccounts.find(
-            (a) => a.isActive && a.accountId === pageOrAccountId && a.channel === channelGuess
-          ) || allAccounts.find((a) => a.isActive && a.channel === channelGuess);
+          channelAccountsActive.find((a) => a.accountId === pageOrAccountId) ||
+          (channelAccountsActive.length === 1 ? channelAccountsActive[0] : undefined);
 
         if (!account) continue;
 
@@ -615,7 +622,16 @@ export default async function channelsRouter(fastify: FastifyInstance) {
 
       const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost:5000').split(',')[0].trim();
-      const baseUrl = (config.meta.publicBaseUrl || `${proto}://${host}`).replace(/\/+$/, '');
+      let appPrefix = '';
+      const rawPrefix = String(req.headers['x-forwarded-prefix'] || '').split(',')[0].trim();
+      if (rawPrefix && /^\/app\/[^/]+/i.test(rawPrefix)) {
+        appPrefix = rawPrefix.replace(/\/+$/, '');
+      } else {
+        const referer = String(req.headers.referer || '').trim();
+        const refMatch = referer.match(/https?:\/\/[^/]+(\/app\/[^/]+)/i);
+        if (refMatch) appPrefix = refMatch[1];
+      }
+      const baseUrl = (config.meta.publicBaseUrl || `${proto}://${host}${appPrefix}`).replace(/\/+$/, '');
       const callbackUrl = `${baseUrl}/api/channels/oauth/callback`;
       const state = signOAuthState({ channel, connectToken: connectToken || null, returnBase: baseUrl });
 
@@ -656,7 +672,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     const returnBase = parsedState?.returnBase || config.frontendUrl.replace(/\/+$/, '');
     const failRedirect = (msg: string) => {
       const dest = parsedState?.connectToken
-        ? `${returnBase}/connect/${parsedState.connectToken}?oauth=error&msg=${encodeURIComponent(msg)}`
+        ? `${returnBase}/connect-channel?token=${encodeURIComponent(parsedState.connectToken)}&oauth=error&msg=${encodeURIComponent(msg)}`
         : `${returnBase}/#settings/omnichannel?oauth=error&msg=${encodeURIComponent(msg)}`;
       return reply.redirect(dest);
     };
@@ -769,8 +785,13 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         const existing = await db
           .select()
           .from(channelAccounts)
-          .where(eq(channelAccounts.accountId, acc.accountId));
-        if (existing.length > 0 && existing[0].channel === acc.channel) {
+          .where(
+            and(
+              eq(channelAccounts.channel, acc.channel),
+              eq(channelAccounts.accountId, acc.accountId)
+            )
+          );
+        if (existing.length > 0) {
           await db
             .update(channelAccounts)
             .set({ name: acc.name, accessToken: acc.accessToken, isActive: true, updatedAt: now })
@@ -798,7 +819,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           .update(channelConnectLinks)
           .set({ usedAt: now, createdChannelAccountId: firstCreatedId })
           .where(eq(channelConnectLinks.token, parsedState.connectToken));
-        return reply.redirect(`${returnBase}/connect/${parsedState.connectToken}?oauth=success`);
+        return reply.redirect(`${returnBase}/connect-channel?token=${encodeURIComponent(parsedState.connectToken)}&oauth=success`);
       }
 
       return reply.redirect(`${returnBase}/#settings/omnichannel?oauth=success&count=${accountsToSave.length}`);

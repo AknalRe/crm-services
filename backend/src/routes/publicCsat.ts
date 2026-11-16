@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db';
 import { conversations, contacts, csatResponses } from '../db/schema';
 import { liveEvents } from '../services/events.service';
@@ -91,15 +91,28 @@ export default async function publicCsatRouter(fastify: FastifyInstance) {
 
       let convId: string | null = null;
       if (csatRows[0]) {
+        if (csatRows[0].rating !== null) {
+          return reply.status(409).send({
+            success: false,
+            error: 'Penilaian untuk tautan ini sudah pernah dikirim',
+          });
+        }
         convId = csatRows[0].conversationId;
-        await db
+        const updatedCsat = await db
           .update(csatResponses)
           .set({
             rating,
             feedback,
             submittedAt: now,
           })
-          .where(eq(csatResponses.id, csatRows[0].id));
+          .where(and(eq(csatResponses.id, csatRows[0].id), isNull(csatResponses.rating)))
+          .returning();
+        if (!updatedCsat[0]) {
+          return reply.status(409).send({
+            success: false,
+            error: 'Penilaian untuk tautan ini sudah pernah dikirim',
+          });
+        }
       } else {
         const rows = await db
           .select()
@@ -107,6 +120,12 @@ export default async function publicCsatRouter(fastify: FastifyInstance) {
           .where(eq(conversations.csatToken, token));
         if (!rows[0]) {
           return reply.status(404).send({ success: false, error: 'Tautan penilaian tidak ditemukan' });
+        }
+        if (rows[0].csatRating !== null) {
+          return reply.status(409).send({
+            success: false,
+            error: 'Penilaian untuk tautan ini sudah pernah dikirim',
+          });
         }
         convId = rows[0].id;
       }

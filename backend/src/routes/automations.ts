@@ -120,7 +120,13 @@ export default async function automationsRouter(fastify: FastifyInstance) {
 
   fastify.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     try {
-      await db.delete(commentAutomations).where(eq(commentAutomations.id, req.params.id));
+      const deleted = await db
+        .delete(commentAutomations)
+        .where(eq(commentAutomations.id, req.params.id))
+        .returning();
+      if (!deleted[0]) {
+        return reply.status(404).send({ success: false, error: 'Aturan otomasi komentar tidak ditemukan' });
+      }
       return reply.send({ success: true });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

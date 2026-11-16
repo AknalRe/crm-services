@@ -117,7 +117,7 @@ function AppShell() {
     }
   };
 
-  const setCurrentTab = (tab: string) => {
+  const setCurrentTab = (tab: string, sectionOverride?: SettingsSection) => {
     const next = VALID_TABS.has(tab) ? tab : 'dashboard';
     setCurrentTabState(next);
     try {
@@ -125,7 +125,7 @@ function AppShell() {
     } catch {
       // Ignore storage error
     }
-    syncHash(next, settingsSection);
+    syncHash(next, sectionOverride ?? settingsSection);
   };
 
   const setSettingsSection = (section: SettingsSection) => {
@@ -362,12 +362,17 @@ function AppShell() {
           user={authStatus.user ?? null}
           onLicenseUpdated={fetchLicenseStatus}
           onOpenPlans={() => setIsPlansModalOpen(true)}
-          onBackToLanding={() => {
-            if (typeof window !== 'undefined' && window.location.hash === '#login') {
+          onBackToLanding={async () => {
+            try {
+              await api.logoutAuth();
+            } catch {
+              // ignore
+            }
+            if (typeof window !== 'undefined') {
               window.history.replaceState(null, '', window.location.pathname + window.location.search);
             }
-            window.location.hash = '';
-            window.location.href = '/';
+            setShowLoginGate(false);
+            setAuthStatus({ initialized: true, authenticated: false, user: null });
           }}
           onLogout={async () => {
             try {
@@ -473,7 +478,7 @@ function AppShell() {
                 onOpenPlans={() => setIsPlansModalOpen(true)}
                 onOpenSettings={(sec) => {
                   setSettingsSection(sec);
-                  setCurrentTab('settings');
+                  setCurrentTab('settings', sec);
                 }}
               />
             )}

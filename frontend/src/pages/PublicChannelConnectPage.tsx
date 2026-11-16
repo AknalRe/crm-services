@@ -5,10 +5,11 @@ import { ChannelAccount, OmnichannelType } from '../types';
 import { Button } from '../components/ui/Button';
 
 export const PublicChannelConnectPage: React.FC = () => {
-  const token =
-    typeof window !== 'undefined'
-      ? new URLSearchParams(window.location.search).get('token') || ''
-      : '';
+  const searchParams =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const token = searchParams?.get('token') || '';
+  const oauthStatus = searchParams?.get('oauth') || '';
+  const oauthMsg = searchParams?.get('msg') || '';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +83,16 @@ export const PublicChannelConnectPage: React.FC = () => {
 
         {loading ? (
           <div className="py-8 text-center text-xs text-gray-500">Memeriksa tautan koneksi...</div>
+        ) : oauthStatus === 'success' ? (
+          <div className="p-4 rounded-md bg-emerald-50 border border-emerald-200 space-y-2 text-xs text-emerald-900">
+            <div className="flex items-center gap-2 font-semibold text-sm">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>Akun {linkMeta?.channel || 'Omnichannel'} Berhasil Terhubung via OAuth!</span>
+            </div>
+            <p>
+              Integrasi selesai dan akun Anda sudah aktif di dashboard Live Chat CRM. Anda dapat menutup halaman ini.
+            </p>
+          </div>
         ) : connectedAccount ? (
           <div className="p-4 rounded-md bg-emerald-50 border border-emerald-200 space-y-2 text-xs text-emerald-900">
             <div className="flex items-center gap-2 font-semibold text-sm">
@@ -123,11 +134,13 @@ export const PublicChannelConnectPage: React.FC = () => {
               </span>
               <div className="flex items-center gap-2">
                 {linkMeta.label && <span className="text-indigo-700">{linkMeta.label}</span>}
-                {['INSTAGRAM', 'FACEBOOK', 'THREADS'].includes(linkMeta.channel) && (
+                {['WHATSAPP_CLOUD', 'INSTAGRAM', 'FACEBOOK', 'THREADS'].includes(linkMeta.channel) && (
                   <button
                     type="button"
                     onClick={() => {
-                      const base = window.location.pathname.replace(/\/+$/, '');
+                      const base = window.location.pathname
+                        .replace(/\/connect-channel\/?$/i, '')
+                        .replace(/\/+$/, '');
                       window.location.href = `${base}/api/channels/oauth/start?channel=${linkMeta.channel}&connectToken=${encodeURIComponent(token)}`;
                     }}
                     className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-medium whitespace-nowrap"
@@ -137,6 +150,12 @@ export const PublicChannelConnectPage: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {oauthStatus === 'error' && (
+              <div className="p-2.5 rounded bg-red-50 border border-red-200 text-red-700">
+                {oauthMsg || 'Otorisasi OAuth gagal. Silakan coba lagi atau isi form manual.'}
+              </div>
+            )}
 
             {error && (
               <div className="p-2.5 rounded bg-red-50 border border-red-200 text-red-700">

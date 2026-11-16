@@ -149,7 +149,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ onUseInPost }) => {
                     <Film className="w-8 h-8 text-gray-400" />
                   ) : (
                     <img
-                      src={item.relativeUrl}
+                      src={item.relativeUrl.startsWith('/') ? `.${item.relativeUrl}` : item.relativeUrl}
                       alt={item.filename}
                       className="w-full h-full object-cover"
                     />

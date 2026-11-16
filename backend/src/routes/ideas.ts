@@ -141,7 +141,13 @@ export default async function ideasRouter(fastify: FastifyInstance) {
 
   fastify.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     try {
-      await db.delete(contentIdeas).where(eq(contentIdeas.id, req.params.id));
+      const deleted = await db
+        .delete(contentIdeas)
+        .where(eq(contentIdeas.id, req.params.id))
+        .returning();
+      if (!deleted[0]) {
+        return reply.status(404).send({ success: false, error: 'Ide konten tidak ditemukan' });
+      }
       return reply.send({ success: true });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

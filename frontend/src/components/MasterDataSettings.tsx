@@ -254,99 +254,187 @@ const QuickRepliesMaster: React.FC = () => {
       ) : error ? (
         <ErrorState message={error} onRetry={loadItems} />
       ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={<Zap className="w-6 h-6" />}
-          title="Belum ada balasan cepat"
-          description="Buat shortcut seperti /sapa, /harga, atau /pembayaran agar agent menjawab chat lebih konsisten."
-          action={
-            <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
-              Tambah Template Pertama
-            </Button>
-          }
-        />
+        items.length > 0 ? (
+          <EmptyState
+            icon={<Search className="w-6 h-6" />}
+            title="Tidak ada balasan cepat yang cocok"
+            description="Coba ubah kata kunci pencarian atau pilih semua kategori."
+            action={
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setSearch('');
+                  setCatFilter('ALL');
+                }}
+              >
+                Reset Filter
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<Zap className="w-6 h-6" />}
+            title="Belum ada balasan cepat"
+            description="Buat shortcut seperti /sapa, /harga, atau /pembayaran agar agent menjawab chat lebih konsisten."
+            action={
+              <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
+                Tambah Template Pertama
+              </Button>
+            }
+          />
+        )
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-md">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase text-gray-500">
-                <th className="py-2 px-3">Kode</th>
-                <th className="py-2 px-3">Judul &amp; Kategori</th>
-                <th className="py-2 px-3">Isi Balasan</th>
-                <th className="py-2 px-3">Status</th>
-                <th className="py-2 px-3 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.map((item) => {
-                const active = item.isActive !== false;
-                return (
-                  <tr key={item.id} className="hover:bg-gray-50 align-top">
-                    <td className="py-2.5 px-3 whitespace-nowrap">
+        <>
+          <div className="sm:hidden space-y-2.5">
+            {filtered.map((item) => {
+              const active = item.isActive !== false;
+              return (
+                <div key={item.id} className="p-3 rounded-lg border border-gray-200 bg-gray-50/40 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex items-center flex-wrap gap-1.5">
                       <span className="inline-block px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono text-[11px] font-semibold">
                         /{item.shortCode}
                       </span>
-                    </td>
-                    <td className="py-2.5 px-3 min-w-[150px]">
-                      <div className="font-medium text-gray-900">{item.title}</div>
-                      <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px]">
+                      <span className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px]">
                         {item.category || 'Umum'}
                       </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-gray-600 max-w-md">
-                      <p className="line-clamp-2 whitespace-pre-wrap">{item.content}</p>
-                    </td>
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => void handleToggleActive(item)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
-                          active
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-gray-100 text-gray-500 border-gray-200'
-                        }`}
-                      >
-                        {active ? 'Aktif' : 'Nonaktif'}
-                      </button>
-                    </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleActive(item)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer shrink-0 ${
+                        active
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-gray-100 text-gray-500 border-gray-200'
+                      }`}
+                    >
+                      {active ? 'Aktif' : 'Nonaktif'}
+                    </button>
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-gray-900">{item.title}</div>
+                    <p className="text-xs text-gray-600 whitespace-pre-wrap line-clamp-3 mt-1">{item.content}</p>
+                  </div>
+                  <div className="flex items-center justify-end gap-1 pt-1 border-t border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(item.content);
+                        setCopiedId(item.id);
+                        setTimeout(() => setCopiedId(null), 1500);
+                        toast.success('Teks balasan disalin');
+                      }}
+                      className="h-7 px-2 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-gray-900"
+                    >
+                      {copiedId === item.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      <span>Salin</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(item)}
+                      className="h-7 px-2 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-indigo-700"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(item)}
+                      className="h-7 px-2 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Hapus</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="hidden sm:block overflow-x-auto border border-gray-200 rounded-md">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase text-gray-500">
+                  <th className="py-2 px-3">Kode</th>
+                  <th className="py-2 px-3">Judul &amp; Kategori</th>
+                  <th className="py-2 px-3">Isi Balasan</th>
+                  <th className="py-2 px-3">Status</th>
+                  <th className="py-2 px-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filtered.map((item) => {
+                  const active = item.isActive !== false;
+                  return (
+                    <tr key={item.id} className="hover:bg-gray-50 align-top">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono text-[11px] font-semibold">
+                          /{item.shortCode}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 min-w-[150px]">
+                        <div className="font-medium text-gray-900">{item.title}</div>
+                        <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px]">
+                          {item.category || 'Umum'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-gray-600 max-w-md">
+                        <p className="line-clamp-2 whitespace-pre-wrap">{item.content}</p>
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
                         <button
                           type="button"
-                          onClick={() => {
-                            navigator.clipboard?.writeText(item.content);
-                            setCopiedId(item.id);
-                            setTimeout(() => setCopiedId(null), 1500);
-                            toast.success('Teks balasan disalin');
-                          }}
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-50"
-                          title="Salin Isi Balasan"
+                          onClick={() => void handleToggleActive(item)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
+                            active
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-gray-100 text-gray-500 border-gray-200'
+                          }`}
                         >
-                          {copiedId === item.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          {active ? 'Aktif' : 'Nonaktif'}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => openEdit(item)}
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
-                          title="Edit"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(item)}
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
-                          title="Hapus"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(item.content);
+                              setCopiedId(item.id);
+                              setTimeout(() => setCopiedId(null), 1500);
+                              toast.success('Teks balasan disalin');
+                            }}
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+                            title="Salin Isi Balasan"
+                          >
+                            {copiedId === item.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEdit(item)}
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
+                            title="Edit"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(item)}
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
+                            title="Hapus"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <Modal
@@ -661,79 +749,155 @@ const ProductsMaster: React.FC = () => {
       ) : error ? (
         <ErrorState message={error} onRetry={loadProducts} />
       ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={<Package className="w-6 h-6" />}
-          title="Belum ada produk di katalog"
-          description="Tambahkan produk atau paket layanan agar agent dapat menyisipkan harga & deskripsi langsung di chat."
-          action={
-            <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
-              Tambah Produk Pertama
-            </Button>
-          }
-        />
+        products.length > 0 ? (
+          <EmptyState
+            icon={<Search className="w-6 h-6" />}
+            title="Tidak ada produk yang cocok"
+            description="Coba ubah kata kunci pencarian atau pilih semua kategori."
+            action={
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setSearch('');
+                  setCatFilter('ALL');
+                }}
+              >
+                Reset Filter
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<Package className="w-6 h-6" />}
+            title="Belum ada produk di katalog"
+            description="Tambahkan produk atau paket layanan agar agent dapat menyisipkan harga & deskripsi langsung di chat."
+            action={
+              <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
+                Tambah Produk Pertama
+              </Button>
+            }
+          />
+        )
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-md">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase text-gray-500">
-                <th className="py-2 px-3">SKU</th>
-                <th className="py-2 px-3">Produk / Jasa</th>
-                <th className="py-2 px-3">Kategori</th>
-                <th className="py-2 px-3">Harga</th>
-                <th className="py-2 px-3">Status</th>
-                <th className="py-2 px-3 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.map((p) => (
-                <tr key={p.id} className="hover:bg-gray-50 align-top">
-                  <td className="py-2.5 px-3 font-mono text-[11px] text-gray-600 whitespace-nowrap">{p.sku}</td>
-                  <td className="py-2.5 px-3 font-medium text-gray-900 min-w-[180px]">
-                    <div>{p.name}</div>
-                    {p.description && <div className="text-[11px] text-gray-500 font-normal mt-0.5">{p.description}</div>}
-                  </td>
-                  <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{p.category || '-'}</td>
-                  <td className="py-2.5 px-3 font-mono text-gray-900 whitespace-nowrap">
-                    Rp {new Intl.NumberFormat('id-ID').format(p.price || 0)} / {p.unit}
-                  </td>
-                  <td className="py-2.5 px-3 whitespace-nowrap">
+        <>
+          <div className="sm:hidden space-y-2.5">
+            {filtered.map((p) => (
+              <div key={p.id} className="p-3 rounded-lg border border-gray-200 bg-gray-50/40 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="inline-block font-mono text-[11px] text-gray-600 bg-white border border-gray-200 px-1.5 py-0.5 rounded">
+                      {p.sku}
+                    </span>
+                    <div className="text-xs font-semibold text-gray-900 mt-1">{p.name}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleActive(p)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer shrink-0 ${
+                      p.isActive
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-gray-100 text-gray-500 border-gray-200'
+                    }`}
+                  >
+                    {p.isActive ? 'Aktif' : 'Nonaktif'}
+                  </button>
+                </div>
+                {p.description && <p className="text-[11px] text-gray-500">{p.description}</p>}
+                <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-gray-100">
+                  <div className="text-xs">
+                    <span className="font-mono font-semibold text-gray-900">
+                      Rp {new Intl.NumberFormat('id-ID').format(p.price || 0)}
+                    </span>{' '}
+                    <span className="text-gray-500 text-[11px]">/ {p.unit}</span>
+                    {p.category && <span className="ml-1.5 text-[10px] text-gray-500">· {p.category}</span>}
+                  </div>
+                  <div className="inline-flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => void handleToggleActive(p)}
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
-                        p.isActive
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-gray-100 text-gray-500 border-gray-200'
-                      }`}
+                      onClick={() => openEdit(p)}
+                      className="h-7 px-2 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-indigo-700"
                     >
-                      {p.isActive ? 'Aktif' : 'Nonaktif'}
+                      <Edit3 className="w-3 h-3" />
+                      <span>Edit</span>
                     </button>
-                  </td>
-                  <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                    <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(p)}
-                        className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
-                        title="Edit Produk"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(p)}
-                        className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
-                        title="Hapus Produk"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(p)}
+                      className="h-7 px-2 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-red-600 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Hapus</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden sm:block overflow-x-auto border border-gray-200 rounded-md">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase text-gray-500">
+                  <th className="py-2 px-3">SKU</th>
+                  <th className="py-2 px-3">Produk / Jasa</th>
+                  <th className="py-2 px-3">Kategori</th>
+                  <th className="py-2 px-3">Harga</th>
+                  <th className="py-2 px-3">Status</th>
+                  <th className="py-2 px-3 text-right">Aksi</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filtered.map((p) => (
+                  <tr key={p.id} className="hover:bg-gray-50 align-top">
+                    <td className="py-2.5 px-3 font-mono text-[11px] text-gray-600 whitespace-nowrap">{p.sku}</td>
+                    <td className="py-2.5 px-3 font-medium text-gray-900 min-w-[180px]">
+                      <div>{p.name}</div>
+                      {p.description && <div className="text-[11px] text-gray-500 font-normal mt-0.5">{p.description}</div>}
+                    </td>
+                    <td className="py-2.5 px-3 text-gray-600 whitespace-nowrap">{p.category || '-'}</td>
+                    <td className="py-2.5 px-3 font-mono text-gray-900 whitespace-nowrap">
+                      Rp {new Intl.NumberFormat('id-ID').format(p.price || 0)} / {p.unit}
+                    </td>
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleActive(p)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
+                          p.isActive
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-gray-100 text-gray-500 border-gray-200'
+                        }`}
+                      >
+                        {p.isActive ? 'Aktif' : 'Nonaktif'}
+                      </button>
+                    </td>
+                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(p)}
+                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
+                          title="Edit Produk"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(p)}
+                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
+                          title="Hapus Produk"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <Modal
@@ -1033,69 +1197,119 @@ const LabelsCategoriesMaster: React.FC = () => {
           description="Tambahkan item baru agar tampil sebagai pilihan standar tim Anda."
         />
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-md">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase text-gray-500">
-                <th className="py-2 px-3">Tampilan Badge</th>
-                <th className="py-2 px-3">Keterangan</th>
-                <th className="py-2 px-3">Urutan</th>
-                <th className="py-2 px-3">Status</th>
-                <th className="py-2 px-3 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {scopedItems.map((item) => {
-                const colorStyle = LABEL_COLOR_MAP[item.color] || LABEL_COLOR_MAP.slate;
-                return (
-                  <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-medium ${colorStyle.badge}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${colorStyle.dot}`} />
-                        {item.name}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-gray-600">{item.description || '-'}</td>
-                    <td className="py-2.5 px-3 font-mono text-gray-500 tabular-nums">{item.sortOrder}</td>
-                    <td className="py-2.5 px-3 whitespace-nowrap">
+        <>
+          <div className="sm:hidden space-y-2.5">
+            {scopedItems.map((item) => {
+              const colorStyle = LABEL_COLOR_MAP[item.color] || LABEL_COLOR_MAP.slate;
+              return (
+                <div key={item.id} className="p-3 rounded-lg border border-gray-200 bg-gray-50/40 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-medium ${colorStyle.badge}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${colorStyle.dot}`} />
+                      {item.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleActive(item)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer shrink-0 ${
+                        item.isActive
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-gray-100 text-gray-500 border-gray-200'
+                      }`}
+                    >
+                      {item.isActive ? 'Aktif' : 'Nonaktif'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-600">{item.description || 'Tanpa keterangan'}</p>
+                  <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-gray-100">
+                    <span className="font-mono text-[11px] text-gray-500">Urutan #{item.sortOrder}</span>
+                    <div className="inline-flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => void handleToggleActive(item)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
-                          item.isActive
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-gray-100 text-gray-500 border-gray-200'
-                        }`}
+                        onClick={() => openEdit(item)}
+                        className="h-7 px-2 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-indigo-700"
                       >
-                        {item.isActive ? 'Aktif' : 'Nonaktif'}
+                        <Edit3 className="w-3 h-3" />
+                        <span>Edit</span>
                       </button>
-                    </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(item)}
+                        className="h-7 px-2 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="hidden sm:block overflow-x-auto border border-gray-200 rounded-md">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase text-gray-500">
+                  <th className="py-2 px-3">Tampilan Badge</th>
+                  <th className="py-2 px-3">Keterangan</th>
+                  <th className="py-2 px-3">Urutan</th>
+                  <th className="py-2 px-3">Status</th>
+                  <th className="py-2 px-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {scopedItems.map((item) => {
+                  const colorStyle = LABEL_COLOR_MAP[item.color] || LABEL_COLOR_MAP.slate;
+                  return (
+                    <tr key={item.id} className="hover:bg-gray-50">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-medium ${colorStyle.badge}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${colorStyle.dot}`} />
+                          {item.name}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-gray-600">{item.description || '-'}</td>
+                      <td className="py-2.5 px-3 font-mono text-gray-500 tabular-nums">{item.sortOrder}</td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
                         <button
                           type="button"
-                          onClick={() => openEdit(item)}
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
-                          title="Edit"
+                          onClick={() => void handleToggleActive(item)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
+                            item.isActive
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-gray-100 text-gray-500 border-gray-200'
+                          }`}
                         >
-                          <Edit3 className="w-3.5 h-3.5" />
+                          {item.isActive ? 'Aktif' : 'Nonaktif'}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(item)}
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
-                          title="Hapus"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(item)}
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
+                            title="Edit"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(item)}
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
+                            title="Hapus"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <Modal
@@ -1385,16 +1599,37 @@ const TemplatesMaster: React.FC = () => {
       ) : error ? (
         <ErrorState message={error} onRetry={loadTemplates} />
       ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={<FileText className="w-6 h-6" />}
-          title="Belum ada template siaran"
-          description="Simpan naskah promo, pengingat tagihan, atau follow up untuk langsung dipakai di menu Siaran."
-          action={
-            <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
-              Buat Template Pertama
-            </Button>
-          }
-        />
+        items.length > 0 ? (
+          <EmptyState
+            icon={<Search className="w-6 h-6" />}
+            title="Tidak ada template yang cocok"
+            description="Coba ubah kata kunci pencarian atau pilih semua kategori."
+            action={
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setSearch('');
+                  setCatFilter('ALL');
+                }}
+              >
+                Reset Filter
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<FileText className="w-6 h-6" />}
+            title="Belum ada template siaran"
+            description="Simpan naskah promo, pengingat tagihan, atau follow up untuk langsung dipakai di menu Siaran."
+            action={
+              <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
+                Buat Template Pertama
+              </Button>
+            }
+          />
+        )
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filtered.map((item) => (

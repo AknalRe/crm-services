@@ -64,7 +64,9 @@ import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBloc
 
 function resolveMediaUrl(url?: string | null): string {
   if (!url) return '';
-  if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('/')) return url;
+  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  if (url.startsWith('/api/')) return `.${url}`;
+  if (url.startsWith('/')) return url;
   if (/^https?:\/\//i.test(url)) {
     return `./api/conversations/media-proxy?url=${encodeURIComponent(url)}`;
   }
