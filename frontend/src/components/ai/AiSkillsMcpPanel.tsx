@@ -397,7 +397,7 @@ export const AiSkillsMcpPanel: React.FC<AiSkillsMcpPanelProps> = ({
                   return (
                     <div
                       key={preset.slug}
-                      className="rounded border border-gray-200 bg-white p-3 flex items-start justify-between gap-3"
+                      className="rounded border border-gray-200 bg-white p-3 flex flex-col sm:flex-row sm:items-start justify-between gap-2.5"
                     >
                       <div className="space-y-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -569,7 +569,7 @@ export const AiSkillsMcpPanel: React.FC<AiSkillsMcpPanelProps> = ({
                   key={skill.id}
                   className={`py-3 space-y-1.5 ${skill.isActive ? '' : 'opacity-60'}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5">
                     <div className="min-w-0 space-y-0.5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-semibold">
@@ -815,7 +815,7 @@ export const AiSkillsMcpPanel: React.FC<AiSkillsMcpPanelProps> = ({
                       srv.isActive ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50 opacity-70'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5">
                       <div className="min-w-0 space-y-0.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-semibold text-gray-900">{srv.name}</span>
@@ -836,7 +836,7 @@ export const AiSkillsMcpPanel: React.FC<AiSkillsMcpPanelProps> = ({
                         )}
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0 self-end sm:self-auto">
                         <button
                           type="button"
                           disabled={busyKey === `toggle-mcp:${srv.id}`}

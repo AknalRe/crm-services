@@ -23,8 +23,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isLicenseActive = licenseInfo && !licenseInfo.isExpired;
 
   return (
-    <header className="h-14 bg-white border-b border-gray-200 px-3 sm:px-6 flex items-center justify-between gap-2 sticky top-0 z-20 shrink-0">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
+    <header className="h-14 bg-white border-b border-gray-200 px-2.5 sm:px-6 flex items-center justify-between gap-2 sticky top-0 z-20 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
         {onMenuClick && (
           <button
             type="button"
@@ -35,7 +35,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Menu className="w-5 h-5" />
           </button>
         )}
-        <h2 className="text-sm sm:text-base font-semibold text-gray-900 truncate">{title}</h2>
+        <h2 className="text-[13px] sm:text-base font-semibold text-gray-900 truncate">{title}</h2>
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
@@ -43,7 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onOpenPlans}
-            className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium border whitespace-nowrap transition-colors ${
+            className={`inline-flex items-center gap-1 sm:gap-1.5 h-8 px-2 sm:px-2.5 rounded-md text-[11px] sm:text-xs font-medium border whitespace-nowrap transition-colors ${
               isLicenseActive
                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                 : 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100'
@@ -53,7 +53,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             {!isLicenseActive && (
               <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
             )}
-            <span className="tabular-nums truncate max-w-[130px] sm:max-w-none">
+            <span className="tabular-nums sm:hidden truncate max-w-[96px]">
+              {isLicenseActive
+                ? `${licenseInfo.plan.split(' ')[0]} · ${licenseInfo.daysLeft}h`
+                : 'Kedaluwarsa'}
+            </span>
+            <span className="tabular-nums hidden sm:inline">
               {isLicenseActive
                 ? `${licenseInfo.plan} (${licenseInfo.daysLeft} hari)`
                 : 'Lisensi Kedaluwarsa'}

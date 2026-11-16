@@ -876,7 +876,7 @@ export const Settings: React.FC<SettingsProps> = ({
                               )}
                             </div>
 
-                            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end" onClick={(e) => e.stopPropagation()}>
                               {!isActive && (
                                 <Button
                                   type="button"
@@ -1092,8 +1092,8 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          <div className="bg-white rounded-lg border border-gray-200 p-5 text-xs space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
+          <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 text-xs space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-gray-900 font-semibold text-sm">Webhook Tracking Otomatis</h3>
               <Button
                 type="button"
@@ -1131,10 +1131,10 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
       )}
       {settingsTab === 'agents' && isAdmin && (
-        <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-sm font-semibold text-gray-900">Manajemen Akun &amp; Agent</h3>
                 {agentQuota && (
                   <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px] font-mono border border-gray-200">
@@ -1301,27 +1301,18 @@ export const Settings: React.FC<SettingsProps> = ({
           ) : agents.length === 0 ? (
             <div className="text-xs text-gray-500 py-4 text-center">Belum ada data agent.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[540px] text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
-                    <th className="py-2 pr-3 font-medium">Nama & Email</th>
-                    <th className="py-2 px-3 font-medium">Peran</th>
-                    <th className="py-2 px-3 font-medium">Akses Menu</th>
-                    <th className="py-2 px-3 font-medium">Status</th>
-                    <th className="py-2 pl-3 font-medium text-right">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {agents.map((ag) => {
-                    const isSelf = currentUser?.id === ag.id || currentUser?.email === ag.email;
-                    return (
-                      <tr key={ag.id} className="hover:bg-gray-50/70">
-                        <td className="py-2.5 pr-3">
-                          <div className="font-medium text-gray-900">{ag.name}</div>
-                          <div className="text-[11px] text-gray-500 font-mono">{ag.email}</div>
-                        </td>
-                        <td className="py-2.5 px-3">
+            <>
+              <div className="sm:hidden divide-y divide-gray-200 border border-gray-200 rounded-md overflow-hidden">
+                {agents.map((ag) => {
+                  const isSelf = currentUser?.id === ag.id || currentUser?.email === ag.email;
+                  return (
+                    <div key={ag.id} className="p-3 bg-white space-y-2 text-xs">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-gray-900 truncate">{ag.name}</div>
+                          <div className="text-[11px] text-gray-500 font-mono truncate">{ag.email}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                               ag.role === 'ADMIN'
@@ -1331,24 +1322,6 @@ export const Settings: React.FC<SettingsProps> = ({
                           >
                             {ag.role}
                           </span>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          {ag.role === 'ADMIN' ? (
-                            <span className="text-[11px] text-gray-500">Semua Menu</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1">
-                              {(ag.permissions || []).map((p) => (
-                                <span
-                                  key={p}
-                                  className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]"
-                                >
-                                  {PERMISSION_OPTIONS.find((o) => o.id === p)?.label || p}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3">
                           <button
                             type="button"
                             disabled={isSelf}
@@ -1361,35 +1334,141 @@ export const Settings: React.FC<SettingsProps> = ({
                           >
                             {ag.isActive ? 'Aktif' : 'Nonaktif'}
                           </button>
-                        </td>
-                        <td className="py-2.5 pl-3 text-right">
-                          <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">
+                        </div>
+                      </div>
+
+                      <div>
+                        {ag.role === 'ADMIN' ? (
+                          <span className="text-[11px] text-gray-500">Akses: Semua Menu</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {(ag.permissions || []).map((p) => (
+                              <span
+                                key={p}
+                                className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]"
+                              >
+                                {PERMISSION_OPTIONS.find((o) => o.id === p)?.label || p}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-gray-100">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditAgent(ag)}
+                          className="h-7 px-2.5 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-gray-700 hover:bg-gray-50"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Edit</span>
+                        </button>
+                        {!isSelf && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteAgent(ag)}
+                            className="h-7 px-2.5 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Hapus</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full min-w-[540px] text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
+                      <th className="py-2 pr-3 font-medium">Nama &amp; Email</th>
+                      <th className="py-2 px-3 font-medium">Peran</th>
+                      <th className="py-2 px-3 font-medium">Akses Menu</th>
+                      <th className="py-2 px-3 font-medium">Status</th>
+                      <th className="py-2 pl-3 font-medium text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {agents.map((ag) => {
+                      const isSelf = currentUser?.id === ag.id || currentUser?.email === ag.email;
+                      return (
+                        <tr key={ag.id} className="hover:bg-gray-50/70">
+                          <td className="py-2.5 pr-3">
+                            <div className="font-medium text-gray-900">{ag.name}</div>
+                            <div className="text-[11px] text-gray-500 font-mono">{ag.email}</div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                ag.role === 'ADMIN'
+                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                  : 'bg-sky-50 text-sky-700 border border-sky-200'
+                              }`}
+                            >
+                              {ag.role}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {ag.role === 'ADMIN' ? (
+                              <span className="text-[11px] text-gray-500">Semua Menu</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                {(ag.permissions || []).map((p) => (
+                                  <span
+                                    key={p}
+                                    className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]"
+                                  >
+                                    {PERMISSION_OPTIONS.find((o) => o.id === p)?.label || p}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3">
                             <button
                               type="button"
-                              onClick={() => handleStartEditAgent(ag)}
-                              className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
-                              title="Edit Agent"
+                              disabled={isSelf}
+                              onClick={() => void handleToggleAgentActive(ag)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                ag.isActive
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : 'bg-gray-100 text-gray-500 border border-gray-200'
+                              } ${isSelf ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                             >
-                              <Edit3 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                              {ag.isActive ? 'Aktif' : 'Nonaktif'}
                             </button>
-                            {!isSelf && (
+                          </td>
+                          <td className="py-2.5 pl-3 text-right">
+                            <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">
                               <button
                                 type="button"
-                                onClick={() => setConfirmDeleteAgent(ag)}
-                                className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 transition-colors"
-                                title="Hapus Agent"
+                                onClick={() => handleStartEditAgent(ag)}
+                                className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
+                                title="Edit Agent"
                               >
-                                <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                <Edit3 className="w-3.5 h-3.5" strokeWidth={1.75} />
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                              {!isSelf && (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteAgent(ag)}
+                                  className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 transition-colors"
+                                  title="Hapus Agent"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

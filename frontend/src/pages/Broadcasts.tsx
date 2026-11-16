@@ -248,17 +248,17 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
   return (
     <div className="space-y-5">
       {/* Top Navigation Tabs */}
-      <div className="flex border-b border-gray-200 gap-6">
+      <div className="flex border-b border-gray-200 gap-4 sm:gap-6 overflow-x-auto">
         <button
           type="button"
           onClick={() => setActiveTab('create')}
-          className={`pb-3 text-[13px] font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+          className={`pb-3 text-[13px] font-semibold flex items-center gap-2 border-b-2 whitespace-nowrap shrink-0 transition-colors ${
             activeTab === 'create'
               ? 'border-indigo-600 text-indigo-600'
               : 'border-transparent text-gray-500 hover:text-gray-900'
           }`}
         >
-          <Send className="w-4 h-4" />
+          <Send className="w-4 h-4 shrink-0" />
           <span>Buat Siaran Baru</span>
         </button>
 
@@ -268,13 +268,13 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
             setActiveTab('history');
             loadCampaigns();
           }}
-          className={`pb-3 text-[13px] font-semibold flex items-center gap-2 border-b-2 transition-colors ${
+          className={`pb-3 text-[13px] font-semibold flex items-center gap-2 border-b-2 whitespace-nowrap shrink-0 transition-colors ${
             activeTab === 'history'
               ? 'border-indigo-600 text-indigo-600'
               : 'border-transparent text-gray-500 hover:text-gray-900'
           }`}
         >
-          <Clock className="w-4 h-4" />
+          <Clock className="w-4 h-4 shrink-0" />
           <span>Riwayat &amp; Progres Siaran</span>
         </button>
       </div>
@@ -774,7 +774,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span
                             className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
                               camp.status === 'COMPLETED'
@@ -897,26 +897,27 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
         ) : selectedCampaign.recipients.length === 0 ? (
           <EmptyState title="Tidak ada penerima" description="Kampanye ini belum memiliki daftar penerima." />
         ) : (
-          <div className="border border-gray-200 rounded-md overflow-x-auto">
-            <table className="w-full min-w-[480px] text-left text-xs">
-              <thead className="bg-gray-50 text-gray-500 font-semibold border-b border-gray-200">
-                <tr>
-                  <th className="py-2.5 px-3">Pelanggan</th>
-                  <th className="py-2.5 px-3">Nomor WA</th>
-                  <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3">Waktu Pembaruan</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {selectedCampaign.recipients.map((rec) => (
-                  <tr key={rec.id} className="hover:bg-gray-50">
-                    <td className="py-2.5 px-3 font-medium text-gray-900">
-                      {rec.contact?.nama_lengkap || '-'}
-                    </td>
-                    <td className="py-2.5 px-3 font-mono text-gray-600">+{rec.phone}</td>
-                    <td className="py-2.5 px-3">
+          <>
+            <div className="sm:hidden border border-gray-200 rounded-md divide-y divide-gray-200">
+              {selectedCampaign.recipients.map((rec) => {
+                const updatedText = rec.readAt
+                  ? new Date(rec.readAt).toLocaleString('id-ID')
+                  : rec.deliveredAt
+                  ? new Date(rec.deliveredAt).toLocaleString('id-ID')
+                  : rec.sentAt
+                  ? new Date(rec.sentAt).toLocaleString('id-ID')
+                  : '-';
+                return (
+                  <div key={rec.id} className="p-3 bg-white space-y-1 text-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-gray-900 truncate">
+                          {rec.contact?.nama_lengkap || '-'}
+                        </div>
+                        <div className="font-mono text-[11px] text-gray-500">+{rec.phone}</div>
+                      </div>
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${
                           rec.status === 'READ'
                             ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                             : rec.status === 'DELIVERED'
@@ -938,21 +939,71 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                           ? 'Gagal'
                           : 'Pending'}
                       </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-gray-500 font-mono text-[11px] tabular-nums">
-                      {rec.readAt
-                        ? new Date(rec.readAt).toLocaleString('id-ID')
-                        : rec.deliveredAt
-                        ? new Date(rec.deliveredAt).toLocaleString('id-ID')
-                        : rec.sentAt
-                        ? new Date(rec.sentAt).toLocaleString('id-ID')
-                        : '-'}
-                    </td>
+                    </div>
+                    <div className="text-[10px] font-mono text-gray-400 tabular-nums">
+                      Pembaruan: {updatedText}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="hidden sm:block border border-gray-200 rounded-md overflow-x-auto">
+              <table className="w-full min-w-[480px] text-left text-xs">
+                <thead className="bg-gray-50 text-gray-500 font-semibold border-b border-gray-200">
+                  <tr>
+                    <th className="py-2.5 px-3">Pelanggan</th>
+                    <th className="py-2.5 px-3">Nomor WA</th>
+                    <th className="py-2.5 px-3">Status</th>
+                    <th className="py-2.5 px-3">Waktu Pembaruan</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {selectedCampaign.recipients.map((rec) => (
+                    <tr key={rec.id} className="hover:bg-gray-50">
+                      <td className="py-2.5 px-3 font-medium text-gray-900">
+                        {rec.contact?.nama_lengkap || '-'}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-gray-600">+{rec.phone}</td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                            rec.status === 'READ'
+                              ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                              : rec.status === 'DELIVERED'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : rec.status === 'SENT'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : rec.status === 'FAILED'
+                              ? 'bg-red-50 text-red-700 border-red-200'
+                              : 'bg-gray-100 text-gray-700 border-gray-200'
+                          }`}
+                        >
+                          {rec.status === 'READ'
+                            ? 'Dibaca'
+                            : rec.status === 'DELIVERED'
+                            ? 'Sampai'
+                            : rec.status === 'SENT'
+                            ? 'Terkirim'
+                            : rec.status === 'FAILED'
+                            ? 'Gagal'
+                            : 'Pending'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-gray-500 font-mono text-[11px] tabular-nums">
+                        {rec.readAt
+                          ? new Date(rec.readAt).toLocaleString('id-ID')
+                          : rec.deliveredAt
+                          ? new Date(rec.deliveredAt).toLocaleString('id-ID')
+                          : rec.sentAt
+                          ? new Date(rec.sentAt).toLocaleString('id-ID')
+                          : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Modal>
 

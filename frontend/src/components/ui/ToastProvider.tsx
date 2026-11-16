@@ -69,7 +69,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {children}
       <div
         aria-live="polite"
-        className="fixed top-4 right-4 z-[90] flex flex-col gap-2 w-full max-w-sm pointer-events-none px-4 sm:px-0"
+        className="fixed top-3 inset-x-3 sm:inset-x-auto sm:top-4 sm:right-4 z-[90] flex flex-col gap-2 sm:w-full sm:max-w-sm pointer-events-none"
       >
         {toasts.map((item) => {
           const style = VARIANT_STYLES[item.variant];

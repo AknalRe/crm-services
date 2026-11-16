@@ -432,7 +432,7 @@ export const AiModelConfigPanel: React.FC<AiModelConfigPanelProps> = ({
       </div>
 
       <div className="rounded-md border border-gray-200 bg-gray-50/60 p-3.5 space-y-2.5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs font-semibold text-gray-900">Model Utama (Primary)</span>
           <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-semibold">
             Prioritas 1
@@ -536,7 +536,7 @@ export const AiModelConfigPanel: React.FC<AiModelConfigPanelProps> = ({
                     fb.enabled ? 'border-gray-200 bg-white' : 'border-gray-200 bg-gray-50 opacity-75'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-gray-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-gray-100">
                     <div className="flex items-center gap-2.5">
                       <span className="text-xs font-semibold text-gray-900">
                         Fallback #{idx + 1}
@@ -650,7 +650,7 @@ export const AiModelConfigPanel: React.FC<AiModelConfigPanelProps> = ({
         </label>
       )}
 
-      <div className="grid grid-cols-3 gap-2.5 pt-2 border-t border-gray-100">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-gray-100">
         <div>
           <label className="block text-[11px] font-medium text-gray-600 mb-1">Temperature</label>
           <input

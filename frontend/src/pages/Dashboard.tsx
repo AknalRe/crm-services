@@ -302,17 +302,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            <div className="pt-3 border-t border-gray-200 grid grid-cols-3 gap-2.5 text-center text-xs">
-              <div className="bg-gray-50 border border-gray-200 p-2.5 rounded-md">
-                <span className="block text-gray-500 text-[11px]">Terkirim</span>
+            <div className="pt-3 border-t border-gray-200 grid grid-cols-3 gap-2 sm:gap-2.5 text-center text-xs">
+              <div className="bg-gray-50 border border-gray-200 p-2 sm:p-2.5 rounded-md min-w-0">
+                <span className="block text-gray-500 text-[10px] sm:text-[11px] truncate">Terkirim</span>
                 <span className="font-bold text-gray-900 tabular-nums">{summary.sent}</span>
               </div>
-              <div className="bg-emerald-50/70 border border-emerald-200 p-2.5 rounded-md">
-                <span className="block text-emerald-700 text-[11px]">Centang Dua</span>
+              <div className="bg-emerald-50/70 border border-emerald-200 p-2 sm:p-2.5 rounded-md min-w-0">
+                <span className="block text-emerald-700 text-[10px] sm:text-[11px] truncate">Centang Dua</span>
                 <span className="font-bold text-emerald-800 tabular-nums">{summary.delivered}</span>
               </div>
-              <div className="bg-indigo-50/70 border border-indigo-200 p-2.5 rounded-md">
-                <span className="block text-indigo-700 text-[11px]">Centang Biru</span>
+              <div className="bg-indigo-50/70 border border-indigo-200 p-2 sm:p-2.5 rounded-md min-w-0">
+                <span className="block text-indigo-700 text-[10px] sm:text-[11px] truncate">Centang Biru</span>
                 <span className="font-bold text-indigo-800 tabular-nums">{summary.read}</span>
               </div>
             </div>
@@ -345,7 +345,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             </p>
           </div>
 
-          <div className="mt-5 pt-4 border-t border-gray-200 flex items-center justify-between gap-3">
+          <div className="mt-5 pt-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2.5">
             <span className="text-xs text-gray-500">
               Jadwal Harian: <strong className="text-gray-900 font-mono">08:00 WIB</strong>
             </span>
@@ -430,7 +430,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 {convAnalytics.bySession.map((sess) => (
                   <div
                     key={sess.session}
-                    className="flex items-center justify-between px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 text-xs"
+                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 text-xs"
                   >
                     <div className="flex items-center gap-1.5 min-w-0">
                       <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -462,7 +462,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 {convAnalytics.byChannel.map((ch) => (
                   <div
                     key={ch.channel}
-                    className="flex items-center justify-between px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 text-xs"
+                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 text-xs"
                   >
                     <div className="flex items-center gap-1.5 min-w-0">
                       <MessageSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
@@ -570,8 +570,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
       {/* Per-Agent Performance Breakdown */}
       {convAnalytics.byAgent && convAnalytics.byAgent.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-3">
+        <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div>
               <h3 className="font-semibold text-gray-900 text-sm">Performa Percakapan per Agent</h3>
               <p className="text-xs text-gray-500 mt-0.5">
@@ -579,7 +579,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               </p>
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="sm:hidden divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden">
+            {convAnalytics.byAgent.map((ag) => (
+              <div key={ag.agentName} className="p-3 bg-white space-y-2 text-xs">
+                <div className="font-semibold text-gray-900 truncate">{ag.agentName}</div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
+                    <span className="text-gray-500">Obrolan</span>
+                    <span className="font-mono font-semibold text-gray-900 tabular-nums">{ag.count}</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-emerald-50/70 px-2 py-1 rounded">
+                    <span className="text-emerald-700">Selesai</span>
+                    <span className="font-mono font-semibold text-emerald-800 tabular-nums">{ag.resolvedCount}</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
+                    <span className="text-gray-500">SLA</span>
+                    <span className="font-mono font-semibold text-gray-900 tabular-nums">
+                      {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between bg-amber-50/70 px-2 py-1 rounded">
+                    <span className="text-amber-800">CSAT</span>
+                    <span className="font-mono font-semibold text-amber-900 tabular-nums">
+                      {ag.avgCsat !== null ? `${ag.avgCsat}/5` : '-'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
@@ -613,7 +642,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       {/* Campaigns & Activity Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+          <div className="px-4 sm:px-5 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="font-semibold text-gray-900 text-sm">Kampanye Siaran Terakhir</h3>
               <p className="text-xs text-gray-500 mt-0.5">Progres pengiriman dan respons penerima</p>

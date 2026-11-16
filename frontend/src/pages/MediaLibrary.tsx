@@ -163,7 +163,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ onUseInPost }) => {
                       {formatBytes(item.sizeBytes)} • {new Date(item.createdAt).toLocaleDateString('id-ID')}
                     </div>
                   </div>
-                  <div className="flex items-center justify-between gap-1 pt-1 border-t border-gray-200/70">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 border-t border-gray-200/70">
                     <div className="flex items-center gap-1">
                       <button
                         type="button"

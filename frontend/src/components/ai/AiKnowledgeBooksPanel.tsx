@@ -659,7 +659,7 @@ export const AiKnowledgeBooksPanel: React.FC<AiKnowledgeBooksPanelProps> = ({
                 return (
                   <div
                     key={k.id}
-                    className={`py-2.5 flex items-start justify-between gap-2 ${
+                    className={`py-2.5 flex flex-col sm:flex-row sm:items-start justify-between gap-2 ${
                       k.isActive ? '' : 'opacity-60'
                     }`}
                   >

@@ -127,7 +127,7 @@ export const Comments: React.FC = () => {
             key={tab.id}
             type="button"
             onClick={() => setStatusTab(tab.id)}
-            className={`pb-2.5 text-xs font-medium border-b-2 transition-colors ${
+            className={`pb-2.5 text-xs font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors ${
               statusTab === tab.id
                 ? 'border-indigo-600 text-indigo-700'
                 : 'border-transparent text-gray-500 hover:text-gray-800'
@@ -158,7 +158,7 @@ export const Comments: React.FC = () => {
             {comments.map((c) => (
               <div key={c.id} className="p-4 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
                       {c.channel}
                     </span>

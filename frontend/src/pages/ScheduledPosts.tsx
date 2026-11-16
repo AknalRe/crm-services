@@ -727,7 +727,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                         </div>
                       )}
 
-                      <div className="flex items-center justify-end gap-1.5 pt-1">
+                      <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1">
                         {(post.status === 'SCHEDULED' || post.status === 'FAILED') && (
                           <Button
                             variant="secondary"
@@ -768,8 +768,8 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
       </div>
 
       {showCsvModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg border border-gray-200 max-w-xl w-full p-5 space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2.5 sm:p-4">
+          <div className="bg-white rounded-lg border border-gray-200 max-w-xl w-full p-4 sm:p-5 space-y-4 max-h-[92dvh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
                 <h3 className="text-sm font-semibold text-gray-900">Impor Jadwal Postingan (CSV)</h3>

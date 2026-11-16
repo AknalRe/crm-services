@@ -701,7 +701,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const activeLabels = getLabelList(selectedConversation);
 
   return (
-    <div className="relative bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-84px)] supports-[height:100dvh]:h-[calc(100dvh-84px)] sm:h-[calc(100vh-100px)] sm:supports-[height:100dvh]:h-[calc(100dvh-100px)] lg:h-[calc(100vh-108px)] lg:supports-[height:100dvh]:h-[calc(100dvh-108px)] flex flex-col md:flex-row">
+    <div className="relative bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-76px)] supports-[height:100dvh]:h-[calc(100dvh-76px)] sm:h-[calc(100vh-100px)] sm:supports-[height:100dvh]:h-[calc(100dvh-100px)] lg:h-[calc(100vh-108px)] lg:supports-[height:100dvh]:h-[calc(100dvh-108px)] flex flex-col md:flex-row">
       {/* Left List */}
       <div
         className={`w-full md:w-64 lg:w-72 xl:w-80 border-b md:border-b-0 md:border-r border-gray-200 flex-col shrink-0 bg-gray-50/50 ${
@@ -913,8 +913,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
       {/* Middle Chat Feed */}
       {selectedConversation ? (
         <div className="flex flex-1 flex-col bg-gray-50 min-w-0 min-h-0">
-          <div className="min-h-[3.5rem] bg-white border-b border-gray-200 px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="min-h-[3.5rem] bg-white border-b border-gray-200 px-3 sm:px-4 py-2 flex flex-col md:flex-row md:flex-wrap md:items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <button
                 type="button"
                 onClick={() => setSelectedConversation(null)}
@@ -1005,13 +1005,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center flex-wrap gap-1.5 min-w-0">
+            <div className="flex items-center flex-wrap gap-1.5 min-w-0 w-full md:w-auto justify-between md:justify-end">
               {sessions.length > 0 && (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP' && (
                 <select
                   value={selectedSession}
                   onChange={(e) => setSelectedSession(e.target.value)}
                   title="Pilih sesi WAHA pengirim"
-                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] font-mono text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[175px] sm:max-w-[200px] min-w-0"
+                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] font-mono text-gray-700 focus:outline-none focus:border-indigo-500 flex-1 sm:flex-none min-w-[100px] sm:max-w-[200px]"
                 >
                   {sessions.map((s) => (
                     <option key={s.name} value={s.name}>
@@ -1026,7 +1026,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   value={selectedConversation.assignedAgentId || ''}
                   onChange={(e) => void handleAssignAgent(e.target.value || null)}
                   title="Tugaskan ke Agent"
-                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[135px] min-w-0"
+                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 flex-1 sm:flex-none min-w-[100px] sm:max-w-[140px]"
                 >
                   <option value="">Belum Ditugaskan</option>
                   {assignableAgents.map((ag) => (
@@ -1062,10 +1062,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     type="button"
                     onClick={() => void handleStatusChange('OPEN')}
                     title="Buka kembali percakapan ini"
-                    className="h-7 px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
+                    className="h-7 px-2 sm:px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
                   >
                     <RotateCcw className="w-3 h-3 shrink-0" />
-                    <span className="hidden sm:inline">Buka Kembali</span>
+                    <span>Buka Kembali</span>
                   </button>
                 ) : (
                   <div className="relative">
@@ -1073,10 +1073,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       type="button"
                       onClick={() => setShowResolveMenu((prev) => !prev)}
                       title="Akhiri percakapan (pilih dengan atau tanpa CSAT)"
-                      className="h-7 px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
+                      className="h-7 px-2 sm:px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
                     >
                       <CheckCircle2 className="w-3 h-3 shrink-0" />
-                      <span className="hidden sm:inline">Akhiri</span>
+                      <span>Akhiri</span>
                       <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
                     </button>
                     {showResolveMenu && (
@@ -1151,12 +1151,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 if (isNote) {
                   return (
                     <div key={msg.id} className="flex justify-center">
-                      <div className="max-w-[85%] rounded-lg px-3.5 py-2 text-xs border bg-amber-50 border-amber-200 text-amber-950 space-y-1">
+                      <div className="max-w-[92%] sm:max-w-[85%] rounded-lg px-3.5 py-2 text-xs border bg-amber-50 border-amber-200 text-amber-950 space-y-1 min-w-0">
                         <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-800">
                           <StickyNote className="w-3 h-3" />
                           <span>Catatan Internal (Tidak terkirim ke WhatsApp)</span>
                         </div>
-                        <div className="whitespace-pre-wrap leading-relaxed">{msg.body}</div>
+                        <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.body}</div>
                         <div className="text-[10px] text-amber-700/80 font-mono text-right">
                           {new Date(msg.createdAt).toLocaleTimeString('id-ID', {
                             hour: '2-digit',
@@ -1174,7 +1174,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`max-w-[75%] rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
+                      className={`max-w-[88%] sm:max-w-[75%] min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
                         isCsat
                           ? 'bg-amber-50/60 border-amber-200 text-gray-900'
                           : isOutbound
@@ -1193,7 +1193,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         <img
                           src={resolveMediaUrl(msg.mediaUrl)}
                           alt={msg.mediaName || 'Lampiran gambar'}
-                          className="max-h-60 rounded border border-gray-200 object-contain bg-white"
+                          className="max-w-full max-h-60 rounded border border-gray-200 object-contain bg-white"
                         />
                       )}
 
@@ -1201,7 +1201,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         <video
                           src={resolveMediaUrl(msg.mediaUrl)}
                           controls
-                          className="max-h-60 rounded border border-gray-200 bg-black"
+                          className="max-w-full max-h-60 rounded border border-gray-200 bg-black"
                         />
                       )}
 
@@ -1636,7 +1636,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               )}
 
-              <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <form onSubmit={handleSendMessage} className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 min-w-0">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1644,82 +1644,94 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 onChange={handleFilePick}
                 className="hidden"
               />
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEmojiPicker((v) => !v);
-                  setShowCannedPicker(false);
-                  setShowProductPicker(false);
-                }}
-                title="Sisipkan Emotikon"
-                className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
-              >
-                <Smile className="w-4 h-4" />
-              </button>
-              {composerMode === 'REPLY' && (
-                <>
+              <div className="flex items-center justify-between sm:justify-start gap-1.5 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
                     onClick={() => {
-                      setShowCannedPicker((v) => !v);
-                      setShowEmojiPicker(false);
+                      setShowEmojiPicker((v) => !v);
+                      setShowCannedPicker(false);
                       setShowProductPicker(false);
                     }}
-                    title="Balasan Cepat (Canned Responses)"
-                    className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-amber-600 inline-flex items-center justify-center shrink-0"
+                    title="Sisipkan Emotikon"
+                    className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
                   >
-                    <Zap className="w-4 h-4" />
+                    <Smile className="w-4 h-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowProductPicker((v) => !v);
-                      setShowCannedPicker(false);
-                      setShowEmojiPicker(false);
-                    }}
-                    title="Sisipkan Katalog Produk (Quick Quote)"
-                    className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
-                  >
-                    <Package className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    title="Lampirkan Gambar atau Dokumen"
-                    className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
-                  >
-                    <Paperclip className="w-4 h-4" />
-                  </button>
-                </>
-              )}
-              <input
-                type="text"
-                placeholder={
-                  composerMode === 'NOTE'
-                    ? 'Tulis catatan internal tim (tidak dikirim ke pelanggan)...'
-                    : `Ketik balasan ${
-                        CHANNEL_META[
-                          ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType
-                        ]?.label || 'WhatsApp'
-                      }...`
-                }
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                className={`flex-1 min-w-0 h-9 px-3 border rounded-md text-[13px] placeholder-gray-400 focus:outline-none ${
-                  composerMode === 'NOTE'
-                    ? 'bg-amber-50/70 border-amber-200 focus:border-amber-500'
-                    : 'bg-gray-50 border-gray-200 focus:border-indigo-500'
-                }`}
-              />
-              <Button
-                type="submit"
-                variant="primary"
-                size="md"
-                isLoading={sending}
-                disabled={!inputText.trim() && !pendingAttachment}
-              >
-                {composerMode === 'NOTE' ? 'Simpan' : 'Kirim'}
-              </Button>
+                  {composerMode === 'REPLY' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCannedPicker((v) => !v);
+                          setShowEmojiPicker(false);
+                          setShowProductPicker(false);
+                        }}
+                        title="Balasan Cepat (Canned Responses)"
+                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-amber-600 inline-flex items-center justify-center shrink-0"
+                      >
+                        <Zap className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowProductPicker((v) => !v);
+                          setShowCannedPicker(false);
+                          setShowEmojiPicker(false);
+                        }}
+                        title="Sisipkan Katalog Produk (Quick Quote)"
+                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
+                      >
+                        <Package className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        title="Lampirkan Gambar atau Dokumen"
+                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
+                      >
+                        <Paperclip className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+                {composerMode === 'REPLY' && (
+                  <span className="sm:hidden text-[10px] text-gray-400 font-mono truncate">
+                    Ketik / untuk template
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                <input
+                  type="text"
+                  placeholder={
+                    composerMode === 'NOTE'
+                      ? 'Tulis catatan internal tim (tidak dikirim ke pelanggan)...'
+                      : `Ketik balasan ${
+                          CHANNEL_META[
+                            ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType
+                          ]?.label || 'WhatsApp'
+                        }...`
+                  }
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  className={`flex-1 min-w-0 h-9 px-3 border rounded-md text-[13px] placeholder-gray-400 focus:outline-none ${
+                    composerMode === 'NOTE'
+                      ? 'bg-amber-50/70 border-amber-200 focus:border-amber-500'
+                      : 'bg-gray-50 border-gray-200 focus:border-indigo-500'
+                  }`}
+                />
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="md"
+                  isLoading={sending}
+                  disabled={!inputText.trim() && !pendingAttachment}
+                  className="shrink-0"
+                >
+                  {composerMode === 'NOTE' ? 'Simpan' : 'Kirim'}
+                </Button>
+              </div>
             </form>
             </div>
           </div>

@@ -110,7 +110,7 @@ export const SocialFeed: React.FC = () => {
           {items.map((item) => (
             <div key={item.id} className="p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                   <span className="text-xs font-semibold text-gray-900">
                     @{item.username || 'threads_user'}
                   </span>
@@ -120,7 +120,7 @@ export const SocialFeed: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                   {item.permalink && (
                     <a
                       href={item.permalink}
