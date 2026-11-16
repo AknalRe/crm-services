@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bot, BookOpen, Plus, Trash2, Send, Save } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import api from '../services/api';
 import { AiAgentConfig, AiKnowledgeItem } from '../types';
 import { Button } from '../components/ui/Button';
@@ -137,10 +137,7 @@ export const AiAgent: React.FC = () => {
           className="lg:col-span-5 bg-white rounded-lg border border-gray-200 p-5 space-y-3.5 h-fit"
         >
           <div className="flex items-center justify-between pb-2.5 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <Bot className="w-4 h-4 text-indigo-600" />
-              <span>Konfigurasi Agent</span>
-            </h2>
+            <h2 className="text-sm font-semibold text-gray-900">Konfigurasi Agent</h2>
             <label className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700">
               <input
                 type="checkbox"
@@ -236,7 +233,6 @@ export const AiAgent: React.FC = () => {
             variant="primary"
             size="sm"
             isLoading={savingConfig}
-            leftIcon={<Save className="w-3.5 h-3.5" />}
           >
             Simpan Pengaturan
           </Button>
@@ -244,9 +240,8 @@ export const AiAgent: React.FC = () => {
 
         <div className="lg:col-span-7 space-y-5">
           <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3.5">
-            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-indigo-600" />
-              <span>Knowledge Base ({knowledge.length})</span>
+            <h2 className="text-sm font-semibold text-gray-900">
+              Knowledge Base ({knowledge.length})
             </h2>
 
             <form onSubmit={handleAddKb} className="space-y-2.5 pb-3 border-b border-gray-100">
@@ -291,7 +286,6 @@ export const AiAgent: React.FC = () => {
                   variant="primary"
                   size="sm"
                   isLoading={savingKb}
-                  leftIcon={<Plus className="w-3.5 h-3.5" />}
                 >
                   Tambah Knowledge
                 </Button>
@@ -348,7 +342,6 @@ export const AiAgent: React.FC = () => {
                 variant="secondary"
                 size="sm"
                 isLoading={testing}
-                leftIcon={<Send className="w-3.5 h-3.5" />}
               >
                 Uji
               </Button>

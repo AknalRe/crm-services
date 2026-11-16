@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Globe2, Plus, Trash2, Copy, Check, Link2 } from 'lucide-react';
+import { Globe2, Trash2, Copy, Check } from 'lucide-react';
 import api from '../services/api';
 import { ChannelAccount, ChannelConnectLink, OmnichannelType } from '../types';
 import { Button } from './ui/Button';
@@ -250,7 +250,7 @@ export const OmnichannelSettings: React.FC = () => {
           onChange={(e) => setAccessToken(e.target.value)}
           className="sm:col-span-2 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs font-mono"
         />
-        <Button type="submit" variant="primary" size="md" isLoading={saving} leftIcon={<Plus className="w-3.5 h-3.5" />} className="sm:col-span-2">
+        <Button type="submit" variant="primary" size="md" isLoading={saving} className="sm:col-span-2">
           Hubungkan
         </Button>
       </form>
@@ -328,8 +328,7 @@ export const OmnichannelSettings: React.FC = () => {
       <div className="pt-3 border-t border-gray-200 space-y-2.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h3 className="text-xs font-semibold text-gray-900 flex items-center gap-1.5">
-              <Link2 className="w-3.5 h-3.5 text-indigo-600" />
+            <h3 className="text-xs font-semibold text-gray-900">
               Connect Link Klien (Tanpa Login CRM)
             </h3>
             <p className="text-[11px] text-gray-500">
@@ -350,7 +349,6 @@ export const OmnichannelSettings: React.FC = () => {
               size="sm"
               isLoading={creatingLink}
               onClick={() => void handleCreateConnectLink()}
-              leftIcon={<Link2 className="w-3.5 h-3.5" />}
             >
               Buat Link
             </Button>

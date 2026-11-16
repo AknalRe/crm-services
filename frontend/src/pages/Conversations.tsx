@@ -2,14 +2,12 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   MessageSquare,
   Search,
-  Send,
   Phone,
   Check,
   CheckCheck,
   Calendar,
   MapPin,
   Lock,
-  KeyRound,
   PanelRightClose,
   PanelRightOpen,
   X,
@@ -667,7 +665,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
               variant="primary"
               size="md"
               onClick={onOpenPlans}
-              leftIcon={<KeyRound className="w-4 h-4" />}
             >
               Lihat &amp; Upgrade Paket Lisensi
             </Button>
@@ -1720,13 +1717,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 size="md"
                 isLoading={sending}
                 disabled={!inputText.trim() && !pendingAttachment}
-                leftIcon={
-                  composerMode === 'NOTE' ? (
-                    <StickyNote className="w-3.5 h-3.5" />
-                  ) : (
-                    <Send className="w-3.5 h-3.5" />
-                  )
-                }
               >
                 {composerMode === 'NOTE' ? 'Simpan' : 'Kirim'}
               </Button>

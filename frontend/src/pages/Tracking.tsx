@@ -5,7 +5,6 @@ import {
   Search,
   Eye,
   AlertCircle,
-  RefreshCw,
   Phone,
 } from 'lucide-react';
 import api from '../services/api';
@@ -97,7 +96,6 @@ export const Tracking: React.FC = () => {
             size="sm"
             onClick={fetchTracking}
             isLoading={loading}
-            leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
           >
             Segarkan
           </Button>

@@ -7,7 +7,6 @@ import {
   Sliders,
   Info,
   Check,
-  RefreshCw,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -704,7 +703,6 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
               className="w-full"
               isLoading={isSubmitting}
               disabled={targetCount === 0}
-              leftIcon={<Send className="w-4 h-4" />}
             >
               {broadcastType === 'SCHEDULED'
                 ? `Jadwalkan Siaran (${targetCount} Kontak)`
@@ -721,7 +719,6 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
               size="sm"
               onClick={loadCampaigns}
               isLoading={loading}
-              leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
             >
               Segarkan
             </Button>

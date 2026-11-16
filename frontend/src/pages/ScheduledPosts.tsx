@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  CalendarClock,
   Send,
   Trash2,
   XCircle,
@@ -8,7 +7,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   Clock,
-  RefreshCw,
   Upload,
   List,
   CalendarDays,
@@ -252,7 +250,6 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             variant="secondary"
             size="sm"
             onClick={() => setShowCsvModal(true)}
-            leftIcon={<Upload className="w-3.5 h-3.5" />}
           >
             Impor CSV
           </Button>
@@ -260,7 +257,6 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             variant="secondary"
             size="sm"
             onClick={loadData}
-            leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
           >
             Segarkan
           </Button>
@@ -274,9 +270,8 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
           className="lg:col-span-5 bg-white rounded-lg border border-gray-200 p-5 space-y-4 h-fit"
         >
           <div className="pb-3 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <CalendarClock className="w-4 h-4 text-indigo-600" />
-              <span>Buat Postingan Baru</span>
+            <h2 className="text-sm font-semibold text-gray-900">
+              Buat Postingan Baru
             </h2>
           </div>
 
@@ -446,7 +441,6 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             isLoading={submitting}
             disabled={matchingAccounts.length === 0}
             className="w-full"
-            leftIcon={publishMode === 'NOW' ? <Send className="w-4 h-4" /> : <CalendarClock className="w-4 h-4" />}
           >
             {publishMode === 'NOW' ? 'Terbitkan Postingan' : 'Simpan Jadwal Postingan'}
           </Button>
@@ -740,7 +734,6 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                             size="sm"
                             isLoading={busyId === post.id}
                             onClick={() => handlePublishNow(post.id)}
-                            leftIcon={<Send className="w-3 h-3" />}
                           >
                             Terbitkan Sekarang
                           </Button>
@@ -751,7 +744,6 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                             size="sm"
                             disabled={busyId === post.id}
                             onClick={() => handleCancel(post.id)}
-                            leftIcon={<XCircle className="w-3.5 h-3.5 text-amber-600" />}
                           >
                             Batalkan
                           </Button>
@@ -814,7 +806,6 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                 variant="secondary"
                 size="sm"
                 onClick={() => csvFileRef.current?.click()}
-                leftIcon={<Upload className="w-3.5 h-3.5" />}
               >
                 Pilih File CSV
               </Button>

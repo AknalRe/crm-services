@@ -3,12 +3,9 @@ import {
   KeyRound,
   Check,
   CreditCard,
-  Receipt,
-  Printer,
   CheckCircle2,
   Clock,
   Copy,
-  RefreshCw,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { LicenseInfo, LicensePlan, LicenseOrder, PaymentMethodItem } from '../types';
@@ -161,7 +158,6 @@ export const PlansModal: React.FC<PlansModalProps> = ({
           onClick={handleCreateOrder}
           isLoading={isSubmitting}
           disabled={loadingPlans || plans.length === 0}
-          leftIcon={<Receipt className="w-4 h-4" />}
         >
           Terbitkan Invoice
         </Button>
@@ -174,7 +170,6 @@ export const PlansModal: React.FC<PlansModalProps> = ({
           variant="secondary"
           size="sm"
           onClick={() => window.print()}
-          leftIcon={<Printer className="w-3.5 h-3.5" />}
         >
           Cetak
         </Button>
@@ -188,7 +183,6 @@ export const PlansModal: React.FC<PlansModalProps> = ({
             variant="primary"
             onClick={handleCheckOrderStatus}
             isLoading={isPaying}
-            leftIcon={<RefreshCw className="w-4 h-4" />}
           >
             Cek Status Pembayaran
           </Button>

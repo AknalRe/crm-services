@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Image as ImageIcon, Upload, Trash2, Copy, Send, Film } from 'lucide-react';
+import { Image as ImageIcon, Trash2, Copy, Send, Film } from 'lucide-react';
 import api from '../services/api';
 import { MediaLibraryItem } from '../types';
 import { Button } from '../components/ui/Button';
@@ -98,7 +98,6 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ onUseInPost }) => {
             size="sm"
             isLoading={uploading}
             onClick={() => fileRef.current?.click()}
-            leftIcon={<Upload className="w-4 h-4" />}
           >
             Unggah Media
           </Button>

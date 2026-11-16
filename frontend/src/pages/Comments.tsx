@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { MessageSquare, RefreshCw, Send, CheckCircle2, Trash2 } from 'lucide-react';
+import { MessageSquare, CheckCircle2, Trash2 } from 'lucide-react';
 import api from '../services/api';
 import { SocialCommentItem } from '../types';
 import { Button } from '../components/ui/Button';
@@ -110,7 +110,6 @@ export const Comments: React.FC = () => {
           size="sm"
           isLoading={syncing}
           onClick={handleSync}
-          leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
         >
           Muat terbaru
         </Button>
@@ -227,7 +226,6 @@ export const Comments: React.FC = () => {
                       size="sm"
                       isLoading={busyId === c.id}
                       onClick={() => handleReply(c.id)}
-                      leftIcon={<Send className="w-3 h-3" />}
                     >
                       Balas
                     </Button>

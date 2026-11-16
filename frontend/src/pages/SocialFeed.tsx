@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, Radio, Send, ExternalLink } from 'lucide-react';
+import { Search, Radio, ExternalLink } from 'lucide-react';
 import api from '../services/api';
 import { FeedPostItem } from '../types';
 import { Button } from '../components/ui/Button';
@@ -160,7 +160,6 @@ export const SocialFeed: React.FC = () => {
                     size="sm"
                     isLoading={sendingReply}
                     onClick={() => handleSendReply(item.id)}
-                    leftIcon={<Send className="w-3 h-3" />}
                   >
                     Kirim
                   </Button>

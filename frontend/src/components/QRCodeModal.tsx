@@ -180,7 +180,6 @@ export const QRCodeModal: React.FC<QRCodeModalProps> = ({
               size="sm"
               onClick={() => void fetchQr(true)}
               isLoading={loading}
-              leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
             >
               Segarkan QR
             </Button>

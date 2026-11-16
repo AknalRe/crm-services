@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { KeyRound, CreditCard, RefreshCw, LogOut, ArrowLeft } from 'lucide-react';
 import api from '../services/api';
 import { LicenseInfo } from '../types';
 import { Button } from './ui/Button';
@@ -64,25 +63,20 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
     <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl bg-white rounded-lg border border-gray-200 p-5 sm:p-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-gray-200 pb-4">
-          <div className="flex items-start gap-3">
-            <div className="h-10 w-10 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
-              <KeyRound className="w-5 h-5 text-amber-600" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-base font-semibold text-gray-900">
-                Aktivasi Lisensi Reneo CRM
-              </h1>
-              <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-                {licenseInfo.status === 'EXPIRED'
-                  ? 'Masa aktif lisensi CRM Anda telah berakhir. Perpanjang atau masukkan kunci lisensi baru untuk melanjutkan.'
-                  : 'Akun CRM Anda sudah siap. Pilih paket lisensi (tersedia Trial 7 Hari) dan lakukan pembayaran, atau masukkan kunci lisensi yang sudah Anda terima.'}
+          <div className="min-w-0">
+            <h1 className="text-base font-semibold text-gray-900">
+              Aktivasi Lisensi Reneo CRM
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+              {licenseInfo.status === 'EXPIRED'
+                ? 'Masa aktif lisensi CRM Anda telah berakhir. Perpanjang atau masukkan kunci lisensi baru untuk melanjutkan.'
+                : 'Akun CRM Anda sudah siap. Pilih paket lisensi (tersedia Trial 7 Hari) dan lakukan pembayaran, atau masukkan kunci lisensi yang sudah Anda terima.'}
+            </p>
+            {user && (
+              <p className="text-[11px] text-gray-500 mt-1 break-all">
+                Akun terdaftar: <span className="font-medium text-gray-800">{user.name}</span> ({user.email})
               </p>
-              {user && (
-                <p className="text-[11px] text-gray-500 mt-1 break-all">
-                  Akun terdaftar: <span className="font-medium text-gray-800">{user.name}</span> ({user.email})
-                </p>
-              )}
-            </div>
+            )}
           </div>
 
           {(onBackToLanding || onLogout) && (
@@ -93,7 +87,6 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
                   variant="ghost"
                   size="sm"
                   onClick={onBackToLanding}
-                  leftIcon={<ArrowLeft className="w-3.5 h-3.5" />}
                 >
                   Landing
                 </Button>
@@ -104,7 +97,6 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
                   variant="secondary"
                   size="sm"
                   onClick={onLogout}
-                  leftIcon={<LogOut className="w-3.5 h-3.5" />}
                 >
                   Keluar
                 </Button>
@@ -116,9 +108,8 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Step 1: Pilih Lisensi & Bayar */}
           <div className="rounded-lg border border-gray-200 p-4 space-y-3 bg-gray-50/50">
-            <div className="flex items-center gap-2 text-xs font-semibold text-gray-900">
-              <CreditCard className="w-4 h-4 text-indigo-600" />
-              <span>1. Beli / Pilih Paket Lisensi</span>
+            <div className="text-xs font-semibold text-gray-900">
+              1. Beli / Pilih Paket Lisensi
             </div>
             <p className="text-xs text-gray-500 leading-relaxed">
               Lihat daftar paket lisensi resmi dari panel Reneo, lakukan pembayaran, dan dapatkan kunci aktivasi secara otomatis.
@@ -128,7 +119,6 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
               variant="primary"
               className="w-full"
               onClick={onOpenPlans}
-              leftIcon={<CreditCard className="w-4 h-4" />}
             >
               Pilih Paket &amp; Bayar
             </Button>
@@ -136,9 +126,8 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
 
           {/* Step 2: Pasang / Aktivasi Kunci Lisensi */}
           <form onSubmit={handleActivate} className="rounded-lg border border-gray-200 p-4 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-gray-900">
-              <KeyRound className="w-4 h-4 text-emerald-600" />
-              <span>2. Pasang Kunci Lisensi</span>
+            <div className="text-xs font-semibold text-gray-900">
+              2. Pasang Kunci Lisensi
             </div>
             <div>
               <input
@@ -166,7 +155,6 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
                 onClick={handleSync}
                 isLoading={syncing}
                 title="Sinkronkan status lisensi dari Reneo"
-                leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
               >
                 Sync
               </Button>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from './Button';
 
 export const LoadingState: React.FC<{ message?: string; className?: string }> = ({
@@ -46,7 +46,7 @@ export const ErrorState: React.FC<{
     <p className="text-[13px] text-gray-500 mt-1 max-w-md leading-relaxed">{message}</p>
     {onRetry && (
       <div className="mt-4">
-        <Button variant="secondary" size="sm" onClick={onRetry} leftIcon={<RefreshCw className="w-3.5 h-3.5" />}>
+        <Button variant="secondary" size="sm" onClick={onRetry}>
           Coba Lagi
         </Button>
       </div>

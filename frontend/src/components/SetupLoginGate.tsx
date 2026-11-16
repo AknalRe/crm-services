@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Lock, UserPlus, LogIn, ArrowLeft } from 'lucide-react';
 import api from '../services/api';
 import { Button } from './ui/Button';
 import { useToast } from './ui/ToastProvider';
@@ -55,24 +54,15 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
           <span className="text-[11px] font-mono text-gray-500 truncate">{currentHost}</span>
         </div>
 
-        <div className="flex items-start gap-3">
-          <div className="h-10 w-10 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center shrink-0">
-            {initialized ? (
-              <Lock className="w-5 h-5 text-indigo-600" />
-            ) : (
-              <UserPlus className="w-5 h-5 text-indigo-600" />
-            )}
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold text-gray-900">
-              {initialized ? 'Masuk ke Reneo CRM' : 'Setup Awal Akun Reneo CRM'}
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
-              {initialized
-                ? 'Masukkan email dan kata sandi akun admin atau staf CRM Anda untuk membuka ruang kerja.'
-                : 'Buat akun pemilik/admin pertama untuk workspace CRM ini (terpisah dari akun login panel server).'}
-            </p>
-          </div>
+        <div className="min-w-0">
+          <h1 className="text-base font-semibold text-gray-900">
+            {initialized ? 'Masuk ke Reneo CRM' : 'Setup Awal Akun Reneo CRM'}
+          </h1>
+          <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+            {initialized
+              ? 'Masukkan email dan kata sandi akun admin atau staf CRM Anda untuk membuka ruang kerja.'
+              : 'Buat akun pemilik/admin pertama untuk workspace CRM ini (terpisah dari akun login panel server).'}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
@@ -126,7 +116,6 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
             variant="primary"
             className="w-full"
             isLoading={submitting}
-            leftIcon={initialized ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
           >
             {initialized ? 'Masuk ke CRM' : 'Simpan & Lanjutkan'}
           </Button>
@@ -137,10 +126,9 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
             <button
               type="button"
               onClick={onBackToLanding}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 transition-colors"
+              className="text-xs font-medium text-gray-500 hover:text-gray-800 transition-colors"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Kembali ke Halaman Utama</span>
+              Kembali ke halaman utama
             </button>
           </div>
         )}

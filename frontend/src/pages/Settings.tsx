@@ -1,20 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Server,
-  RefreshCw,
-  QrCode,
-  Send,
-  LogOut,
-  Power,
-  ShieldCheck,
   Globe,
   Lock,
-  Plus,
   Check,
   Trash2,
   Users,
   Edit3,
-  UserPlus,
   Bot,
   Smartphone,
 } from 'lucide-react';
@@ -411,7 +403,6 @@ export const Settings: React.FC<SettingsProps> = ({
           variant="secondary"
           size="md"
           onClick={onRefreshStatus}
-          leftIcon={<RefreshCw className="w-4 h-4" />}
         >
           Periksa Koneksi
         </Button>
@@ -539,7 +530,6 @@ export const Settings: React.FC<SettingsProps> = ({
                         size="sm"
                         onClick={fetchSessions}
                         isLoading={sessionsLoading}
-                        leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
                       >
                         Muat Ulang
                       </Button>
@@ -573,7 +563,6 @@ export const Settings: React.FC<SettingsProps> = ({
                         size="md"
                         isLoading={creatingSession}
                         disabled={!newSessionName.trim() || sessions.length >= maxSessions}
-                        leftIcon={<Plus className="w-4 h-4" />}
                       >
                         Tambah Sesi
                       </Button>
@@ -649,7 +638,6 @@ export const Settings: React.FC<SettingsProps> = ({
                                   variant="secondary"
                                   size="sm"
                                   onClick={() => onOpenQr(item.name)}
-                                  leftIcon={<QrCode className="w-3.5 h-3.5" />}
                                 >
                                   Scan QR
                                 </Button>
@@ -774,7 +762,6 @@ export const Settings: React.FC<SettingsProps> = ({
                   variant="secondary"
                   size="md"
                   isLoading={testSending}
-                  leftIcon={<Send className="w-3.5 h-3.5" />}
                   className="w-full sm:w-auto"
                 >
                   Kirim Pesan Tes
@@ -799,9 +786,8 @@ export const Settings: React.FC<SettingsProps> = ({
         <div className="space-y-5">
           <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
             <div>
-              <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-indigo-600" />
-                <span>Status Sesi WhatsApp</span>
+              <h3 className="font-semibold text-gray-900 text-sm">
+                Status Sesi WhatsApp
               </h3>
               <p className="text-[11px] text-gray-500 mt-0.5">
                 Menampilkan status sesi aktif yang dipilih dari daftar sesi di sebelah kiri.
@@ -838,7 +824,6 @@ export const Settings: React.FC<SettingsProps> = ({
                 variant="primary"
                 className="w-full"
                 onClick={() => onOpenQr()}
-                leftIcon={<QrCode className="w-4 h-4" />}
               >
                 Buka Scanner QR WhatsApp
               </Button>
@@ -849,7 +834,6 @@ export const Settings: React.FC<SettingsProps> = ({
                   size="sm"
                   onClick={handleStartSession}
                   isLoading={sessionActionLoading}
-                  leftIcon={<Power className="w-3.5 h-3.5 text-emerald-600" />}
                 >
                   Start Sesi
                 </Button>
@@ -870,7 +854,6 @@ export const Settings: React.FC<SettingsProps> = ({
                 className="w-full text-red-600 hover:bg-red-50 hover:text-red-700"
                 onClick={() => setConfirmAction('logout')}
                 disabled={sessionActionLoading}
-                leftIcon={<LogOut className="w-3.5 h-3.5" />}
               >
                 Logout Sesi WhatsApp
               </Button>
@@ -878,10 +861,7 @@ export const Settings: React.FC<SettingsProps> = ({
           </div>
 
           <div className="bg-white rounded-lg border border-gray-200 p-5 text-xs space-y-2.5">
-            <div className="flex items-center gap-2 text-gray-900 font-semibold">
-              <ShieldCheck className="w-4 h-4 text-indigo-600" />
-              <span>Webhook Tracking Otomatis</span>
-            </div>
+            <h3 className="text-gray-900 font-semibold">Webhook Tracking Otomatis</h3>
             <p className="text-gray-500 text-[11px] leading-relaxed">
               WAHA mengirimkan event <code className="font-mono text-gray-800">message.ack</code> ke endpoint backend CRM:
             </p>
@@ -932,7 +912,6 @@ export const Settings: React.FC<SettingsProps> = ({
                 variant="secondary"
                 size="sm"
                 onClick={onOpenPlans}
-                leftIcon={<Lock className="w-3.5 h-3.5 text-amber-500" />}
               >
                 Upgrade untuk Multi-Agent
               </Button>
@@ -946,7 +925,6 @@ export const Settings: React.FC<SettingsProps> = ({
                   setShowAgentForm(true);
                 }}
                 disabled={Boolean(agentQuota && agentQuota.currentCount >= agentQuota.maxAgents)}
-                leftIcon={<UserPlus className="w-3.5 h-3.5" />}
               >
                 Tambah Agent
               </Button>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BellRing, Clock, Globe, RefreshCw, Save, Send, Star, Users } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import api from '../services/api';
 import { AutomationConfig, LicenseInfo, WebhookDeliveryItem } from '../types';
 import { Button } from './ui/Button';
@@ -151,9 +151,8 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
       {/* Card 1: Routing Otomatis Agent, Target SLA & Eskalasi Webhook */}
       <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
         <div className="pb-3 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <BellRing className="w-4 h-4 text-amber-600" />
-            <span>Routing Agent, Target SLA &amp; Webhook Alert</span>
+          <h2 className="text-sm font-semibold text-gray-900">
+            Routing Agent, Target SLA &amp; Webhook Alert
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Atur pembagian chat masuk ke agent, batas waktu respon pertama (SLA), serta notifikasi eskalasi SLA / CSAT rendah.
@@ -163,8 +162,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
         <form onSubmit={handleSaveRoutingSla} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-3.5 rounded-md border border-gray-200 bg-gray-50/70 space-y-2">
-              <label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-indigo-600" />
+              <label className="block text-xs font-semibold text-gray-800">
                 Routing Otomatis Chat Masuk (Auto-Assign)
               </label>
               <select
@@ -184,8 +182,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
             </div>
 
             <div className="p-3.5 rounded-md border border-gray-200 bg-gray-50/70 space-y-2">
-              <label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-indigo-600" />
+              <label className="block text-xs font-semibold text-gray-800">
                 Target SLA Respon Pertama (Menit)
               </label>
               <input
@@ -204,8 +201,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
 
           <div className="p-3.5 rounded-md border border-gray-200 bg-gray-50/70 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
-                <BellRing className="w-3.5 h-3.5 text-amber-600" />
+              <label className="text-xs font-semibold text-gray-800">
                 Aktifkan Eskalasi SLA &amp; Alert CSAT Rendah (Skor &le; 2)
               </label>
               <input
@@ -232,7 +228,6 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
                 disabled={testingWebhook || !slaAlertWebhookUrl.trim()}
                 className="h-9 shrink-0 whitespace-nowrap"
               >
-                <Send className="w-3.5 h-3.5 mr-1.5" />
                 {testingWebhook ? 'Menguji...' : 'Test Webhook'}
               </Button>
             </div>
@@ -296,7 +291,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
           </div>
 
           <div className="flex justify-end">
-            <Button type="submit" variant="primary" size="md" isLoading={savingSla} leftIcon={<Save className="w-4 h-4" />}>
+            <Button type="submit" variant="primary" size="md" isLoading={savingSla}>
               Simpan SLA &amp; Routing
             </Button>
           </div>
@@ -306,9 +301,8 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
       {/* Card 2: Pengaturan Survei CSAT */}
       <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
         <div className="pb-3 border-b border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <Star className="w-4 h-4 text-amber-500" />
-            <span>Survei Penilaian Pelanggan (CSAT)</span>
+          <h3 className="text-sm font-semibold text-gray-900">
+            Survei Penilaian Pelanggan (CSAT)
           </h3>
           <p className="text-xs text-gray-500 mt-0.5">
             Atur naskah pesan ajakan rating dan domain publik halaman formulir CSAT pelanggan.
@@ -355,9 +349,8 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
 
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <label className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5 text-gray-500" />
-                <span>URL Publik CSAT (Domain / Cloudflare Tunnel)</span>
+              <label className="text-xs font-medium text-gray-700">
+                URL Publik CSAT (Domain / Cloudflare Tunnel)
               </label>
               <button
                 type="button"
@@ -402,7 +395,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
           </div>
 
           <div className="flex justify-end pt-1">
-            <Button type="submit" variant="primary" size="md" isLoading={savingCsat} leftIcon={<Save className="w-4 h-4" />}>
+            <Button type="submit" variant="primary" size="md" isLoading={savingCsat}>
               Simpan Pengaturan CSAT
             </Button>
           </div>

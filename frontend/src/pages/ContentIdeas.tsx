@@ -146,7 +146,6 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ onConvertToPost }) =
             setStage('IDE');
             setShowForm((prev) => !prev);
           }}
-          leftIcon={<Plus className="w-4 h-4" />}
         >
           Catat Ide
         </Button>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Globe2, CheckCircle2, AlertTriangle, Link2 } from 'lucide-react';
+import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
 import { ChannelAccount, OmnichannelType } from '../types';
 import { Button } from '../components/ui/Button';
@@ -67,18 +67,13 @@ export const PublicChannelConnectPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-lg bg-white rounded-lg border border-gray-200 p-6 space-y-5">
-        <div className="flex items-start gap-3 border-b border-gray-200 pb-4">
-          <div className="h-10 w-10 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center shrink-0">
-            <Link2 className="w-5 h-5 text-indigo-600" />
-          </div>
-          <div>
-            <h1 className="text-base font-semibold text-gray-900">
-              Hubungkan Akun Omnichannel CRM
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Tautkan akun media sosial atau bot Anda tanpa perlu membagikan kata sandi akun CRM.
-            </p>
-          </div>
+        <div className="border-b border-gray-200 pb-4">
+          <h1 className="text-base font-semibold text-gray-900">
+            Hubungkan Akun Omnichannel CRM
+          </h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Tautkan akun media sosial atau bot Anda tanpa perlu membagikan kata sandi akun CRM.
+          </p>
         </div>
 
         {loading ? (
@@ -128,8 +123,7 @@ export const PublicChannelConnectPage: React.FC = () => {
         ) : linkMeta ? (
           <form onSubmit={handleSubmit} className="space-y-4 text-xs">
             <div className="p-3 rounded-md bg-indigo-50/70 border border-indigo-200 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-indigo-900 font-medium flex items-center gap-1.5">
-                <Globe2 className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="text-indigo-900 font-medium">
                 Channel: <strong>{linkMeta.channel}</strong>
               </span>
               <div className="flex items-center gap-2">

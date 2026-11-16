@@ -1,18 +1,10 @@
 import React, { useState } from 'react';
 import {
-  ArrowRight,
-  Bot,
-  BarChart3,
-  Cake,
   Check,
   ChevronDown,
-  Link2,
   Maximize2,
   Menu,
   Minus,
-  Send,
-  ShieldCheck,
-  Tag,
   X,
 } from 'lucide-react';
 import { ReneoCrmLogo } from '../components/ReneoCrmLogo';
@@ -93,32 +85,32 @@ const CHANNEL_ROWS = [
 
 const FEATURE_ITEMS = [
   {
-    icon: Bot,
+    num: '01',
     title: 'Asisten AI & Balas Komentar Otomatis',
     desc: 'Menjawab pertanyaan umum di luar jam kerja dan menindaklanjuti komentar media sosial ke pesan pribadi.',
   },
   {
-    icon: Send,
+    num: '02',
     title: 'Siaran Promo Terjadwal dengan Jeda Aman',
     desc: 'Kirim info promo ke segmen kontak tertentu dengan jeda antar-pesan otomatis agar pengiriman lebih terjaga.',
   },
   {
-    icon: Tag,
+    num: '03',
     title: 'Katalog Produk & Ringkasan Tagihan di Chat',
     desc: 'Pilih produk dan hitung total pesanan langsung di samping jendela chat tanpa perlu mengetik ulang harga.',
   },
   {
-    icon: Cake,
+    num: '04',
     title: 'Pesan Ulang Tahun Pelanggan Otomatis',
     desc: 'Kirim ucapan dan penawaran khusus pada hari ulang tahun pelanggan untuk mendorong pembelian ulang.',
   },
   {
-    icon: BarChart3,
+    num: '05',
     title: 'Survei Kepuasan & Target Waktu Balas',
     desc: 'Kirim tautan penilaian singkat setelah chat selesai dan pantau kecepatan respon setiap staf CS.',
   },
   {
-    icon: Link2,
+    num: '06',
     title: 'Tautan Sambung Akun untuk Klien',
     desc: 'Bagikan tautan sekali pakai agar klien bisa menautkan akun media sosialnya tanpa memberi akses admin.',
   },
@@ -257,11 +249,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             <a
               href={PANEL_ORDER_URL}
               target="_top"
-              className="h-8 px-2.5 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              className="h-8 px-2.5 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center transition-colors whitespace-nowrap"
             >
               <span className="sm:hidden">Beli Paket</span>
               <span className="hidden sm:inline">Beli Hosting + CRM</span>
-              <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
             </a>
             <button
               type="button"
@@ -292,10 +283,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
               <a
                 href={PANEL_ORDER_URL}
                 target="_top"
-                className="h-9 px-3 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5"
+                className="h-9 px-3 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center justify-center"
               >
-                <span>Beli Hosting + CRM &amp; Lisensi</span>
-                <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+                Beli Hosting + CRM &amp; Lisensi
               </a>
               <button
                 type="button"
@@ -331,10 +321,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 <a
                   href={PANEL_ORDER_URL}
                   target="_top"
-                  className="min-h-[40px] py-2 px-4 sm:px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 text-center transition-colors"
+                  className="min-h-[40px] py-2 px-4 sm:px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center text-center transition-colors"
                 >
-                  <span>Beli Hosting + CRM &amp; Lisensi</span>
-                  <ArrowRight className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                  Beli Hosting + CRM &amp; Lisensi
                 </a>
                 <a
                   href={PANEL_INSTALL_URL}
@@ -562,23 +551,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
         </div>
 
         <div className="border border-slate-200 rounded-xl bg-white overflow-hidden grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 divide-slate-200">
-          {FEATURE_ITEMS.map((feat, idx) => {
-            const Icon = feat.icon;
-            return (
-              <div
-                key={feat.title}
-                className={`p-4 flex items-start gap-3 ${
-                  idx % 2 === 1 ? 'md:border-l md:border-slate-200' : ''
-                } ${idx >= 2 ? 'md:border-t md:border-slate-200' : ''}`}
-              >
-                <Icon className="w-4 h-4 text-[#2563eb] shrink-0 mt-0.5" strokeWidth={1.75} />
-                <div className="space-y-1">
-                  <h3 className="text-xs sm:text-sm font-semibold text-slate-900">{feat.title}</h3>
-                  <p className="text-xs text-slate-600 leading-relaxed">{feat.desc}</p>
-                </div>
+          {FEATURE_ITEMS.map((feat, idx) => (
+            <div
+              key={feat.title}
+              className={`p-4 flex items-start gap-3 ${
+                idx % 2 === 1 ? 'md:border-l md:border-slate-200' : ''
+              } ${idx >= 2 ? 'md:border-t md:border-slate-200' : ''}`}
+            >
+              <span className="font-mono text-xs font-semibold text-[#2563eb] shrink-0 mt-0.5">
+                {feat.num}
+              </span>
+              <div className="space-y-1">
+                <h3 className="text-xs sm:text-sm font-semibold text-slate-900">{feat.title}</h3>
+                <p className="text-xs text-slate-600 leading-relaxed">{feat.desc}</p>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       </section>
 
@@ -774,14 +762,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
                 .
               </p>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-blue-100">
-                <span className="inline-flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" strokeWidth={1.75} />
-                  Data tersimpan di server sendiri
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" strokeWidth={2} />
-                  Tanpa biaya per pesan dari panel
-                </span>
+                <span>· Data tersimpan di server sendiri</span>
+                <span>· Tanpa biaya per pesan dari panel</span>
               </div>
             </div>
           </div>
@@ -790,10 +772,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ initialized, onEnterLo
             <a
               href={PANEL_ORDER_URL}
               target="_top"
-              className="min-h-[40px] py-2 px-4 sm:px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 text-center transition-colors"
+              className="min-h-[40px] py-2 px-4 sm:px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center text-center transition-colors"
             >
-              <span>Beli Hosting + CRM &amp; Lisensi</span>
-              <ArrowRight className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+              Beli Hosting + CRM &amp; Lisensi
             </a>
             <a
               href={PANEL_INSTALL_URL}

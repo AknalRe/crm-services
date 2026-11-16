@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Zap, Plus, Trash2, Power } from 'lucide-react';
+import { Zap, Trash2, Power } from 'lucide-react';
 import api from '../services/api';
 import { CommentAutomationItem } from '../types';
 import { Button } from '../components/ui/Button';
@@ -106,7 +106,6 @@ export const Automations: React.FC = () => {
           variant="primary"
           size="sm"
           onClick={() => setShowForm((prev) => !prev)}
-          leftIcon={<Plus className="w-4 h-4" />}
         >
           Buat Aturan
         </Button>

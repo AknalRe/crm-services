@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, KeyRound, AlertTriangle, Menu } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Menu } from 'lucide-react';
 import { LicenseInfo } from '../types';
 import { Button } from './ui/Button';
 
@@ -50,9 +50,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
             title="Kelola Paket & Lisensi Reneo"
           >
-            {isLicenseActive ? (
-              <KeyRound className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-            ) : (
+            {!isLicenseActive && (
               <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
             )}
             <span className="tabular-nums truncate max-w-[130px] sm:max-w-none">

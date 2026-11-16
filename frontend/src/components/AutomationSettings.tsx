@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bot, Clock, Edit3, Plus, Save, Trash2 } from 'lucide-react';
+import { Bot, Clock, Edit3, Trash2 } from 'lucide-react';
 import api from '../services/api';
 import { AutomationConfig, AutoReplyRule } from '../types';
 import { Button } from './ui/Button';
@@ -320,7 +320,7 @@ export const AutomationSettings: React.FC = () => {
           </div>
 
           <div className="lg:col-span-2 flex justify-end">
-            <Button type="submit" variant="primary" size="md" isLoading={savingAuto} leftIcon={<Save className="w-4 h-4" />}>
+            <Button type="submit" variant="primary" size="md" isLoading={savingAuto}>
               Simpan Auto-Reply &amp; Jam Kerja
             </Button>
           </div>
@@ -331,15 +331,14 @@ export const AutomationSettings: React.FC = () => {
       <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <Bot className="w-4 h-4 text-indigo-600" />
+            <h3 className="text-sm font-semibold text-gray-900">
               Master Aturan Kata Kunci (Keyword Auto-Reply)
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
               Balasan otomatis instan saat pesan masuk cocok dengan kata kunci (angka prioritas kecil diproses lebih dulu).
             </p>
           </div>
-          <Button type="button" variant="secondary" size="sm" onClick={openCreateRule} leftIcon={<Plus className="w-4 h-4" />}>
+          <Button type="button" variant="secondary" size="sm" onClick={openCreateRule}>
             Tambah Aturan
           </Button>
         </div>

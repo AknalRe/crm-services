@@ -2,8 +2,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   Cake,
   Clock,
-  Send,
-  Save,
   Eye,
   Sliders,
 } from 'lucide-react';
@@ -485,7 +483,6 @@ export const BirthdayAutomation: React.FC = () => {
                 type="submit"
                 variant="primary"
                 isLoading={saving}
-                leftIcon={<Save className="w-4 h-4" />}
               >
                 Simpan Pengaturan
               </Button>
@@ -509,7 +506,6 @@ export const BirthdayAutomation: React.FC = () => {
                   size="sm"
                   onClick={() => setConfirmTriggerOpen(true)}
                   disabled={triggering}
-                  leftIcon={<Send className="w-3.5 h-3.5" />}
                 >
                   Kirim Sekarang
                 </Button>

@@ -2,18 +2,14 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Search,
-  Plus,
   Upload,
-  Download,
   FileSpreadsheet,
   Pencil,
   Trash2,
   Phone,
   Calendar,
-  Send,
   Cake,
   Users,
-  UserPlus,
   FolderKanban,
 } from 'lucide-react';
 import api from '../services/api';
@@ -465,7 +461,6 @@ export const Contacts: React.FC<ContactsProps> = ({
               variant="primary"
               size="md"
               onClick={() => onStartBroadcastWithContacts(selectedIds)}
-              leftIcon={<Send className="w-4 h-4" strokeWidth={1.75} />}
             >
               Siaran ({selectedIds.length})
             </Button>
@@ -475,7 +470,6 @@ export const Contacts: React.FC<ContactsProps> = ({
             variant="secondary"
             size="md"
             onClick={() => setIsImportModalOpen(true)}
-            leftIcon={<FileSpreadsheet className="w-4 h-4" strokeWidth={1.75} />}
           >
             Import Data
           </Button>
@@ -484,7 +478,6 @@ export const Contacts: React.FC<ContactsProps> = ({
             variant={selectedIds.length > 0 ? 'secondary' : 'primary'}
             size="md"
             onClick={handleOpenAddModal}
-            leftIcon={<UserPlus className="w-4 h-4" strokeWidth={1.75} />}
           >
             Tambah Kontak
           </Button>
@@ -503,7 +496,7 @@ export const Contacts: React.FC<ContactsProps> = ({
             title="Belum ada data pelanggan"
             description="Tambahkan kontak pelanggan secara manual atau impor daftar melalui CSV."
             action={
-              <Button variant="primary" size="sm" onClick={handleOpenAddModal} leftIcon={<Plus className="w-3.5 h-3.5" />}>
+              <Button variant="primary" size="sm" onClick={handleOpenAddModal}>
                 Tambah Kontak
               </Button>
             }
@@ -1189,7 +1182,6 @@ export const Contacts: React.FC<ContactsProps> = ({
                 variant="secondary"
                 size="sm"
                 onClick={() => handleDownloadTemplate('xlsx')}
-                leftIcon={<Download className="w-3.5 h-3.5" />}
               >
                 Template Excel (.xlsx)
               </Button>
@@ -1198,7 +1190,6 @@ export const Contacts: React.FC<ContactsProps> = ({
                 variant="secondary"
                 size="sm"
                 onClick={() => handleDownloadTemplate('csv')}
-                leftIcon={<Download className="w-3.5 h-3.5" />}
               >
                 Template CSV
               </Button>

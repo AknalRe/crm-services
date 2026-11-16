@@ -193,7 +193,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             variant="secondary"
             size="md"
             onClick={() => onNavigate('contacts')}
-            leftIcon={<Users className="w-4 h-4" />}
           >
             Kelola Pelanggan
           </Button>
@@ -201,7 +200,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             variant="primary"
             size="md"
             onClick={() => onNavigate('broadcasts')}
-            leftIcon={<Send className="w-4 h-4" />}
           >
             Kirim Siaran Baru
           </Button>

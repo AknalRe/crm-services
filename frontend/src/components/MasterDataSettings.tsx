@@ -4,7 +4,6 @@ import {
   Package,
   Tag,
   FileText,
-  Plus,
   Search,
   Edit3,
   Trash2,
@@ -211,15 +210,14 @@ const QuickRepliesMaster: React.FC = () => {
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-amber-500" />
+          <h2 className="text-sm font-semibold text-gray-900">
             Master Balasan Cepat (Quick Replies)
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Ketik <code className="font-mono bg-gray-100 px-1 rounded">/kode</code> di Inbox Live Chat untuk menyisipkan template secara instan.
           </p>
         </div>
-        <Button type="button" variant="primary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-4 h-4" />}>
+        <Button type="button" variant="primary" size="sm" onClick={openCreate}>
           Tambah Balasan Cepat
         </Button>
       </div>
@@ -279,7 +277,7 @@ const QuickRepliesMaster: React.FC = () => {
             title="Belum ada balasan cepat"
             description="Buat shortcut seperti /sapa, /harga, atau /pembayaran agar agent menjawab chat lebih konsisten."
             action={
-              <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
+              <Button type="button" variant="secondary" size="sm" onClick={openCreate}>
                 Tambah Template Pertama
               </Button>
             }
@@ -706,15 +704,14 @@ const ProductsMaster: React.FC = () => {
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <Package className="w-4 h-4 text-indigo-600" />
+          <h2 className="text-sm font-semibold text-gray-900">
             Master Katalog Produk &amp; Layanan
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Daftar produk/jasa untuk penawaran cepat (Quick Quote) saat agent membalas pelanggan di Inbox CRM.
           </p>
         </div>
-        <Button type="button" variant="primary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-4 h-4" />}>
+        <Button type="button" variant="primary" size="sm" onClick={openCreate}>
           Tambah Produk
         </Button>
       </div>
@@ -774,7 +771,7 @@ const ProductsMaster: React.FC = () => {
             title="Belum ada produk di katalog"
             description="Tambahkan produk atau paket layanan agar agent dapat menyisipkan harga & deskripsi langsung di chat."
             action={
-              <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
+              <Button type="button" variant="secondary" size="sm" onClick={openCreate}>
                 Tambah Produk Pertama
               </Button>
             }
@@ -1148,15 +1145,14 @@ const LabelsCategoriesMaster: React.FC = () => {
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <Tag className="w-4 h-4 text-indigo-600" />
+          <h2 className="text-sm font-semibold text-gray-900">
             Master Label Percakapan &amp; Kategori Kontak
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Standarisasi label tiket di Inbox CRM dan kelompok kategori pada halaman Kontak Pelanggan.
           </p>
         </div>
-        <Button type="button" variant="primary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-4 h-4" />}>
+        <Button type="button" variant="primary" size="sm" onClick={openCreate}>
           {scope === 'CONVERSATION_LABEL' ? 'Tambah Label Inbox' : 'Tambah Kategori Kontak'}
         </Button>
       </div>
@@ -1556,15 +1552,14 @@ const TemplatesMaster: React.FC = () => {
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-indigo-600" />
+          <h2 className="text-sm font-semibold text-gray-900">
             Master Template Pesan &amp; Siaran
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Kumpulan naskah siap pakai untuk kampanye Siaran &amp; Follow Up tanpa mengetik ulang.
           </p>
         </div>
-        <Button type="button" variant="primary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-4 h-4" />}>
+        <Button type="button" variant="primary" size="sm" onClick={openCreate}>
           Tambah Template
         </Button>
       </div>
@@ -1624,7 +1619,7 @@ const TemplatesMaster: React.FC = () => {
             title="Belum ada template siaran"
             description="Simpan naskah promo, pengingat tagihan, atau follow up untuk langsung dipakai di menu Siaran."
             action={
-              <Button type="button" variant="secondary" size="sm" onClick={openCreate} leftIcon={<Plus className="w-3.5 h-3.5" />}>
+              <Button type="button" variant="secondary" size="sm" onClick={openCreate}>
                 Buat Template Pertama
               </Button>
             }
@@ -1664,7 +1659,7 @@ const TemplatesMaster: React.FC = () => {
                 </p>
               </div>
               <div className="flex items-center justify-end gap-1.5 pt-1">
-                <Button type="button" variant="ghost" size="sm" onClick={() => openEdit(item)} leftIcon={<Edit3 className="w-3.5 h-3.5" />}>
+                <Button type="button" variant="ghost" size="sm" onClick={() => openEdit(item)}>
                   Edit
                 </Button>
                 <Button
@@ -1673,7 +1668,6 @@ const TemplatesMaster: React.FC = () => {
                   size="sm"
                   className="text-red-600 hover:text-red-700 hover:bg-red-50"
                   onClick={() => setDeleteTarget(item)}
-                  leftIcon={<Trash2 className="w-3.5 h-3.5" />}
                 >
                   Hapus
                 </Button>
