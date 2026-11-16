@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, desc, asc } from 'drizzle-orm';
+import { and, eq, desc, asc, gt } from 'drizzle-orm';
 import axios from 'axios';
 import { db } from '../db';
-import { conversations, chatMessages, contacts, crmAgents, cannedResponses, csatResponses } from '../db/schema';
+import { conversations, chatMessages, contacts, contactIdentities, crmAgents, cannedResponses, csatResponses } from '../db/schema';
 import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
@@ -49,6 +49,24 @@ function resolveRequestAppBaseUrl(req: FastifyRequest): string {
   return `${proto}://${host}${fwdPrefix}`;
 }
 
+async function resolveWhatsAppTarget(
+  conv: typeof conversations.$inferSelect,
+  contact: typeof contacts.$inferSelect
+): Promise<string | null> {
+  if (contact.nomorWhatsapp && contact.nomorWhatsapp.trim()) {
+    return contact.nomorWhatsapp.trim();
+  }
+  if (conv.externalThreadId && conv.externalThreadId.trim()) {
+    return conv.externalThreadId.trim();
+  }
+  const idRows = await db
+    .select({ externalId: contactIdentities.externalId })
+    .from(contactIdentities)
+    .where(and(eq(contactIdentities.contactId, contact.id), eq(contactIdentities.channel, 'WHATSAPP')))
+    .limit(1);
+  return idRows[0]?.externalId || null;
+}
+
 async function sendCsatCtaForConversation(
   conv: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
@@ -71,7 +89,7 @@ async function sendCsatCtaForConversation(
 
   const targetSession = opts.session?.trim() || conv.wahaSession || undefined;
   const convChannel = ((conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
-  let sendResult: { success: boolean; messageId?: string; error?: string };
+  let sendResult: { success: boolean; messageId?: string; sessionUsed?: string; error?: string };
 
   if (convChannel !== 'WHATSAPP') {
     const out = await sendOutboundChannelMessage({
@@ -83,22 +101,27 @@ async function sendCsatCtaForConversation(
     });
     sendResult = { success: true, messageId: out.externalMessageId || undefined };
   } else {
-    if (!contact.nomorWhatsapp) {
+    const targetWa = await resolveWhatsAppTarget(conv, contact);
+    if (!targetWa) {
       throw new Error('Kontak belum memiliki nomor WhatsApp');
     }
     sendResult = await wahaService.sendTextMessage(
-      contact.nomorWhatsapp,
+      targetWa,
       ctaBody,
       targetSession
     );
+    if (!sendResult.success) {
+      throw new Error(sendResult.error || 'Gagal mengirim tautan CSAT melalui WhatsApp');
+    }
   }
 
+  const effectiveSession = sendResult.sessionUsed || targetSession || null;
   const now = new Date();
   await db.insert(csatResponses).values({
     id: crypto.randomUUID(),
     conversationId: conv.id,
     contactId: conv.contactId,
-    wahaSession: targetSession || null,
+    wahaSession: effectiveSession,
     assignedAgentId: conv.assignedAgentId || null,
     assignedAgentName: conv.assignedAgentName || null,
     token,
@@ -114,12 +137,13 @@ async function sendCsatCtaForConversation(
       contactId: conv.contactId,
       direction: 'OUTBOUND',
       messageType: 'CSAT',
-      wahaSession: targetSession || null,
+      channel: convChannel,
+      wahaSession: effectiveSession,
       body: ctaBody,
-      wahaMessageId: sendResult.messageId,
-      status: sendResult.success ? 'SENT' : 'FAILED',
-      ackStatus: sendResult.success ? 1 : -1,
-      sentAt: sendResult.success ? now : null,
+      wahaMessageId: sendResult.messageId || null,
+      status: 'SENT',
+      ackStatus: 1,
+      sentAt: now,
       createdAt: now,
     })
     .returning();
@@ -128,7 +152,7 @@ async function sendCsatCtaForConversation(
     .update(conversations)
     .set({
       csatToken: token,
-      wahaSession: targetSession || conv.wahaSession,
+      wahaSession: effectiveSession || conv.wahaSession,
       firstResponseAt: conv.firstInboundAt && !conv.firstResponseAt ? now : conv.firstResponseAt,
       lastMessage: ctaBody,
       lastMessageAt: now,
@@ -320,18 +344,34 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const rawUrl = String(req.query?.url || '').trim();
-      if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) {
+      if (!rawUrl) {
         return reply.status(400).send({ success: false, error: 'Invalid media url' });
       }
       const wahaCfg = await wahaService.getConfig(true);
-      let targetUrl: URL;
       let wahaOrigin = '';
       try {
-        targetUrl = new URL(rawUrl);
         wahaOrigin = new URL(wahaCfg.baseUrl).origin;
       } catch {
-        return reply.status(400).send({ success: false, error: 'URL media tidak valid' });
+        return reply.status(400).send({ success: false, error: 'Base URL WAHA belum valid' });
       }
+
+      let targetUrl: URL;
+      if (rawUrl.startsWith('/api/files/') || rawUrl.startsWith('/files/')) {
+        targetUrl = new URL(rawUrl, wahaOrigin);
+      } else if (/^https?:\/\//i.test(rawUrl)) {
+        targetUrl = new URL(rawUrl);
+        const host = targetUrl.hostname.toLowerCase();
+        const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+        if (
+          isLoopback &&
+          (targetUrl.pathname.startsWith('/api/files/') || targetUrl.pathname.startsWith('/files/'))
+        ) {
+          targetUrl = new URL(`${targetUrl.pathname}${targetUrl.search}`, wahaOrigin);
+        }
+      } else {
+        return reply.status(400).send({ success: false, error: 'Invalid media url' });
+      }
+
       if (!wahaOrigin || targetUrl.origin !== wahaOrigin) {
         return reply.status(403).send({
           success: false,
@@ -432,11 +472,11 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .where(eq(chatMessages.conversationId, req.params.id))
         .orderBy(asc(chatMessages.createdAt));
 
-      // Reset unread count
+      // Reset unread count only when needed without mutating conversation sort timestamp
       await db
         .update(conversations)
-        .set({ unreadCount: 0, updatedAt: new Date() })
-        .where(eq(conversations.id, req.params.id));
+        .set({ unreadCount: 0 })
+        .where(and(eq(conversations.id, req.params.id), gt(conversations.unreadCount, 0)));
 
       return reply.send({ success: true, data: messages });
     } catch (error: any) {
@@ -489,6 +529,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .values({
           id: crypto.randomUUID(),
           contactId: contact.id,
+          channel: 'WHATSAPP',
           status: 'OPEN',
           wahaSession: targetSession,
           unreadCount: 0,
@@ -741,7 +782,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const targetSession = session?.trim() || conversation.conv.wahaSession || undefined;
       const convChannel = ((conversation.conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
-      let sendResult: { success: boolean; messageId?: string; error?: string };
+      let sendResult: { success: boolean; messageId?: string; sessionUsed?: string; error?: string };
       let mediaType: string | null = null;
       let storedMediaUrl: string | null = null;
 
@@ -761,10 +802,11 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         });
         sendResult = { success: true, messageId: out.externalMessageId || undefined };
       } else {
-        if (!conversation.contact.nomorWhatsapp) {
+        const targetWa = await resolveWhatsAppTarget(conversation.conv, conversation.contact);
+        if (!targetWa) {
           return reply.status(400).send({
             success: false,
-            error: 'Kontak ini belum memiliki nomor WhatsApp',
+            error: 'Kontak ini belum memiliki nomor WhatsApp atau WhatsApp ID (@lid)',
           });
         }
         if (mediaBase64 && mediaMimetype) {
@@ -781,7 +823,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               : `data:${mediaMimetype};base64,${mediaBase64}`;
           }
           sendResult = await wahaService.sendMediaMessage(
-            conversation.contact.nomorWhatsapp,
+            targetWa,
             {
               base64: mediaBase64,
               mimetype: mediaMimetype,
@@ -792,7 +834,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           );
         } else {
           sendResult = await wahaService.sendTextMessage(
-            conversation.contact.nomorWhatsapp,
+            targetWa,
             bodyText,
             targetSession
           );
@@ -802,6 +844,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const now = new Date();
       const messageId = crypto.randomUUID();
       const displayBody = bodyText || (mediaName ? `[Lampiran: ${mediaName}]` : '[Lampiran Media]');
+      const effectiveSession = sendResult.sessionUsed || targetSession || null;
+      const sendErrorMsg = sendResult.success ? null : (sendResult.error || 'Gagal mengirim pesan WhatsApp');
 
       const inserted = await db
         .insert(chatMessages)
@@ -811,39 +855,168 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           contactId: conversation.conv.contactId,
           direction: 'OUTBOUND',
           messageType: mediaType ? 'MEDIA' : 'TEXT',
-          wahaSession: targetSession || null,
+          channel: convChannel,
+          externalMessageId: convChannel === 'WHATSAPP' ? null : (sendResult.messageId || null),
+          wahaSession: convChannel === 'WHATSAPP' ? effectiveSession : null,
           body: displayBody,
           mediaUrl: storedMediaUrl,
           mediaType,
           mediaName: mediaName || null,
-          wahaMessageId: sendResult.messageId,
+          wahaMessageId: convChannel === 'WHATSAPP' && sendResult.success ? (sendResult.messageId || null) : null,
           status: sendResult.success ? 'SENT' : 'FAILED',
           ackStatus: sendResult.success ? 1 : -1,
+          errorMessage: sendErrorMsg,
           sentAt: sendResult.success ? now : null,
           createdAt: now,
         })
         .returning();
 
-      await db
-        .update(conversations)
-        .set({
-          wahaSession: targetSession || conversation.conv.wahaSession,
-          firstResponseAt:
-            conversation.conv.firstInboundAt && !conversation.conv.firstResponseAt
-              ? now
-              : conversation.conv.firstResponseAt,
-          lastMessage: displayBody,
-          lastMessageAt: now,
-          updatedAt: now,
-        })
-        .where(eq(conversations.id, conversation.conv.id));
+      if (sendResult.success) {
+        await db
+          .update(conversations)
+          .set({
+            wahaSession: effectiveSession || conversation.conv.wahaSession,
+            firstResponseAt:
+              conversation.conv.firstInboundAt && !conversation.conv.firstResponseAt
+                ? now
+                : conversation.conv.firstResponseAt,
+            lastMessage: displayBody,
+            lastMessageAt: now,
+            updatedAt: now,
+          })
+          .where(eq(conversations.id, conversation.conv.id));
+      }
 
       liveEvents.emit('conversations:update', { conversationId: conversation.conv.id });
       liveEvents.emit('tracking:update', { conversationId: conversation.conv.id });
 
-      return reply.status(201).send({ success: true, data: inserted[0] });
+      return reply.status(201).send({
+        success: true,
+        sendFailed: !sendResult.success,
+        error: sendErrorMsg || undefined,
+        data: inserted[0],
+      });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST retry sending a FAILED outbound message in-place
+  fastify.post('/:id/messages/:messageId/retry', async (req: FastifyRequest<{
+    Params: { id: string; messageId: string };
+    Body: { session?: string } | undefined;
+  }>, reply: FastifyReply) => {
+    try {
+      const msgRows = await db
+        .select()
+        .from(chatMessages)
+        .where(and(eq(chatMessages.id, req.params.messageId), eq(chatMessages.conversationId, req.params.id)));
+      const msg = msgRows[0];
+      if (!msg) {
+        return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
+      }
+      if (msg.direction !== 'OUTBOUND' || (msg.status !== 'FAILED' && msg.ackStatus >= 0)) {
+        return reply.status(400).send({ success: false, error: 'Hanya pesan keluar yang gagal yang dapat dikirim ulang' });
+      }
+
+      const convList = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(eq(conversations.id, req.params.id));
+      const conversation = convList[0];
+      if (!conversation || !conversation.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
+      const targetSession = req.body?.session?.trim() || msg.wahaSession || conversation.conv.wahaSession || undefined;
+      const convChannel = ((conversation.conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+      let sendResult: { success: boolean; messageId?: string; sessionUsed?: string; error?: string };
+
+      if (convChannel !== 'WHATSAPP') {
+        const out = await sendOutboundChannelMessage({
+          channel: convChannel,
+          channelAccountId: conversation.conv.channelAccountId,
+          contactId: conversation.conv.contactId,
+          externalThreadId: conversation.conv.externalThreadId,
+          text: msg.body,
+        });
+        sendResult = { success: true, messageId: out.externalMessageId || undefined };
+      } else {
+        const targetWa = await resolveWhatsAppTarget(conversation.conv, conversation.contact);
+        if (!targetWa) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Kontak ini belum memiliki nomor WhatsApp atau WhatsApp ID (@lid)',
+          });
+        }
+        if (msg.messageType === 'MEDIA') {
+          if (!msg.mediaUrl || !msg.mediaUrl.startsWith('data:')) {
+            return reply.status(400).send({
+              success: false,
+              error: 'Lampiran berkas tidak tersimpan untuk kirim ulang. Unggah ulang berkas melalui kolom balas.',
+            });
+          }
+          const mimeMatch = msg.mediaUrl.match(/^data:([^;]+);base64,/);
+          sendResult = await wahaService.sendMediaMessage(
+            targetWa,
+            {
+              base64: msg.mediaUrl,
+              mimetype: mimeMatch?.[1] || 'image/png',
+              filename: msg.mediaName || 'attachment',
+              caption: msg.body.startsWith('[Lampiran:') ? '' : msg.body,
+            },
+            targetSession
+          );
+        } else {
+          sendResult = await wahaService.sendTextMessage(targetWa, msg.body, targetSession);
+        }
+      }
+
+      const now = new Date();
+      const effectiveSession = sendResult.sessionUsed || targetSession || null;
+      const sendErrorMsg = sendResult.success ? null : (sendResult.error || 'Gagal mengirim ulang pesan WhatsApp');
+
+      const [updated] = await db
+        .update(chatMessages)
+        .set({
+          wahaSession: convChannel === 'WHATSAPP' ? effectiveSession : null,
+          wahaMessageId: convChannel === 'WHATSAPP' && sendResult.success ? (sendResult.messageId || null) : null,
+          externalMessageId: convChannel === 'WHATSAPP' ? null : (sendResult.messageId || null),
+          status: sendResult.success ? 'SENT' : 'FAILED',
+          ackStatus: sendResult.success ? 1 : -1,
+          errorMessage: sendErrorMsg,
+          sentAt: sendResult.success ? now : null,
+        })
+        .where(eq(chatMessages.id, msg.id))
+        .returning();
+
+      if (sendResult.success) {
+        await db
+          .update(conversations)
+          .set({
+            wahaSession: effectiveSession || conversation.conv.wahaSession,
+            firstResponseAt:
+              conversation.conv.firstInboundAt && !conversation.conv.firstResponseAt
+                ? now
+                : conversation.conv.firstResponseAt,
+            lastMessage: msg.body,
+            lastMessageAt: now,
+            updatedAt: now,
+          })
+          .where(eq(conversations.id, conversation.conv.id));
+      }
+
+      liveEvents.emit('conversations:update', { conversationId: conversation.conv.id });
+      liveEvents.emit('tracking:update', { conversationId: conversation.conv.id });
+
+      return reply.send({
+        success: sendResult.success,
+        error: sendErrorMsg || undefined,
+        data: updated,
+      });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 }

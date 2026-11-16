@@ -161,6 +161,10 @@ export class LicenseService {
     return LicenseService.instance;
   }
 
+  public getCachedPublicUrls(): string[] {
+    return Array.isArray(this.cachedLicense?.publicUrls) ? this.cachedLicense.publicUrls : [];
+  }
+
   /**
    * Get current license information, synced with Reneo Panel
    */

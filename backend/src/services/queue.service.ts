@@ -90,7 +90,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
     }
 
     // Attempt to send via selected channel
-    let sendResult: { success: boolean; messageId?: string; error?: string };
+    let sendResult: { success: boolean; messageId?: string; sessionUsed?: string; error?: string };
     if (targetChannel !== 'WHATSAPP') {
       try {
         const ext = await sendOutboundChannelMessage({
@@ -115,6 +115,8 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
 
     if (sendResult.success) {
       const now = new Date();
+      const effectiveSession =
+        targetChannel === 'WHATSAPP' ? sendResult.sessionUsed || sessionName || null : null;
 
       // Update recipient record
       await db
@@ -164,7 +166,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
             contactId,
             channel: targetChannel,
             channelAccountId: targetChannel === 'WHATSAPP' ? null : channelAccountId,
-            wahaSession: targetChannel === 'WHATSAPP' ? sessionName || null : null,
+            wahaSession: effectiveSession,
             lastMessage: message,
             lastMessageAt: now,
             unreadCount: 0,
@@ -175,7 +177,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           await db
             .update(conversations)
             .set({
-              wahaSession: targetChannel === 'WHATSAPP' ? sessionName || undefined : undefined,
+              wahaSession: effectiveSession || undefined,
               channelAccountId: targetChannel === 'WHATSAPP' ? undefined : channelAccountId || undefined,
               lastMessage: message,
               lastMessageAt: now,
@@ -192,7 +194,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           messageType: 'TEXT',
           channel: targetChannel,
           externalMessageId: sendResult.messageId || null,
-          wahaSession: targetChannel === 'WHATSAPP' ? sessionName || null : null,
+          wahaSession: effectiveSession,
           body: message,
           wahaMessageId: sendResult.messageId,
           status: 'SENT',

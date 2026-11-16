@@ -128,6 +128,10 @@ export const Settings: React.FC<SettingsProps> = ({
   const [confirmAction, setConfirmAction] = useState<'stop' | 'logout' | null>(null);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
   const [webhookCopied, setWebhookCopied] = useState(false);
+  const [webhookUrlDraft, setWebhookUrlDraft] = useState('');
+  const webhookDirtyRef = useRef(false);
+  const [savingWebhook, setSavingWebhook] = useState(false);
+  const [syncingWebhook, setSyncingWebhook] = useState(false);
 
   // Multi-Agent state (ADMIN only)
   const isAdmin = !currentUser || currentUser.role !== 'AGENT';
@@ -295,6 +299,9 @@ export const Settings: React.FC<SettingsProps> = ({
           setBaseUrl(ext.baseUrl || '');
           setApiKey(ext.apiKey || '');
         }
+      }
+      if (!webhookDirtyRef.current) {
+        setWebhookUrlDraft(wahaStatus.config.customWebhookUrl || '');
       }
     }
   }, [wahaStatus]);
@@ -649,7 +656,24 @@ export const Settings: React.FC<SettingsProps> = ({
   };
 
   const activeStatusMeta = getSessionStatusMeta(effectiveSessionStatus);
-  const webhookUrlValue = wahaStatus?.webhookUrl || `${window.location.origin}/api/waha/webhook`;
+  const browserPublicWebhook = (() => {
+    try {
+      const host = window.location.hostname.toLowerCase();
+      const isLocal =
+        host === 'localhost' ||
+        host === '127.0.0.1' ||
+        host === '::1' ||
+        !host.includes('.');
+      if (isLocal) return '';
+      const appMatch = window.location.pathname.match(/^(\/app\/[^/]+)/);
+      return `${window.location.origin}${appMatch ? appMatch[1] : ''}/api/waha/webhook`;
+    } catch {
+      return '';
+    }
+  })();
+  const webhookUrlValue = wahaStatus?.webhookUrl || browserPublicWebhook || `${window.location.origin}/api/waha/webhook`;
+  const webhookWarning =
+    savedMode === 'EXTERNAL' && wahaStatus?.webhookReachableForExternal === false;
 
   const handleCopyWebhook = async () => {
     try {
@@ -659,6 +683,59 @@ export const Settings: React.FC<SettingsProps> = ({
       setTimeout(() => setWebhookCopied(false), 1800);
     } catch {
       toast.error('Gagal menyalin URL Webhook.');
+    }
+  };
+
+  const handleSaveWebhookUrl = async (overrideUrl?: string) => {
+    if (savingWebhook) return;
+    const nextUrl = (overrideUrl !== undefined ? overrideUrl : webhookUrlDraft).trim();
+    const extUrl = (wahaStatus?.config?.externalConfig?.baseUrl || baseUrl).trim();
+    if (savedMode === 'EXTERNAL' && !extUrl) {
+      toast.error('Simpan Base URL WAHA Eksternal terlebih dahulu.');
+      return;
+    }
+    setSavingWebhook(true);
+    try {
+      await api.updateWahaSettings({
+        mode: savedMode,
+        ...(savedMode === 'EXTERNAL' ? { baseUrl: extUrl } : {}),
+        webhookUrl: nextUrl,
+      });
+      webhookDirtyRef.current = false;
+      setWebhookUrlDraft(nextUrl);
+      const syncRes = await api.syncWahaWebhooks().catch(() => null);
+      if (syncRes?.skippedReason) {
+        toast.info(syncRes.skippedReason);
+      } else if (syncRes && syncRes.synced.length > 0) {
+        toast.success(`URL Webhook disimpan & diterapkan ke ${syncRes.synced.length} sesi WAHA.`);
+      } else {
+        toast.success(nextUrl ? 'URL Webhook kustom disimpan.' : 'URL Webhook dikembalikan ke deteksi otomatis.');
+      }
+      await Promise.resolve(onRefreshStatus());
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menyimpan URL Webhook');
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
+  const handleSyncWebhooksNow = async () => {
+    if (syncingWebhook || isPendingModeSwitch) return;
+    setSyncingWebhook(true);
+    try {
+      const res = await api.syncWahaWebhooks();
+      if (res.skippedReason) {
+        toast.error(res.skippedReason);
+      } else if (res.synced.length > 0) {
+        toast.success(`Webhook disinkronkan ke ${res.synced.length} sesi (${res.synced.join(', ')}).`);
+      } else {
+        toast.info('Belum ada sesi WAHA untuk disinkronkan.');
+      }
+      await Promise.resolve(onRefreshStatus());
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menyinkronkan webhook WAHA');
+    } finally {
+      setSyncingWebhook(false);
     }
   };
 
@@ -1101,7 +1178,7 @@ export const Settings: React.FC<SettingsProps> = ({
               </p>
             </div>
 
-            {sessions.length > 1 && (
+            {sessions.length > 0 && (
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Sesi WhatsApp Pengirim
@@ -1301,27 +1378,110 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 text-xs space-y-2.5">
+          <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 text-xs space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-gray-900 font-semibold text-sm">Webhook Tracking Otomatis</h3>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => void handleCopyWebhook()}
-              >
-                {webhookCopied ? 'Tersalin' : 'Salin'}
-              </Button>
+              <h3 className="text-gray-900 font-semibold text-sm">Webhook Masuk &amp; Tracking (WAHA)</h3>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={syncingWebhook}
+                  disabled={isPendingModeSwitch || isServerOffline}
+                  onClick={() => void handleSyncWebhooksNow()}
+                >
+                  Sinkronkan
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleCopyWebhook()}
+                >
+                  {webhookCopied ? 'Tersalin' : 'Salin'}
+                </Button>
+              </div>
             </div>
             <p className="text-gray-500 text-[11px] leading-relaxed">
-              WAHA mengirimkan event <code className="font-mono text-gray-800">message.ack</code> ke endpoint backend CRM:
+              WAHA mengirimkan event <code className="font-mono text-gray-800">message</code> (chat masuk ke Inbox) dan <code className="font-mono text-gray-800">message.ack</code> (status centang dua/biru) ke endpoint ini:
             </p>
             <div className="bg-gray-50 p-2.5 rounded-md font-mono text-[11px] text-gray-800 break-all select-all border border-gray-200">
               {webhookUrlValue}
             </div>
-            <p className="text-[11px] text-gray-500">
-              Event ini mencatat status pesan sampai (Centang Dua) dan dibaca (Centang Biru).
-            </p>
+
+            {webhookWarning && (
+              <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-2 leading-relaxed">
+                <p>
+                  URL di atas masih alamat internal Docker sehingga server <strong>WAHA Eksternal</strong> tidak dapat mengirim chat masuk ke CRM. Masukkan URL HTTPS publik CRM Anda di bawah lalu simpan.
+                </p>
+                {browserPublicWebhook && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    isLoading={savingWebhook}
+                    onClick={() => void handleSaveWebhookUrl(browserPublicWebhook)}
+                  >
+                    Pakai URL Publik Ini &amp; Terapkan
+                  </Button>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-1.5 pt-1 border-t border-gray-100">
+              <label className="block text-[11px] font-medium text-gray-700">
+                Override URL Webhook Publik (Opsional)
+              </label>
+              <div className="flex flex-col sm:flex-row gap-1.5">
+                <input
+                  type="url"
+                  placeholder={browserPublicWebhook || 'https://crm.domainanda.com/api/waha/webhook'}
+                  value={webhookUrlDraft}
+                  onChange={(e) => {
+                    webhookDirtyRef.current = true;
+                    setWebhookUrlDraft(e.target.value);
+                  }}
+                  className="w-full flex-none sm:flex-1 h-8 px-2.5 bg-white border border-gray-200 rounded-md text-[11px] font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={savingWebhook}
+                  onClick={() => void handleSaveWebhookUrl()}
+                  className="shrink-0"
+                >
+                  Simpan
+                </Button>
+              </div>
+              <p className="text-[10px] text-gray-400">
+                Kosongkan lalu klik Simpan untuk memakai deteksi URL otomatis.
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-gray-100 text-[11px] text-gray-500">
+              {wahaStatus?.lastWebhook ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span
+                    className={`inline-block w-2 h-2 rounded-full ${
+                      wahaStatus.lastWebhook.outcome === 'ERROR'
+                        ? 'bg-red-500'
+                        : wahaStatus.lastWebhook.outcome === 'IGNORED'
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                    }`}
+                  />
+                  <span>
+                    Terakhir diterima: <strong className="font-mono text-gray-700">{wahaStatus.lastWebhook.event}</strong>
+                    {wahaStatus.lastWebhook.session ? ` (${wahaStatus.lastWebhook.session})` : ''}
+                    {' • '}
+                    {new Date(wahaStatus.lastWebhook.receivedAt).toLocaleTimeString('id-ID')}
+                  </span>
+                </div>
+              ) : (
+                <span>Belum ada event webhook diterima sejak backend CRM dimulai.</span>
+              )}
+            </div>
           </div>
         </div>
       </div>

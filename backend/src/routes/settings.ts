@@ -9,6 +9,7 @@ import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { notifyAlertWebhook } from '../services/automation.service';
 import { requirePermission } from './auth';
+import { resolveRequestPublicBase } from './waha';
 
 export default async function settingsRouter(fastify: FastifyInstance) {
   // GET all settings
@@ -50,11 +51,13 @@ export default async function settingsRouter(fastify: FastifyInstance) {
 
   // POST update WAHA settings
   fastify.post<{
-    Body: { mode?: 'INTERNAL' | 'EXTERNAL'; baseUrl?: string; apiKey?: string; session?: string };
+    Body: { mode?: 'INTERNAL' | 'EXTERNAL'; baseUrl?: string; apiKey?: string; session?: string; webhookUrl?: string };
   }>('/waha', { preHandler: requirePermission('settings') }, async (req, reply: FastifyReply) => {
     try {
-      const { mode = 'INTERNAL', baseUrl, apiKey, session } = req.body || {};
+      const { mode = 'INTERNAL', baseUrl, apiKey, session, webhookUrl } = req.body || {};
       const now = new Date();
+      const publicBase = resolveRequestPublicBase(req);
+      await wahaService.rememberPublicBaseUrl(publicBase);
 
       const pairs: Array<{ key: string; value: string }> = [
         { key: 'waha_mode', value: mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL' },
@@ -78,6 +81,21 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         pairs.push({ key: 'waha_session', value: session.trim() });
       }
 
+      if (webhookUrl !== undefined) {
+        const cleanWebhook = String(webhookUrl || '').trim();
+        if (!cleanWebhook) {
+          await db.delete(systemSettings).where(eq(systemSettings.key, 'waha_webhook_url'));
+        } else {
+          if (!/^https?:\/\//i.test(cleanWebhook)) {
+            return reply.status(400).send({
+              success: false,
+              error: 'URL Webhook WAHA harus diawali http:// atau https://',
+            });
+          }
+          pairs.push({ key: 'waha_webhook_url', value: cleanWebhook });
+        }
+      }
+
       for (const p of pairs) {
         await db
           .insert(systemSettings)
@@ -88,6 +106,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
           });
       }
 
+      void wahaService.syncSessionWebhooks(publicBase).catch(() => {});
       liveEvents.emit('waha:status', { action: 'settings', mode });
       return reply.send({ success: true, message: 'Pengaturan WAHA berhasil disimpan' });
     } catch (error: any) {

@@ -59,7 +59,12 @@ async function main() {
       return;
     }
     const urlPath = req.url.split('?')[0];
-    if (urlPath === '/health' || urlPath.startsWith('/api/channels/webhook/')) {
+    if (
+      urlPath === '/health' ||
+      urlPath.startsWith('/api/channels/webhook/') ||
+      urlPath === '/api/waha/webhook' ||
+      urlPath.startsWith('/api/waha/webhook/')
+    ) {
       return;
     }
 

@@ -128,6 +128,16 @@ export const api = {
     const res = await client.post(`/conversations/${id}/messages`, payload);
     return res.data.data;
   },
+  retryConversationMessage: async (
+    conversationId: string,
+    messageId: string,
+    session?: string
+  ): Promise<{ success: boolean; error?: string; data: ChatMessage }> => {
+    const res = await client.post(`/conversations/${conversationId}/messages/${messageId}/retry`, {
+      ...(session ? { session } : {}),
+    });
+    return res.data;
+  },
   updateConversation: async (
     id: string,
     payload: {
@@ -217,9 +227,14 @@ export const api = {
     baseUrl?: string;
     apiKey?: string;
     session?: string;
+    webhookUrl?: string;
   }): Promise<any> => {
     const res = await client.post('/settings/waha', data);
     return res.data;
+  },
+  syncWahaWebhooks: async (): Promise<{ webhookUrl: string; synced: string[]; skippedReason?: string }> => {
+    const res = await client.post('/waha/webhook/sync');
+    return res.data.data;
   },
   testWahaConnection: async (data?: {
     mode?: 'INTERNAL' | 'EXTERNAL';

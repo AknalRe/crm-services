@@ -22,13 +22,18 @@ export function normalizePhoneNumber(phone: string): string {
 
 export function toWahaChatId(phone: string): string {
   const trimmed = (phone || '').trim();
-  if (/^[^@\s]+@s\.whatsapp\.net$/i.test(trimmed)) {
-    return trimmed.replace(/@s\.whatsapp\.net$/i, '@c.us');
+  if (!trimmed) return '';
+  const deviceJidMatch = trimmed.match(/^([^@\s:]+)(?::\d+)?@(s\.whatsapp\.net|c\.us|lid)$/i);
+  if (deviceJidMatch) {
+    const userPart = deviceJidMatch[1];
+    const domain = deviceJidMatch[2].toLowerCase();
+    return `${userPart}@${domain === 's.whatsapp.net' ? 'c.us' : domain}`;
   }
-  if (/^[^@\s]+@(c\.us|lid|g\.us|broadcast)$/i.test(trimmed)) {
+  if (/^[^@\s]+@(g\.us|broadcast)$/i.test(trimmed)) {
     return trimmed;
   }
   const normalized = normalizePhoneNumber(trimmed);
+  if (!normalized) return '';
   if (!normalized.endsWith('@c.us')) {
     return `${normalized}@c.us`;
   }
@@ -36,6 +41,20 @@ export function toWahaChatId(phone: string): string {
 }
 
 export function fromWahaChatId(chatId: string): string {
-  return chatId.replace('@c.us', '').replace('@s.whatsapp.net', '');
+  const withoutDomain = String(chatId || '')
+    .trim()
+    .replace(/@(c\.us|s\.whatsapp\.net|lid|g\.us|broadcast|newsletter)$/i, '');
+  const colonIdx = withoutDomain.indexOf(':');
+  return colonIdx !== -1 ? withoutDomain.slice(0, colonIdx) : withoutDomain;
+}
+
+export function isPhoneWahaJid(jid: string): boolean {
+  const clean = String(jid || '').trim().toLowerCase();
+  return clean.endsWith('@c.us') || clean.endsWith('@s.whatsapp.net');
+}
+
+export function isPersonalWahaJid(jid: string): boolean {
+  const clean = String(jid || '').trim().toLowerCase();
+  return isPhoneWahaJid(clean) || clean.endsWith('@lid');
 }
 

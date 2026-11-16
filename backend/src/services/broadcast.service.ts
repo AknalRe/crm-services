@@ -233,13 +233,40 @@ export class BroadcastService {
       isScheduled && scheduleDate ? Math.max(0, scheduleDate.getTime() - Date.now()) : 0;
 
     let rotationPool: string[] = [];
-    if (normalizedChannel === 'WHATSAPP' && sessionName === '__ALL_ACTIVE__') {
+    if (normalizedChannel === 'WHATSAPP') {
       try {
         const listed = await wahaService.listSessions();
-        rotationPool = listed.sessions
+        const workingSessions = listed.sessions
           .filter((s) => s.status === 'WORKING')
           .map((s) => s.name);
-      } catch {
+
+        if (sessionName === '__ALL_ACTIVE__') {
+          rotationPool = workingSessions;
+        } else if (!isScheduled) {
+          const requested = sessionName?.trim();
+          if (requested && !listed.sessions.some((s) => s.name === requested && s.status === 'WORKING')) {
+            const matched = listed.sessions.find((s) => s.name === requested);
+            throw new Error(
+              matched
+                ? `Sesi WhatsApp "${requested}" berstatus ${matched.status}. Pastikan sesi WORKING sebelum mengirim siaran.`
+                : `Sesi WhatsApp "${requested}" tidak ditemukan di server WAHA.`
+            );
+          }
+          if (!requested && workingSessions.length === 0) {
+            throw new Error(
+              'Tidak ada sesi WhatsApp yang berstatus WORKING. Scan QR atau start sesi WAHA terlebih dahulu.'
+            );
+          }
+        }
+        if (sessionName === '__ALL_ACTIVE__' && !isScheduled && rotationPool.length === 0) {
+          throw new Error(
+            'Tidak ada sesi WhatsApp yang berstatus WORKING untuk rotasi siaran.'
+          );
+        }
+      } catch (sessErr: any) {
+        if (!isScheduled) {
+          throw sessErr;
+        }
         rotationPool = [];
       }
     }
@@ -381,6 +408,18 @@ export class BroadcastService {
       })
       .where(eq(campaigns.id, campaignId));
 
+    let retryPool: string[] = [];
+    if (targetChannel === 'WHATSAPP') {
+      try {
+        const listed = await wahaService.listSessions();
+        retryPool = listed.sessions
+          .filter((s) => s.status === 'WORKING')
+          .map((s) => s.name);
+      } catch {
+        retryPool = [];
+      }
+    }
+
     for (let i = 0; i < failedRecipients.length; i++) {
       const recipient = failedRecipients[i];
       const batchNumber = Math.floor(i / batchSize);
@@ -388,6 +427,7 @@ export class BroadcastService {
         i * (delaySeconds * 1000) +
         batchNumber * (intervalSeconds * 1000) +
         Math.floor(Math.random() * 1200);
+      const retrySession = retryPool.length > 0 ? retryPool[i % retryPool.length] : undefined;
 
       await broadcastQueue.add(
         'send-message',
@@ -397,6 +437,7 @@ export class BroadcastService {
           contactId: recipient.contactId,
           phone: recipient.phone,
           message: recipient.personalizedMessage,
+          sessionName: retrySession,
           channel: targetChannel,
           channelAccountId: campaign.channelAccountId || null,
         },

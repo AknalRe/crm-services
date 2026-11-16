@@ -109,6 +109,7 @@ export const chatMessages = pgTable('chat_messages', {
   wahaMessageId: text('waha_message_id').unique(),
   status: text('status').default('PENDING').notNull(),
   ackStatus: integer('ack_status').default(0).notNull(),
+  errorMessage: text('error_message'),
   sentAt: timestamp('sent_at'),
   deliveredAt: timestamp('delivered_at'),
   readAt: timestamp('read_at'),

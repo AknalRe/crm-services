@@ -86,12 +86,19 @@ async function sendAutoReplyMessage(params: {
     text,
   } = params;
   const now = new Date();
-  let msgId = `auto_${crypto.randomUUID()}`;
+  let msgId: string | null = `auto_${crypto.randomUUID()}`;
+  let sendSucceeded = true;
+  let effectiveSession: string | null = channel === 'WHATSAPP' ? sessionName || null : null;
+  let sendError: string | null = null;
 
   if (channel === 'WHATSAPP') {
-    if (!phone) return;
-    const sendRes = await wahaService.sendTextMessage(phone, text, sessionName || undefined);
-    msgId = sendRes?.messageId || msgId;
+    const targetWa = phone || externalThreadId;
+    if (!targetWa) return;
+    const sendRes = await wahaService.sendTextMessage(targetWa, text, sessionName || undefined);
+    sendSucceeded = sendRes.success;
+    msgId = sendRes.success ? sendRes.messageId || msgId : null;
+    effectiveSession = sendRes.sessionUsed || sessionName || null;
+    sendError = sendRes.success ? null : sendRes.error || 'Auto-reply WhatsApp gagal terkirim';
   } else {
     const out = await sendOutboundChannelMessage({
       channel,
@@ -113,24 +120,28 @@ async function sendAutoReplyMessage(params: {
     messageType: 'TEXT',
     channel,
     externalMessageId: channel === 'WHATSAPP' ? null : msgId,
-    wahaSession: channel === 'WHATSAPP' ? sessionName || null : null,
+    wahaSession: channel === 'WHATSAPP' ? effectiveSession : null,
     body: text,
     wahaMessageId: channel === 'WHATSAPP' ? msgId : null,
-    status: 'SENT',
-    ackStatus: 1,
-    sentAt: now,
+    status: sendSucceeded ? 'SENT' : 'FAILED',
+    ackStatus: sendSucceeded ? 1 : -1,
+    errorMessage: sendError,
+    sentAt: sendSucceeded ? now : null,
     createdAt: now,
   });
 
-  await db
-    .update(conversations)
-    .set({
-      lastMessage: text,
-      lastMessageAt: now,
-      firstResponseAt: sql`COALESCE(${conversations.firstResponseAt}, ${now})`,
-      updatedAt: now,
-    })
-    .where(eq(conversations.id, conversationId));
+  if (sendSucceeded) {
+    await db
+      .update(conversations)
+      .set({
+        wahaSession: effectiveSession || undefined,
+        lastMessage: text,
+        lastMessageAt: now,
+        firstResponseAt: sql`COALESCE(${conversations.firstResponseAt}, ${now})`,
+        updatedAt: now,
+      })
+      .where(eq(conversations.id, conversationId));
+  }
 
   liveEvents.emit('conversations:update', { conversationId, channel });
 }
@@ -288,7 +299,7 @@ export async function handleInboundAutomation(params: {
       sessionName,
     };
 
-    if (channel === 'WHATSAPP' && !contact.nomorWhatsapp) return;
+    if (channel === 'WHATSAPP' && !contact.nomorWhatsapp && !externalThreadId) return;
 
     // 2. Keyword Auto-Reply Rules (WhatsApp & Omnichannel)
     const trimmedBody = (inboundBody || '').trim().toLowerCase();

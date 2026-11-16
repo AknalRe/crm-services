@@ -152,6 +152,7 @@ export interface ChatMessage {
   wahaMessageId?: string | null;
   status: string;
   ackStatus: number;
+  errorMessage?: string | null;
   sentAt?: string | null;
   deliveredAt?: string | null;
   readAt?: string | null;
@@ -268,6 +269,15 @@ export interface WahaSessionItem {
   } | null;
 }
 
+export interface WahaWebhookTelemetry {
+  receivedAt: string;
+  event: string;
+  session?: string | null;
+  from?: string | null;
+  outcome: 'PROCESSED' | 'DEDUP' | 'IGNORED' | 'ERROR';
+  note?: string;
+}
+
 export interface WahaStatus {
   connected: boolean;
   sessionStatus: string;
@@ -278,6 +288,8 @@ export interface WahaStatus {
   details?: any;
   error?: string;
   webhookUrl?: string;
+  webhookReachableForExternal?: boolean;
+  lastWebhook?: WahaWebhookTelemetry | null;
   config: {
     baseUrl: string;
     apiKey?: string;
@@ -285,6 +297,7 @@ export interface WahaStatus {
     mode?: 'INTERNAL' | 'EXTERNAL';
     internalLocked?: boolean;
     hasApiKey?: boolean;
+    customWebhookUrl?: string;
     externalConfig?: {
       baseUrl: string;
       apiKey?: string;

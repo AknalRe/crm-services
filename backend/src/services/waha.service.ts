@@ -1,9 +1,55 @@
+import crypto from 'crypto';
 import axios, { AxiosInstance } from 'axios';
 import { eq } from 'drizzle-orm';
 import { config } from '../config';
 import { db } from '../db';
 import { systemSettings } from '../db/schema';
-import { toWahaChatId } from './phone.utils';
+import { licenseService } from './license.service';
+import { fromWahaChatId, isPhoneWahaJid, normalizePhoneNumber, toWahaChatId } from './phone.utils';
+
+export function isPrivateOrInternalUrl(rawUrl?: string | null): boolean {
+  const trimmed = String(rawUrl || '').trim();
+  if (!trimmed) return true;
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (!host) return true;
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host === '0.0.0.0' ||
+      host === 'host.docker.internal' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal')
+    ) {
+      return true;
+    }
+    if (!host.includes('.')) {
+      return true;
+    }
+    if (/^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) {
+      return true;
+    }
+    const octets = host.split('.');
+    if (octets.length === 4 && octets[0] === '172') {
+      const second = Number(octets[1]);
+      if (second >= 16 && second <= 31) return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+export interface WahaWebhookTelemetry {
+  receivedAt: string;
+  event: string;
+  session?: string | null;
+  from?: string | null;
+  outcome: 'PROCESSED' | 'DEDUP' | 'IGNORED' | 'ERROR';
+  note?: string;
+}
 
 export interface WahaConfig {
   baseUrl: string;
@@ -12,6 +58,8 @@ export interface WahaConfig {
   mode?: 'INTERNAL' | 'EXTERNAL';
   internalLocked?: boolean;
   hasApiKey?: boolean;
+  customWebhookUrl?: string;
+  detectedPublicUrl?: string;
   externalConfig?: {
     baseUrl: string;
     apiKey?: string;
@@ -35,8 +83,19 @@ export interface WahaSessionInfo {
 export class WahaService {
   private static instance: WahaService;
   private webhookSyncAt = new Map<string, number>();
+  private lidPhoneCache = new Map<string, string>();
+  private lastWebhookEvent: WahaWebhookTelemetry | null = null;
+  private lastDetectedPublicBaseUrl = '';
 
   private constructor() { }
+
+  public recordWebhookEvent(entry: WahaWebhookTelemetry): void {
+    this.lastWebhookEvent = entry;
+  }
+
+  public getLastWebhookEvent(): WahaWebhookTelemetry | null {
+    return this.lastWebhookEvent;
+  }
 
   public static getInstance(): WahaService {
     if (!WahaService.instance) {
@@ -196,6 +255,13 @@ export class WahaService {
       const urlSetting = settings.find((s) => s.key === 'waha_base_url');
       const keySetting = settings.find((s) => s.key === 'waha_api_key');
       const sessionSetting = settings.find((s) => s.key === 'waha_session');
+      const webhookSetting = settings.find((s) => s.key === 'waha_webhook_url');
+      const detectedPublicSetting = settings.find((s) => s.key === 'waha_detected_public_url');
+      const customWebhookUrl = (webhookSetting?.value || '').trim();
+      const detectedPublicUrl = (detectedPublicSetting?.value || '').trim();
+      if (detectedPublicUrl && !isPrivateOrInternalUrl(detectedPublicUrl)) {
+        this.lastDetectedPublicBaseUrl = detectedPublicUrl;
+      }
 
       const mode: 'INTERNAL' | 'EXTERNAL' =
         modeSetting?.value === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
@@ -224,6 +290,8 @@ export class WahaService {
           mode: 'INTERNAL',
           internalLocked: true,
           hasApiKey: internalConfig.hasApiKey,
+          customWebhookUrl,
+          detectedPublicUrl: detectedPublicUrl || this.lastDetectedPublicBaseUrl || undefined,
           externalConfig,
           internalConfig,
         };
@@ -236,6 +304,8 @@ export class WahaService {
         mode: 'EXTERNAL',
         internalLocked: false,
         hasApiKey: externalConfig.hasApiKey,
+        customWebhookUrl,
+        detectedPublicUrl: detectedPublicUrl || this.lastDetectedPublicBaseUrl || undefined,
         externalConfig,
         internalConfig,
       };
@@ -254,13 +324,19 @@ export class WahaService {
   /**
    * Create Axios client with authentication headers
    */
-  private async getClient(): Promise<{ client: AxiosInstance; session: string; ownerPrefix: string | null }> {
+  private async getClient(): Promise<{
+    client: AxiosInstance;
+    session: string;
+    ownerPrefix: string | null;
+    mode: 'INTERNAL' | 'EXTERNAL';
+  }> {
     const conf = await this.getConfig();
-    const ownerPrefix = this.getOwnerPrefix(conf.mode);
+    const mode: 'INTERNAL' | 'EXTERNAL' = conf.mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+    const ownerPrefix = this.getOwnerPrefix(mode);
     const activeSession =
       ownerPrefix && !this.isOwnedSession(conf.session, ownerPrefix) ? ownerPrefix : conf.session;
     const client = this.createHttpClient(conf.baseUrl, conf.apiKey, 30000);
-    return { client, session: activeSession, ownerPrefix };
+    return { client, session: activeSession, ownerPrefix, mode };
   }
 
   /**
@@ -335,9 +411,152 @@ export class WahaService {
   }
 
   /**
+   * Persist observed public CRM base URL so background jobs / external WAHA webhook sync can use it
+   */
+  public async rememberPublicBaseUrl(rawBaseUrl?: string | null): Promise<void> {
+    const clean = String(rawBaseUrl || '').trim().replace(/\/+$/, '');
+    if (!clean || !/^https?:\/\//i.test(clean) || isPrivateOrInternalUrl(clean)) return;
+    this.lastDetectedPublicBaseUrl = clean;
+    try {
+      const now = new Date();
+      await db
+        .insert(systemSettings)
+        .values({ key: 'waha_detected_public_url', value: clean, updatedAt: now })
+        .onConflictDoUpdate({
+          target: systemSettings.key,
+          set: { value: clean, updatedAt: now },
+        });
+    } catch {
+      // Ignore DB persistence failures in unit tests / readonly scenarios
+    }
+  }
+
+  /**
+   * Resolve the best webhook URL for WAHA events based on active mode (INTERNAL vs EXTERNAL)
+   */
+  public async resolveEffectiveWebhookUrl(
+    currentConfig?: WahaConfig,
+    requestBaseUrl?: string | null
+  ): Promise<{ url: string; isPublic: boolean; source: string }> {
+    const conf = currentConfig || (await this.getConfig(true));
+    const custom = (conf.customWebhookUrl || '').trim();
+    if (custom && /^https?:\/\//i.test(custom)) {
+      return { url: custom, isPublic: !isPrivateOrInternalUrl(custom), source: 'custom' };
+    }
+
+    if (conf.mode !== 'EXTERNAL') {
+      const url = (config.webhookUrl || '').trim();
+      return { url, isPublic: !isPrivateOrInternalUrl(url), source: 'internal' };
+    }
+
+    const candidates: Array<{ base: string; source: string }> = [];
+    if (config.meta.publicBaseUrl) {
+      candidates.push({ base: config.meta.publicBaseUrl, source: 'public_env' });
+    }
+    try {
+      for (const pub of licenseService.getCachedPublicUrls()) {
+        if (pub) candidates.push({ base: pub, source: 'license_public_url' });
+      }
+    } catch {
+      // Ignore license lookup failures
+    }
+    if (requestBaseUrl) {
+      candidates.push({ base: requestBaseUrl, source: 'request_origin' });
+    }
+    if (conf.detectedPublicUrl) {
+      candidates.push({ base: conf.detectedPublicUrl, source: 'detected_origin' });
+    } else if (this.lastDetectedPublicBaseUrl) {
+      candidates.push({ base: this.lastDetectedPublicBaseUrl, source: 'detected_origin' });
+    }
+
+    for (const item of candidates) {
+      const cleanBase = String(item.base || '').trim().replace(/\/+$/, '');
+      if (cleanBase && /^https?:\/\//i.test(cleanBase) && !isPrivateOrInternalUrl(cleanBase)) {
+        const fullUrl = cleanBase.endsWith('/api/waha/webhook')
+          ? cleanBase
+          : `${cleanBase}/api/waha/webhook`;
+        return { url: fullUrl, isPublic: true, source: item.source };
+      }
+    }
+
+    const fallback = (config.webhookUrl || '').trim();
+    return { url: fallback, isPublic: !isPrivateOrInternalUrl(fallback), source: 'internal_fallback' };
+  }
+
+  /**
+   * Resolve a WhatsApp @lid privacy JID to a normalized phone number via WAHA API (cached)
+   */
+  public async resolveLidToPhone(sessionName: string | null | undefined, lidJid: string): Promise<string | null> {
+    const cleanLid = String(lidJid || '').trim();
+    if (!cleanLid || !cleanLid.toLowerCase().endsWith('@lid')) return null;
+
+    const cached = this.lidPhoneCache.get(cleanLid);
+    if (cached) return cached;
+
+    try {
+      const { client, session, ownerPrefix } = await this.getClient();
+      const targetSession = sessionName
+        ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
+        : session;
+
+      const tryExtractPhone = (candidate: unknown): string | null => {
+        if (typeof candidate !== 'string' || !candidate.trim()) return null;
+        if (candidate.toLowerCase().endsWith('@lid')) return null;
+        const normalized = normalizePhoneNumber(fromWahaChatId(candidate));
+        const digits = normalized.replace(/\D/g, '');
+        return digits.length >= 7 && digits.length <= 15 ? normalized : null;
+      };
+
+      const lidRes = await client
+        .get(`/api/${encodeURIComponent(targetSession)}/lids/${encodeURIComponent(cleanLid)}`, {
+          timeout: 3500,
+        })
+        .catch(() => null);
+
+      const lidCandidates = [
+        lidRes?.data?.pn,
+        lidRes?.data?.phoneNumber,
+        lidRes?.data?.id,
+      ];
+      for (const c of lidCandidates) {
+        const phone = tryExtractPhone(c);
+        if (phone) {
+          if (this.lidPhoneCache.size > 2000) this.lidPhoneCache.clear();
+          this.lidPhoneCache.set(cleanLid, phone);
+          return phone;
+        }
+      }
+
+      const contactRes = await client
+        .get('/api/contacts', {
+          params: { contactId: cleanLid, session: targetSession },
+          timeout: 3500,
+        })
+        .catch(() => null);
+
+      const contactCandidates = [
+        contactRes?.data?.number,
+        contactRes?.data?.id,
+        isPhoneWahaJid(String(contactRes?.data?.id || '')) ? contactRes?.data?.id : null,
+      ];
+      for (const c of contactCandidates) {
+        const phone = tryExtractPhone(c);
+        if (phone) {
+          if (this.lidPhoneCache.size > 2000) this.lidPhoneCache.clear();
+          this.lidPhoneCache.set(cleanLid, phone);
+          return phone;
+        }
+      }
+    } catch {
+      // Ignore LID lookup failures cleanly
+    }
+    return null;
+  }
+
+  /**
    * Check connection and server status
    */
-  public async getStatus(): Promise<{
+  public async getStatus(requestBaseUrl?: string | null): Promise<{
     connected: boolean;
     sessionStatus?: string;
     activeSession?: string;
@@ -347,9 +566,18 @@ export class WahaService {
     details?: any;
     error?: string;
     webhookUrl?: string;
+    webhookReachableForExternal?: boolean;
+    lastWebhook?: WahaWebhookTelemetry | null;
     config: WahaConfig;
   }> {
+    if (requestBaseUrl) {
+      void this.rememberPublicBaseUrl(requestBaseUrl);
+    }
     const currentConfig = await this.getConfig(true);
+    const resolvedWebhook = await this.resolveEffectiveWebhookUrl(currentConfig, requestBaseUrl);
+    const webhookReachableForExternal =
+      currentConfig.mode !== 'EXTERNAL' || resolvedWebhook.isPublic;
+
     try {
       const { client, session, ownerPrefix } = await this.getClient();
       currentConfig.session = session;
@@ -385,10 +613,15 @@ export class WahaService {
       const sessionSummaries = ownedList.map((s) => ({ name: s.name, status: s.status }));
       const connectedSessions = sessionSummaries.filter((s) => s.status === 'WORKING').length;
 
-      // Ensure active/QR sessions have CRM's current webhook URL + message.ack subscribed
-      for (const item of ownedList) {
-        if (item.status === 'WORKING' || item.status === 'SCAN_QR_CODE') {
-          void this.ensureSessionWebhook(client, item.name, item.raw);
+      // Ensure active/QR sessions have CRM's reachable webhook URL + inbound/ack events subscribed
+      if (webhookReachableForExternal) {
+        for (const item of ownedList) {
+          if (item.status === 'WORKING' || item.status === 'SCAN_QR_CODE') {
+            void this.ensureSessionWebhook(client, item.name, item.raw, {
+              mode: currentConfig.mode,
+              targetUrl: resolvedWebhook.url,
+            });
+          }
         }
       }
 
@@ -400,7 +633,9 @@ export class WahaService {
         totalSessions: sessionSummaries.length,
         sessions: sessionSummaries,
         details: sessionData,
-        webhookUrl: config.webhookUrl,
+        webhookUrl: resolvedWebhook.url,
+        webhookReachableForExternal,
+        lastWebhook: this.lastWebhookEvent,
         config: currentConfig,
       };
     } catch (err: any) {
@@ -412,7 +647,9 @@ export class WahaService {
         totalSessions: 0,
         sessions: [],
         error: this.extractWahaError(err),
-        webhookUrl: config.webhookUrl,
+        webhookUrl: resolvedWebhook.url,
+        webhookReachableForExternal,
+        lastWebhook: this.lastWebhookEvent,
         config: currentConfig,
       };
     }
@@ -424,10 +661,15 @@ export class WahaService {
   private async ensureSessionWebhook(
     client: AxiosInstance,
     sessionName: string,
-    existingSessionData?: any
-  ): Promise<void> {
-    const targetUrl = (config.webhookUrl || '').trim();
-    if (!targetUrl) return;
+    existingSessionData?: any,
+    opts?: { mode?: 'INTERNAL' | 'EXTERNAL'; targetUrl?: string; force?: boolean }
+  ): Promise<boolean> {
+    const mode = opts?.mode || 'INTERNAL';
+    const targetUrl = (opts?.targetUrl || config.webhookUrl || '').trim();
+    if (!targetUrl) return false;
+    if (mode === 'EXTERNAL' && isPrivateOrInternalUrl(targetUrl)) {
+      return false;
+    }
 
     const requiredEvents = ['message', 'message.ack', 'session.status'];
     let sessionData = existingSessionData;
@@ -436,26 +678,31 @@ export class WahaService {
         const res = await client.get(`/api/sessions/${encodeURIComponent(sessionName)}`);
         sessionData = res.data;
       } catch {
-        return;
+        return false;
       }
     }
 
     const existingConfig = sessionData?.config && typeof sessionData.config === 'object' ? sessionData.config : {};
     const existingWebhooks: any[] = Array.isArray(existingConfig.webhooks) ? existingConfig.webhooks : [];
+    const normTarget = targetUrl.replace(/\/+$/, '');
     const hasValidWebhook = existingWebhooks.some((wh) => {
-      if (!wh || wh.url !== targetUrl) return false;
+      if (!wh || typeof wh.url !== 'string') return false;
+      if (wh.url.trim().replace(/\/+$/, '') !== normTarget) return false;
       const evs: string[] = Array.isArray(wh.events) ? wh.events : [];
-      return evs.includes('*') || requiredEvents.every((ev) => evs.includes(ev));
+      const hasInbound = evs.includes('message') || evs.includes('message.any');
+      return evs.includes('*') || (hasInbound && evs.includes('message.ack') && evs.includes('session.status'));
     });
 
-    if (hasValidWebhook) return;
+    if (hasValidWebhook) return true;
 
-    const lastAttempt = this.webhookSyncAt.get(sessionName) || 0;
-    if (Date.now() - lastAttempt < 30_000) return;
+    if (!opts?.force) {
+      const lastAttempt = this.webhookSyncAt.get(sessionName) || 0;
+      if (Date.now() - lastAttempt < 30_000) return false;
+    }
     this.webhookSyncAt.set(sessionName, Date.now());
 
     const preservedWebhooks = existingWebhooks.filter(
-      (wh) => wh && typeof wh.url === 'string' && !wh.url.endsWith('/api/waha/webhook')
+      (wh) => wh && typeof wh.url === 'string' && !wh.url.replace(/\/+$/, '').endsWith('/api/waha/webhook')
     );
     const nextWebhooks = [
       ...preservedWebhooks,
@@ -474,27 +721,71 @@ export class WahaService {
         },
       });
       console.log(`[WahaService] Synced webhook for session "${sessionName}" -> ${targetUrl}`);
+      return true;
     } catch (err: any) {
       console.warn(
         `[WahaService] Failed to sync webhook for session "${sessionName}":`,
         err?.response?.data || err?.message
       );
+      return false;
     }
+  }
+
+  /**
+   * Force webhook configuration sync across all owned sessions
+   */
+  public async syncSessionWebhooks(requestBaseUrl?: string | null): Promise<{
+    webhookUrl: string;
+    synced: string[];
+    skippedReason?: string;
+  }> {
+    const conf = await this.getConfig(false);
+    const resolved = await this.resolveEffectiveWebhookUrl(conf, requestBaseUrl);
+    if (conf.mode === 'EXTERNAL' && !resolved.isPublic) {
+      return {
+        webhookUrl: resolved.url,
+        synced: [],
+        skippedReason:
+          'URL Webhook saat ini masih bersifat internal Docker/lokal. Masukkan URL HTTPS publik CRM agar server WAHA eksternal dapat mengirimkan event masuk.',
+      };
+    }
+
+    const { client, ownerPrefix } = await this.getClient();
+    const rawList = await this.fetchRawSessionList(client);
+    const owned = rawList
+      .map((item: any) => ({ name: String(item.name || 'default'), status: String(item.status || 'UNKNOWN'), raw: item }))
+      .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
+
+    const synced: string[] = [];
+    for (const item of owned) {
+      const ok = await this.ensureSessionWebhook(client, item.name, item.raw, {
+        mode: conf.mode,
+        targetUrl: resolved.url,
+        force: true,
+      });
+      if (ok) synced.push(item.name);
+    }
+    return { webhookUrl: resolved.url, synced };
   }
 
   /**
    * Create/update session with automatic webhook tracking and start it
    */
   public async startSession(sessionName?: string): Promise<any> {
+    const conf = await this.getConfig(false);
     const { client, session, ownerPrefix } = await this.getClient();
     const targetSession = sessionName
       ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
       : session;
     this.assertOwnedSession(targetSession, ownerPrefix);
-    const webhookConfigs = config.webhookUrl
+
+    const resolvedWebhook = await this.resolveEffectiveWebhookUrl(conf);
+    const canAttachWebhook =
+      Boolean(resolvedWebhook.url) && (conf.mode !== 'EXTERNAL' || resolvedWebhook.isPublic);
+    const webhookConfigs = canAttachWebhook
       ? [
           {
-            url: config.webhookUrl,
+            url: resolvedWebhook.url,
             events: ['message', 'message.ack', 'session.status'],
           },
         ]
@@ -518,12 +809,12 @@ export class WahaService {
 
       const status = err?.response?.status;
       if (status === 409 || status === 422 || status === 404 || status === 405) {
-        if ((status === 409 || status === 422) && webhookConfigs.length > 0) {
-          await client
-            .put(`/api/sessions/${encodeURIComponent(targetSession)}`, {
-              config: { webhooks: webhookConfigs },
-            })
-            .catch(() => { });
+        if ((status === 409 || status === 422) && canAttachWebhook) {
+          await this.ensureSessionWebhook(client, targetSession, undefined, {
+            mode: conf.mode,
+            targetUrl: resolvedWebhook.url,
+            force: true,
+          }).catch(() => {});
         }
         try {
           const startRes = await client.post(`/api/sessions/${encodeURIComponent(targetSession)}/start`);
@@ -809,6 +1100,115 @@ export class WahaService {
     }
   }
 
+  private extractOutboundMessageId(data: any): string {
+    return (
+      data?.id?._serialized ||
+      (typeof data?.id === 'string' ? data.id : null) ||
+      data?.id?.id ||
+      data?.key?.id ||
+      data?.messageId ||
+      `WAHA_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`
+    );
+  }
+
+  private async pickLiveWorkingSession(
+    client: AxiosInstance,
+    ownerPrefix: string | null,
+    excludeSession?: string
+  ): Promise<string | null> {
+    try {
+      const rawList = await this.fetchRawSessionList(client);
+      const owned = rawList
+        .map((item: any) => ({
+          name: String(item.name || 'default'),
+          status: String(item.status || 'UNKNOWN'),
+        }))
+        .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
+      const working = owned.find((s) => s.status === 'WORKING' && s.name !== excludeSession);
+      if (working) return working.name;
+      const anyOther = owned.find((s) => s.name !== excludeSession);
+      return anyOther ? anyOther.name : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async executeOutboundSend(
+    phone: string,
+    sessionName: string | undefined,
+    sender: (client: AxiosInstance, targetSession: string, chatId: string) => Promise<any>
+  ): Promise<{ success: boolean; messageId?: string; sessionUsed?: string; error?: string }> {
+    const chatId = toWahaChatId(phone);
+    if (!chatId) {
+      return {
+        success: false,
+        error: 'Nomor atau ID WhatsApp tujuan tidak valid atau kosong.',
+      };
+    }
+
+    let resolvedSession = sessionName?.trim() || undefined;
+    try {
+      const { client, session, ownerPrefix, mode } = await this.getClient();
+      let targetSession = resolvedSession
+        ? this.resolveOwnedSessionName(resolvedSession, ownerPrefix)
+        : session;
+      this.assertOwnedSession(targetSession, ownerPrefix);
+
+      if (!resolvedSession && (targetSession === 'default' || !targetSession)) {
+        const liveSession = await this.pickLiveWorkingSession(client, ownerPrefix);
+        if (liveSession) {
+          targetSession = liveSession;
+        }
+      }
+
+      const sendWithSession = async (sess: string) => {
+        const resData = await sender(client, sess, chatId);
+        return {
+          success: true,
+          messageId: this.extractOutboundMessageId(resData),
+          sessionUsed: sess,
+        };
+      };
+
+      try {
+        return await sendWithSession(targetSession);
+      } catch (firstErr: any) {
+        const httpStatus = firstErr?.response?.status;
+        if (!resolvedSession && (httpStatus === 404 || httpStatus === 422 || mode === 'EXTERNAL')) {
+          const fallbackWorking = await this.pickLiveWorkingSession(client, ownerPrefix, targetSession);
+          if (fallbackWorking) {
+            return await sendWithSession(fallbackWorking);
+          }
+        }
+
+        let errMsg = this.extractWahaError(firstErr);
+        if (httpStatus === 404 || httpStatus === 422) {
+          const sInfo = await client
+            .get(`/api/sessions/${encodeURIComponent(targetSession)}`, { timeout: 3000 })
+            .catch(() => null);
+          const sessStatus = sInfo?.data?.status;
+          if (sessStatus && sessStatus !== 'WORKING') {
+            errMsg = `Sesi WhatsApp "${targetSession}" berstatus ${sessStatus}. Jalankan atau scan QR sesi tersebut terlebih dahulu.`;
+          }
+        }
+        console.error('[WahaService] Send failed:', firstErr?.response?.data || errMsg);
+        return {
+          success: false,
+          sessionUsed: targetSession,
+          error: errMsg,
+        };
+      }
+    } catch (err: any) {
+      const errMsg = this.extractWahaError(err);
+      console.error('[WahaService] Send failed:', err?.response?.data || errMsg);
+      return {
+        success: false,
+        sessionUsed: resolvedSession,
+        error: errMsg,
+      };
+    }
+  }
+
   /**
    * Send WhatsApp text message
    */
@@ -816,62 +1216,31 @@ export class WahaService {
     phone: string,
     text: string,
     sessionName?: string
-  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    try {
-      const { client, session, ownerPrefix } = await this.getClient();
-      const targetSession = sessionName
-        ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
-        : session;
-      this.assertOwnedSession(targetSession, ownerPrefix);
-      const chatId = toWahaChatId(phone);
-
+  ): Promise<{ success: boolean; messageId?: string; sessionUsed?: string; error?: string }> {
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
       const response = await client.post('/api/sendText', {
         session: targetSession,
-        chatId: chatId,
-        text: text,
+        chatId,
+        text,
       });
-
-      const wahaMsgId =
-        response.data?.id?._serialized ||
-        (typeof response.data?.id === 'string' ? response.data.id : null) ||
-        response.data?.id?.id ||
-        response.data?.key?.id ||
-        response.data?.messageId ||
-        `WAHA_${Date.now()}`;
-
-      return {
-        success: true,
-        messageId: wahaMsgId,
-      };
-    } catch (err: any) {
-      console.error('[WahaService] Send message failed:', err.response?.data || err.message);
-      return {
-        success: false,
-        error: err.response?.data?.message || err.message,
-      };
-    }
+      return response.data;
+    });
   }
 
   /**
-   * Send WhatsApp image or document file via WAHA
+   * Send WhatsApp image, video, or document file via WAHA
    */
   public async sendMediaMessage(
     phone: string,
     file: { base64: string; mimetype: string; filename: string; caption?: string },
     sessionName?: string
   ): Promise<{ success: boolean; messageId?: string; sessionUsed?: string; error?: string }> {
-    try {
-      const { client, session, ownerPrefix } = await this.getClient();
-      const targetSession = sessionName
-        ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
-        : session;
-      this.assertOwnedSession(targetSession, ownerPrefix);
-      const chatId = toWahaChatId(phone);
-      const isImage = file.mimetype.startsWith('image/');
-      const endpoint = isImage ? '/api/sendImage' : '/api/sendFile';
-      const cleanBase64 = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
+    const cleanBase64 = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
+    const isImage = file.mimetype.startsWith('image/');
+    const isVideo = file.mimetype.startsWith('video/');
 
-      const response = await client.post(endpoint, {
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      const payload = {
         session: targetSession,
         chatId,
         file: {
@@ -880,28 +1249,24 @@ export class WahaService {
           data: cleanBase64,
         },
         caption: file.caption || '',
-      });
-
-      const wahaMsgId =
-        response.data?.id?._serialized ||
-        (typeof response.data?.id === 'string' ? response.data.id : null) ||
-        response.data?.id?.id ||
-        response.data?.key?.id ||
-        response.data?.messageId ||
-        `WAHA_${Date.now()}`;
-
-      return {
-        success: true,
-        messageId: wahaMsgId,
-        sessionUsed: targetSession,
       };
-    } catch (err: any) {
-      console.error('[WahaService] Send media failed:', err.response?.data || err.message);
-      return {
-        success: false,
-        error: err.response?.data?.message || err.message,
-      };
-    }
+
+      if (isImage) {
+        const res = await client.post('/api/sendImage', payload);
+        return res.data;
+      }
+      if (isVideo) {
+        try {
+          const res = await client.post('/api/sendVideo', payload);
+          return res.data;
+        } catch (err: any) {
+          const st = err?.response?.status;
+          if (st !== 404 && st !== 405) throw err;
+        }
+      }
+      const res = await client.post('/api/sendFile', payload);
+      return res.data;
+    });
   }
 }
 

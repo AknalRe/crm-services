@@ -415,3 +415,289 @@ test('testConnection uses saved externalConfig key (not internal key) when activ
   assert.equal(res.sessionCount, 1);
 });
 
+test('phone utils handle multi-device suffixes and @lid / group JID classification', () => {
+  const {
+    fromWahaChatId,
+    isPhoneWahaJid,
+    isPersonalWahaJid,
+  } = require('./phone.utils') as typeof import('./phone.utils');
+
+  assert.equal(fromWahaChatId('6281234567890:12@s.whatsapp.net'), '6281234567890');
+  assert.equal(fromWahaChatId('6281234567890@c.us'), '6281234567890');
+  assert.equal(fromWahaChatId('123456789012345:0@lid'), '123456789012345');
+
+  assert.equal(isPhoneWahaJid('6281234567890:4@s.whatsapp.net'), true);
+  assert.equal(isPhoneWahaJid('6281234567890@c.us'), true);
+  assert.equal(isPhoneWahaJid('123456789012345@lid'), false);
+
+  assert.equal(isPersonalWahaJid('123456789012345@lid'), true);
+  assert.equal(isPersonalWahaJid('6281234567890@s.whatsapp.net'), true);
+  assert.equal(isPersonalWahaJid('120363000000000@g.us'), false);
+  assert.equal(isPersonalWahaJid('status@broadcast'), false);
+  assert.equal(isPersonalWahaJid('120363000000000@newsletter'), false);
+});
+
+test('isPrivateOrInternalUrl identifies internal Docker/LAN webhook targets vs public HTTPS URLs', () => {
+  const { isPrivateOrInternalUrl } = require('./waha.service') as typeof import('./waha.service');
+
+  assert.equal(isPrivateOrInternalUrl('http://reneo-app-1-reneo-crm/api/waha/webhook'), true);
+  assert.equal(isPrivateOrInternalUrl('http://localhost:3001/api/waha/webhook'), true);
+  assert.equal(isPrivateOrInternalUrl('http://127.0.0.1:3001/api/waha/webhook'), true);
+  assert.equal(isPrivateOrInternalUrl('http://192.168.1.50:8080/api/waha/webhook'), true);
+  assert.equal(isPrivateOrInternalUrl('https://crm.claricebeauty.co.id/api/waha/webhook'), false);
+});
+
+test('EXTERNAL mode prefers public webhook URL over internal Docker WEBHOOK_URL and preserves external WAHA webhooks', async (t) => {
+  const { config } = require('../config') as typeof import('../config');
+  const { db } = require('../db') as typeof import('../db');
+
+  const origWebhookUrl = config.webhookUrl;
+  const origPublicBase = config.meta.publicBaseUrl;
+  const origGetConfig = wahaService.getConfig.bind(wahaService);
+  const origDbSelect = db.select.bind(db);
+  const origCreate = axios.create;
+
+  t.after(() => {
+    config.webhookUrl = origWebhookUrl;
+    config.meta.publicBaseUrl = origPublicBase;
+    (wahaService as any).getConfig = origGetConfig;
+    (db as any).select = origDbSelect;
+    axios.create = origCreate;
+  });
+
+  config.webhookUrl = 'http://reneo-app-1-reneo-crm/api/waha/webhook';
+  config.meta.publicBaseUrl = '';
+
+  const settingsRows: Array<{ key: string; value: string }> = [];
+  (db as any).select = () => ({
+    from: () => ({
+      where: async () => settingsRows,
+    }),
+  });
+
+  (wahaService as any).getConfig = async () => ({
+    mode: 'EXTERNAL',
+    baseUrl: 'https://wagt.example.com',
+    apiKey: 'ext-key',
+    sessionName: 'HRIS_HR',
+    isCustomUrl: true,
+    hasApiKey: true,
+    webhookUrlOverride: '',
+  });
+
+  const resolvedFromRequest = await (wahaService as any).resolveEffectiveWebhookUrl(
+    undefined,
+    'https://crm.claricebeauty.co.id'
+  );
+  assert.deepEqual(resolvedFromRequest, {
+    url: 'https://crm.claricebeauty.co.id/api/waha/webhook',
+    isPublic: true,
+    source: 'request_origin',
+  });
+
+  let putCalled = false;
+  axios.create = (() => ({
+    get: async (url: string) => {
+      if (url.startsWith('/api/sessions/HRIS_HR')) {
+        return {
+          data: {
+            name: 'HRIS_HR',
+            status: 'WORKING',
+            config: {
+              webhooks: [{ url: 'https://manual-public.example.com/api/waha/webhook', events: ['message'] }],
+            },
+          },
+        };
+      }
+      if (url.startsWith('/api/sessions')) {
+        return { data: [{ name: 'HRIS_HR', status: 'WORKING' }] };
+      }
+      return { data: {} };
+    },
+    put: async () => {
+      putCalled = true;
+      return { data: {} };
+    },
+  })) as any;
+
+  // Without any public URL available, EXTERNAL mode must NOT overwrite external WAHA webhook with internal Docker URL
+  const status = await wahaService.getStatus();
+  assert.equal(status.connected, true);
+  assert.equal(putCalled, false);
+});
+
+test('resolveLidToPhone resolves @lid via WAHA lids endpoint and caches the result', async (t) => {
+  const origGetConfig = wahaService.getConfig.bind(wahaService);
+  const origCreate = axios.create;
+
+  t.after(() => {
+    (wahaService as any).getConfig = origGetConfig;
+    axios.create = origCreate;
+  });
+
+  (wahaService as any).getConfig = async () => ({
+    mode: 'EXTERNAL',
+    baseUrl: 'https://wagt.example.com',
+    apiKey: 'ext-key',
+    sessionName: 'HRIS_HR',
+    isCustomUrl: true,
+    hasApiKey: true,
+  });
+
+  let lidApiCalls = 0;
+  axios.create = (() => ({
+    get: async (url: string) => {
+      if (url.includes('/api/HRIS_HR/lids/998877665544%40lid') || url.includes('/api/HRIS_HR/lids/998877665544@lid')) {
+        lidApiCalls += 1;
+        return { data: { lid: '998877665544@lid', pn: '6281122334455@c.us' } };
+      }
+      return { data: {} };
+    },
+  })) as any;
+
+  const first = await wahaService.resolveLidToPhone('HRIS_HR', '998877665544@lid');
+  const second = await wahaService.resolveLidToPhone('HRIS_HR', '998877665544@lid');
+
+  assert.equal(first, '6281122334455');
+  assert.equal(second, '6281122334455');
+  assert.equal(lidApiCalls, 1);
+});
+
+test('inbound WAHA payload helpers extract phone candidates from @lid alt fields and message content', () => {
+  const {
+    isWahaFromMe,
+    extractInboundWahaText,
+    extractPhoneCandidatesFromWahaPayload,
+  } = require('../routes/waha') as typeof import('../routes/waha');
+
+  const lidPayload = {
+    from: '123456789012345@lid',
+    fromMe: false,
+    body: '',
+    caption: 'Halo kak, mau tanya promo',
+    _data: {
+      Info: {
+        SenderAlt: '6281299988877:3@s.whatsapp.net',
+        IsFromMe: false,
+      },
+    },
+  };
+
+  assert.equal(isWahaFromMe(lidPayload), false);
+  assert.equal(extractInboundWahaText(lidPayload), 'Halo kak, mau tanya promo');
+  assert.deepEqual(extractPhoneCandidatesFromWahaPayload(lidPayload), ['6281299988877']);
+
+  const keyPayload = {
+    from: '123456789012345@lid',
+    _data: {
+      key: {
+        fromMe: true,
+        remoteJidAlt: '0813-5555-6666@s.whatsapp.net',
+      },
+      message: {
+        extendedTextMessage: { text: 'Balasan dari HP' },
+      },
+    },
+  };
+
+  assert.equal(isWahaFromMe(keyPayload), true);
+  assert.equal(extractInboundWahaText(keyPayload), 'Balasan dari HP');
+  assert.deepEqual(extractPhoneCandidatesFromWahaPayload(keyPayload), ['6281355556666']);
+
+  assert.equal(extractInboundWahaText({ location: { latitude: -6.2 } }), '[Lokasi dibagikan]');
+  assert.equal(extractInboundWahaText({ type: 'sticker' }), '[Stiker]');
+  assert.equal(extractInboundWahaText({ vCards: ['BEGIN:VCARD'] }), '[Kontak dibagikan]');
+});
+
+test('toWahaChatId strips device suffixes and rejects empty recipients safely', () => {
+  const { toWahaChatId } = require('./phone.utils') as typeof import('./phone.utils');
+
+  assert.equal(toWahaChatId(''), '');
+  assert.equal(toWahaChatId('   '), '');
+  assert.equal(toWahaChatId('081234567890'), '6281234567890@c.us');
+  assert.equal(toWahaChatId('6281234567890:12@s.whatsapp.net'), '6281234567890@c.us');
+  assert.equal(toWahaChatId('123456789012345:0@lid'), '123456789012345@lid');
+});
+
+test('sendTextMessage & sendMediaMessage resolve away from stale default session, fallback video->file, and reject empty target', async (t) => {
+  const origGetConfig = wahaService.getConfig.bind(wahaService);
+  const origCreate = axios.create;
+
+  t.after(() => {
+    (wahaService as any).getConfig = origGetConfig;
+    axios.create = origCreate;
+  });
+
+  (wahaService as any).getConfig = async () => ({
+    mode: 'EXTERNAL',
+    baseUrl: 'https://wagt.example.com',
+    apiKey: 'ext-key',
+    session: 'default',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const invalid = await wahaService.sendTextMessage('', 'Halo');
+  assert.equal(invalid.success, false);
+
+  const posted: Array<{ url: string; body: any }> = [];
+  axios.create = (() => ({
+    get: async (url: string) => {
+      if (url.startsWith('/api/sessions/WA_OFF')) {
+        return { data: { name: 'WA_OFF', status: 'SCAN_QR_CODE' } };
+      }
+      if (url.startsWith('/api/sessions')) {
+        return {
+          data: [
+            { name: 'HRIS_MINTI', status: 'STOPPED' },
+            { name: 'HRIS_HR', status: 'WORKING' },
+          ],
+        };
+      }
+      return { data: {} };
+    },
+    post: async (url: string, body: any) => {
+      posted.push({ url, body });
+      if (url === '/api/sendVideo') {
+        const err: any = new Error('Not Found');
+        err.response = { status: 404, data: { message: 'Not Found' } };
+        throw err;
+      }
+      if (body?.session === 'WA_OFF') {
+        const err: any = new Error('Unprocessable Entity');
+        err.response = { status: 422, data: { message: 'Session WA_OFF is not WORKING' } };
+        throw err;
+      }
+      return { data: { id: { _serialized: `true_${body.chatId}_MSG123` } } };
+    },
+  })) as any;
+
+  const textRes = await wahaService.sendTextMessage('0812-3456-7890', 'Tes kirim');
+  assert.equal(textRes.success, true);
+  assert.equal(textRes.sessionUsed, 'HRIS_HR');
+  assert.equal(textRes.messageId, 'true_6281234567890@c.us_MSG123');
+  assert.equal(posted[0].url, '/api/sendText');
+  assert.equal(posted[0].body.session, 'HRIS_HR');
+  assert.equal(posted[0].body.chatId, '6281234567890@c.us');
+
+  const videoRes = await wahaService.sendMediaMessage(
+    '123456789012345@lid',
+    {
+      base64: 'data:video/mp4;base64,AAAA',
+      mimetype: 'video/mp4',
+      filename: 'promo.mp4',
+      caption: 'Video promo',
+    },
+    'HRIS_HR'
+  );
+  assert.equal(videoRes.success, true);
+  assert.equal(videoRes.sessionUsed, 'HRIS_HR');
+  assert.equal(posted[1].url, '/api/sendVideo');
+  assert.equal(posted[2].url, '/api/sendFile');
+  assert.equal(posted[2].body.chatId, '123456789012345@lid');
+
+  const stoppedRes = await wahaService.sendTextMessage('081234567890', 'Halo', 'WA_OFF');
+  assert.equal(stoppedRes.success, false);
+  assert.match(stoppedRes.error || '', /SCAN_QR_CODE/);
+});
+

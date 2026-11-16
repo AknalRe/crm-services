@@ -63,6 +63,9 @@ import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBloc
 function resolveMediaUrl(url?: string | null): string {
   if (!url) return '';
   if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  if (url.startsWith('/api/files/') || url.startsWith('/files/')) {
+    return `./api/conversations/media-proxy?url=${encodeURIComponent(url)}`;
+  }
   if (url.startsWith('/api/')) return `.${url}`;
   if (url.startsWith('/')) return url;
   if (/^https?:\/\//i.test(url)) {
@@ -131,7 +134,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [showResolveMenu, setShowResolveMenu] = useState(false);
 
   const [sessions, setSessions] = useState<WahaSessionItem[]>([]);
+  const [defaultWahaSession, setDefaultWahaSession] = useState<string>('');
   const [selectedSession, setSelectedSession] = useState<string>('');
+  const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
   const [showContactPanel, setShowContactPanel] = useState<boolean>(readContactPanelPref);
 
   // Composer enhancements: Internal note mode, Emoji picker, Product Quick Quote, File attachment
@@ -162,6 +167,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [sendingCsat, setSendingCsat] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastAutoScrollRef = useRef<{ convId: string; lastMsgId: string | null }>({
+    convId: '',
+    lastMsgId: null,
+  });
 
   const toggleContactPanel = (next?: boolean) => {
     setShowContactPanel((prev) => {
@@ -192,16 +201,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   }, [isLiveChatUnlocked]);
 
-  const fetchMessages = useCallback(async (convId: string) => {
+  const fetchMessages = useCallback(async (convId: string, silent = false) => {
     if (!isLiveChatUnlocked) return;
-    setLoadingMessages(true);
+    if (!silent) {
+      setLoadingMessages(true);
+    }
     try {
       const data = await api.getConversationMessages(convId);
       setMessages(data);
     } catch (err) {
       console.error('Error fetching messages:', err);
     } finally {
-      setLoadingMessages(false);
+      if (!silent) {
+        setLoadingMessages(false);
+      }
     }
   }, [isLiveChatUnlocked]);
 
@@ -211,7 +224,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
     const unsub = subscribeLiveEvent('conversations:update', () => {
       void fetchConversations();
     });
-    return unsub;
+    // Fallback poll ensures inbound WAHA chats still appear promptly if SSE disconnects/buffers behind a proxy
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void fetchConversations();
+      }
+    }, 12000);
+    return () => {
+      unsub();
+      window.clearInterval(timer);
+    };
   }, [fetchConversations, isLiveChatUnlocked]);
 
   useEffect(() => {
@@ -219,8 +241,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
     api
       .getWahaSessions()
       .then((res) => {
-        setSessions(res.sessions || []);
-        setSelectedSession(res.activeSession || '');
+        const list = res.sessions || [];
+        setSessions(list);
+        const preferred =
+          (res.activeSession && list.some((s) => s.name === res.activeSession) ? res.activeSession : '') ||
+          list.find((s) => s.status === 'WORKING')?.name ||
+          list[0]?.name ||
+          res.activeSession ||
+          '';
+        setDefaultWahaSession(preferred);
       })
       .catch(() => {});
     api
@@ -254,16 +283,43 @@ export const Conversations: React.FC<ConversationsProps> = ({
   }, [isLiveChatUnlocked]);
 
   useEffect(() => {
-    if (isLiveChatUnlocked && selectedConversation) {
-      fetchMessages(selectedConversation.id);
-      if (selectedConversation.wahaSession) {
-        setSelectedSession(selectedConversation.wahaSession);
+    if (!selectedConversation) return;
+    const convSession = (selectedConversation.wahaSession || '').trim();
+    if (sessions.length > 0) {
+      const exactMatch = convSession ? sessions.find((s) => s.name === convSession) : undefined;
+      if (exactMatch) {
+        setSelectedSession(exactMatch.name);
+      } else {
+        const workingMatch =
+          sessions.find((s) => s.name === defaultWahaSession && s.status === 'WORKING')?.name ||
+          sessions.find((s) => s.status === 'WORKING')?.name ||
+          (defaultWahaSession && sessions.some((s) => s.name === defaultWahaSession)
+            ? defaultWahaSession
+            : sessions[0]?.name || '');
+        setSelectedSession(workingMatch);
       }
+    } else {
+      setSelectedSession(convSession || defaultWahaSession);
+    }
+  }, [selectedConversation?.id, selectedConversation?.wahaSession, sessions, defaultWahaSession]);
+
+  useEffect(() => {
+    if (isLiveChatUnlocked && selectedConversation) {
+      fetchMessages(selectedConversation.id, false);
       setContactNotesDraft(selectedConversation.contact?.notes || '');
+      const convId = selectedConversation.id;
       const unsub = subscribeLiveEvent('conversations:update', () => {
-        void fetchMessages(selectedConversation.id);
+        void fetchMessages(convId, true);
       });
-      return unsub;
+      const timer = window.setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          void fetchMessages(convId, true);
+        }
+      }, 12000);
+      return () => {
+        unsub();
+        window.clearInterval(timer);
+      };
     }
   }, [selectedConversation?.id, fetchMessages, isLiveChatUnlocked]);
 
@@ -274,8 +330,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
   }, [selectedConversation?.contact?.notes, selectedConversation?.id]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const convId = selectedConversation?.id || '';
+    const lastMsgId = messages.length > 0 ? messages[messages.length - 1].id : null;
+    const prev = lastAutoScrollRef.current;
+    if (convId && (prev.convId !== convId || (lastMsgId && prev.lastMsgId !== lastMsgId))) {
+      lastAutoScrollRef.current = { convId, lastMsgId };
+      messagesEndRef.current?.scrollIntoView({ behavior: prev.convId === convId ? 'smooth' : 'auto' });
+    }
+  }, [messages, selectedConversation?.id]);
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -334,11 +396,39 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setPendingAttachment(null);
       setShowEmojiPicker(false);
       setMessages((prev) => [...prev, newMsg]);
+      if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+        toast.error(newMsg.errorMessage || 'Gagal mengirim pesan WhatsApp');
+      }
       void fetchConversations();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal mengirim pesan WhatsApp');
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleRetryMessage = async (messageId: string) => {
+    if (!selectedConversation || retryingMessageId) return;
+    setRetryingMessageId(messageId);
+    try {
+      const res = await api.retryConversationMessage(
+        selectedConversation.id,
+        messageId,
+        selectedSession || undefined
+      );
+      if (res?.data) {
+        setMessages((prev) => prev.map((m) => (m.id === messageId ? res.data : m)));
+      }
+      if (res?.success) {
+        toast.success('Pesan berhasil dikirim ulang');
+        void fetchConversations();
+      } else {
+        toast.error(res?.error || res?.data?.errorMessage || 'Gagal mengirim ulang pesan');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengirim ulang pesan');
+    } finally {
+      setRetryingMessageId(null);
     }
   };
 
@@ -831,7 +921,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-semibold text-gray-900 text-xs truncate">
-                        {conv.contact?.nama_lengkap || conv.contact?.nomor_whatsapp}
+                        {conv.contact?.nama_lengkap || conv.contact?.nomor_whatsapp || 'WhatsApp'}
                       </span>
                       {conv.lastMessageAt && (
                         <span className="text-[10px] text-gray-400 font-mono tabular-nums shrink-0">
@@ -999,7 +1089,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   </a>
                 ) : (
                   <span className="text-[11px] text-gray-500">
-                    {selectedConversation.contact?.nama_panggilan || 'Kontak Omnichannel'}
+                    {selectedConversation.contact?.nama_panggilan ||
+                      ((selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
+                        ? 'WhatsApp ID Tertaut'
+                        : 'Kontak Omnichannel')}
                   </span>
                 )}
               </div>
@@ -1145,6 +1238,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 const isNote = msg.messageType === 'NOTE';
                 const isCsat = msg.messageType === 'CSAT';
                 const isOutbound = msg.direction === 'OUTBOUND';
+                const isFailed = isOutbound && (msg.status === 'FAILED' || msg.ackStatus < 0);
                 const isRead = msg.ackStatus >= 3;
                 const isDelivered = msg.ackStatus === 2;
 
@@ -1175,7 +1269,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   >
                     <div
                       className={`max-w-[88%] sm:max-w-[75%] min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
-                        isCsat
+                        isFailed
+                          ? 'bg-red-50/70 border-red-200 text-gray-900'
+                          : isCsat
                           ? 'bg-amber-50/60 border-amber-200 text-gray-900'
                           : isOutbound
                           ? 'bg-indigo-50 border-indigo-200 text-gray-900'
@@ -1228,6 +1324,26 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                       <div className="whitespace-pre-wrap break-words">{msg.body}</div>
 
+                      {isFailed && (
+                        <div className="pt-1 border-t border-red-200/70 flex flex-wrap items-center justify-between gap-2 text-[10px] text-red-700">
+                          <span className="inline-flex items-center gap-1 font-medium">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span className="break-words">
+                              {msg.errorMessage ? `Gagal: ${msg.errorMessage}` : 'Gagal mengirim pesan'}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            disabled={retryingMessageId === msg.id}
+                            onClick={() => void handleRetryMessage(msg.id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50 shrink-0"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                            <span>{retryingMessageId === msg.id ? 'Mengirim...' : 'Kirim Ulang'}</span>
+                          </button>
+                        </div>
+                      )}
+
                       <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-gray-500 font-mono tabular-nums">
                         {msg.wahaSession && (
                           <span className="text-[9px] text-gray-400">{msg.wahaSession}</span>
@@ -1239,7 +1355,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           })}
                         </span>
 
-                        {isOutbound && (
+                        {isOutbound && !isFailed && (
                           <span>
                             {isRead ? (
                               <CheckCheck className="w-3.5 h-3.5 text-blue-600 inline" />
@@ -1294,6 +1410,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </button>
               </div>
             </div>
+
+            {composerMode === 'REPLY' &&
+              (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP' &&
+              sessions.length > 0 &&
+              (() => {
+                const activeItem = sessions.find((s) => s.name === selectedSession);
+                if (!activeItem || activeItem.status === 'WORKING') return null;
+                return (
+                  <div className="px-2.5 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                    <span>
+                      Sesi <strong className="font-mono">{activeItem.name}</strong> berstatus{' '}
+                      <strong className="font-mono">{activeItem.status}</strong>. Pilih sesi yang aktif di header atau hidupkan sesi di Pengaturan WAHA sebelum mengirim balasan.
+                    </span>
+                  </div>
+                );
+              })()}
 
             {pendingAttachment && (
               <div className="flex items-center gap-2 p-2 rounded-md bg-indigo-50 border border-indigo-200 text-xs">
@@ -1791,10 +1924,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
           <div className="py-4 space-y-4 flex-1 text-xs text-gray-700">
             <div>
               <span className="block text-[11px] text-gray-400 font-medium mb-0.5">WhatsApp</span>
-              <div className="font-mono text-gray-900 flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-indigo-600" />
-                <span>+{selectedConversation.contact.nomor_whatsapp}</span>
-              </div>
+              {selectedConversation.contact.nomor_whatsapp ? (
+                <div className="font-mono text-gray-900 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>+{selectedConversation.contact.nomor_whatsapp}</span>
+                </div>
+              ) : (
+                <div className="text-gray-600 text-[11px]">
+                  {(selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
+                    ? 'WhatsApp Privacy ID (@lid)'
+                    : 'Akun Omnichannel'}
+                </div>
+              )}
             </div>
 
             {selectedConversation.contact.tanggal_lahir && (
@@ -2155,7 +2296,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     return (
                       c.nama_lengkap.toLowerCase().includes(q) ||
                       (c.nama_panggilan || '').toLowerCase().includes(q) ||
-                      c.nomor_whatsapp.includes(q)
+                      (c.nomor_whatsapp || '').includes(q)
                     );
                   })
                   .map((c) => (
@@ -2171,7 +2312,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           {c.nama_lengkap}
                         </div>
                         <div className="text-[11px] text-gray-500 font-mono">
-                          +{c.nomor_whatsapp}
+                          {c.nomor_whatsapp ? `+${c.nomor_whatsapp}` : 'Tanpa nomor WhatsApp'}
                         </div>
                       </div>
                       <span className="text-[11px] font-medium text-indigo-600 shrink-0">

@@ -149,6 +149,7 @@ export async function initDb() {
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_message_id TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS error_message TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS channel_accounts (
