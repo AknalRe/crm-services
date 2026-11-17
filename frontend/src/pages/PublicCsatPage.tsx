@@ -61,13 +61,13 @@ export const PublicCsatPage: React.FC = () => {
         const crits = Array.isArray(data.criteria) && data.criteria.length > 0
           ? data.criteria
           : [
-              {
-                key: 'umum',
-                label: 'Kepuasan Layanan',
-                required: true,
-                isActive: true,
-              },
-            ];
+            {
+              key: 'umum',
+              label: 'Kepuasan Layanan',
+              required: true,
+              isActive: true,
+            },
+          ];
         setCriteria(crits);
 
         if (data.alreadyRated && data.rating) {
@@ -118,8 +118,8 @@ export const PublicCsatPage: React.FC = () => {
         Array.isArray(resultData?.criteriaDetails)
           ? resultData.criteriaDetails
           : criteria
-              .filter((c) => criteriaScores[c.key])
-              .map((c) => ({ key: c.key, label: c.label, score: criteriaScores[c.key] }))
+            .filter((c) => criteriaScores[c.key])
+            .map((c) => ({ key: c.key, label: c.label, score: criteriaScores[c.key] }))
       );
       setSubmitted(true);
     } catch (err: any) {
@@ -132,8 +132,8 @@ export const PublicCsatPage: React.FC = () => {
   const scaleMap = texts.scaleLabels || DEFAULT_SCALE_LABELS;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-5">
+    <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-gray-50 flex items-center justify-center p-3 sm:p-4">
+      <div className="w-full max-w-lg bg-white border border-gray-200 rounded-xl shadow-sm p-4 sm:p-6 space-y-4 sm:space-y-5">
         <div className="pb-4 border-b border-gray-200">
           {texts.brandName && (
             <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-0.5">
@@ -174,11 +174,10 @@ export const PublicCsatPage: React.FC = () => {
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Star
                     key={star}
-                    className={`w-6 h-6 ${
-                      star <= Math.round(submittedOverall)
+                    className={`w-6 h-6 ${star <= Math.round(submittedOverall)
                         ? 'text-amber-400 fill-amber-400'
                         : 'text-gray-200'
-                    }`}
+                      }`}
                   />
                 ))}
                 <span className="ml-1.5 text-sm font-mono font-bold text-amber-900">
@@ -255,11 +254,10 @@ export const PublicCsatPage: React.FC = () => {
                           aria-label={`${crit.label}: ${star} bintang`}
                         >
                           <Star
-                            className={`w-7 h-7 transition-colors ${
-                              star <= displayVal
+                            className={`w-7 h-7 transition-colors ${star <= displayVal
                                 ? 'text-amber-400 fill-amber-400'
                                 : 'text-gray-300'
-                            }`}
+                              }`}
                           />
                         </button>
                       ))}

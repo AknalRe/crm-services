@@ -65,8 +65,8 @@ export const PublicChannelConnectPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg bg-white rounded-lg border border-gray-200 p-6 space-y-5">
+    <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-gray-50 flex items-center justify-center p-3 sm:p-4">
+      <div className="w-full max-w-lg bg-white rounded-lg border border-gray-200 p-4 sm:p-6 space-y-4 sm:space-y-5">
         <div className="border-b border-gray-200 pb-4">
           <h1 className="text-base font-semibold text-gray-900">
             Hubungkan Akun Omnichannel CRM

@@ -162,7 +162,7 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
                 : 'Client cukup login akun Meta/Threads melalui aplikasi resmi Reneo yang terdaftar.'}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 w-full sm:w-auto">
             {(['WHATSAPP_CLOUD', 'INSTAGRAM', 'FACEBOOK', 'THREADS'] as OmnichannelType[]).map((ch) => {
               const ready =
                 oauthCfg?.reneoOAuthReady ||

@@ -679,8 +679,8 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({
             </div>
 
             {/* Sub-tabs inside selected profile */}
-            <div className="px-4 pt-3 border-b border-gray-200 bg-white flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-1">
+            <div className="px-3 sm:px-4 pt-2.5 sm:pt-3 border-b border-gray-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-1 overflow-x-auto max-w-full">
                 {(
                   [
                     { id: 'criteria', label: 'Kriteria Penilaian (1–5)' },
@@ -693,7 +693,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({
                     key={tab.id}
                     type="button"
                     onClick={() => setProfileSubTab(tab.id)}
-                    className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors inline-flex items-center gap-1 ${
+                    className={`px-2.5 sm:px-3 py-2 text-xs font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors inline-flex items-center gap-1 ${
                       profileSubTab === tab.id
                         ? 'border-indigo-600 text-indigo-700'
                         : 'border-transparent text-gray-500 hover:text-gray-800'

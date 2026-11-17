@@ -35,6 +35,7 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ currentUser, onConve
   const [channel, setChannel] = useState<ContentIdeaItem['channel']>('INSTAGRAM');
   const [stage, setStage] = useState<string>('IDE');
   const [saving, setSaving] = useState(false);
+  const [mobileStageFilter, setMobileStageFilter] = useState<string>('IDE');
 
   const loadIdeas = useCallback(async () => {
     try {
@@ -213,15 +214,57 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ currentUser, onConve
       {loading ? (
         <LoadingState message="Memuat papan ide konten..." />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
-          {columns.map((col, colIdx) => {
-            const colItems = ideas.filter((i) => i.stage === col.id);
-            const isDefaultCol = ['IDE', 'DIKERJAKAN', 'SIAP'].includes(col.id);
-            return (
-              <div
-                key={col.id}
-                className="bg-white rounded-lg border border-gray-200 p-3.5 space-y-3 min-h-[280px] flex flex-col"
-              >
+        <div className="space-y-3">
+          {/* Mobile Stage Switcher Pills */}
+          <div className="md:hidden flex items-center gap-1.5 overflow-x-auto pb-1">
+            {columns.map((col) => {
+              const count = ideas.filter((i) => i.stage === col.id).length;
+              const isSelected = mobileStageFilter === col.id;
+              return (
+                <button
+                  key={col.id}
+                  type="button"
+                  onClick={() => setMobileStageFilter(col.id)}
+                  className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 transition-colors ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <span>{col.label}</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
+                      isSelected ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setMobileStageFilter('__ALL__')}
+              className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
+                mobileStageFilter === '__ALL__'
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              Semua ({ideas.length})
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-4 items-start">
+            {columns.map((col, colIdx) => {
+              const colItems = ideas.filter((i) => i.stage === col.id);
+              const isDefaultCol = ['IDE', 'DIKERJAKAN', 'SIAP'].includes(col.id);
+              const showOnMobile = mobileStageFilter === '__ALL__' || mobileStageFilter === col.id;
+              return (
+                <div
+                  key={col.id}
+                  className={`${showOnMobile ? 'flex' : 'hidden md:flex'} bg-white rounded-lg border border-gray-200 p-3.5 space-y-3 min-h-[220px] md:min-h-[280px] flex-col`}
+                >
                 <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-gray-800">{col.label}</span>
@@ -382,6 +425,7 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ currentUser, onConve
               )}
             </div>
           )}
+        </div>
         </div>
       )}
     </div>

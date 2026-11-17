@@ -85,8 +85,8 @@ export const Tracking: React.FC = () => {
           />
         </form>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex bg-gray-100 p-1 rounded-md text-xs font-medium overflow-x-auto">
+        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+          <div className="flex flex-1 sm:flex-none bg-gray-100 p-1 rounded-md text-xs font-medium overflow-x-auto max-w-full">
             {[
               { id: 'ALL', label: 'Semua' },
               { id: 'READ', label: 'Dibaca' },
@@ -101,11 +101,10 @@ export const Tracking: React.FC = () => {
                   setStatusFilter(st.id);
                   setPage(1);
                 }}
-                className={`px-3 py-1 rounded transition-colors whitespace-nowrap ${
-                  statusFilter === st.id
+                className={`px-2.5 sm:px-3 py-1 rounded transition-colors whitespace-nowrap shrink-0 ${statusFilter === st.id
                     ? 'bg-white text-gray-900 shadow-sm font-semibold'
                     : 'text-gray-600 hover:text-gray-900'
-                }`}
+                  }`}
               >
                 {st.label}
               </button>
@@ -117,6 +116,7 @@ export const Tracking: React.FC = () => {
             size="sm"
             onClick={fetchTracking}
             isLoading={loading}
+            className="shrink-0"
           >
             Segarkan
           </Button>
@@ -145,10 +145,10 @@ export const Tracking: React.FC = () => {
                 const fmtTime = (val?: string | null) =>
                   val
                     ? new Date(val).toLocaleTimeString('id-ID', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })
                     : '-';
 
                 return (
@@ -164,17 +164,16 @@ export const Tracking: React.FC = () => {
                         </div>
                       </div>
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${
-                          isRead
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${isRead
                             ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                             : isDelivered
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : isSent
-                            ? 'bg-blue-50 text-blue-700 border-blue-200'
-                            : isFailed
-                            ? 'bg-red-50 text-red-700 border-red-200'
-                            : 'bg-gray-100 text-gray-700 border-gray-200'
-                        }`}
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : isSent
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : isFailed
+                                  ? 'bg-red-50 text-red-700 border-red-200'
+                                  : 'bg-gray-100 text-gray-700 border-gray-200'
+                          }`}
                       >
                         {isRead ? (
                           <>
@@ -278,17 +277,16 @@ export const Tracking: React.FC = () => {
 
                         <td className="py-3 px-4">
                           <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold border ${
-                              isRead
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold border ${isRead
                                 ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                 : isDelivered
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : isSent
-                                ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                : isFailed
-                                ? 'bg-red-50 text-red-700 border-red-200'
-                                : 'bg-gray-100 text-gray-700 border-gray-200'
-                            }`}
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : isSent
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : isFailed
+                                      ? 'bg-red-50 text-red-700 border-red-200'
+                                      : 'bg-gray-100 text-gray-700 border-gray-200'
+                              }`}
                           >
                             {isRead ? (
                               <>
@@ -325,30 +323,30 @@ export const Tracking: React.FC = () => {
                         <td className="py-3 px-4 text-gray-600 font-mono tabular-nums">
                           {item.sentAt
                             ? new Date(item.sentAt).toLocaleTimeString('id-ID', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                              })
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })
                             : '-'}
                         </td>
 
                         <td className="py-3 px-4 text-emerald-700 font-mono tabular-nums font-medium">
                           {item.deliveredAt
                             ? new Date(item.deliveredAt).toLocaleTimeString('id-ID', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                              })
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })
                             : '-'}
                         </td>
 
                         <td className="py-3 px-4 text-indigo-700 font-mono tabular-nums font-semibold">
                           {item.readAt
                             ? new Date(item.readAt).toLocaleTimeString('id-ID', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                              })
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })
                             : '-'}
                         </td>
 

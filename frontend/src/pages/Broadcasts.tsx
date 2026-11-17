@@ -9,6 +9,8 @@ import {
   Check,
   Search,
   X,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -87,6 +89,8 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [showMobileSafety, setShowMobileSafety] = useState(false);
+  const [showMobilePreview, setShowMobilePreview] = useState(false);
 
   const loadContactsAndTags = useCallback(async () => {
     try {
@@ -314,10 +318,10 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
       </div>
 
       {activeTab === 'create' ? (
-        <form onSubmit={handleSubmitCampaign} className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <div className="lg:col-span-2 space-y-5">
+        <form onSubmit={handleSubmitCampaign} className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+          <div className="lg:col-span-2 space-y-4 sm:space-y-5">
             {/* 1. Type & Title */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+            <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
               <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
                 <span className="w-5 h-5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs flex items-center justify-center font-bold">
                   1
@@ -476,7 +480,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
             </div>
 
             {/* 2. Target Recipients */}
-            <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+            <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
               <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
                 <span className="w-5 h-5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs flex items-center justify-center font-bold">
                   2
@@ -700,14 +704,28 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
           </div>
 
           {/* Right Column */}
-          <div className="space-y-5">
-            <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-              <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
-                <Sliders className="w-4 h-4 text-indigo-600" />
-                <span>Jeda &amp; Keamanan Pengiriman</span>
-              </h3>
+          <div className="space-y-4 sm:space-y-5">
+            <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
+              <button
+                type="button"
+                onClick={() => setShowMobileSafety((v) => !v)}
+                className="lg:pointer-events-none w-full flex items-center justify-between gap-2 text-left"
+              >
+                <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+                  <Sliders className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>Jeda &amp; Keamanan Pengiriman</span>
+                </h3>
+                <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
+                  <span>{showMobileSafety ? 'Tutup' : `~${estimatedMinutes} mnt`}</span>
+                  {showMobileSafety ? (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  )}
+                </span>
+              </button>
 
-              <div className="space-y-3 text-xs">
+              <div className={`${showMobileSafety ? 'block' : 'hidden lg:block'} space-y-3 text-xs`}>
                 <div>
                   <div className="flex justify-between font-medium text-gray-700 mb-1">
                     <span>Jeda Antar Pesan</span>
@@ -775,21 +793,37 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
               </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-gray-200 p-5">
-              <h4 className="font-semibold text-gray-700 text-xs uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <Eye className="w-3.5 h-3.5 text-gray-400" />
-                <span>Pratinjau Pesan</span>
-              </h4>
+            <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5">
+              <button
+                type="button"
+                onClick={() => setShowMobilePreview((v) => !v)}
+                className="lg:pointer-events-none w-full flex items-center justify-between gap-2 text-left"
+              >
+                <h4 className="font-semibold text-gray-700 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  <Eye className="w-3.5 h-3.5 text-gray-400" />
+                  <span>Pratinjau Pesan</span>
+                </h4>
+                <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
+                  <span>{showMobilePreview ? 'Sembunyikan' : 'Lihat'}</span>
+                  {showMobilePreview ? (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  )}
+                </span>
+              </button>
 
-              <div className="bg-[#e5ddd5] p-4 rounded-lg border border-gray-200">
-                <div className="bg-white rounded-md p-3 text-xs shadow-sm max-w-[90%] ml-auto text-gray-800 whitespace-pre-wrap leading-relaxed">
-                  {previewMessage || '(Ketik pesan untuk melihat pratinjau)'}
-                  <div className="text-[10px] text-gray-400 text-right mt-1 font-mono">10:30</div>
+              <div className={`${showMobilePreview ? 'mt-3 block' : 'hidden lg:mt-3 lg:block'}`}>
+                <div className="bg-[#e5ddd5] p-3.5 sm:p-4 rounded-lg border border-gray-200">
+                  <div className="bg-white rounded-md p-3 text-xs shadow-sm max-w-[90%] ml-auto text-gray-800 whitespace-pre-wrap leading-relaxed">
+                    {previewMessage || '(Ketik pesan untuk melihat pratinjau)'}
+                    <div className="text-[10px] text-gray-400 text-right mt-1 font-mono">10:30</div>
+                  </div>
                 </div>
+                <p className="text-[11px] text-gray-400 mt-2 text-center truncate">
+                  Simulasi: {sampleContact.nama_lengkap} ({sampleContact.nomor_whatsapp})
+                </p>
               </div>
-              <p className="text-[11px] text-gray-400 mt-2 text-center truncate">
-                Simulasi: {sampleContact.nama_lengkap} ({sampleContact.nomor_whatsapp})
-              </p>
             </div>
 
             <Button

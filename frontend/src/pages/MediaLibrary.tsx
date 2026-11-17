@@ -133,7 +133,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
         </div>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 p-5">
+      <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5">
         {loading ? (
           <LoadingState message="Memuat pustaka media..." />
         ) : filtered.length === 0 ? (
@@ -142,7 +142,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
             description="Unggah foto atau video di sini agar bisa dipakai ulang di Jadwal Postingan."
           />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
             {filtered.map((item) => (
               <div
                 key={item.filename}

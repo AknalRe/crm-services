@@ -156,7 +156,7 @@ export const Comments: React.FC = () => {
         ) : (
           <div className="divide-y divide-gray-200">
             {comments.map((c) => (
-              <div key={c.id} className="p-4 space-y-2.5">
+              <div key={c.id} className="p-3 sm:p-4 space-y-2 sm:space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                     <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">

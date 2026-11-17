@@ -75,6 +75,10 @@ export default async function settingsRouter(fastify: FastifyInstance) {
             error: 'Base URL WAHA wajib diisi dan diawali http:// atau https:// untuk mode eksternal',
           });
         }
+        await wahaService.assertExternalGowsEngine({
+          baseUrl: cleanUrl,
+          apiKey,
+        });
         pairs.push({ key: 'waha_base_url', value: cleanUrl });
         if (apiKey !== undefined && apiKey !== '••••••••') {
           pairs.push({ key: 'waha_api_key', value: apiKey.trim() });
@@ -110,11 +114,12 @@ export default async function settingsRouter(fastify: FastifyInstance) {
           });
       }
 
+      wahaService.invalidateExternalEngineCache();
       void wahaService.syncSessionWebhooks(publicBase).catch(() => {});
       liveEvents.emit('waha:status', { action: 'settings', mode });
       return reply.send({ success: true, message: 'Pengaturan WAHA berhasil disimpan' });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({ success: false, error: error.message });
     }
   });
 

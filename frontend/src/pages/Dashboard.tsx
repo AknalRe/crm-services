@@ -80,6 +80,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
   const [expandedCriterionKey, setExpandedCriterionKey] = useState<string | null>(null);
   const [expandedReviewId, setExpandedReviewId] = useState<string | null>(null);
   const [expandedAgentName, setExpandedAgentName] = useState<string | null>(null);
+  const [mobileSections, setMobileSections] = useState<Record<string, boolean>>({});
+  const isMobileSectionOpen = (key: string) => Boolean(mobileSections[key]);
+  const toggleMobileSection = (key: string) =>
+    setMobileSections((prev) => ({ ...prev, [key]: !prev[key] }));
   const [drilldown, setDrilldown] = useState<DrilldownModalState | null>(null);
 
   const openDrilldown = async (opts: {
@@ -242,25 +246,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900">Ringkasan Aktivitas CRM</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Klik kartu metrik, bagan, atau baris mana pun untuk membuka rincian data di baliknya.
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="min-w-0">
+          <h1 className="text-base sm:text-lg font-semibold text-gray-900">Ringkasan Aktivitas CRM</h1>
+          <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">
+            Klik kartu, bagan, atau baris untuk melihat rincian data.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 shrink-0">
           {canExportCsv && (
-            <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+            <div className="inline-flex items-center justify-between sm:justify-start rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => void handleExport('conversations')}
                 disabled={exportingType !== null}
                 title="Ekspor Laporan Percakapan & SLA (CSV)"
-                className="h-9 px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+                className="flex-1 sm:flex-none h-8 sm:h-9 px-2.5 text-[11px] sm:text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
               >
                 <Download className="w-3.5 h-3.5 text-gray-500" />
                 <span>CSV Chat</span>
@@ -270,7 +274,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                 onClick={() => void handleExport('agents')}
                 disabled={exportingType !== null}
                 title="Ekspor Laporan Performa Agent (CSV)"
-                className="h-9 px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+                className="flex-1 sm:flex-none h-8 sm:h-9 px-2.5 text-[11px] sm:text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
               >
                 <span>Agent</span>
               </button>
@@ -279,35 +283,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                 onClick={() => void handleExport('broadcasts')}
                 disabled={exportingType !== null}
                 title="Ekspor Laporan Broadcast (CSV)"
-                className="h-9 px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+                className="flex-1 sm:flex-none h-8 sm:h-9 px-2.5 text-[11px] sm:text-xs font-medium text-gray-700 hover:bg-gray-50 inline-flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
               >
                 <span>Broadcast</span>
               </button>
             </div>
           )}
-          {canAccessContacts && (
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={() => onNavigate('contacts')}
-            >
-              Kelola Pelanggan
-            </Button>
-          )}
-          {canSendBroadcast && (
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => onNavigate('broadcasts')}
-            >
-              Kirim Siaran Baru
-            </Button>
+          {(canAccessContacts || canSendBroadcast) && (
+            <div className="grid grid-cols-2 sm:inline-flex items-center gap-2">
+              {canAccessContacts && (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => onNavigate('contacts')}
+                  className="justify-center"
+                >
+                  Kelola Pelanggan
+                </Button>
+              )}
+              {canSendBroadcast && (
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => onNavigate('broadcasts')}
+                  className={`justify-center ${!canAccessContacts ? 'col-span-2 sm:col-span-1' : ''}`}
+                >
+                  Kirim Siaran Baru
+                </Button>
+              )}
+            </div>
           )}
         </div>
       </div>
 
       {/* KPI Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-4">
         <StatCard
           title="Total Pelanggan"
           value={summary.totalContacts}
@@ -419,18 +429,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
       </div>
 
       {/* Delivery & Birthday Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="bg-white rounded-lg border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 sm:gap-5">
+        <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5">
+          <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
+            <div className="min-w-0">
               <h3 className="font-semibold text-gray-900 text-sm">
                 Tingkat Keberhasilan Pengiriman
               </h3>
-              <p className="text-xs text-gray-500 mt-0.5">
+              <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">
                 Klik batang progres atau kotak metrik untuk rincian penerima
               </p>
             </div>
-            <TrendingUp className="w-4 h-4 text-indigo-600" />
+            <TrendingUp className="w-4 h-4 text-indigo-600 shrink-0" />
           </div>
 
           <div className="space-y-4">
@@ -545,9 +555,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col justify-between">
+        <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2.5 sm:mb-3 gap-2">
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
                 <Cake className="w-3.5 h-3.5" />
                 Otomasi Ulang Tahun
@@ -600,19 +610,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
       </div>
 
       {/* 7-Day Activity Trend & Contact Categories */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-5">
+        <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3 sm:space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
-                <BarChart3 className="w-4 h-4 text-indigo-600" />
+                <BarChart3 className="w-4 h-4 text-indigo-600 shrink-0" />
                 <span>Tren Aktivitas 7 Hari Terakhir</span>
               </h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Klik batang hari untuk melihat detail percakapan masuk atau pengiriman siaran pada tanggal tersebut
+              <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">
+                Tap batang hari untuk melihat detail percakapan atau siaran
               </p>
             </div>
-            <div className="flex items-center gap-3 text-[11px] text-gray-600">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] sm:text-[11px] text-gray-600">
               <span className="inline-flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-sm bg-indigo-600" /> Obrolan Dinilai
               </span>
@@ -638,7 +648,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
               )
             );
             return (
-              <div className="grid grid-cols-7 gap-2 pt-2">
+              <div className="grid grid-cols-7 gap-1 sm:gap-2 pt-1 sm:pt-2">
                 {summary.activityTrend7d.map((day) => {
                   const totalConv = day.conversationsAssessed + day.conversationsExcluded;
                   const convPct = Math.round((totalConv / maxVal) * 100);
@@ -646,8 +656,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                     totalConv > 0 ? Math.round((day.conversationsAssessed / totalConv) * 100) : 0;
                   const bcastPct = Math.round((day.broadcastSent / maxVal) * 100);
                   return (
-                    <div key={day.date} className="flex flex-col items-center gap-1.5 min-w-0">
-                      <div className="w-full h-32 flex items-end justify-center gap-1.5 px-1 bg-gray-50/70 rounded-md border border-gray-100 py-2">
+                    <div key={day.date} className="flex flex-col items-center gap-1 sm:gap-1.5 min-w-0">
+                      <div className="w-full h-24 sm:h-32 flex items-end justify-center gap-1 sm:gap-1.5 px-0.5 sm:px-1 bg-gray-50/70 rounded-md border border-gray-100 py-1.5 sm:py-2">
                         <button
                           type="button"
                           onClick={() =>
@@ -662,7 +672,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                             })
                           }
                           title={`${day.label}: ${day.conversationsAssessed} chat dinilai, ${day.conversationsExcluded} non-penilaian (Klik untuk detail)`}
-                          className="w-4 sm:w-5 h-full flex flex-col justify-end rounded-t overflow-hidden hover:opacity-85 cursor-pointer group"
+                          className="w-2.5 sm:w-5 h-full flex flex-col justify-end rounded-t overflow-hidden hover:opacity-85 cursor-pointer group"
                         >
                           <div
                             style={{ height: `${Math.max(totalConv > 0 ? 8 : 2, convPct)}%` }}
@@ -688,7 +698,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                             })
                           }
                           title={`${day.label}: ${day.broadcastSent} pesan siaran dikirim (${day.broadcastRead} dibaca). Klik untuk detail.`}
-                          className="w-4 sm:w-5 h-full flex flex-col justify-end rounded-t overflow-hidden hover:opacity-85 cursor-pointer"
+                          className="w-2.5 sm:w-5 h-full flex flex-col justify-end rounded-t overflow-hidden hover:opacity-85 cursor-pointer"
                         >
                           <div
                             style={{ height: `${Math.max(day.broadcastSent > 0 ? 8 : 2, bcastPct)}%` }}
@@ -696,11 +706,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                           />
                         </button>
                       </div>
-                      <div className="text-center leading-tight">
-                        <span className="text-[10px] sm:text-[11px] font-medium text-gray-700 block">
+                      <div className="text-center leading-tight min-w-0 w-full">
+                        <span className="text-[9px] sm:text-[11px] font-medium text-gray-700 block truncate">
                           {day.label}
                         </span>
-                        <span className="text-[9px] font-mono text-gray-400 tabular-nums">
+                        <span className="text-[8px] sm:text-[9px] font-mono text-gray-400 tabular-nums block truncate">
                           {totalConv}/{day.broadcastSent}
                         </span>
                       </div>
@@ -712,79 +722,98 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
           })()}
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
+        <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <div>
-              <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
-                <FolderKanban className="w-4 h-4 text-indigo-600" />
-                <span>Kategori Pelanggan</span>
-              </h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Klik kategori untuk melihat daftar kontak
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={() => toggleMobileSection('categories')}
+              className="sm:pointer-events-none flex-1 min-w-0 text-left flex items-center justify-between gap-2"
+            >
+              <div className="min-w-0">
+                <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+                  <FolderKanban className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span className="truncate">Kategori Pelanggan</span>
+                  <span className="sm:hidden px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono">
+                    {summary.contactCategories?.length || 0}
+                  </span>
+                </h3>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 hidden sm:block">
+                  Klik kategori untuk melihat daftar kontak
+                </p>
+              </div>
+              <span className="sm:hidden text-[11px] text-indigo-600 font-medium inline-flex items-center gap-0.5 shrink-0">
+                <span>{isMobileSectionOpen('categories') ? 'Tutup' : 'Detail'}</span>
+                {isMobileSectionOpen('categories') ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => onNavigate('contacts')}
-              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium shrink-0"
             >
               Kelola
             </button>
           </div>
 
-          {!summary.contactCategories || summary.contactCategories.length === 0 ? (
-            <EmptyState
-              title="Belum ada kontak"
-              description="Tambahkan atau sinkronkan kontak WhatsApp untuk melihat distribusi kategori."
-            />
-          ) : (
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-              {summary.contactCategories.map((cat) => {
-                const pct =
-                  summary.totalContacts > 0
-                    ? Math.round((cat.count / summary.totalContacts) * 100)
-                    : 0;
-                return (
-                  <button
-                    key={cat.category}
-                    type="button"
-                    onClick={() =>
-                      void openDrilldown({
-                        title: `Kontak Kategori: ${cat.category}`,
-                        subtitle: `${cat.count} kontak (${pct}% dari total pelanggan)`,
-                        kind: 'contacts',
-                        filter: 'category',
-                        value: cat.category,
-                        shortcutTab: 'contacts',
-                        shortcutLabel: 'Buka Daftar Kontak',
-                      })
-                    }
-                    className="w-full text-left p-2 rounded-md border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/30 transition-colors cursor-pointer space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between gap-2 text-xs">
-                      <span className="font-medium text-gray-800 truncate">{cat.category}</span>
-                      <span className="font-mono font-semibold text-gray-900 shrink-0 tabular-nums inline-flex items-center gap-1">
-                        {cat.count} <span className="text-[10px] text-gray-400">({pct}%)</span>
-                        <ChevronRight className="w-3 h-3 text-gray-400" />
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-indigo-500 rounded-full"
-                        style={{ width: `${Math.max(3, pct)}%` }}
-                      />
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <div className={`${isMobileSectionOpen('categories') ? 'block' : 'hidden sm:block'}`}>
+            {!summary.contactCategories || summary.contactCategories.length === 0 ? (
+              <EmptyState
+                title="Belum ada kontak"
+                description="Tambahkan atau sinkronkan kontak WhatsApp untuk melihat distribusi kategori."
+              />
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {summary.contactCategories.map((cat) => {
+                  const pct =
+                    summary.totalContacts > 0
+                      ? Math.round((cat.count / summary.totalContacts) * 100)
+                      : 0;
+                  return (
+                    <button
+                      key={cat.category}
+                      type="button"
+                      onClick={() =>
+                        void openDrilldown({
+                          title: `Kontak Kategori: ${cat.category}`,
+                          subtitle: `${cat.count} kontak (${pct}% dari total pelanggan)`,
+                          kind: 'contacts',
+                          filter: 'category',
+                          value: cat.category,
+                          shortcutTab: 'contacts',
+                          shortcutLabel: 'Buka Daftar Kontak',
+                        })
+                      }
+                      className="w-full text-left p-2 rounded-md border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/30 transition-colors cursor-pointer space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-medium text-gray-800 truncate">{cat.category}</span>
+                        <span className="font-mono font-semibold text-gray-900 shrink-0 tabular-nums inline-flex items-center gap-1">
+                          {cat.count} <span className="text-[10px] text-gray-400">({pct}%)</span>
+                          <ChevronRight className="w-3 h-3 text-gray-400" />
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-500 rounded-full"
+                          style={{ width: `${Math.max(3, pct)}%` }}
+                        />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Chatwoot-style Conversation, SLA & CSAT Analytics */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-5">
+        <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3 sm:space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
@@ -990,115 +1019,143 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
             </div>
           </div>
 
-          {convAnalytics.bySession.length > 0 && (
-            <div className="pt-3 border-t border-gray-200">
-              <span className="text-[11px] font-semibold text-gray-600 block mb-2">
-                Distribusi per Sesi WhatsApp (Klik untuk rincian)
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {convAnalytics.bySession.map((sess) => (
-                  <button
-                    key={sess.session}
-                    type="button"
-                    onClick={() =>
-                      void openDrilldown({
-                        title: `Percakapan Sesi WA: ${sess.session}`,
-                        subtitle: `${sess.count} obrolan dinilai • ${sess.resolvedCount} selesai`,
-                        kind: 'conversations',
-                        filter: 'session',
-                        value: sess.session,
-                        shortcutTab: 'conversations',
-                        shortcutLabel: 'Buka Live Chat',
-                      })
-                    }
-                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 hover:border-indigo-300 hover:bg-indigo-50/30 text-xs transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span className="font-mono text-[11px] font-medium text-gray-800 truncate">
-                        {sess.session}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[11px] tabular-nums shrink-0">
-                      <span className="text-gray-700 font-semibold">{sess.count} chat</span>
-                      {sess.avgCsat !== null && (
-                        <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
-                          <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
-                          {sess.avgCsat}
-                        </span>
-                      )}
-                      <ChevronRight className="w-3 h-3 text-gray-400" />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          {(convAnalytics.bySession.length > 0 || (convAnalytics.byChannel && convAnalytics.byChannel.length > 0)) && (
+            <div className="pt-2.5 sm:pt-3 border-t border-gray-200 space-y-3">
+              <button
+                type="button"
+                onClick={() => toggleMobileSection('channels')}
+                className="sm:hidden w-full flex items-center justify-between gap-2 py-1 text-left text-xs font-semibold text-gray-800"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Distribusi Sesi WA &amp; Channel</span>
+                  <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono">
+                    {convAnalytics.bySession.length + (convAnalytics.byChannel?.length || 0)}
+                  </span>
+                </span>
+                <span className="text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5">
+                  <span>{isMobileSectionOpen('channels') ? 'Tutup' : 'Detail'}</span>
+                  {isMobileSectionOpen('channels') ? (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  )}
+                </span>
+              </button>
 
-          {convAnalytics.byChannel && convAnalytics.byChannel.length > 0 && (
-            <div className="pt-3 border-t border-gray-200">
-              <span className="text-[11px] font-semibold text-gray-600 block mb-2">
-                Distribusi per Channel Omnichannel (Klik untuk rincian)
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {convAnalytics.byChannel.map((ch) => (
-                  <button
-                    key={ch.channel}
-                    type="button"
-                    onClick={() =>
-                      void openDrilldown({
-                        title: `Percakapan Channel ${ch.channel}`,
-                        subtitle: `${ch.count} obrolan dinilai • ${ch.resolvedCount} selesai`,
-                        kind: 'conversations',
-                        filter: 'channel',
-                        value: ch.channel,
-                        shortcutTab: 'conversations',
-                        shortcutLabel: 'Buka Live Chat',
-                      })
-                    }
-                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 hover:border-indigo-300 hover:bg-indigo-50/30 text-xs transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <MessageSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                      <span className="font-mono text-[11px] font-semibold text-gray-800 truncate">
-                        {ch.channel}
-                      </span>
+              <div className={`${isMobileSectionOpen('channels') ? 'space-y-3' : 'hidden sm:block sm:space-y-3'}`}>
+                {convAnalytics.bySession.length > 0 && (
+                  <div>
+                    <span className="text-[11px] font-semibold text-gray-600 block mb-2">
+                      Distribusi per Sesi WhatsApp (Klik untuk rincian)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {convAnalytics.bySession.map((sess) => (
+                        <button
+                          key={sess.session}
+                          type="button"
+                          onClick={() =>
+                            void openDrilldown({
+                              title: `Percakapan Sesi WA: ${sess.session}`,
+                              subtitle: `${sess.count} obrolan dinilai • ${sess.resolvedCount} selesai`,
+                              kind: 'conversations',
+                              filter: 'session',
+                              value: sess.session,
+                              shortcutTab: 'conversations',
+                              shortcutLabel: 'Buka Live Chat',
+                            })
+                          }
+                          className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 hover:border-indigo-300 hover:bg-indigo-50/30 text-xs transition-colors cursor-pointer"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span className="font-mono text-[11px] font-medium text-gray-800 truncate">
+                              {sess.session}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] tabular-nums shrink-0">
+                            <span className="text-gray-700 font-semibold">{sess.count} chat</span>
+                            {sess.avgCsat !== null && (
+                              <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
+                                <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                                {sess.avgCsat}
+                              </span>
+                            )}
+                            <ChevronRight className="w-3 h-3 text-gray-400" />
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] tabular-nums shrink-0">
-                      <span className="text-gray-700 font-semibold">{ch.count} chat</span>
-                      <span className="text-emerald-700">{ch.resolvedCount} selesai</span>
-                      {ch.avgCsat !== null && (
-                        <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
-                          <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
-                          {ch.avgCsat}
-                        </span>
-                      )}
-                      <ChevronRight className="w-3 h-3 text-gray-400" />
+                  </div>
+                )}
+
+                {convAnalytics.byChannel && convAnalytics.byChannel.length > 0 && (
+                  <div className={convAnalytics.bySession.length > 0 ? 'pt-3 border-t border-gray-100' : ''}>
+                    <span className="text-[11px] font-semibold text-gray-600 block mb-2">
+                      Distribusi per Channel Omnichannel (Klik untuk rincian)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {convAnalytics.byChannel.map((ch) => (
+                        <button
+                          key={ch.channel}
+                          type="button"
+                          onClick={() =>
+                            void openDrilldown({
+                              title: `Percakapan Channel ${ch.channel}`,
+                              subtitle: `${ch.count} obrolan dinilai • ${ch.resolvedCount} selesai`,
+                              kind: 'conversations',
+                              filter: 'channel',
+                              value: ch.channel,
+                              shortcutTab: 'conversations',
+                              shortcutLabel: 'Buka Live Chat',
+                            })
+                          }
+                          className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 hover:border-indigo-300 hover:bg-indigo-50/30 text-xs transition-colors cursor-pointer"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <MessageSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            <span className="font-mono text-[11px] font-semibold text-gray-800 truncate">
+                              {ch.channel}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] tabular-nums shrink-0">
+                            <span className="text-gray-700 font-semibold">{ch.count} chat</span>
+                            <span className="text-emerald-700">{ch.resolvedCount} selesai</span>
+                            {ch.avgCsat !== null && (
+                              <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
+                                <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                                {ch.avgCsat}
+                              </span>
+                            )}
+                            <ChevronRight className="w-3 h-3 text-gray-400" />
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                  </button>
-                ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 p-5 flex flex-col justify-between space-y-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 flex flex-col justify-between space-y-3 sm:space-y-4">
           <div>
-            <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="flex items-start justify-between gap-2 mb-2.5 sm:mb-3">
               <div>
                 <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
                   <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
                   <span>Hasil Rating CSAT</span>
                 </h3>
-                <p className="text-xs text-gray-500 mt-0.5">Skor total &amp; rata-rata kepuasan pelanggan</p>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">Skor total &amp; rata-rata kepuasan pelanggan</p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowCsatDetailsModal(true)}
                 title="Klik untuk melihat detail nilai per kriteria & target survei"
-                className="text-right group rounded-md px-2 py-1 -mr-2 -mt-1 hover:bg-amber-50 transition-colors cursor-pointer"
+                className="text-right group rounded-md px-2 py-1 -mr-2 -mt-1 hover:bg-amber-50 transition-colors cursor-pointer shrink-0"
               >
-                <span className="text-xl font-bold text-gray-900 group-hover:text-amber-700 font-mono tabular-nums">
+                <span className="text-lg sm:text-xl font-bold text-gray-900 group-hover:text-amber-700 font-mono tabular-nums">
                   {convAnalytics.csatAverage !== null ? convAnalytics.csatAverage.toFixed(2) : '-'}
                 </span>
                 <span className="text-[11px] text-gray-400 block">
@@ -1113,7 +1170,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
               </button>
             </div>
 
-            <div className="space-y-1.5">
+            <button
+              type="button"
+              onClick={() => toggleMobileSection('csat')}
+              className="sm:hidden w-full flex items-center justify-between gap-2 py-1.5 px-2.5 rounded-md bg-amber-50/60 border border-amber-200/70 text-[11px] font-medium text-amber-900"
+            >
+              <span>Sebaran Bintang &amp; Ulasan ({convAnalytics.recentCsat.length})</span>
+              <span className="inline-flex items-center gap-0.5 text-indigo-600">
+                <span>{isMobileSectionOpen('csat') ? 'Tutup' : 'Detail'}</span>
+                {isMobileSectionOpen('csat') ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </span>
+            </button>
+
+            <div className={`${isMobileSectionOpen('csat') ? 'mt-2.5 space-y-1.5' : 'hidden sm:block sm:space-y-1.5'}`}>
               {[5, 4, 3, 2, 1].map((star) => {
                 const count = convAnalytics.csatDistribution?.[star] || 0;
                 const pct =
@@ -1154,7 +1227,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
             </div>
           </div>
 
-          <div className="pt-3 border-t border-gray-200 space-y-2">
+          <div className={`${isMobileSectionOpen('csat') ? 'block pt-3 border-t border-gray-200 space-y-2' : 'hidden sm:block sm:pt-3 sm:border-t sm:border-gray-200 sm:space-y-2'}`}>
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-semibold text-gray-600">Ulasan Terbaru</span>
               {((convAnalytics.csatByCriterion?.length || 0) > 0 || (convAnalytics.csatByProfile?.length || 0) > 0) && (
@@ -1283,16 +1356,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
 
       {/* Per-Agent Performance Breakdown */}
       {convAnalytics.byAgent && convAnalytics.byAgent.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div>
-              <h3 className="font-semibold text-gray-900 text-sm">Performa Percakapan per Agent</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Ringkasan obrolan, kepatuhan SLA, dan rata-rata CSAT. Klik agent atau nilai CSAT untuk melihat rincian per kriteria.
-              </p>
-            </div>
+        <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5">
+          <div className="flex items-center justify-between gap-2 sm:mb-3">
+            <button
+              type="button"
+              onClick={() => toggleMobileSection('agents')}
+              className="sm:pointer-events-none w-full text-left flex items-center justify-between gap-2"
+            >
+              <div className="min-w-0">
+                <h3 className="font-semibold text-gray-900 text-sm inline-flex items-center gap-1.5">
+                  <span>Performa Percakapan per Agent</span>
+                  <span className="sm:hidden px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono">
+                    {convAnalytics.byAgent.length}
+                  </span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">
+                  Ringkasan obrolan, kepatuhan SLA, dan rata-rata CSAT. Klik agent atau nilai CSAT untuk melihat rincian per kriteria.
+                </p>
+              </div>
+              <span className="sm:hidden text-[11px] text-indigo-600 font-medium inline-flex items-center gap-0.5 shrink-0">
+                <span>{isMobileSectionOpen('agents') ? 'Tutup' : 'Detail'}</span>
+                {isMobileSectionOpen('agents') ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </span>
+            </button>
           </div>
-          <div className="sm:hidden divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden">
+          <div className={`${isMobileSectionOpen('agents') ? 'mt-3' : 'hidden'} sm:hidden divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden`}>
             {convAnalytics.byAgent.map((ag) => {
               const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
               const isOpen = expandedAgentName === ag.agentName;
@@ -1472,23 +1564,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
       )}
 
       {/* Campaigns & Activity Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-5">
         <div className="lg:col-span-2 bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="px-4 sm:px-5 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="font-semibold text-gray-900 text-sm">Kampanye Siaran Terakhir</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Progres pengiriman dan respons penerima</p>
-            </div>
+          <div className="px-3.5 sm:px-5 py-3 sm:py-4 border-b border-gray-200 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => toggleMobileSection('campaigns')}
+              className="sm:pointer-events-none flex-1 min-w-0 text-left flex items-center justify-between gap-2"
+            >
+              <div className="min-w-0">
+                <h3 className="font-semibold text-gray-900 text-sm inline-flex items-center gap-1.5">
+                  <span className="truncate">Kampanye Siaran Terakhir</span>
+                  <span className="sm:hidden px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono shrink-0">
+                    {stats?.recentCampaigns?.length || 0}
+                  </span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">Progres pengiriman dan respons penerima</p>
+              </div>
+              <span className="sm:hidden text-[11px] text-indigo-600 font-medium inline-flex items-center gap-0.5 shrink-0">
+                <span>{isMobileSectionOpen('campaigns') ? 'Tutup' : 'Detail'}</span>
+                {isMobileSectionOpen('campaigns') ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => onNavigate('broadcasts')}
-              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1"
+              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1 shrink-0"
             >
               Lihat Semua <ArrowUpRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="divide-y divide-gray-200">
+          <div className={`${isMobileSectionOpen('campaigns') ? 'divide-y divide-gray-200' : 'hidden sm:block sm:divide-y sm:divide-gray-200'}`}>
             {!stats?.recentCampaigns || stats.recentCampaigns.length === 0 ? (
               <EmptyState
                 title="Belum ada kampanye siaran"
@@ -1589,21 +1700,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col">
-          <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
-            <div>
-              <h3 className="font-semibold text-gray-900 text-sm">Aktivitas Terakhir</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Event pengiriman real-time</p>
-            </div>
+          <div className="px-3.5 sm:px-5 py-3 sm:py-4 border-b border-gray-200 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => toggleMobileSection('activity')}
+              className="sm:pointer-events-none flex-1 min-w-0 text-left flex items-center justify-between gap-2"
+            >
+              <div className="min-w-0">
+                <h3 className="font-semibold text-gray-900 text-sm inline-flex items-center gap-1.5">
+                  <span className="truncate">Aktivitas Terakhir</span>
+                  <span className="sm:hidden px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono shrink-0">
+                    {stats?.recentActivity?.length || 0}
+                  </span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">Event pengiriman real-time</p>
+              </div>
+              <span className="sm:hidden text-[11px] text-indigo-600 font-medium inline-flex items-center gap-0.5 shrink-0">
+                <span>{isMobileSectionOpen('activity') ? 'Tutup' : 'Detail'}</span>
+                {isMobileSectionOpen('activity') ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => onNavigate('tracking')}
-              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium shrink-0"
             >
               Lihat Detail
             </button>
           </div>
 
-          <div className="p-4 space-y-2.5 flex-1 overflow-y-auto max-h-[380px]">
+          <div className={`${isMobileSectionOpen('activity') ? 'p-3.5 sm:p-4 space-y-2.5 flex-1 overflow-y-auto max-h-[380px]' : 'hidden sm:block sm:p-4 sm:space-y-2.5 sm:flex-1 sm:overflow-y-auto sm:max-h-[380px]'}`}>
             {!stats?.recentActivity || stats.recentActivity.length === 0 ? (
               <EmptyState title="Belum ada aktivitas" description="Log pengiriman terbaru akan tampil di sini." />
             ) : (
@@ -1678,21 +1808,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
 
       {drilldown && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4"
           onClick={() => setDrilldown(null)}
         >
           <div
-            className="bg-white rounded-xl border border-gray-200 shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[88dvh]"
+            className="bg-white rounded-xl border border-gray-200 shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[88dvh]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-4 sm:px-5 py-3.5 border-b border-gray-200 flex items-start justify-between gap-3 bg-gray-50/80 shrink-0">
+            <div className="px-3.5 sm:px-5 py-3 sm:py-3.5 border-b border-gray-200 flex items-start justify-between gap-2 sm:gap-3 bg-gray-50/80 shrink-0">
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold text-gray-900 truncate">{drilldown.title}</h3>
                 {drilldown.subtitle && (
                   <p className="text-xs text-gray-500 mt-0.5 truncate">{drilldown.subtitle}</p>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                 {drilldown.shortcutTab && (
                   <button
                     type="button"
@@ -1701,10 +1831,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                       setDrilldown(null);
                       onNavigate(tab);
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-medium"
+                    className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-[11px] sm:text-xs font-medium whitespace-nowrap"
                   >
                     <span>{drilldown.shortcutLabel || 'Buka Menu'}</span>
-                    <ExternalLink className="w-3 h-3" />
+                    <ExternalLink className="w-3 h-3 shrink-0" />
                   </button>
                 )}
                 <button
@@ -1718,7 +1848,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
               </div>
             </div>
 
-            <div className="px-4 sm:px-5 py-2.5 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2 shrink-0">
+            <div className="px-3.5 sm:px-5 py-2.5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
               <input
                 type="text"
                 value={drilldown.search}
@@ -1727,17 +1857,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                   setDrilldown((prev) => (prev ? { ...prev, search: val } : null));
                 }}
                 placeholder="Saring cepat di daftar ini..."
-                className="flex-1 min-w-[200px] h-8 px-3 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
+                className="w-full sm:flex-1 min-w-0 sm:min-w-[200px] h-8 px-3 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
               />
               {!drilldown.loading && (
-                <span className="text-[11px] font-mono text-gray-500">
+                <span className="text-[11px] font-mono text-gray-500 shrink-0">
                   {drilldown.totalMatched} total kecocokan
                   {drilldown.totalMatched > 200 ? ' (menampilkan 200 terbaru)' : ''}
                 </span>
               )}
             </div>
 
-            <div className="p-4 sm:p-5 overflow-y-auto flex-1 text-xs">
+            <div className="p-3.5 sm:p-5 overflow-y-auto flex-1 text-xs">
               {drilldown.loading ? (
                 <LoadingState message="Memuat detail data..." />
               ) : drilldown.error ? (
@@ -1966,18 +2096,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
 
       {showCsatDetailsModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4"
           onClick={() => setShowCsatDetailsModal(false)}
         >
           <div
-            className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]"
+            className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-2xl overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[85vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
-              <div>
+            <div className="px-3.5 sm:px-5 py-3 sm:py-4 border-b border-gray-200 flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-                  <Star className="w-4 h-4 text-amber-500 fill-amber-400" />
-                  <span>Rincian Skor CSAT Per Kriteria &amp; Target</span>
+                  <Star className="w-4 h-4 text-amber-500 fill-amber-400 shrink-0" />
+                  <span className="truncate">Rincian Skor CSAT Per Kriteria &amp; Target</span>
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Skor rata-rata total:{' '}
@@ -1990,14 +2120,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
               <button
                 type="button"
                 onClick={() => setShowCsatDetailsModal(false)}
-                className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 shrink-0"
                 aria-label="Tutup detail CSAT"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-5 text-xs">
+            <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4 sm:space-y-5 text-xs">
               {/* Breakdown per Kriteria */}
               <div className="space-y-2.5">
                 <h4 className="font-semibold text-gray-900 text-xs uppercase tracking-wider text-[11px]">
@@ -2018,7 +2148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                           onClick={() => setExpandedCriterionKey(isExpanded ? null : crit.key)}
                           className="p-3 rounded-lg border border-gray-200 bg-gray-50/70 hover:bg-amber-50/40 cursor-pointer space-y-2 transition-colors"
                         >
-                          <div className="flex items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="font-semibold text-gray-900 inline-flex items-center gap-1">
                               {isExpanded ? (
                                 <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
@@ -2060,7 +2190,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                             />
                           </div>
                           {isExpanded && crit.distribution && (
-                            <div className="pt-2 border-t border-gray-200 grid grid-cols-5 gap-1.5 text-[10px]">
+                            <div className="pt-2 border-t border-gray-200 grid grid-cols-3 sm:grid-cols-5 gap-1.5 text-[10px]">
                               {[5, 4, 3, 2, 1].map((s) => (
                                 <div
                                   key={s}

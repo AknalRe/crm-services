@@ -44,10 +44,14 @@ import {
   RefreshCw,
   SlidersHorizontal,
   MoreVertical,
-  MoreHorizontal,
   ChevronRight,
   Send,
   Info,
+  Sticker,
+  ShoppingBag,
+  SmilePlus,
+  Compass,
+  UserPlus,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -67,8 +71,20 @@ import {
   LicenseInfo,
   OmnichannelType,
   ProductItem,
+  SavedStickerItem,
+  SharedContactMetadataItem,
   WahaSessionItem,
 } from '../types';
+import {
+  EMOJI_CATEGORIES,
+  PRESET_STICKER_TEMPLATES,
+  PresetStickerTemplate,
+  QUICK_REACTION_EMOJIS,
+  convertImageFileToStickerWebp,
+  getRecentEmojis,
+  pushRecentEmoji,
+  renderPresetStickerToWebp,
+} from '../lib/emojiStickers';
 import { LABEL_COLOR_MAP } from '../components/MasterDataSettings';
 import { hasPerm } from '../lib/permissions';
 
@@ -226,11 +242,6 @@ interface ConversationsProps {
 
 const CONTACT_PANEL_KEY = 'crm_livechat_contact_panel';
 const PRESET_LABELS = ['VIP', 'Follow Up', 'Komplain', 'Lunas', 'Prospek'];
-const QUICK_EMOJIS = [
-  '😀', '😊', '🙏', '👍', '❤️', '🎉', '🔥', '✅',
-  '👋', '🤝', '💡', '📦', '🚀', '⏰', '📞', '⭐',
-  '😅', '😢', '🙌', '💯', '✨', '📌', '📝', '💬',
-];
 
 function getAppBaseUrl(): string {
   if (typeof window === 'undefined') return '';
@@ -293,7 +304,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [showListFilters, setShowListFilters] = useState(false);
   const [showMobileChatActions, setShowMobileChatActions] = useState(false);
   const [showComposerTools, setShowComposerTools] = useState(false);
-  const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
   const [openProfileSections, setOpenProfileSections] = useState<Record<string, boolean>>({});
 
   const toggleProfileSection = (key: string) => {
@@ -309,6 +319,32 @@ export const Conversations: React.FC<ConversationsProps> = ({
       : 'REPLY'
   );
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiPickerTab, setEmojiPickerTab] = useState<'EMOJI' | 'STICKER'>('EMOJI');
+  const [emojiCategoryId, setEmojiCategoryId] = useState<string>('smileys');
+  const [emojiSearch, setEmojiSearch] = useState('');
+  const [recentEmojis, setRecentEmojis] = useState<string[]>(getRecentEmojis);
+  const [savedStickers, setSavedStickers] = useState<SavedStickerItem[]>([]);
+  const [savingSticker, setSavingSticker] = useState(false);
+  const [savingMsgStickerId, setSavingMsgStickerId] = useState<string | null>(null);
+  const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
+  const [reactingMsgId, setReactingMsgId] = useState<string | null>(null);
+  const stickerInputRef = useRef<HTMLInputElement>(null);
+
+  const [showLocationComposer, setShowLocationComposer] = useState(false);
+  const [locLat, setLocLat] = useState('');
+  const [locLng, setLocLng] = useState('');
+  const [locName, setLocName] = useState('');
+  const [locAddress, setLocAddress] = useState('');
+  const [locMapUrlInput, setLocMapUrlInput] = useState('');
+  const [loadingGeo, setLoadingGeo] = useState(false);
+
+  const [showContactSharePicker, setShowContactSharePicker] = useState(false);
+  const [contactShareSearch, setContactShareSearch] = useState('');
+  const [contactShareList, setContactShareList] = useState<Contact[]>([]);
+  const [loadingContactShareList, setLoadingContactShareList] = useState(false);
+  const [savingSharedContactKey, setSavingSharedContactKey] = useState<string | null>(null);
+  const [savedSharedPhones, setSavedSharedPhones] = useState<Record<string, boolean>>({});
+
   const [showLinkComposer, setShowLinkComposer] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkTitle, setLinkTitle] = useState('');
@@ -714,13 +750,32 @@ export const Conversations: React.FC<ConversationsProps> = ({
   };
 
   const openComposerPicker = (
-    target: 'EMOJI' | 'CANNED' | 'PRODUCT' | 'LINK' | 'INTERACTIVE' | null
+    target:
+      | 'EMOJI'
+      | 'STICKER'
+      | 'CANNED'
+      | 'PRODUCT'
+      | 'LINK'
+      | 'INTERACTIVE'
+      | 'LOCATION'
+      | 'CONTACT'
+      | null
   ) => {
-    setShowEmojiPicker((v) => (target === 'EMOJI' ? !v : false));
+    if (target === 'EMOJI') {
+      setShowEmojiPicker((v) => !(v && emojiPickerTab === 'EMOJI'));
+      setEmojiPickerTab('EMOJI');
+    } else if (target === 'STICKER') {
+      setShowEmojiPicker((v) => !(v && emojiPickerTab === 'STICKER'));
+      setEmojiPickerTab('STICKER');
+    } else {
+      setShowEmojiPicker(false);
+    }
     setShowCannedPicker((v) => (target === 'CANNED' ? !v : false));
     setShowProductPicker((v) => (target === 'PRODUCT' ? !v : false));
     setShowLinkComposer((v) => (target === 'LINK' ? !v : false));
     setShowInteractiveComposer((v) => (target === 'INTERACTIVE' ? !v : false));
+    setShowLocationComposer((v) => (target === 'LOCATION' ? !v : false));
+    setShowContactSharePicker((v) => (target === 'CONTACT' ? !v : false));
     if (target) setShowComposerTools(false);
   };
 
@@ -1027,6 +1082,297 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   };
 
+  const handleInsertEmoji = (char: string) => {
+    setRecentEmojis(pushRecentEmoji(char));
+    setInputText((prev) => prev + char);
+  };
+
+  const handleReactMessage = async (msgId: string, emoji: string) => {
+    if (!selectedConversation || reactingMsgId) return;
+    setReactingMsgId(msgId);
+    try {
+      const updated = await api.reactToConversationMessage(
+        selectedConversation.id,
+        msgId,
+        emoji,
+        selectedSession || undefined
+      );
+      setMessages((prev) => prev.map((m) => (m.id === msgId ? updated : m)));
+      setActiveReactionMsgId(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengirim reaksi emoji');
+    } finally {
+      setReactingMsgId(null);
+    }
+  };
+
+  const handleSendPresetSticker = async (tpl: PresetStickerTemplate) => {
+    if (!isLiveChatUnlocked || !selectedConversation || sending) return;
+    setSending(true);
+    try {
+      const webpData = await renderPresetStickerToWebp(tpl);
+      const newMsg = await api.sendConversationMessage(selectedConversation.id, {
+        messageKind: 'STICKER',
+        mediaBase64: webpData,
+        mediaMimetype: webpData.startsWith('data:image/webp') ? 'image/webp' : 'image/png',
+        mediaName: `${tpl.id}.webp`,
+        session: selectedSession || undefined,
+        replyToMessageId: replyingToMessage?.id,
+      });
+      setReplyingToMessage(null);
+      setShowEmojiPicker(false);
+      setMessages((prev) => [...prev, newMsg]);
+      if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+        toast.error(newMsg.errorMessage || 'Gagal mengirim stiker');
+      }
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengirim stiker');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSendSavedSticker = async (sticker: SavedStickerItem) => {
+    if (!isLiveChatUnlocked || !selectedConversation || sending) return;
+    setSending(true);
+    try {
+      const newMsg = await api.sendConversationMessage(selectedConversation.id, {
+        messageKind: 'STICKER',
+        mediaUrl: sticker.mediaUrl,
+        mediaName: `${sticker.name || 'sticker'}.webp`,
+        session: selectedSession || undefined,
+        replyToMessageId: replyingToMessage?.id,
+      });
+      setReplyingToMessage(null);
+      setShowEmojiPicker(false);
+      setMessages((prev) => [...prev, newMsg]);
+      if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+        toast.error(newMsg.errorMessage || 'Gagal mengirim stiker');
+      }
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengirim stiker');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleUploadNewSticker = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || savingSticker) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Ukuran file stiker maksimal 5 MB');
+      return;
+    }
+    setSavingSticker(true);
+    try {
+      const { dataUri, mimetype } = await convertImageFileToStickerWebp(file);
+      const { sticker } = await api.saveSticker({
+        name: file.name.replace(/\.[^.]+$/, '') || 'Stiker',
+        mediaBase64: dataUri,
+        mimetype,
+      });
+      setSavedStickers((prev) => [sticker, ...prev.filter((s) => s.id !== sticker.id)]);
+      toast.success('Stiker ditambahkan ke koleksi dan siap dikirim');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err?.message || 'Gagal mengunggah stiker');
+    } finally {
+      setSavingSticker(false);
+    }
+  };
+
+  const handleSaveInboundSticker = async (msg: ChatMessage) => {
+    if (!msg.mediaUrl || savingMsgStickerId) return;
+    setSavingMsgStickerId(msg.id);
+    try {
+      const { sticker, alreadyExists } = await api.saveSticker({
+        name: msg.mediaName?.replace(/\.[^.]+$/, '') || `Stiker ${savedStickers.length + 1}`,
+        mediaUrl: msg.mediaUrl,
+      });
+      setSavedStickers((prev) => [sticker, ...prev.filter((s) => s.id !== sticker.id)]);
+      toast.success(alreadyExists ? 'Stiker sudah ada di koleksi Anda' : 'Stiker disimpan ke koleksi');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menyimpan stiker');
+    } finally {
+      setSavingMsgStickerId(null);
+    }
+  };
+
+  const handleDeleteSavedSticker = async (stickerId: string) => {
+    try {
+      await api.deleteSticker(stickerId);
+      setSavedStickers((prev) => prev.filter((s) => s.id !== stickerId));
+      toast.info('Stiker dihapus dari koleksi');
+    } catch {
+      toast.error('Gagal menghapus stiker');
+    }
+  };
+
+  const handleSaveOrChatSharedContact = async (
+    sc: SharedContactMetadataItem,
+    openChat: boolean
+  ) => {
+    const rawPhone = sc.phones?.[0] || sc.waId || '';
+    if (!rawPhone) {
+      toast.error('Nomor telepon tidak tersedia pada kartu kontak ini');
+      return;
+    }
+    const key = `${openChat ? 'chat' : 'save'}:${rawPhone}`;
+    setSavingSharedContactKey(key);
+    try {
+      const res = await api.saveSharedContact({
+        fullName: sc.fullName,
+        phoneNumber: rawPhone,
+        organization: sc.organization,
+        openConversation: openChat,
+        session: selectedSession || undefined,
+      });
+      setSavedSharedPhones((prev) => ({ ...prev, [rawPhone]: true }));
+      if (openChat && res.conversation) {
+        const list = await api.getConversations().catch(() => []);
+        const target = list.find((c) => c.id === res.conversation?.id) || null;
+        if (list.length > 0) setConversations(list);
+        if (target) {
+          setSelectedConversation(target);
+        }
+        toast.success(`Membuka percakapan dengan ${res.contact.nama_lengkap}`);
+      } else {
+        toast.success(
+          res.createdNew
+            ? `Kontak "${res.contact.nama_lengkap}" disimpan ke CRM`
+            : `Kontak "${res.contact.nama_lengkap}" sudah terdaftar di CRM`
+        );
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal memproses kontak yang dibagikan');
+    } finally {
+      setSavingSharedContactKey(null);
+    }
+  };
+
+  const parseMapsUrlInput = (raw: string) => {
+    setLocMapUrlInput(raw);
+    const match =
+      raw.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/) ||
+      raw.match(/[?&](?:q|ll)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+    if (match) {
+      setLocLat(match[1]);
+      setLocLng(match[2]);
+    }
+  };
+
+  const handleDetectCurrentGeo = () => {
+    if (!navigator?.geolocation) {
+      toast.error('Browser tidak mendukung deteksi GPS lokasi');
+      return;
+    }
+    setLoadingGeo(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocLat(pos.coords.latitude.toFixed(6));
+        setLocLng(pos.coords.longitude.toFixed(6));
+        setLoadingGeo(false);
+        toast.success('Koordinat GPS saat ini berhasil diambil');
+      },
+      (geoErr) => {
+        setLoadingGeo(false);
+        toast.error(geoErr?.message || 'Gagal mengambil koordinat lokasi dari browser');
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  const handleSendLocation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isLiveChatUnlocked || !selectedConversation || sending) return;
+    const lat = Number(locLat);
+    const lng = Number(locLng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      toast.error('Koordinat latitude & longitude tidak valid');
+      return;
+    }
+    setSending(true);
+    try {
+      const newMsg = await api.sendConversationMessage(selectedConversation.id, {
+        messageKind: 'LOCATION',
+        session: selectedSession || undefined,
+        replyToMessageId: replyingToMessage?.id,
+        location: {
+          latitude: lat,
+          longitude: lng,
+          name: locName.trim() || undefined,
+          address: locAddress.trim() || undefined,
+        },
+      });
+      setMessages((prev) => [...prev, newMsg]);
+      setShowLocationComposer(false);
+      setLocName('');
+      setLocAddress('');
+      setLocMapUrlInput('');
+      setReplyingToMessage(null);
+      if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+        toast.error(newMsg.errorMessage || 'Gagal mengirim lokasi');
+      }
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengirim lokasi');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const loadShareableContacts = useCallback(async (q: string) => {
+    setLoadingContactShareList(true);
+    try {
+      const res = await api.getContacts({ search: q.trim() || undefined, limit: 30 });
+      setContactShareList((res.data || []).filter((c) => Boolean(c.nomor_whatsapp)));
+    } catch {
+      setContactShareList([]);
+    } finally {
+      setLoadingContactShareList(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showContactSharePicker) return;
+    const t = setTimeout(() => {
+      void loadShareableContacts(contactShareSearch);
+    }, 200);
+    return () => clearTimeout(t);
+  }, [showContactSharePicker, contactShareSearch, loadShareableContacts]);
+
+  const handleSendSharedContact = async (c: Contact) => {
+    if (!isLiveChatUnlocked || !selectedConversation || sending || !c.nomor_whatsapp) return;
+    setSending(true);
+    try {
+      const newMsg = await api.sendConversationMessage(selectedConversation.id, {
+        messageKind: 'CONTACT',
+        session: selectedSession || undefined,
+        replyToMessageId: replyingToMessage?.id,
+        sharedContacts: [
+          {
+            fullName: c.nama_lengkap,
+            phoneNumber: c.nomor_whatsapp,
+            organization: c.kategori || undefined,
+          },
+        ],
+      });
+      setMessages((prev) => [...prev, newMsg]);
+      setShowContactSharePicker(false);
+      setReplyingToMessage(null);
+      if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+        toast.error(newMsg.errorMessage || 'Gagal membagikan kontak');
+      }
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal membagikan kontak');
+    } finally {
+      setSending(false);
+    }
+  };
+
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [contactsList, setContactsList] = useState<Contact[]>([]);
   const [contactsTotal, setContactsTotal] = useState(0);
@@ -1067,14 +1413,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const fetchAgentsAndCanned = useCallback(async () => {
     if (!isLiveChatUnlocked) return;
     try {
-      const [agentsData, cannedData, labelsData] = await Promise.all([
+      const [agentsData, cannedData, labelsData, stickersData] = await Promise.all([
         api.getAssignableAgents().catch(() => []),
         api.getCannedResponses(true).catch(() => []),
         api.getMasterLabels('CONVERSATION_LABEL', true).catch(() => []),
+        api.getStickers().catch(() => []),
       ]);
       setAssignableAgents(agentsData || []);
       setCannedList(cannedData || []);
       setMasterLabels(labelsData || []);
+      setSavedStickers(stickersData || []);
     } catch {
       // ignore
     }
@@ -1722,7 +2070,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       setReplyingToMessage(null);
                       setShowMobileChatActions(false);
                       setShowComposerTools(false);
-                      setActiveMessageMenuId(null);
+                      setActiveReactionMsgId(null);
                       setOpenProfileSections({});
                     }
                     setSelectedConversation(conv);
@@ -2621,9 +2969,22 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
                           }`}
                         >
-                          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-800">
-                            <StickyNote className="w-3 h-3" />
-                            <span>Catatan Internal (Tidak terkirim ke WhatsApp)</span>
+                          <div className="flex items-center justify-between gap-3 text-[10px] font-semibold text-amber-800">
+                            <span className="inline-flex items-center gap-1.5">
+                              <StickyNote className="w-3 h-3 shrink-0" />
+                              <span>Catatan Internal (Tidak terkirim ke WhatsApp)</span>
+                            </span>
+                            {(canReplyConversation || canManageConversation) && (
+                              <button
+                                type="button"
+                                onClick={() => setDeleteMessageTarget(msg)}
+                                title="Hapus catatan"
+                                className="inline-flex items-center gap-0.5 text-amber-700 hover:text-red-600 font-medium shrink-0"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Hapus</span>
+                              </button>
+                            )}
                           </div>
                           <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.body}</div>
                           <div className="text-[10px] text-amber-700/80 font-mono text-right">
@@ -2639,6 +3000,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   );
                 }
 
+                const msgMeta = parseChatMessageMeta(msg);
+                const isStickerMsg = Boolean(
+                  msgMeta?.kind === 'STICKER' ||
+                    (msg.mediaUrl && msg.mediaType === 'image' && msg.body.trim() === '[Stiker]')
+                );
+                const stickerAlreadySaved = Boolean(
+                  msg.mediaUrl && savedStickers.some((s) => s.mediaUrl === msg.mediaUrl)
+                );
+
                 return (
                   <React.Fragment key={msg.id}>
                     {startDividerNode}
@@ -2649,18 +3019,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`group max-w-[88%] sm:max-w-[75%] min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
-                          isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
-                        } ${
-                          isFailed
-                            ? 'bg-red-50/70 border-red-200 text-gray-900'
-                            : isCsat
-                            ? 'bg-amber-50/60 border-amber-200 text-gray-900'
-                            : isOutbound
-                            ? 'bg-indigo-50 border-indigo-200 text-gray-900'
-                            : 'bg-white border-gray-200 text-gray-900'
-                        }`}
+                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%] min-w-0`}
                       >
+                        <div
+                          className={`w-full min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
+                            isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
+                          } ${
+                            isStickerMsg && msg.mediaUrl
+                              ? 'bg-transparent border-transparent px-1 py-1'
+                              : isFailed
+                              ? 'bg-red-50/70 border-red-200 text-gray-900'
+                              : isCsat
+                              ? 'bg-amber-50/60 border-amber-200 text-gray-900'
+                              : isOutbound
+                              ? 'bg-indigo-50 border-indigo-200 text-gray-900'
+                              : 'bg-white border-gray-200 text-gray-900'
+                          }`}
+                        >
                         {!isOutbound &&
                           !isCsat &&
                           (selectedConversation.isGroup || msg.senderName || msg.senderPhone) && (
@@ -2711,7 +3086,45 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           </div>
                         )}
 
-                        {msg.mediaUrl && msg.mediaType === 'image' && (
+                        {msg.mediaUrl && msg.mediaType === 'image' && isStickerMsg && (
+                          <div className="space-y-1 inline-flex flex-col items-start">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setLightboxMedia({
+                                  url: resolveMediaUrl(msg.mediaUrl),
+                                  name: msg.mediaName || 'Stiker',
+                                })
+                              }
+                              title="Klik untuk memperbesar stiker"
+                              className="block rounded-lg overflow-hidden hover:scale-[1.02] transition-transform"
+                            >
+                              <img
+                                src={resolveMediaUrl(msg.mediaUrl)}
+                                alt={msg.mediaName || 'Stiker WhatsApp'}
+                                loading="lazy"
+                                className="w-28 h-28 sm:w-36 sm:h-36 object-contain drop-shadow-xs"
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={savingMsgStickerId === msg.id || stickerAlreadySaved}
+                              onClick={() => void handleSaveInboundSticker(msg)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/90 border border-gray-200 text-[10px] font-medium text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-60"
+                            >
+                              <Sticker className="w-2.5 h-2.5" />
+                              <span>
+                                {stickerAlreadySaved
+                                  ? 'Tersimpan'
+                                  : savingMsgStickerId === msg.id
+                                  ? 'Menyimpan...'
+                                  : 'Simpan Stiker'}
+                              </span>
+                            </button>
+                          </div>
+                        )}
+
+                        {msg.mediaUrl && msg.mediaType === 'image' && !isStickerMsg && (
                           <div className="space-y-1">
                             <button
                               type="button"
@@ -2917,6 +3330,185 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               </div>
                             );
                           }
+                          if (meta?.revoked) {
+                            return (
+                              <div className="italic text-[11px] text-gray-500">
+                                Pesan ini telah ditarik oleh pengirim
+                              </div>
+                            );
+                          }
+                          if (meta?.kind === 'LOCATION' && meta.location) {
+                            const loc = meta.location;
+                            const mapsUrl =
+                              loc.url || `https://www.google.com/maps?q=${loc.latitude},${loc.longitude}`;
+                            return (
+                              <div className="rounded-md border border-emerald-200/80 bg-white/95 p-2.5 space-y-1.5">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800">
+                                    <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>{loc.isLive ? 'Live Lokasi Dibagikan' : 'Lokasi Dibagikan'}</span>
+                                  </div>
+                                  {loc.isLive && (
+                                    <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-semibold uppercase">
+                                      Live
+                                    </span>
+                                  )}
+                                </div>
+                                {loc.name && (
+                                  <div className="font-semibold text-gray-900 text-xs">{loc.name}</div>
+                                )}
+                                {loc.address && (
+                                  <div className="text-[11px] text-gray-600 break-words">{loc.address}</div>
+                                )}
+                                <div className="text-[10px] font-mono text-gray-500">
+                                  {loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)}
+                                </div>
+                                <a
+                                  href={mapsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-medium transition-colors"
+                                >
+                                  <Compass className="w-3 h-3" />
+                                  <span>Buka Google Maps</span>
+                                  <ExternalLink className="w-2.5 h-2.5 opacity-80" />
+                                </a>
+                              </div>
+                            );
+                          }
+                          if (meta?.kind === 'CONTACT' && Array.isArray(meta.sharedContacts) && meta.sharedContacts.length > 0) {
+                            return (
+                              <div className="space-y-1.5">
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-700">
+                                  <Users className="w-3 h-3" />
+                                  <span>
+                                    Kartu Kontak Dibagikan ({meta.sharedContacts.length})
+                                  </span>
+                                </div>
+                                {meta.sharedContacts.map((sc, scIdx) => {
+                                  const primaryPhone = sc.phones?.[0] || sc.waId || '';
+                                  const isSavedLocal = Boolean(primaryPhone && savedSharedPhones[primaryPhone]);
+                                  return (
+                                    <div
+                                      key={`${sc.fullName}-${scIdx}`}
+                                      className="p-2.5 rounded-md border border-indigo-200/80 bg-white/95 space-y-2"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center shrink-0">
+                                          {sc.fullName.slice(0, 2).toUpperCase()}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="font-semibold text-gray-900 text-xs truncate">
+                                            {sc.fullName}
+                                          </div>
+                                          {sc.organization && (
+                                            <div className="text-[10px] text-gray-500 truncate">
+                                              {sc.organization}
+                                            </div>
+                                          )}
+                                          {primaryPhone && (
+                                            <div className="text-[11px] font-mono text-gray-700 mt-0.5">
+                                              +{primaryPhone.replace(/^\+/, '')}
+                                            </div>
+                                          )}
+                                          {sc.email && (
+                                            <div className="text-[10px] text-gray-500 truncate">
+                                              {sc.email}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {primaryPhone && (
+                                        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-gray-100">
+                                          <button
+                                            type="button"
+                                            disabled={savingSharedContactKey === `save:${primaryPhone}`}
+                                            onClick={() => void handleSaveOrChatSharedContact(sc, false)}
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-medium disabled:opacity-50"
+                                          >
+                                            <UserPlus className="w-3 h-3" />
+                                            <span>
+                                              {isSavedLocal
+                                                ? 'Tersimpan di CRM'
+                                                : savingSharedContactKey === `save:${primaryPhone}`
+                                                ? 'Menyimpan...'
+                                                : 'Simpan Kontak'}
+                                            </span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={savingSharedContactKey === `chat:${primaryPhone}`}
+                                            onClick={() => void handleSaveOrChatSharedContact(sc, true)}
+                                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-medium disabled:opacity-50"
+                                          >
+                                            <MessageSquare className="w-3 h-3" />
+                                            <span>
+                                              {savingSharedContactKey === `chat:${primaryPhone}`
+                                                ? 'Membuka...'
+                                                : 'Chat WA'}
+                                            </span>
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          }
+                          if (meta?.kind === 'ORDER' && meta.order) {
+                            return (
+                              <div className="p-2.5 rounded-md border border-amber-200 bg-amber-50/70 space-y-1">
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800">
+                                  <ShoppingBag className="w-3 h-3" />
+                                  <span>Pesanan WhatsApp</span>
+                                </div>
+                                <div className="font-semibold text-gray-900">{meta.order.title || 'Pesanan'}</div>
+                                <div className="text-[11px] text-gray-600">
+                                  {meta.order.itemCount ? `${meta.order.itemCount} item` : ''}
+                                  {meta.order.totalAmount
+                                    ? ` • ${meta.order.currency || 'Rp'} ${new Intl.NumberFormat('id-ID').format(meta.order.totalAmount)}`
+                                    : ''}
+                                </div>
+                              </div>
+                            );
+                          }
+                          if (meta?.kind === 'PRODUCT' && meta.product) {
+                            return (
+                              <div className="p-2.5 rounded-md border border-indigo-200 bg-white/95 space-y-1">
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-700">
+                                  <Package className="w-3 h-3" />
+                                  <span>Produk Katalog WhatsApp</span>
+                                </div>
+                                <div className="font-semibold text-gray-900">{meta.product.title}</div>
+                                {meta.product.description && (
+                                  <p className="text-[11px] text-gray-600 line-clamp-2">{meta.product.description}</p>
+                                )}
+                                {meta.product.price !== undefined && (
+                                  <div className="text-xs font-mono font-semibold text-indigo-700">
+                                    {meta.product.currency || 'Rp'} {new Intl.NumberFormat('id-ID').format(meta.product.price)}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+                          if (meta?.kind === 'GROUP_INVITE' && meta.groupInvite) {
+                            return (
+                              <div className="p-2.5 rounded-md border border-teal-200 bg-teal-50/60 space-y-1">
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-800">
+                                  <Users className="w-3 h-3" />
+                                  <span>Undangan Grup WhatsApp</span>
+                                </div>
+                                <div className="font-semibold text-gray-900">{meta.groupInvite.groupName}</div>
+                                {meta.groupInvite.caption && (
+                                  <p className="text-[11px] text-gray-600">{meta.groupInvite.caption}</p>
+                                )}
+                              </div>
+                            );
+                          }
+                          if (isStickerMsg && msg.mediaUrl) {
+                            return null;
+                          }
                           if (meta?.poll) {
                             return (
                               <div className="space-y-1.5">
@@ -2952,6 +3544,40 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           );
                         })()}
 
+                        {Array.isArray(msgMeta?.reactions) && msgMeta.reactions.length > 0 && (() => {
+                          const grouped = new Map<string, { count: number; byMe: boolean }>();
+                          for (const r of msgMeta.reactions) {
+                            if (!r?.emoji) continue;
+                            const cur = grouped.get(r.emoji) || { count: 0, byMe: false };
+                            grouped.set(r.emoji, {
+                              count: cur.count + 1,
+                              byMe: cur.byMe || Boolean(r.isOutbound && r.actor === 'CS'),
+                            });
+                          }
+                          if (grouped.size === 0) return null;
+                          return (
+                            <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                              {Array.from(grouped.entries()).map(([em, info]) => (
+                                <button
+                                  key={em}
+                                  type="button"
+                                  disabled={!canReplyConversation || reactingMsgId === msg.id}
+                                  onClick={() => canReplyConversation && void handleReactMessage(msg.id, em)}
+                                  title={info.byMe ? 'Klik untuk menghapus reaksi Anda' : 'Klik untuk ikut bereaksi'}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[11px] leading-none transition-colors ${
+                                    info.byMe
+                                      ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold'
+                                      : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                                  }`}
+                                >
+                                  <span>{em}</span>
+                                  {info.count > 1 && <span className="text-[10px] font-mono">{info.count}</span>}
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
+
                         {isFailed && (
                           <div className="pt-1 border-t border-red-200/70 flex flex-wrap items-center justify-between gap-2 text-[10px] text-red-700">
                             <span className="inline-flex items-center gap-1 font-medium">
@@ -2975,62 +3601,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         )}
 
                         <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-gray-500 font-mono tabular-nums">
-                          <div className="mr-auto flex items-center gap-1.5">
-                            {(canReplyConversation || canManageConversation) && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setActiveMessageMenuId((prev) => (prev === msg.id ? null : msg.id))
-                                }
-                                title="Opsi pesan (Balas / Hapus)"
-                                className={`sm:hidden inline-flex items-center justify-center p-0.5 rounded transition-colors ${
-                                  activeMessageMenuId === msg.id
-                                    ? 'bg-indigo-100 text-indigo-700'
-                                    : 'text-gray-400 hover:text-gray-700'
-                                }`}
-                              >
-                                <MoreHorizontal className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            {canReplyConversation && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setReplyingToMessage(msg);
-                                  setComposerMode('REPLY');
-                                  setActiveMessageMenuId(null);
-                                  replyInputRef.current?.focus();
-                                }}
-                                title="Balas pesan ini"
-                                className={`${
-                                  activeMessageMenuId === msg.id
-                                    ? 'inline-flex opacity-100'
-                                    : 'hidden sm:inline-flex sm:opacity-0 group-hover:opacity-100 focus:opacity-100'
-                                } items-center gap-0.5 text-[10px] font-sans text-indigo-600 hover:text-indigo-800 transition-opacity`}
-                              >
-                                <Reply className="w-3 h-3" />
-                                <span>Balas</span>
-                              </button>
-                            )}
-                            {(canReplyConversation || canManageConversation) && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveMessageMenuId(null);
-                                  setDeleteMessageTarget(msg);
-                                }}
-                                title="Hapus Pesan (Tarik / Hapus Pribadi)"
-                                className={`${
-                                  activeMessageMenuId === msg.id
-                                    ? 'inline-flex opacity-100'
-                                    : 'hidden sm:inline-flex sm:opacity-0 group-hover:opacity-100 focus:opacity-100'
-                                } items-center gap-0.5 text-[10px] font-sans text-gray-500 hover:text-red-600 transition-opacity`}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Hapus</span>
-                              </button>
-                            )}
-                          </div>
                           {msg.wahaSession && (
                             <span className="text-[9px] text-gray-400">{msg.wahaSession}</span>
                           )}
@@ -3053,6 +3623,78 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             </span>
                           )}
                         </div>
+                        </div>
+
+                        {/* Directly Accessible Outside Message Actions (Balas, Reaksi, Hapus) */}
+                        {(canReplyConversation || canManageConversation) && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 px-0.5 text-[11px]">
+                            {canReplyConversation && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingToMessage(msg);
+                                  setComposerMode('REPLY');
+                                  replyInputRef.current?.focus();
+                                }}
+                                title="Balas pesan ini"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-indigo-50 hover:border-indigo-200 text-indigo-700 font-medium transition-colors"
+                              >
+                                <Reply className="w-3 h-3" />
+                                <span>Balas</span>
+                              </button>
+                            )}
+                            {canReplyConversation && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActiveReactionMsgId((prev) => (prev === msg.id ? null : msg.id))
+                                }
+                                title="Beri reaksi emoji"
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-medium transition-colors ${
+                                  activeReactionMsgId === msg.id
+                                    ? 'bg-amber-50 border-amber-300 text-amber-800'
+                                    : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'
+                                }`}
+                              >
+                                <SmilePlus className="w-3 h-3" />
+                                <span>Reaksi</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setDeleteMessageTarget(msg)}
+                              title="Hapus Pesan (Tarik / Hapus Pribadi)"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 text-gray-600 hover:text-red-600 font-medium transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Hapus</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {activeReactionMsgId === msg.id && (
+                          <div className="mt-1 p-1 rounded-full bg-white border border-gray-200 shadow-sm inline-flex items-center gap-0.5 flex-wrap">
+                            {QUICK_REACTION_EMOJIS.map((em) => (
+                              <button
+                                key={em}
+                                type="button"
+                                disabled={reactingMsgId === msg.id}
+                                onClick={() => void handleReactMessage(msg.id, em)}
+                                className="h-7 w-7 rounded-full hover:bg-indigo-50 text-sm flex items-center justify-center transition-transform hover:scale-110 disabled:opacity-50"
+                              >
+                                {em}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setActiveReactionMsgId(null)}
+                              className="h-6 w-6 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 inline-flex items-center justify-center"
+                              aria-label="Tutup pilihan reaksi"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                     {endDividerNodes}
@@ -3218,20 +3860,386 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
             <div className="relative">
               {showEmojiPicker && (
-                <div className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-2.5 w-64 max-w-[calc(100vw-2.5rem)] grid grid-cols-8 gap-1">
-                  {QUICK_EMOJIS.map((em) => (
+                <div className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 sm:w-96 max-w-[calc(100vw-2rem)] space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
+                    <div className="inline-flex rounded border border-gray-200 p-0.5 bg-gray-50 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setEmojiPickerTab('EMOJI')}
+                        className={`px-2.5 py-1 rounded font-medium inline-flex items-center gap-1 ${
+                          emojiPickerTab === 'EMOJI'
+                            ? 'bg-white text-indigo-700 shadow-2xs'
+                            : 'text-gray-600'
+                        }`}
+                      >
+                        <Smile className="w-3.5 h-3.5" />
+                        <span>Emotikon</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEmojiPickerTab('STICKER')}
+                        className={`px-2.5 py-1 rounded font-medium inline-flex items-center gap-1 ${
+                          emojiPickerTab === 'STICKER'
+                            ? 'bg-white text-indigo-700 shadow-2xs'
+                            : 'text-gray-600'
+                        }`}
+                      >
+                        <Sticker className="w-3.5 h-3.5" />
+                        <span>Stiker ({savedStickers.length + PRESET_STICKER_TEMPLATES.length})</span>
+                      </button>
+                    </div>
                     <button
-                      key={em}
                       type="button"
-                      onClick={() => {
-                        setInputText((prev) => prev + em);
-                        setShowEmojiPicker(false);
-                      }}
-                      className="h-7 w-7 rounded hover:bg-gray-100 text-base flex items-center justify-center"
+                      onClick={() => setShowEmojiPicker(false)}
+                      title="Tutup panel emotikon & stiker"
+                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0"
                     >
-                      {em}
+                      <X className="w-3.5 h-3.5" />
                     </button>
-                  ))}
+                  </div>
+
+                  {emojiPickerTab === 'EMOJI' ? (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder="Cari emotikon (mis. senyum, paket, ok, love)..."
+                          value={emojiSearch}
+                          onChange={(e) => setEmojiSearch(e.target.value)}
+                          className="w-full h-7 pl-7 pr-6 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                        />
+                        {emojiSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setEmojiSearch('')}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+
+                      {!emojiSearch.trim() && recentEmojis.length > 0 && (
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                            Sering Dipakai
+                          </span>
+                          <div className="grid grid-cols-8 gap-1">
+                            {recentEmojis.slice(0, 8).map((em) => (
+                              <button
+                                key={`rec-${em}`}
+                                type="button"
+                                onClick={() => handleInsertEmoji(em)}
+                                className="h-8 rounded hover:bg-indigo-50 text-lg flex items-center justify-center"
+                              >
+                                {em}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {!emojiSearch.trim() && (
+                        <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                          {EMOJI_CATEGORIES.map((cat) => (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              onClick={() => setEmojiCategoryId(cat.id)}
+                              className={`px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap shrink-0 inline-flex items-center gap-1 border ${
+                                emojiCategoryId === cat.id
+                                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              <span>{cat.icon}</span>
+                              <span>{cat.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="max-h-48 overflow-y-auto">
+                        {(() => {
+                          const q = emojiSearch.trim().toLowerCase();
+                          const list = q
+                            ? EMOJI_CATEGORIES.flatMap((c) => c.items).filter(
+                                (item) => item.keywords.includes(q) || item.char === q
+                              )
+                            : EMOJI_CATEGORIES.find((c) => c.id === emojiCategoryId)?.items || [];
+                          if (list.length === 0) {
+                            return (
+                              <div className="py-5 text-center text-[11px] text-gray-400">
+                                Tidak ada emotikon cocok dengan "{emojiSearch}".
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="grid grid-cols-8 gap-1">
+                              {list.map((item) => (
+                                <button
+                                  key={`${emojiCategoryId}-${item.char}`}
+                                  type="button"
+                                  onClick={() => handleInsertEmoji(item.char)}
+                                  title={item.keywords}
+                                  className="h-8 rounded hover:bg-indigo-50 text-lg flex items-center justify-center transition-transform hover:scale-110"
+                                >
+                                  {item.char}
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 max-h-64 overflow-y-auto pr-0.5">
+                      <input
+                        ref={stickerInputRef}
+                        type="file"
+                        accept="image/webp,image/png,image/jpeg,image/gif"
+                        onChange={(e) => void handleUploadNewSticker(e)}
+                        className="hidden"
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-gray-700">
+                          Koleksi Stiker Tersimpan ({savedStickers.length})
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          isLoading={savingSticker}
+                          onClick={() => stickerInputRef.current?.click()}
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Unggah Stiker</span>
+                        </Button>
+                      </div>
+
+                      {savedStickers.length > 0 ? (
+                        <div className="grid grid-cols-4 gap-2">
+                          {savedStickers.map((st) => (
+                            <div
+                              key={st.id}
+                              className="relative group rounded-md border border-gray-200 bg-gray-50 p-1.5 flex flex-col items-center gap-1 hover:border-indigo-300"
+                            >
+                              <button
+                                type="button"
+                                disabled={sending}
+                                onClick={() => void handleSendSavedSticker(st)}
+                                title={`Kirim stiker: ${st.name}`}
+                                className="w-full aspect-square flex items-center justify-center disabled:opacity-50"
+                              >
+                                <img
+                                  src={resolveMediaUrl(st.mediaUrl)}
+                                  alt={st.name}
+                                  className="max-w-full max-h-full object-contain"
+                                />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteSavedSticker(st.id)}
+                                title="Hapus stiker dari koleksi"
+                                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-red-600 shadow-xs inline-flex items-center justify-center text-[10px]"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="px-3 py-2.5 rounded-md bg-gray-50 border border-dashed border-gray-200 text-[11px] text-gray-500 text-center">
+                          Unggah gambar/WebP atau klik "Simpan Stiker" pada stiker pelanggan untuk menyimpannya di sini.
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5 pt-1 border-t border-gray-100">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                          Stiker Cepat Layanan CS (1-Klik Kirim)
+                        </span>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                          {PRESET_STICKER_TEMPLATES.map((tpl) => (
+                            <button
+                              key={tpl.id}
+                              type="button"
+                              disabled={sending}
+                              onClick={() => void handleSendPresetSticker(tpl)}
+                              style={{ backgroundColor: tpl.bgHex, borderColor: tpl.accentHex }}
+                              className="p-2 rounded-md border text-left hover:opacity-90 transition-opacity disabled:opacity-50 space-y-0.5"
+                            >
+                              <div className="text-base leading-none">{tpl.emoji}</div>
+                              <div
+                                style={{ color: tpl.accentHex }}
+                                className="text-[10px] font-bold truncate"
+                              >
+                                {tpl.topText}
+                              </div>
+                              <div
+                                style={{ color: tpl.textHex }}
+                                className="text-[9px] truncate opacity-85"
+                              >
+                                {tpl.bottomText}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showLocationComposer && (
+                <form
+                  onSubmit={handleSendLocation}
+                  className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 sm:w-96 max-w-[calc(100vw-2rem)] space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Bagikan Lokasi (Pin Maps)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowLocationComposer(false)}
+                      title="Tutup Form Lokasi"
+                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="Tempel link Google Maps (otomatis deteksi lat,lng)..."
+                        value={locMapUrlInput}
+                        onChange={(e) => parseMapsUrlInput(e.target.value)}
+                        className="flex-1 min-w-0 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono focus:outline-none focus:border-emerald-500"
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        isLoading={loadingGeo}
+                        onClick={handleDetectCurrentGeo}
+                        title="Ambil Koordinat GPS Browser"
+                      >
+                        <Compass className="w-3.5 h-3.5" />
+                        <span>GPS</span>
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        placeholder="Latitude (mis. -6.200000)"
+                        value={locLat}
+                        onChange={(e) => setLocLat(e.target.value)}
+                        className="px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono focus:outline-none focus:border-emerald-500"
+                      />
+                      <input
+                        type="number"
+                        step="any"
+                        required
+                        placeholder="Longitude (mis. 106.816666)"
+                        value={locLng}
+                        onChange={(e) => setLocLng(e.target.value)}
+                        className="px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Nama tempat / cabang / toko (opsional)"
+                      value={locName}
+                      onChange={(e) => setLocName(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-emerald-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Alamat lengkap / patokan (opsional)"
+                      value={locAddress}
+                      onChange={(e) => setLocAddress(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-1.5 pt-1">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setShowLocationComposer(false)}
+                    >
+                      Batal
+                    </Button>
+                    <Button type="submit" variant="primary" size="sm" isLoading={sending}>
+                      Kirim Lokasi
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {showContactSharePicker && (
+                <div className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 sm:w-96 max-w-[calc(100vw-2rem)] space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-900 inline-flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Bagikan Kontak (vCard WhatsApp)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowContactSharePicker(false)}
+                      title="Tutup Pemilih Kontak"
+                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Cari nama atau nomor kontak CRM..."
+                    value={contactShareSearch}
+                    onChange={(e) => setContactShareSearch(e.target.value)}
+                    className="w-full h-8 px-2.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                  />
+
+                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-100">
+                    {loadingContactShareList ? (
+                      <div className="py-4 text-center text-[11px] text-gray-500">Memuat kontak...</div>
+                    ) : contactShareList.length === 0 ? (
+                      <div className="py-4 text-center text-[11px] text-gray-500">
+                        Tidak ada kontak bernomor WhatsApp yang cocok.
+                      </div>
+                    ) : (
+                      contactShareList.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          disabled={sending}
+                          onClick={() => void handleSendSharedContact(c)}
+                          className="w-full text-left py-2 px-1.5 hover:bg-indigo-50/70 rounded flex items-center justify-between gap-2 disabled:opacity-50"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-semibold text-gray-900 truncate">
+                              {c.nama_lengkap}
+                            </div>
+                            <div className="text-[10px] font-mono text-gray-500 truncate">
+                              +{c.nomor_whatsapp}
+                              {c.kategori ? ` • ${c.kategori}` : ''}
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-medium text-indigo-700 shrink-0">
+                            Kirim
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -3885,15 +4893,25 @@ export const Conversations: React.FC<ConversationsProps> = ({
               )}
 
               {showComposerTools && (
-                <div className="sm:hidden mb-2 p-2 rounded-lg bg-gray-50 border border-gray-200 grid grid-cols-3 gap-1.5 text-[11px]">
+                <div className="sm:hidden mb-2 p-2 rounded-lg bg-gray-50 border border-gray-200 grid grid-cols-4 gap-1.5 text-[10px]">
                   <button
                     type="button"
                     onClick={() => openComposerPicker('EMOJI')}
-                    className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                    className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
                   >
                     <Smile className="w-4 h-4 text-gray-600" />
                     <span>Emotikon</span>
                   </button>
+                  {composerMode === 'REPLY' && (
+                    <button
+                      type="button"
+                      onClick={() => openComposerPicker('STICKER')}
+                      className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                    >
+                      <Sticker className="w-4 h-4 text-violet-600" />
+                      <span>Stiker</span>
+                    </button>
+                  )}
                   {canManageConversation && (
                     <button
                       type="button"
@@ -3908,7 +4926,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         }
                         setShowComposerTools(false);
                       }}
-                      className={`flex flex-col items-center justify-center gap-1 p-2 rounded-md border ${
+                      className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-md border ${
                         composerMode === 'NOTE'
                           ? 'bg-amber-50 border-amber-300 text-amber-900 font-semibold'
                           : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
@@ -3923,23 +4941,39 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => openComposerPicker('CANNED')}
-                        className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
                       >
                         <Zap className="w-4 h-4 text-amber-600" />
-                        <span>Template /</span>
+                        <span>Template</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => openComposerPicker('PRODUCT')}
-                        className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
                       >
                         <Package className="w-4 h-4 text-indigo-600" />
                         <span>Produk</span>
                       </button>
                       <button
                         type="button"
+                        onClick={() => openComposerPicker('LOCATION')}
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                      >
+                        <MapPin className="w-4 h-4 text-emerald-600" />
+                        <span>Lokasi</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openComposerPicker('CONTACT')}
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                      >
+                        <Users className="w-4 h-4 text-indigo-600" />
+                        <span>Kontak</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => openComposerPicker('LINK')}
-                        className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
                       >
                         <Link2 className="w-4 h-4 text-sky-600" />
                         <span>Tautan</span>
@@ -3947,10 +4981,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => openComposerPicker('INTERACTIVE')}
-                        className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
                       >
                         <ListChecks className="w-4 h-4 text-emerald-600" />
-                        <span>Tombol/Poll</span>
+                        <span>Tombol</span>
                       </button>
                     </>
                   )}
@@ -4005,6 +5039,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   <>
                     <button
                       type="button"
+                      onClick={() => openComposerPicker('STICKER')}
+                      title="Kirim Stiker WhatsApp"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-violet-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <Sticker className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => openComposerPicker('CANNED')}
                       title="Balasan Cepat (Canned Responses)"
                       className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-amber-600 inline-flex items-center justify-center shrink-0"
@@ -4018,6 +5060,22 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
                     >
                       <Package className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openComposerPicker('LOCATION')}
+                      title="Bagikan Lokasi (Google Maps Pin)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-emerald-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <MapPin className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openComposerPicker('CONTACT')}
+                      title="Bagikan Kartu Kontak (vCard)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <Users className="w-4 h-4" />
                     </button>
                     <button
                       type="button"

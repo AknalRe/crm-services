@@ -576,7 +576,7 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
               onSave={handleSaveConfig}
             />
           </fieldset>
-          <div className="lg:col-span-5">
+          <div className="hidden lg:block lg:col-span-5">
             <AiTestSimulatorPanel
               testMessage={testMessage}
               onTestMessageChange={setTestMessage}
@@ -615,7 +615,7 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
               onSave={handleSaveConfig}
             />
           </fieldset>
-          <div className="lg:col-span-5">
+          <div className="hidden lg:block lg:col-span-5">
             <AiTestSimulatorPanel
               testMessage={testMessage}
               onTestMessageChange={setTestMessage}

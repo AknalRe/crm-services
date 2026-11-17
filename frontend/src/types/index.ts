@@ -221,10 +221,45 @@ export interface InteractiveButtonItem {
   copyCode?: string;
 }
 
+export interface SharedContactMetadataItem {
+  fullName: string;
+  phones: string[];
+  waId?: string;
+  organization?: string;
+  email?: string;
+  vcard?: string;
+}
+
+export interface LocationMessageMetadata {
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+  url?: string;
+  isLive?: boolean;
+  accuracyInMeters?: number;
+}
+
+export interface MessageReactionItem {
+  emoji: string;
+  actor: string;
+  actorName?: string;
+  isOutbound?: boolean;
+}
+
+export interface SavedStickerItem {
+  id: string;
+  name: string;
+  mediaUrl: string;
+  createdAt: string;
+}
+
 export interface ChatMessageMetadata {
-  kind?: 'LINK' | 'BUTTONS' | 'POLL';
+  kind?: 'LINK' | 'BUTTONS' | 'POLL' | 'CONTACT' | 'LOCATION' | 'STICKER' | 'ORDER' | 'PRODUCT' | 'GROUP_INVITE';
   usedFallbackText?: boolean;
   fallbackReason?: string;
+  revoked?: boolean;
+  reactions?: MessageReactionItem[];
   linkPreview?: {
     url: string;
     title?: string;
@@ -244,6 +279,31 @@ export interface ChatMessageMetadata {
     options: string[];
     multipleAnswers?: boolean;
   };
+  sharedContacts?: SharedContactMetadataItem[];
+  location?: LocationMessageMetadata;
+  sticker?: {
+    isAnimated?: boolean;
+  };
+  order?: {
+    orderId?: string;
+    title?: string;
+    itemCount?: number;
+    totalAmount?: number;
+    currency?: string;
+  };
+  product?: {
+    productId?: string;
+    title?: string;
+    description?: string;
+    price?: number;
+    currency?: string;
+  };
+  groupInvite?: {
+    groupJid?: string;
+    groupName?: string;
+    inviteCode?: string;
+    caption?: string;
+  };
 }
 
 export interface ChatMessage {
@@ -251,7 +311,7 @@ export interface ChatMessage {
   conversationId: string;
   contactId: string;
   direction: 'INBOUND' | 'OUTBOUND';
-  messageType?: 'TEXT' | 'MEDIA' | 'NOTE' | 'CSAT' | 'LINK' | 'BUTTONS' | 'POLL';
+  messageType?: 'TEXT' | 'MEDIA' | 'NOTE' | 'CSAT' | 'LINK' | 'BUTTONS' | 'POLL' | 'CONTACT' | 'LOCATION';
   wahaSession?: string | null;
   body: string;
   mediaUrl?: string | null;
@@ -457,6 +517,8 @@ export interface WahaWebhookTelemetry {
 export interface WahaStatus {
   connected: boolean;
   sessionStatus: string;
+  engine?: string | null;
+  engineSupported?: boolean;
   activeSession?: string;
   connectedSessions?: number;
   totalSessions?: number;

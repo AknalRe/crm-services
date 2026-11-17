@@ -4,6 +4,8 @@ import {
   Clock,
   Eye,
   Sliders,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -36,6 +38,7 @@ export const BirthdayAutomation: React.FC = () => {
   const [senderMode, setSenderMode] = useState<'AUTO_MULTI' | 'SINGLE'>('AUTO_MULTI');
   const [selectedWahaSessions, setSelectedWahaSessions] = useState<string[]>([]);
   const [selectedChannelAccountIds, setSelectedChannelAccountIds] = useState<string[]>([]);
+  const [showMobileSideInfo, setShowMobileSideInfo] = useState(false);
 
   const loadWahaSessions = useCallback(async () => {
     try {
@@ -161,15 +164,15 @@ export const BirthdayAutomation: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Ucapan Ulang Tahun Otomatis</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <h1 className="text-base sm:text-lg font-semibold text-gray-900">Ucapan Ulang Tahun Otomatis</h1>
+          <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">
             Kirim ucapan personal otomatis setiap pagi kepada pelanggan yang berulang tahun.
           </p>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 px-4 py-2.5 flex items-center gap-3 shrink-0">
+        <div className="bg-white rounded-lg border border-gray-200 px-3.5 py-2 sm:px-4 sm:py-2.5 flex items-center gap-3 shrink-0 self-start sm:self-auto">
           <Cake className="w-5 h-5 text-amber-600 shrink-0" />
           <div>
             <span className="text-[11px] text-gray-500 block">Ulang Tahun Hari Ini</span>
@@ -183,9 +186,9 @@ export const BirthdayAutomation: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
-          <form onSubmit={handleSaveSettings} className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-5">
+          <form onSubmit={handleSaveSettings} className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
             <div className="flex items-center justify-between pb-3.5 border-b border-gray-200">
               <div>
                 <h3 className="font-semibold text-gray-900 text-sm">Pengaturan Bot Ucapan</h3>
@@ -557,34 +560,55 @@ export const BirthdayAutomation: React.FC = () => {
           </div>
         </div>
 
-        <div className="space-y-5">
-          <div className="bg-white rounded-lg border border-gray-200 p-5">
-            <h4 className="font-semibold text-gray-700 text-xs uppercase tracking-wider mb-3 flex items-center gap-1.5">
-              <Eye className="w-3.5 h-3.5 text-gray-400" />
-              <span>Pratinjau Pesan</span>
-            </h4>
+        <div className="space-y-3.5 sm:space-y-5">
+          <button
+            type="button"
+            onClick={() => setShowMobileSideInfo((v) => !v)}
+            className="lg:hidden w-full bg-white rounded-lg border border-gray-200 px-3.5 py-2.5 flex items-center justify-between text-xs font-semibold text-gray-800"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Eye className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Pratinjau Pesan &amp; Panduan Otomasi</span>
+            </span>
+            <span className="text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5">
+              <span>{showMobileSideInfo ? 'Tutup' : 'Detail'}</span>
+              {showMobileSideInfo ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5" />
+              )}
+            </span>
+          </button>
 
-            <div className="bg-[#e5ddd5] p-4 rounded-lg border border-gray-200">
-              <div className="bg-white rounded-md p-3 text-xs shadow-sm max-w-[90%] ml-auto text-gray-800 whitespace-pre-wrap leading-relaxed">
-                {previewMessage || '(Ketik template untuk melihat pratinjau)'}
-                <div className="text-[10px] text-gray-400 text-right mt-1 font-mono">
-                  {sendTime}
+          <div className={`${showMobileSideInfo ? 'space-y-3.5' : 'hidden lg:block lg:space-y-5'}`}>
+            <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5">
+              <h4 className="font-semibold text-gray-700 text-xs uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <Eye className="w-3.5 h-3.5 text-gray-400" />
+                <span>Pratinjau Pesan</span>
+              </h4>
+
+              <div className="bg-[#e5ddd5] p-3.5 sm:p-4 rounded-lg border border-gray-200">
+                <div className="bg-white rounded-md p-3 text-xs shadow-sm max-w-[90%] ml-auto text-gray-800 whitespace-pre-wrap leading-relaxed">
+                  {previewMessage || '(Ketik template untuk melihat pratinjau)'}
+                  <div className="text-[10px] text-gray-400 text-right mt-1 font-mono">
+                    {sendTime}
+                  </div>
                 </div>
               </div>
+              <p className="text-[11px] text-gray-400 mt-2 text-center truncate">
+                Simulasi target: {sampleContact.nama_lengkap}
+              </p>
             </div>
-            <p className="text-[11px] text-gray-400 mt-2 text-center">
-              Simulasi target: {sampleContact.nama_lengkap}
-            </p>
-          </div>
 
-          <div className="bg-white rounded-lg border border-gray-200 p-5 text-xs space-y-2.5">
-            <h4 className="font-semibold text-gray-900 text-sm">Cara Kerja Otomasi</h4>
-            <ul className="space-y-1.5 text-gray-600 text-[11px] leading-relaxed list-disc list-inside">
-              <li>Sistem memeriksa tanggal dan bulan lahir pelanggan setiap hari.</li>
-              <li>Pesan dikirim otomatis pada pukul <strong className="font-mono">{sendTime} WIB</strong>.</li>
-              <li>Jeda pengiriman (<strong className="font-mono">{delaySeconds} detik</strong>) menjaga keamanan sesi WhatsApp.</li>
-              <li>Riwayat pengiriman tercatat pada daftar siaran dengan tipe <code className="font-mono text-gray-800">BIRTHDAY</code>.</li>
-            </ul>
+            <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 text-xs space-y-2.5">
+              <h4 className="font-semibold text-gray-900 text-sm">Cara Kerja Otomasi</h4>
+              <ul className="space-y-1.5 text-gray-600 text-[11px] leading-relaxed list-disc list-inside">
+                <li>Sistem memeriksa tanggal dan bulan lahir pelanggan setiap hari.</li>
+                <li>Pesan dikirim otomatis pada pukul <strong className="font-mono">{sendTime} WIB</strong>.</li>
+                <li>Jeda pengiriman (<strong className="font-mono">{delaySeconds} detik</strong>) menjaga keamanan sesi WhatsApp.</li>
+                <li>Riwayat pengiriman tercatat pada daftar siaran dengan tipe <code className="font-mono text-gray-800">BIRTHDAY</code>.</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>

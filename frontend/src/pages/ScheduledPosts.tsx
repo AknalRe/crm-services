@@ -19,6 +19,7 @@ import {
   Video,
   Mic,
   Type as TypeIcon,
+  Plus,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -141,6 +142,11 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  });
+  const [showMobileComposer, setShowMobileComposer] = useState(() => Boolean(prefill));
+  const [selectedCalendarDateKey, setSelectedCalendarDateKey] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
 
   const handleUploadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -443,15 +449,26 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Jadwal Postingan Kanal</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Jadwalkan atau terbitkan langsung konten ke Instagram Feed, Facebook Page, Threads, Telegram, Post WhatsApp, dan WhatsApp Story (Status).
+          <h1 className="text-base sm:text-lg font-semibold text-gray-900">Jadwal Postingan Kanal</h1>
+          <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">
+            Jadwalkan atau terbitkan konten ke Instagram, Facebook, Threads, Telegram, dan WhatsApp.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {canPublishPost && (
+            <Button
+              variant={showMobileComposer ? 'secondary' : 'primary'}
+              size="sm"
+              onClick={() => setShowMobileComposer((v) => !v)}
+              className="lg:hidden"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{showMobileComposer ? 'Tutup Form' : 'Buat Postingan'}</span>
+            </Button>
+          )}
           {canPublishPost && (
             <Button
               variant="secondary"
@@ -471,12 +488,12 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
         {/* Create / Schedule Form */}
         {canPublishPost && (
           <form
             onSubmit={handleSubmit}
-            className="lg:col-span-5 bg-white rounded-lg border border-gray-200 p-5 space-y-4 h-fit"
+            className={`${showMobileComposer ? 'block' : 'hidden lg:block'} lg:col-span-5 bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4 h-fit`}
           >
           <div className="pb-3 border-b border-gray-100">
             <h2 className="text-sm font-semibold text-gray-900">
@@ -925,7 +942,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
 
         {/* Queue / History / Calendar */}
         <div className={`${canPublishPost ? 'lg:col-span-7' : 'lg:col-span-12'} bg-white rounded-lg border border-gray-200 overflow-hidden`}>
-          <div className="px-5 py-3.5 border-b border-gray-200 space-y-2.5">
+          <div className="px-3.5 sm:px-5 py-3 sm:py-3.5 border-b border-gray-200 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-gray-900">
                 Antrean &amp; Riwayat Postingan ({viewMode === 'list' ? listTotal : posts.length})
@@ -957,14 +974,14 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2">
               <select
                 value={filterChannel}
                 onChange={(e) => {
                   setFilterChannel(e.target.value as any);
                   setListPage(1);
                 }}
-                className="h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700"
+                className="w-full sm:w-auto h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700"
               >
                 <option value="ALL">Semua Channel</option>
                 <option value="WHATSAPP_STATUS">WhatsApp Story</option>
@@ -980,7 +997,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                   setFilterStatus(e.target.value as any);
                   setListPage(1);
                 }}
-                className="h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700"
+                className="w-full sm:w-auto h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700"
               >
                 <option value="ALL">Semua Status</option>
                 <option value="SCHEDULED">Terjadwal</option>
@@ -1049,7 +1066,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
               };
 
               return (
-                <div className="p-4 space-y-3">
+                <div className="p-3 sm:p-4 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-gray-800">
                       {calendarGranularity === 'week'
@@ -1099,7 +1116,113 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                       </div>
                     </div>
                   </div>
-                  <div className="overflow-x-auto pb-1">
+
+                  {/* Mobile Compact Tap-Date Calendar + Agenda */}
+                  <div className="sm:hidden space-y-3">
+                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-gray-500">
+                      {['M', 'S', 'S', 'R', 'K', 'J', 'S'].map((d, i) => (
+                        <div key={`${d}-${i}`} className="py-1">{d}</div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {activeCells.map((cellDate, idx) => {
+                        if (!cellDate) {
+                          return <div key={`m-empty-${idx}`} className="h-11 rounded bg-gray-50/50" />;
+                        }
+                        const dateKey = `${cellDate.getFullYear()}-${String(cellDate.getMonth() + 1).padStart(2, '0')}-${String(cellDate.getDate()).padStart(2, '0')}`;
+                        const dayPosts = filteredPosts.filter((p) => {
+                          const pd = new Date(p.scheduledAt);
+                          return (
+                            pd.getFullYear() === cellDate.getFullYear() &&
+                            pd.getMonth() === cellDate.getMonth() &&
+                            pd.getDate() === cellDate.getDate()
+                          );
+                        });
+                        const isPicked = selectedCalendarDateKey === dateKey;
+                        return (
+                          <button
+                            key={dateKey}
+                            type="button"
+                            onClick={() => setSelectedCalendarDateKey(dateKey)}
+                            className={`h-11 rounded border flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                              isPicked
+                                ? 'border-indigo-600 bg-indigo-50 text-indigo-800'
+                                : 'border-gray-200 bg-white text-gray-800'
+                            }`}
+                          >
+                            <span className="text-[11px] font-mono font-semibold leading-none">
+                              {cellDate.getDate()}
+                            </span>
+                            {dayPosts.length > 0 && (
+                              <span className="px-1 rounded-full bg-indigo-600 text-white text-[9px] font-mono leading-tight">
+                                {dayPosts.length}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {(() => {
+                      const pickedPosts = filteredPosts.filter((p) => {
+                        const pd = new Date(p.scheduledAt);
+                        const k = `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, '0')}-${String(pd.getDate()).padStart(2, '0')}`;
+                        return k === selectedCalendarDateKey;
+                      });
+                      return (
+                        <div className="border border-gray-200 rounded-md bg-gray-50/70 p-2.5 space-y-2">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-semibold text-gray-800">
+                              Jadwal {new Date(`${selectedCalendarDateKey}T00:00:00`).toLocaleDateString('id-ID', {
+                                weekday: 'short',
+                                day: 'numeric',
+                                month: 'short',
+                              })}
+                            </span>
+                            <span className="font-mono text-gray-500">{pickedPosts.length} item</span>
+                          </div>
+                          {pickedPosts.length === 0 ? (
+                            <p className="text-[11px] text-gray-400 py-2 text-center">
+                              Tidak ada postingan terjadwal di tanggal ini.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {pickedPosts.map((dp) => (
+                                <button
+                                  key={dp.id}
+                                  type="button"
+                                  onClick={() => setViewMode('list')}
+                                  className="w-full text-left p-2 rounded border border-gray-200 bg-white space-y-1"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${
+                                        POST_CHANNEL_META[dp.channel]?.badgeCls || 'bg-gray-100 text-gray-700'
+                                      }`}
+                                    >
+                                      {POST_CHANNEL_META[dp.channel]?.label || dp.channel}
+                                    </span>
+                                    <span className="text-[10px] font-mono text-gray-500">
+                                      {new Date(dp.scheduledAt).toLocaleTimeString('id-ID', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-gray-700 line-clamp-2">
+                                    {dp.caption || '(Media / Status)'}
+                                  </p>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Desktop Grid Calendar */}
+                  <div className="hidden sm:block overflow-x-auto pb-1">
                     <div className="min-w-[560px] space-y-1">
                       <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-gray-500">
                         {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((d) => (

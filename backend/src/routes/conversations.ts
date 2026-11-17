@@ -1,8 +1,26 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { and, eq, ne, desc, asc, gt, inArray } from 'drizzle-orm';
 import { db } from '../db';
-import { conversations, chatMessages, contacts, contactIdentities, crmAgents, cannedResponses, csatResponses, channelAccounts } from '../db/schema';
-import { wahaService, WahaInteractiveButtonInput, WahaSendResult, formatInteractiveButtonsFallbackText, formatLinkPreviewFallbackText } from '../services/waha.service';
+import {
+  conversations,
+  chatMessages,
+  contacts,
+  contactIdentities,
+  crmAgents,
+  cannedResponses,
+  csatResponses,
+  channelAccounts,
+  systemSettings,
+} from '../db/schema';
+import {
+  wahaService,
+  WahaInteractiveButtonInput,
+  WahaLocationData,
+  WahaSendResult,
+  WahaSharedContactItem,
+  formatInteractiveButtonsFallbackText,
+  formatLinkPreviewFallbackText,
+} from '../services/waha.service';
 import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
@@ -208,7 +226,59 @@ async function sendCsatCtaForConversation(
 
 const lastSeenSentByConv = new Map<string, string>();
 
-type OutboundMessageKind = 'TEXT' | 'MEDIA' | 'LINK_PREVIEW' | 'BUTTONS' | 'POLL';
+type OutboundMessageKind =
+  | 'TEXT'
+  | 'MEDIA'
+  | 'STICKER'
+  | 'LOCATION'
+  | 'CONTACT'
+  | 'LINK_PREVIEW'
+  | 'BUTTONS'
+  | 'POLL';
+
+const STICKER_PACK_SETTINGS_KEY = 'crm_sticker_pack_v1';
+
+interface SavedStickerItem {
+  id: string;
+  name: string;
+  mediaUrl: string;
+  createdAt: string;
+}
+
+async function readSavedStickers(): Promise<SavedStickerItem[]> {
+  const rows = await db
+    .select({ value: systemSettings.value })
+    .from(systemSettings)
+    .where(eq(systemSettings.key, STICKER_PACK_SETTINGS_KEY))
+    .limit(1);
+  if (!rows[0]?.value) return [];
+  try {
+    const parsed = JSON.parse(rows[0].value);
+    return Array.isArray(parsed)
+      ? parsed.filter((x) => x && typeof x.id === 'string' && typeof x.mediaUrl === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeSavedStickers(items: SavedStickerItem[]): Promise<void> {
+  const now = new Date();
+  await db
+    .insert(systemSettings)
+    .values({
+      key: STICKER_PACK_SETTINGS_KEY,
+      value: JSON.stringify(items.slice(0, 120)),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: systemSettings.key,
+      set: {
+        value: JSON.stringify(items.slice(0, 120)),
+        updatedAt: now,
+      },
+    });
+}
 
 interface OutboundLinkPreviewPayload {
   url: string;
@@ -294,7 +364,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
 
     const routePath = (req.routeOptions?.url || req.url || '').toLowerCase();
-    if (req.method === 'DELETE' && routePath.includes('/messages/')) {
+    if (req.method === 'DELETE' && (routePath.includes('/messages/') || routePath.includes('/stickers/'))) {
       return requirePermission('conversations.reply', 'conversations.manage')(req, reply);
     }
     if (req.method === 'POST' && routePath.endsWith('/csat-cta')) {
@@ -302,7 +372,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
     if (
       req.method === 'POST' &&
-      (routePath.endsWith('/messages') || routePath.endsWith('/retry') || routePath.endsWith('/typing'))
+      (routePath.endsWith('/messages') ||
+        routePath.endsWith('/retry') ||
+        routePath.endsWith('/typing') ||
+        routePath.endsWith('/reaction') ||
+        routePath.endsWith('/stickers') ||
+        routePath.endsWith('/save-shared-contact'))
     ) {
       return requirePermission('conversations.reply')(req, reply);
     }
@@ -311,6 +386,191 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       !routePath.endsWith('/read')
     ) {
       return requirePermission('conversations.manage')(req, reply);
+    }
+  });
+
+  // GET / POST / DELETE Saved Sticker Pack for Live Chat CRM
+  fastify.get('/stickers', async (_req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const items = await readSavedStickers();
+      return reply.send({ success: true, data: items });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  fastify.post('/stickers', async (req: FastifyRequest<{
+    Body: { name?: string; mediaBase64?: string; mimetype?: string; mediaUrl?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const name = String(req.body?.name || '').trim() || `Stiker ${new Date().toLocaleDateString('id-ID')}`;
+      let storedUrl = String(req.body?.mediaUrl || '').trim();
+      if (!storedUrl && req.body?.mediaBase64) {
+        const saved = await saveBase64MediaFile({
+          base64: req.body.mediaBase64,
+          mimeType: req.body.mimetype || 'image/webp',
+          fileName: `${name.replace(/[^a-zA-Z0-9_-]/g, '_')}.webp`,
+          maxBytes: 5 * 1024 * 1024,
+        });
+        storedUrl = saved.relativeUrl;
+      }
+      if (!storedUrl) {
+        return reply.status(400).send({ success: false, error: 'File stiker atau URL media stiker wajib disediakan.' });
+      }
+      const prev = await readSavedStickers();
+      const existing = prev.find((s) => s.mediaUrl === storedUrl);
+      if (existing) {
+        return reply.send({ success: true, data: existing, alreadyExists: true });
+      }
+      const nextItem: SavedStickerItem = {
+        id: crypto.randomUUID(),
+        name,
+        mediaUrl: storedUrl,
+        createdAt: new Date().toISOString(),
+      };
+      await writeSavedStickers([nextItem, ...prev]);
+      return reply.status(201).send({ success: true, data: nextItem });
+    } catch (error: any) {
+      return reply.status(400).send({ success: false, error: error.message || 'Gagal menyimpan stiker' });
+    }
+  });
+
+  fastify.delete('/stickers/:stickerId', async (req: FastifyRequest<{
+    Params: { stickerId: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const prev = await readSavedStickers();
+      const next = prev.filter((s) => s.id !== req.params.stickerId);
+      await writeSavedStickers(next);
+      return reply.send({ success: true });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST quick save shared contact (vCard) to CRM contacts and optionally open/return its WhatsApp conversation
+  fastify.post('/save-shared-contact', async (req: FastifyRequest<{
+    Body: {
+      fullName?: string;
+      phoneNumber?: string;
+      organization?: string;
+      openConversation?: boolean;
+      session?: string;
+    };
+  }>, reply: FastifyReply) => {
+    try {
+      const rawPhone = String(req.body?.phoneNumber || '').trim();
+      const normPhone = normalizePhoneNumber(rawPhone);
+      if (!normPhone) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Nomor telepon kontak yang dibagikan tidak valid.',
+        });
+      }
+      const cleanName = String(req.body?.fullName || '').trim() || `+${normPhone}`;
+      const cleanOrg = String(req.body?.organization || '').trim();
+
+      const phoneVariants = Array.from(
+        new Set([
+          normPhone,
+          `+${normPhone}`,
+          normPhone.startsWith('62') ? `0${normPhone.slice(2)}` : '',
+        ].filter(Boolean))
+      );
+      const existingRows = await db
+        .select()
+        .from(contacts)
+        .where(inArray(contacts.nomorWhatsapp, phoneVariants))
+        .limit(1);
+
+      let contactRow = existingRows[0];
+      let createdNew = false;
+
+      if (!contactRow) {
+        const currentUser = await getCurrentAuthUser(req);
+        if (currentUser && !hasUserPermission(currentUser, 'contacts.create')) {
+          return reply.status(403).send({
+            success: false,
+            error: 'Role Anda tidak memiliki izin menambah kontak baru (contacts.create).',
+          });
+        }
+        const lic = await licenseService.assertLicenseActive().catch(() => null);
+        if (lic && lic.features?.maxContacts > 0) {
+          const allCountRes = await db.select().from(contacts);
+          if (allCountRes.length >= lic.features.maxContacts) {
+            return reply.status(403).send({
+              success: false,
+              error: `Kuota maksimal ${lic.features.maxContacts} kontak pada paket "${lic.plan}" sudah penuh.`,
+            });
+          }
+        }
+        const now = new Date();
+        const inserted = await db
+          .insert(contacts)
+          .values({
+            id: crypto.randomUUID(),
+            namaLengkap: cleanName,
+            nomorWhatsapp: normPhone,
+            tags: 'Kontak Dibagikan',
+            notes: cleanOrg ? `Perusahaan/Org: ${cleanOrg}` : null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+        contactRow = inserted[0];
+        createdNew = true;
+        liveEvents.emit('contacts:update', { action: 'create', contactId: contactRow.id });
+      }
+
+      let conversationRow: typeof conversations.$inferSelect | null = null;
+      if (req.body?.openConversation && contactRow) {
+        const convList = await db
+          .select()
+          .from(conversations)
+          .where(and(eq(conversations.contactId, contactRow.id), eq(conversations.channel, 'WHATSAPP')))
+          .orderBy(desc(conversations.updatedAt));
+        const requestedSession = req.body?.session?.trim() || null;
+        const matched = requestedSession
+          ? convList.find((c) => c.wahaSession === requestedSession) || convList.find((c) => !c.wahaSession)
+          : convList[0];
+        const now = new Date();
+        if (matched) {
+          const [upd] = await db
+            .update(conversations)
+            .set({ status: 'OPEN', updatedAt: now })
+            .where(eq(conversations.id, matched.id))
+            .returning();
+          conversationRow = upd;
+        } else {
+          const [insConv] = await db
+            .insert(conversations)
+            .values({
+              id: crypto.randomUUID(),
+              contactId: contactRow.id,
+              channel: 'WHATSAPP',
+              wahaSession: requestedSession,
+              pushName: contactRow.namaLengkap,
+              status: 'OPEN',
+              sessionStartedAt: now,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
+          conversationRow = insConv;
+        }
+        liveEvents.emit('conversations:update', { conversationId: conversationRow.id });
+      }
+
+      return reply.status(createdNew ? 201 : 200).send({
+        success: true,
+        data: {
+          contact: contactRow,
+          createdNew,
+          conversation: conversationRow,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
 
@@ -1273,7 +1533,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // POST send reply message (text, media attachment, link preview, interactive buttons, or poll)
+  // POST send reply message (text, media, sticker, location, shared contact, link preview, interactive buttons, or poll)
   fastify.post('/:id/messages', async (req: FastifyRequest<{
     Params: { id: string };
     Body: {
@@ -1282,11 +1542,19 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       mediaBase64?: string;
       mediaMimetype?: string;
       mediaName?: string;
+      mediaUrl?: string;
       replyToMessageId?: string;
       messageKind?: OutboundMessageKind;
       linkPreview?: OutboundLinkPreviewPayload;
       interactiveButtons?: OutboundButtonsPayload;
       poll?: OutboundPollPayload;
+      location?: WahaLocationData;
+      sharedContacts?: Array<{
+        fullName: string;
+        phoneNumber: string;
+        organization?: string;
+        email?: string;
+      }>;
     };
   }>, reply: FastifyReply) => {
     try {
@@ -1296,11 +1564,14 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         mediaBase64,
         mediaMimetype,
         mediaName,
+        mediaUrl,
         replyToMessageId,
         messageKind,
         linkPreview,
         interactiveButtons,
         poll,
+        location,
+        sharedContacts,
       } = req.body || {};
 
       const inferredKind: OutboundMessageKind =
@@ -1311,7 +1582,11 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           ? 'BUTTONS'
           : poll
           ? 'POLL'
-          : mediaBase64
+          : location
+          ? 'LOCATION'
+          : Array.isArray(sharedContacts) && sharedContacts.length > 0
+          ? 'CONTACT'
+          : mediaBase64 || mediaUrl
           ? 'MEDIA'
           : 'TEXT');
 
@@ -1321,6 +1596,29 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           return reply.status(400).send({
             success: false,
             error: 'URL tautan wajib valid dan diawali http:// atau https://',
+          });
+        }
+      } else if (inferredKind === 'LOCATION') {
+        const lat = Number(location?.latitude);
+        const lng = Number(location?.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Koordinat latitude & longitude lokasi wajib diisi dengan benar.',
+          });
+        }
+      } else if (inferredKind === 'CONTACT') {
+        if (!Array.isArray(sharedContacts) || sharedContacts.length === 0 || !sharedContacts[0]?.phoneNumber?.trim()) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Minimal 1 kontak beserta nomor WhatsApp wajib dipilih untuk dibagikan.',
+          });
+        }
+      } else if (inferredKind === 'STICKER') {
+        if (!mediaBase64 && !mediaUrl) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Data atau URL stiker wajib dipilih.',
           });
         }
       } else if (inferredKind === 'BUTTONS') {
@@ -1415,7 +1713,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       let sendResult: WahaSendResult;
       let mediaType: string | null = null;
       let storedMediaUrl: string | null = null;
-      let persistedMessageType: 'TEXT' | 'MEDIA' | 'LINK' | 'BUTTONS' | 'POLL' = 'TEXT';
+      let persistedMessageType: 'TEXT' | 'MEDIA' | 'LOCATION' | 'CONTACT' | 'LINK' | 'BUTTONS' | 'POLL' = 'TEXT';
       let persistedBody = bodyText;
       let metadataRecord: Record<string, any> | null = null;
 
@@ -1439,10 +1737,48 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             },
             usedFallbackText: true,
           };
+        } else if (inferredKind === 'LOCATION' && location) {
+          persistedMessageType = 'LOCATION';
+          const lat = Number(location.latitude);
+          const lng = Number(location.longitude);
+          const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+          const locLabel = [location.name?.trim(), location.address?.trim()].filter(Boolean).join(' — ');
+          persistedBody = locLabel ? `📍 ${locLabel}\n${mapsUrl}` : `📍 Lokasi: ${mapsUrl}`;
+          metadataRecord = {
+            kind: 'LOCATION',
+            location: {
+              latitude: lat,
+              longitude: lng,
+              ...(location.name?.trim() ? { name: location.name.trim() } : {}),
+              ...(location.address?.trim() ? { address: location.address.trim() } : {}),
+              url: mapsUrl,
+            },
+            usedFallbackText: true,
+          };
+        } else if (inferredKind === 'CONTACT' && Array.isArray(sharedContacts) && sharedContacts.length > 0) {
+          persistedMessageType = 'CONTACT';
+          const normalizedContacts: WahaSharedContactItem[] = sharedContacts.map((c) => {
+            const norm = normalizePhoneNumber(c.phoneNumber) || c.phoneNumber.replace(/[^\d]/g, '');
+            return {
+              fullName: c.fullName?.trim() || `+${norm || c.phoneNumber}`,
+              phones: [norm || c.phoneNumber.trim()],
+              ...(norm ? { waId: norm } : {}),
+              ...(c.organization?.trim() ? { organization: c.organization.trim() } : {}),
+              ...(c.email?.trim() ? { email: c.email.trim() } : {}),
+            };
+          });
+          persistedBody = normalizedContacts
+            .map((c) => `👤 ${c.fullName}${c.organization ? ` (${c.organization})` : ''}: +${c.phones[0]}`)
+            .join('\n');
+          metadataRecord = {
+            kind: 'CONTACT',
+            sharedContacts: normalizedContacts,
+            usedFallbackText: true,
+          };
         } else if (!bodyText) {
           return reply.status(400).send({
             success: false,
-            error: `Pengiriman pesan di ${convChannel} saat ini mendukung balasan teks & tautan`,
+            error: `Pengiriman pesan di ${convChannel} saat ini mendukung balasan teks, lokasi, kontak, & tautan`,
           });
         }
         const out = await sendOutboundChannelMessage({
@@ -1556,6 +1892,107 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           metadataRecord = {
             kind: 'POLL',
             poll: cleanPoll,
+          };
+        } else if (inferredKind === 'LOCATION' && location) {
+          persistedMessageType = 'LOCATION';
+          const lat = Number(location.latitude);
+          const lng = Number(location.longitude);
+          const cleanName = location.name?.trim() || undefined;
+          const cleanAddr = location.address?.trim() || undefined;
+          const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+          const locLabel = [cleanName, cleanAddr].filter(Boolean).join(' — ');
+          persistedBody = locLabel ? `[Lokasi] ${locLabel}` : `[Lokasi dibagikan] ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+          sendResult = await wahaService.sendLocation(
+            targetWa,
+            {
+              latitude: lat,
+              longitude: lng,
+              title: cleanName,
+              address: cleanAddr,
+              replyTo: quotedWahaId,
+            },
+            targetSession
+          );
+          metadataRecord = {
+            kind: 'LOCATION',
+            location: {
+              latitude: lat,
+              longitude: lng,
+              ...(cleanName ? { name: cleanName } : {}),
+              ...(cleanAddr ? { address: cleanAddr } : {}),
+              url: mapsUrl,
+            },
+            ...(sendResult.usedFallbackText ? { usedFallbackText: true } : {}),
+          };
+        } else if (inferredKind === 'CONTACT' && Array.isArray(sharedContacts) && sharedContacts.length > 0) {
+          persistedMessageType = 'CONTACT';
+          const normalizedContacts: WahaSharedContactItem[] = sharedContacts.map((c) => {
+            const norm = normalizePhoneNumber(c.phoneNumber) || c.phoneNumber.replace(/[^\d]/g, '');
+            return {
+              fullName: c.fullName?.trim() || `+${norm || c.phoneNumber}`,
+              phones: [norm || c.phoneNumber.trim()],
+              ...(norm ? { waId: norm } : {}),
+              ...(c.organization?.trim() ? { organization: c.organization.trim() } : {}),
+              ...(c.email?.trim() ? { email: c.email.trim() } : {}),
+            };
+          });
+          const first = normalizedContacts[0];
+          const extra = normalizedContacts.length > 1 ? ` +${normalizedContacts.length - 1} lainnya` : '';
+          persistedBody = `[Kontak] ${first.fullName} (+${first.phones[0]})${extra}`;
+          sendResult = await wahaService.sendContactVcard(
+            targetWa,
+            sharedContacts,
+            targetSession,
+            quotedWahaId
+          );
+          metadataRecord = {
+            kind: 'CONTACT',
+            sharedContacts: normalizedContacts,
+            ...(sendResult.usedFallbackText ? { usedFallbackText: true } : {}),
+          };
+        } else if (inferredKind === 'STICKER' && (mediaBase64 || mediaUrl)) {
+          persistedMessageType = 'MEDIA';
+          mediaType = 'image';
+          persistedBody = '[Stiker]';
+          let stickerDataUri = mediaBase64 || '';
+          let stickerMime = mediaMimetype || 'image/webp';
+          if (mediaUrl) {
+            const loaded = await readUploadedMediaAsDataUri(mediaUrl);
+            if (!loaded) {
+              return reply.status(400).send({
+                success: false,
+                error: 'Berkas stiker tersimpan tidak ditemukan. Silakan unggah ulang stiker.',
+              });
+            }
+            stickerDataUri = loaded.dataUri;
+            stickerMime = loaded.mimetype || 'image/webp';
+            storedMediaUrl = mediaUrl;
+          } else if (mediaBase64) {
+            try {
+              const savedMedia = await saveBase64MediaFile({
+                base64: mediaBase64,
+                mimeType: stickerMime,
+                fileName: mediaName || 'sticker.webp',
+                maxBytes: 5 * 1024 * 1024,
+              });
+              storedMediaUrl = savedMedia.relativeUrl;
+            } catch {
+              storedMediaUrl = mediaBase64;
+            }
+          }
+          sendResult = await wahaService.sendSticker(
+            targetWa,
+            {
+              base64: stickerDataUri,
+              mimetype: stickerMime,
+              filename: mediaName || 'sticker.webp',
+              replyTo: quotedWahaId,
+            },
+            targetSession
+          );
+          metadataRecord = {
+            kind: 'STICKER',
+            sticker: { isAnimated: false },
           };
         } else if (mediaBase64 && mediaMimetype) {
           persistedMessageType = 'MEDIA';
@@ -1761,6 +2198,30 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             },
             targetSession
           );
+        } else if (msg.messageType === 'LOCATION' && parsedMeta?.location) {
+          sendResult = await wahaService.sendLocation(
+            targetWa,
+            {
+              latitude: Number(parsedMeta.location.latitude),
+              longitude: Number(parsedMeta.location.longitude),
+              title: parsedMeta.location.name,
+              address: parsedMeta.location.address,
+              replyTo: retryWahaReplyTo,
+            },
+            targetSession
+          );
+        } else if (msg.messageType === 'CONTACT' && Array.isArray(parsedMeta?.sharedContacts) && parsedMeta.sharedContacts.length > 0) {
+          sendResult = await wahaService.sendContactVcard(
+            targetWa,
+            parsedMeta.sharedContacts.map((c: any) => ({
+              fullName: c.fullName || 'Kontak',
+              phoneNumber: c.phones?.[0] || c.waId || '',
+              organization: c.organization,
+              email: c.email,
+            })),
+            targetSession,
+            retryWahaReplyTo
+          );
         } else if (msg.messageType === 'MEDIA') {
           const loaded = msg.mediaUrl ? await readUploadedMediaAsDataUri(msg.mediaUrl) : null;
           if (!loaded) {
@@ -1769,17 +2230,30 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               error: 'Lampiran berkas tidak tersimpan untuk kirim ulang. Unggah ulang berkas melalui kolom balas.',
             });
           }
-          sendResult = await wahaService.sendMediaMessage(
-            targetWa,
-            {
-              base64: loaded.dataUri,
-              mimetype: loaded.mimetype,
-              filename: msg.mediaName || 'attachment',
-              caption: msg.body.startsWith('[Lampiran:') ? '' : msg.body,
-              replyTo: retryWahaReplyTo,
-            },
-            targetSession
-          );
+          if (parsedMeta?.kind === 'STICKER') {
+            sendResult = await wahaService.sendSticker(
+              targetWa,
+              {
+                base64: loaded.dataUri,
+                mimetype: loaded.mimetype || 'image/webp',
+                filename: msg.mediaName || 'sticker.webp',
+                replyTo: retryWahaReplyTo,
+              },
+              targetSession
+            );
+          } else {
+            sendResult = await wahaService.sendMediaMessage(
+              targetWa,
+              {
+                base64: loaded.dataUri,
+                mimetype: loaded.mimetype,
+                filename: msg.mediaName || 'attachment',
+                caption: msg.body.startsWith('[Lampiran:') ? '' : msg.body,
+                replyTo: retryWahaReplyTo,
+              },
+              targetSession
+            );
+          }
         } else {
           sendResult = await wahaService.sendTextMessage(
             targetWa,
@@ -1974,6 +2448,93 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           scope,
         },
       });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST react with an emoji to a message inside conversation
+  fastify.post('/:id/messages/:messageId/reaction', async (req: FastifyRequest<{
+    Params: { id: string; messageId: string };
+    Body: { emoji?: string; session?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(eq(conversations.id, req.params.id))
+        .limit(1);
+      const convRow = convRows[0];
+      if (!convRow?.conv || !convRow.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
+      const msgRows = await db
+        .select()
+        .from(chatMessages)
+        .where(and(eq(chatMessages.id, req.params.messageId), eq(chatMessages.conversationId, convRow.conv.id)))
+        .limit(1);
+      const msg = msgRows[0];
+      if (!msg) {
+        return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
+      }
+
+      const emoji = String(req.body?.emoji ?? '').trim();
+      let prevMeta: Record<string, any> = {};
+      if (msg.metadataJson) {
+        try {
+          prevMeta = JSON.parse(msg.metadataJson);
+        } catch {
+          prevMeta = {};
+        }
+      }
+      const prevReactions: Array<any> = Array.isArray(prevMeta.reactions) ? prevMeta.reactions : [];
+      const currentCsReaction = prevReactions.find((r) => r && r.actor === 'CS' && r.isOutbound);
+      const effectiveEmoji =
+        emoji && currentCsReaction?.emoji === emoji ? '' : emoji;
+
+      const convChannel = (msg.channel || convRow.conv.channel || 'WHATSAPP').toUpperCase();
+      if (convChannel === 'WHATSAPP' && msg.wahaMessageId) {
+        const targetWa = await resolveWhatsAppTarget(convRow.conv, convRow.contact);
+        if (targetWa) {
+          const targetSession =
+            req.body?.session?.trim() || msg.wahaSession || convRow.conv.wahaSession || undefined;
+          const reactRes = await wahaService.sendReaction(
+            targetWa,
+            { messageId: msg.wahaMessageId, reaction: effectiveEmoji },
+            targetSession
+          );
+          if (!reactRes.success) {
+            return reply.status(400).send({
+              success: false,
+              error: reactRes.error || 'Gagal mengirim reaksi emoji ke WhatsApp',
+            });
+          }
+        }
+      }
+
+      const nextReactions = prevReactions.filter((r) => !(r && r.actor === 'CS' && r.isOutbound));
+      if (effectiveEmoji) {
+        const currentActor = await getCurrentAuthUser(req);
+        nextReactions.push({
+          emoji: effectiveEmoji,
+          actor: 'CS',
+          actorName: currentActor?.name || 'Tim CS',
+          isOutbound: true,
+        });
+      }
+
+      const [updatedMsg] = await db
+        .update(chatMessages)
+        .set({
+          metadataJson: JSON.stringify({ ...prevMeta, reactions: nextReactions }),
+        })
+        .where(eq(chatMessages.id, msg.id))
+        .returning();
+
+      liveEvents.emit('conversations:update', { conversationId: convRow.conv.id });
+      return reply.send({ success: true, data: updatedMsg });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }

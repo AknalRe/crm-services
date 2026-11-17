@@ -2,15 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
 import { config } from '../config';
-import { WahaConfig, wahaService } from './waha.service';
+import {
+  buildVCardString,
+  parseVCardString,
+  WahaConfig,
+  wahaService,
+} from './waha.service';
+import { extractInboundWahaMediaMeta, extractInboundWahaRichData } from '../routes/waha';
 
 function stubGetConfig(t: test.TestContext, conf: WahaConfig) {
+  wahaService.invalidateExternalEngineCache();
   const origGetConfig = wahaService.getConfig.bind(wahaService);
   (wahaService as any).getConfig = async (maskSecret = false) => ({
     ...conf,
     apiKey: maskSecret ? (conf.apiKey ? '••••••••' : '') : conf.apiKey,
   });
   t.after(() => {
+    wahaService.invalidateExternalEngineCache();
     (wahaService as any).getConfig = origGetConfig;
   });
 }
@@ -44,6 +52,9 @@ test('External WAHA mode supports full multi-session listing and accurate status
     capturedBaseUrl = cfg?.baseURL || '';
     return {
       get: async (url: string) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+        }
         if (url.startsWith('/api/sessions?all=true')) {
           return {
             data: [
@@ -138,6 +149,9 @@ test('getStatus returns NOT_FOUND cleanly without forging synthetic STOPPED rows
   axios.create = (() =>
     ({
       get: async (url: string) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+        }
         if (url.startsWith('/api/sessions?all=true')) {
           return { data: [] };
         }
@@ -220,6 +234,12 @@ test('startSession explains WAHA Core single-session limit clearly instead of ma
 
   axios.create = (() =>
     ({
+      get: async (url: string) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'CORE' } };
+        }
+        return { data: {} };
+      },
       post: async () => {
         const err: any = new Error('Unprocessable Entity');
         err.response = {
@@ -306,7 +326,7 @@ test('testConnection reuses stored secret when masked placeholder is submitted',
           return { data: [{ name: 'default', status: 'WORKING' }] };
         }
         if (url === '/api/version') {
-          return { data: { version: '2026.1.0', tier: 'PLUS' } };
+          return { data: { version: '2026.1.0', engine: 'GOWS', tier: 'PLUS' } };
         }
         return { data: {} };
       },
@@ -322,6 +342,8 @@ test('testConnection reuses stored secret when masked placeholder is submitted',
   assert.equal(sentApiKey, 'real-secret-token');
   assert.equal(res.connected, true);
   assert.equal(res.tier, 'PLUS');
+  assert.equal(res.engine, 'GOWS');
+  assert.equal(res.isGows, true);
   assert.equal(res.sessionCount, 1);
 });
 
@@ -344,6 +366,9 @@ test('External WAHA falls back from stale/default DB session to active WORKING s
   axios.create = (() =>
     ({
       get: async (url: string) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+        }
         if (url.startsWith('/api/sessions?all=true')) {
           return {
             data: [
@@ -398,6 +423,7 @@ test('testConnection uses saved externalConfig key (not internal key) when activ
     sentKey = cfg?.headers?.['X-Api-Key'] || '';
     return {
       get: async (url: string) => {
+        if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
         if (url.startsWith('/api/sessions')) return { data: [{ name: 'HRIS_HR', status: 'WORKING' }] };
         return { data: {} };
       },
@@ -498,6 +524,9 @@ test('EXTERNAL mode prefers public webhook URL over internal Docker WEBHOOK_URL 
   let putCalled = false;
   axios.create = (() => ({
     get: async (url: string) => {
+      if (url === '/api/version') {
+        return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      }
       if (url.startsWith('/api/sessions/HRIS_HR')) {
         return {
           data: {
@@ -547,6 +576,9 @@ test('resolveLidToPhone resolves @lid via WAHA lids endpoint and caches the resu
   let lidApiCalls = 0;
   axios.create = (() => ({
     get: async (url: string) => {
+      if (url === '/api/version') {
+        return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      }
       if (url.includes('/api/HRIS_HR/lids/998877665544%40lid') || url.includes('/api/HRIS_HR/lids/998877665544@lid')) {
         lidApiCalls += 1;
         return { data: { lid: '998877665544@lid', pn: '6281122334455@c.us' } };
@@ -643,6 +675,9 @@ test('sendTextMessage & sendMediaMessage resolve away from stale default session
   const posted: Array<{ url: string; body: any }> = [];
   axios.create = (() => ({
     get: async (url: string) => {
+      if (url === '/api/version') {
+        return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      }
       if (url.startsWith('/api/sessions/WA_OFF')) {
         return { data: { name: 'WA_OFF', status: 'SCAN_QR_CODE' } };
       }
@@ -730,7 +765,10 @@ test('sendSeen, setTyping, sendLinkPreviewMessage, sendButtonsMessage, sendPollM
   let failSendSeenPrimary = true;
 
   axios.create = (() => ({
-    get: async () => ({ data: [{ name: 'HRIS_HR', status: 'WORKING' }] }),
+    get: async (url: string) =>
+      url === '/api/version'
+        ? { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } }
+        : { data: [{ name: 'HRIS_HR', status: 'WORKING' }] },
     post: async (url: string, body: any) => {
       posted.push({ url, body });
       if (url === '/api/sendSeen' && failSendSeenPrimary) {
@@ -1086,6 +1124,9 @@ test('WhatsApp Status sending, deletion, viewer parsing, and ACK ID extraction w
   axios.create = (() =>
     ({
       get: async (url: string) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+        }
         if (url === '/api/sessions?all=true') {
           return { data: [{ name: 'marketing', status: 'WORKING' }] };
         }
@@ -1225,6 +1266,9 @@ test('WAHA contact synchronization and group metadata normalization support GOWS
   axios.create = (() =>
     ({
       get: async (url: string) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+        }
         if (url === '/api/contacts/all') {
           return {
             data: [
@@ -1285,7 +1329,10 @@ test('deleteMessage revokes WhatsApp message via WAHA DELETE endpoint with POST 
 
   axios.create = (() =>
     ({
-      get: async () => ({ data: [{ name: 'sales', status: 'WORKING' }] }),
+      get: async (url: string) =>
+        url === '/api/version'
+          ? { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } }
+          : { data: [{ name: 'sales', status: 'WORKING' }] },
       delete: async (url: string) => {
         if (simulate404) {
           const err: any = new Error('Not found');
@@ -1350,6 +1397,9 @@ test('fetchAllContacts paginates beyond 500 contacts and recovers from capped /c
   axios.create = (() =>
     ({
       get: async (url: string, cfg?: any) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+        }
         if (url === '/api/contacts/all') {
           const off = Number(cfg?.params?.offset || 0);
           return { data: all1250.slice(off, off + 500) };
@@ -1369,6 +1419,9 @@ test('fetchAllContacts paginates beyond 500 contacts and recovers from capped /c
   axios.create = (() =>
     ({
       get: async (url: string, cfg?: any) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+        }
         if (url === '/api/contacts/all') {
           return { data: all1250.slice(0, 500) };
         }
@@ -1384,6 +1437,373 @@ test('fetchAllContacts paginates beyond 500 contacts and recovers from capped /c
   assert.equal(fallbackPagedRes.contacts.length, 1250);
   assert.equal(fallbackPagedRes.contacts[1249]?.name, 'Kontak 1250');
 });
+
+test('parseVCardString, buildVCardString, and extractInboundWahaRichData capture shared contacts, locations, stickers, polls, orders, and reactions', () => {
+  const built = buildVCardString({
+    fullName: 'Budi Santoso',
+    phoneNumber: '0812-3456-7890',
+    organization: 'PT Maju Jaya',
+    email: 'budi@majujaya.id',
+  });
+  const parsedVcard = parseVCardString(built);
+  assert.ok(parsedVcard);
+  assert.equal(parsedVcard?.fullName, 'Budi Santoso');
+  assert.equal(parsedVcard?.organization, 'PT Maju Jaya');
+  assert.equal(parsedVcard?.email, 'budi@majujaya.id');
+  assert.equal(parsedVcard?.waId, '6281234567890');
+  assert.ok(parsedVcard?.phones.includes('6281234567890'));
+
+  // Shared contacts (vCards array / contactsArrayMessage)
+  const contactRich = extractInboundWahaRichData(
+    {
+      _data: {
+        message: {
+          contactsArrayMessage: {
+            contacts: [
+              { displayName: 'Budi', vcard: built },
+              { displayName: 'Siti', vcard: 'BEGIN:VCARD\nVERSION:3.0\nFN:Siti Aminah\nTEL;waid=628987654321:+628987654321\nEND:VCARD' },
+            ],
+          },
+        },
+      },
+    },
+    {
+      hasMedia: false,
+      rawMediaUrl: null,
+      inlineBase64: null,
+      mimetype: null,
+      mediaType: null,
+      mediaName: null,
+      isSticker: false,
+    }
+  );
+  assert.equal(contactRich.messageType, 'CONTACT');
+  assert.equal(contactRich.metadata?.kind, 'CONTACT');
+  assert.equal(contactRich.metadata?.sharedContacts?.length, 2);
+  assert.equal(contactRich.metadata?.sharedContacts?.[1]?.fullName, 'Siti Aminah');
+
+  // Location & Live Location
+  const locRich = extractInboundWahaRichData(
+    {
+      location: {
+        latitude: -6.2,
+        longitude: 106.816666,
+        name: 'Kantor Pusat Reneo',
+        address: 'Jl. Sudirman No. 10, Jakarta',
+      },
+    },
+    {
+      hasMedia: false,
+      rawMediaUrl: null,
+      inlineBase64: null,
+      mimetype: null,
+      mediaType: null,
+      mediaName: null,
+      isSticker: false,
+    }
+  );
+  assert.equal(locRich.messageType, 'LOCATION');
+  assert.equal(locRich.metadata?.kind, 'LOCATION');
+  assert.equal(locRich.metadata?.location?.latitude, -6.2);
+  assert.equal(locRich.metadata?.location?.name, 'Kantor Pusat Reneo');
+  assert.match(locRich.metadata?.location?.url || '', /google\.com\/maps/);
+
+  const liveLocRich = extractInboundWahaRichData(
+    {
+      _data: {
+        message: {
+          liveLocationMessage: {
+            degreesLatitude: -6.9175,
+            degreesLongitude: 107.6191,
+            caption: 'Kurir OTW',
+            accuracyInMeters: 15,
+          },
+        },
+      },
+    },
+    {
+      hasMedia: false,
+      rawMediaUrl: null,
+      inlineBase64: null,
+      mimetype: null,
+      mediaType: null,
+      mediaName: null,
+      isSticker: false,
+    }
+  );
+  assert.equal(liveLocRich.messageType, 'LOCATION');
+  assert.equal(liveLocRich.metadata?.location?.isLive, true);
+  assert.equal(liveLocRich.metadata?.location?.name, 'Kurir OTW');
+
+  // Sticker detection
+  const stickerPayload = {
+    type: 'sticker',
+    hasMedia: true,
+    media: { url: '/api/files/s.webp', mimetype: 'image/webp' },
+    _data: { message: { stickerMessage: { isAnimated: true, mimetype: 'image/webp' } } },
+  };
+  const stickerMediaMeta = extractInboundWahaMediaMeta(stickerPayload);
+  const stickerRich = extractInboundWahaRichData(stickerPayload, stickerMediaMeta);
+  assert.equal(stickerMediaMeta.isSticker, true);
+  assert.equal(stickerRich.metadata?.kind, 'STICKER');
+  assert.equal(stickerRich.metadata?.sticker?.isAnimated, true);
+
+  // Poll creation + Order + Product + Group Invite + Reaction + Revoke
+  const pollRich = extractInboundWahaRichData(
+    {
+      _data: {
+        message: {
+          pollCreationMessageV3: {
+            name: 'Pilih jadwal meeting',
+            options: [{ optionName: 'Senin 10:00' }, { optionName: 'Selasa 14:00' }],
+            selectableOptionsCount: 1,
+          },
+        },
+      },
+    },
+    { hasMedia: false, rawMediaUrl: null, inlineBase64: null, mimetype: null, mediaType: null, mediaName: null, isSticker: false }
+  );
+  assert.equal(pollRich.messageType, 'POLL');
+  assert.deepEqual(pollRich.metadata?.poll?.options, ['Senin 10:00', 'Selasa 14:00']);
+
+  const orderRich = extractInboundWahaRichData(
+    {
+      _data: {
+        message: {
+          orderMessage: {
+            orderId: 'ORD-77',
+            orderTitle: 'Paket Hosting Pro',
+            itemCount: 2,
+            totalAmount1000: 150000000,
+            totalCurrencyCode: 'IDR',
+          },
+        },
+      },
+    },
+    { hasMedia: false, rawMediaUrl: null, inlineBase64: null, mimetype: null, mediaType: null, mediaName: null, isSticker: false }
+  );
+  assert.equal(orderRich.metadata?.kind, 'ORDER');
+  assert.equal(orderRich.metadata?.order?.totalAmount, 150000);
+
+  const reactRich = extractInboundWahaRichData(
+    {
+      _data: {
+        message: {
+          reactionMessage: {
+            key: { id: 'MSG_123' },
+            text: '🔥',
+          },
+        },
+      },
+    },
+    { hasMedia: false, rawMediaUrl: null, inlineBase64: null, mimetype: null, mediaType: null, mediaName: null, isSticker: false }
+  );
+  assert.equal(reactRich.reaction?.targetMessageId, 'MSG_123');
+  assert.equal(reactRich.reaction?.emoji, '🔥');
+
+  const revokeRich = extractInboundWahaRichData(
+    {
+      _data: {
+        message: {
+          protocolMessage: {
+            type: 0,
+            key: { id: 'MSG_OLD_1' },
+          },
+        },
+      },
+    },
+    { hasMedia: false, rawMediaUrl: null, inlineBase64: null, mimetype: null, mediaType: null, mediaName: null, isSticker: false }
+  );
+  assert.equal(revokeRich.revokedTargetId, 'MSG_OLD_1');
+});
+
+test('sendSticker, sendLocation, sendContactVcard, and sendReaction dispatch expected WAHA endpoints and fallbacks', async (t) => {
+  stubWahaEnvSession(t, 'sales');
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha.example.com',
+    apiKey: 'secret-token',
+    session: 'sales',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const calls: Array<{ method: string; url: string; body: any }> = [];
+  let failSendLocation404 = false;
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  axios.create = (() =>
+    ({
+      get: async (url: string) =>
+        url === '/api/version'
+          ? { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } }
+          : { data: [] },
+      post: async (url: string, body: any) => {
+        calls.push({ method: 'POST', url, body });
+        if (url === '/api/sendLocation' && failSendLocation404) {
+          const err: any = new Error('Not found');
+          err.response = { status: 404, data: { message: 'Not Found' } };
+          throw err;
+        }
+        return { data: { id: `msg_${calls.length}` } };
+      },
+      put: async (url: string, body: any) => {
+        calls.push({ method: 'PUT', url, body });
+        return { data: { ok: true } };
+      },
+    }) as any) as any;
+
+  const stRes = await wahaService.sendSticker(
+    '08123456789',
+    { base64: 'data:image/webp;base64,AAA=', mimetype: 'image/webp', filename: 'hi.webp' },
+    'sales'
+  );
+  assert.equal(stRes.success, true);
+  assert.equal(calls[0]?.url, '/api/sendSticker');
+
+  const locRes = await wahaService.sendLocation(
+    '08123456789',
+    { latitude: -6.2, longitude: 106.8, title: 'Kantor' },
+    'sales'
+  );
+  assert.equal(locRes.success, true);
+  assert.equal(calls[1]?.url, '/api/sendLocation');
+
+  failSendLocation404 = true;
+  const locFallbackRes = await wahaService.sendLocation(
+    '08123456789',
+    { latitude: -6.2, longitude: 106.8, title: 'Kantor' },
+    'sales'
+  );
+  assert.equal(locFallbackRes.success, true);
+  assert.equal(locFallbackRes.usedFallbackText, true);
+  assert.equal(calls[3]?.url, '/api/sendText');
+
+  const vcardRes = await wahaService.sendContactVcard(
+    '08123456789',
+    [{ fullName: 'Admin CS', phoneNumber: '081122334455', organization: 'Reneo' }],
+    'sales'
+  );
+  assert.equal(vcardRes.success, true);
+  assert.equal(calls[4]?.url, '/api/sendContactVcard');
+  assert.equal(calls[4]?.body?.contacts?.[0]?.fullName, 'Admin CS');
+
+  const reactRes = await wahaService.sendReaction(
+    '08123456789',
+    { messageId: 'true_628123456789@c.us_XYZ', reaction: '👍' },
+    'sales'
+  );
+  assert.equal(reactRes.success, true);
+  assert.equal(calls[5]?.method, 'PUT');
+  assert.equal(calls[5]?.url, '/api/reaction');
+});
+
+test('EXTERNAL WAHA strictly requires GOWS engine across test, save assertion, status, sessions, and outbound send', async (t) => {
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://ext-webjs.example.com',
+    apiKey: 'secret-key',
+    session: 'default',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  let mockEngine: string | undefined = 'WEBJS';
+  let sendCalled = false;
+  axios.create = (() =>
+    ({
+      get: async (url: string) => {
+        if (url === '/api/version') {
+          return {
+            data: mockEngine
+              ? { version: '2026.8.2', engine: mockEngine, tier: 'PLUS' }
+              : { version: '2026.8.2', tier: 'PLUS' },
+          };
+        }
+        if (url.startsWith('/api/sessions')) {
+          return { data: [{ name: 'default', status: 'WORKING' }] };
+        }
+        return { data: {} };
+      },
+      post: async () => {
+        sendCalled = true;
+        return { data: { id: 'should_not_send' } };
+      },
+    }) as any) as any;
+
+  // 1. Rejects WEBJS on testConnection & assertExternalGowsEngine
+  await assert.rejects(
+    () =>
+      wahaService.testConnection({
+        mode: 'EXTERNAL',
+        baseUrl: 'https://ext-webjs.example.com',
+        apiKey: 'secret-key',
+      }),
+    (err: any) => err?.statusCode === 422 && /wajib menggunakan engine GOWS.*WEBJS/i.test(err?.message || '')
+  );
+
+  await assert.rejects(
+    () =>
+      wahaService.assertExternalGowsEngine({
+        baseUrl: 'https://ext-webjs.example.com',
+        apiKey: 'secret-key',
+      }),
+    (err: any) => err?.statusCode === 422 && /WEBJS/i.test(err?.message || '')
+  );
+
+  // 2. Blocks getStatus, listSessions, startSession, and sendTextMessage when external is WEBJS
+  const webjsStatus = await wahaService.getStatus();
+  assert.equal(webjsStatus.connected, false);
+  assert.equal(webjsStatus.sessionStatus, 'UNSUPPORTED_ENGINE');
+  assert.equal(webjsStatus.engineSupported, false);
+  assert.equal(webjsStatus.engine, 'WEBJS');
+  assert.match(webjsStatus.error || '', /wajib menggunakan engine GOWS/i);
+
+  await assert.rejects(() => wahaService.listSessions(), /wajib menggunakan engine GOWS/i);
+  await assert.rejects(() => wahaService.startSession('default'), /wajib menggunakan engine GOWS/i);
+
+  const sendBlocked = await wahaService.sendTextMessage('08123456789', 'Halo');
+  assert.equal(sendBlocked.success, false);
+  assert.equal(sendCalled, false);
+  assert.match(sendBlocked.error || '', /wajib menggunakan engine GOWS/i);
+
+  // 3. Rejects NOWEB and missing-engine responses too
+  mockEngine = 'NOWEB';
+  wahaService.invalidateExternalEngineCache();
+  await assert.rejects(
+    () => wahaService.assertExternalGowsEngine({ baseUrl: 'https://ext-noweb.example.com' }),
+    /NOWEB/i
+  );
+
+  mockEngine = undefined;
+  wahaService.invalidateExternalEngineCache();
+  await assert.rejects(
+    () => wahaService.assertExternalGowsEngine({ baseUrl: 'https://ext-unknown.example.com' }),
+    /tidak melaporkan engine GOWS/i
+  );
+
+  // 4. Accepts GOWS engine cleanly
+  mockEngine = 'GOWS';
+  wahaService.invalidateExternalEngineCache();
+  const okTest = await wahaService.testConnection({
+    mode: 'EXTERNAL',
+    baseUrl: 'https://ext-gows.example.com',
+    apiKey: 'secret-key',
+  });
+  assert.equal(okTest.connected, true);
+  assert.equal(okTest.engine, 'GOWS');
+  assert.equal(okTest.isGows, true);
+});
+
 
 
 

@@ -21,6 +21,7 @@ import {
   CrmSlaCsatSettings,
   CannedResponse,
   PaginationMeta,
+  SavedStickerItem,
 } from '../types';
 import { getApiBaseUrl } from './paths';
 
@@ -225,8 +226,9 @@ export const api = {
       mediaBase64?: string;
       mediaMimetype?: string;
       mediaName?: string;
+      mediaUrl?: string;
       replyToMessageId?: string;
-      messageKind?: 'TEXT' | 'MEDIA' | 'LINK_PREVIEW' | 'BUTTONS' | 'POLL';
+      messageKind?: 'TEXT' | 'MEDIA' | 'STICKER' | 'LOCATION' | 'CONTACT' | 'LINK_PREVIEW' | 'BUTTONS' | 'POLL';
       linkPreview?: {
         url: string;
         title?: string;
@@ -253,9 +255,62 @@ export const api = {
         options: string[];
         multipleAnswers?: boolean;
       };
+      location?: {
+        latitude: number;
+        longitude: number;
+        name?: string;
+        address?: string;
+      };
+      sharedContacts?: Array<{
+        fullName: string;
+        phoneNumber: string;
+        organization?: string;
+        email?: string;
+      }>;
     }
   ): Promise<ChatMessage> => {
     const res = await client.post(`/conversations/${id}/messages`, payload);
+    return res.data.data;
+  },
+  reactToConversationMessage: async (
+    conversationId: string,
+    messageId: string,
+    emoji: string,
+    session?: string
+  ): Promise<ChatMessage> => {
+    const res = await client.post(`/conversations/${conversationId}/messages/${messageId}/reaction`, {
+      emoji,
+      ...(session ? { session } : {}),
+    });
+    return res.data.data;
+  },
+  getStickers: async (): Promise<SavedStickerItem[]> => {
+    const res = await client.get('/conversations/stickers');
+    return res.data.data || [];
+  },
+  saveSticker: async (payload: {
+    name?: string;
+    mediaBase64?: string;
+    mimetype?: string;
+    mediaUrl?: string;
+  }): Promise<{ sticker: SavedStickerItem; alreadyExists?: boolean }> => {
+    const res = await client.post('/conversations/stickers', payload);
+    return {
+      sticker: res.data.data,
+      alreadyExists: Boolean(res.data.alreadyExists),
+    };
+  },
+  deleteSticker: async (stickerId: string): Promise<void> => {
+    await client.delete(`/conversations/stickers/${stickerId}`);
+  },
+  saveSharedContact: async (payload: {
+    fullName: string;
+    phoneNumber: string;
+    organization?: string;
+    openConversation?: boolean;
+    session?: string;
+  }): Promise<{ contact: Contact; createdNew: boolean; conversation?: Conversation | null }> => {
+    const res = await client.post('/conversations/save-shared-contact', payload);
     return res.data.data;
   },
   retryConversationMessage: async (
@@ -411,6 +466,8 @@ export const api = {
     baseUrl: string;
     version?: string | null;
     tier?: string | null;
+    engine?: string | null;
+    isGows?: boolean;
     sessionCount: number;
     sessions: Array<{ name: string; status: string }>;
   }> => {

@@ -61,10 +61,10 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
 
   return (
     <div
-      className={`px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 text-xs text-gray-600 ${className}`}
+      className={`px-3 py-2.5 sm:px-4 sm:py-3 bg-gray-50 border-t border-gray-200 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5 sm:gap-3 text-xs text-gray-600 ${className}`}
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="tabular-nums">
+      <div className="flex flex-wrap items-center justify-between sm:justify-start gap-x-3 gap-y-1.5">
+        <span className="tabular-nums text-[11px] sm:text-xs">
           {total === 0 ? (
             <>
               Tidak ada <strong className="text-gray-900">{itemLabel}</strong>
@@ -78,14 +78,14 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
           )}
         </span>
 
-        <label className="inline-flex items-center gap-1.5 text-gray-500">
+        <label className="inline-flex items-center gap-1.5 text-gray-500 text-[11px] sm:text-xs">
           <span>Baris:</span>
           <select
             aria-label={`Jumlah ${itemLabel} per halaman`}
             value={limit}
             disabled={loading}
             onChange={(e) => onLimitChange(Number(e.target.value))}
-            className="h-7 px-2 rounded-md border border-gray-300 bg-white text-gray-800 text-xs font-medium tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 disabled:opacity-50"
+            className="h-7 px-1.5 sm:px-2 rounded-md border border-gray-300 bg-white text-gray-800 text-[11px] sm:text-xs font-medium tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 disabled:opacity-50"
           >
             {mergedLimitOptions.map((opt) => (
               <option key={opt} value={opt}>
@@ -98,28 +98,34 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
         {extraContent}
       </div>
 
-      <div className="flex items-center justify-between sm:justify-end gap-1 flex-wrap">
-        <button
-          type="button"
-          title="Halaman pertama"
-          disabled={loading || safePage <= 1}
-          onClick={() => onPageChange(1)}
-          className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          <ChevronsLeft className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          title="Halaman sebelumnya"
-          disabled={loading || safePage <= 1}
-          onClick={() => onPageChange(safePage - 1)}
-          className="h-7 px-2 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          <ChevronLeft className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Prev</span>
-        </button>
+      <div className="flex items-center justify-between sm:justify-end gap-1">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            title="Halaman pertama"
+            disabled={loading || safePage <= 1}
+            onClick={() => onPageChange(1)}
+            className="h-8 w-8 sm:h-7 sm:w-7 inline-flex items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronsLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            title="Halaman sebelumnya"
+            disabled={loading || safePage <= 1}
+            onClick={() => onPageChange(safePage - 1)}
+            className="h-8 px-2.5 sm:h-7 sm:px-2 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Prev</span>
+          </button>
+        </div>
 
-        <div className="flex items-center gap-1 mx-0.5">
+        <span className="sm:hidden px-2.5 text-[11px] font-medium text-gray-700 tabular-nums">
+          Hal <strong className="text-gray-900">{safePage}</strong> / {safeTotalPages}
+        </span>
+
+        <div className="hidden sm:flex items-center gap-1 mx-0.5">
           {tokens.map((tok) =>
             typeof tok !== 'number' ? (
               <span key={tok} className="px-1.5 text-gray-400 select-none">
@@ -143,25 +149,27 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
           )}
         </div>
 
-        <button
-          type="button"
-          title="Halaman berikutnya"
-          disabled={loading || safePage >= safeTotalPages}
-          onClick={() => onPageChange(safePage + 1)}
-          className="h-7 px-2 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          <span className="hidden sm:inline">Next</span>
-          <ChevronRight className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          title="Halaman terakhir"
-          disabled={loading || safePage >= safeTotalPages}
-          onClick={() => onPageChange(safeTotalPages)}
-          className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          <ChevronsRight className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            title="Halaman berikutnya"
+            disabled={loading || safePage >= safeTotalPages}
+            onClick={() => onPageChange(safePage + 1)}
+            className="h-8 px-2.5 sm:h-7 sm:px-2 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <span className="hidden sm:inline">Next</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            title="Halaman terakhir"
+            disabled={loading || safePage >= safeTotalPages}
+            onClick={() => onPageChange(safeTotalPages)}
+            className="h-8 w-8 sm:h-7 sm:w-7 inline-flex items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronsRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );

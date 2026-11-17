@@ -108,7 +108,7 @@ export const SocialFeed: React.FC = () => {
       ) : (
         <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-200">
           {items.map((item) => (
-            <div key={item.id} className="p-4 space-y-2">
+            <div key={item.id} className="p-3 sm:p-4 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
                   <span className="text-xs font-semibold text-gray-900">

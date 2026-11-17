@@ -11,7 +11,12 @@ import {
   scheduledPosts,
 } from '../db/schema';
 import { upsertWhatsappStatusView } from '../services/post.service';
-import { wahaService } from '../services/waha.service';
+import {
+  parseVCardString,
+  WahaLocationData,
+  wahaService,
+  WahaSharedContactItem,
+} from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import {
@@ -73,6 +78,289 @@ export function isWahaFromMe(payload: any): boolean {
   return false;
 }
 
+export interface InboundWahaRichData {
+  messageType: 'TEXT' | 'MEDIA' | 'LOCATION' | 'CONTACT' | 'POLL' | 'BUTTONS';
+  body: string;
+  metadata: Record<string, any> | null;
+  reaction?: {
+    targetMessageId: string;
+    emoji: string;
+  } | null;
+  revokedTargetId?: string | null;
+}
+
+export function extractInboundWahaRichData(
+  payload: any,
+  mediaMeta: InboundWahaMediaMeta,
+  fallbackText?: string
+): InboundWahaRichData {
+  const msg = payload?._data?.message || payload?._data?.Message || {};
+
+  // 1. Reaction (inline reactionMessage OR message.reaction payload)
+  const reactionPayload = payload?.reaction || msg?.reactionMessage;
+  if (reactionPayload && typeof reactionPayload === 'object') {
+    const targetMessageId = String(
+      reactionPayload?.messageId ||
+        reactionPayload?.key?.id ||
+        reactionPayload?.key?.ID ||
+        payload?._data?.reaction?.key?.id ||
+        ''
+    ).trim();
+    if (targetMessageId) {
+      return {
+        messageType: 'TEXT',
+        body: '',
+        metadata: null,
+        reaction: {
+          targetMessageId,
+          emoji: String(reactionPayload?.text ?? reactionPayload?.emoji ?? '').trim(),
+        },
+      };
+    }
+  }
+
+  // 2. Revoked / Deleted for everyone by sender (protocolMessage type 0 / REVOKE)
+  const protoMsg = msg?.protocolMessage;
+  if (
+    protoMsg &&
+    (protoMsg.type === 0 || String(protoMsg.type).toUpperCase() === 'REVOKE') &&
+    protoMsg?.key?.id
+  ) {
+    return {
+      messageType: 'TEXT',
+      body: '',
+      metadata: null,
+      revokedTargetId: String(protoMsg.key.id).trim(),
+    };
+  }
+
+  // 3. Location / Live Location
+  const rawLoc = payload?.location || msg?.locationMessage || msg?.liveLocationMessage;
+  if (rawLoc && typeof rawLoc === 'object') {
+    const lat = Number(rawLoc.latitude ?? rawLoc.degreesLatitude ?? rawLoc.lat);
+    const lng = Number(rawLoc.longitude ?? rawLoc.degreesLongitude ?? rawLoc.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const isLive = Boolean(msg?.liveLocationMessage || rawLoc.live || payload?.type === 'live_location');
+      const name =
+        String(rawLoc.name || rawLoc.description || rawLoc.comment || rawLoc.caption || '').trim() ||
+        undefined;
+      const address = String(rawLoc.address || '').trim() || undefined;
+      const url =
+        String(rawLoc.url || '').trim() || `https://www.google.com/maps?q=${lat},${lng}`;
+      const accuracyRaw = Number(rawLoc.accuracyInMeters);
+      const locationData: WahaLocationData = {
+        latitude: lat,
+        longitude: lng,
+        ...(name ? { name } : {}),
+        ...(address ? { address } : {}),
+        url,
+        ...(isLive ? { isLive: true } : {}),
+        ...(Number.isFinite(accuracyRaw) && accuracyRaw > 0 ? { accuracyInMeters: accuracyRaw } : {}),
+      };
+      const label = [name, address].filter(Boolean).join(' — ');
+      const bodyText = isLive
+        ? `[Live Lokasi]${label ? ` ${label}` : ''}`
+        : label
+        ? `[Lokasi] ${label}`
+        : `[Lokasi dibagikan] ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      return {
+        messageType: 'LOCATION',
+        body: bodyText,
+        metadata: {
+          kind: 'LOCATION',
+          location: locationData,
+        },
+      };
+    }
+  }
+
+  // 4. Shared Contacts (vCard / contactMessage / contactsArrayMessage)
+  const vCardInputs: Array<{ vcard: string; displayName?: string }> = [];
+  if (Array.isArray(payload?.vCards)) {
+    for (const v of payload.vCards) {
+      if (typeof v === 'string' && v.trim()) vCardInputs.push({ vcard: v });
+      else if (v && typeof v === 'object' && typeof v.vcard === 'string') {
+        vCardInputs.push({ vcard: v.vcard, displayName: v.displayName });
+      }
+    }
+  }
+  if (Array.isArray(payload?._data?.vCards)) {
+    for (const v of payload._data.vCards) {
+      if (typeof v === 'string' && v.trim()) vCardInputs.push({ vcard: v });
+    }
+  }
+  if (msg?.contactMessage?.vcard) {
+    vCardInputs.push({
+      vcard: String(msg.contactMessage.vcard),
+      displayName: msg.contactMessage.displayName,
+    });
+  }
+  if (Array.isArray(msg?.contactsArrayMessage?.contacts)) {
+    for (const c of msg.contactsArrayMessage.contacts) {
+      if (c?.vcard) {
+        vCardInputs.push({ vcard: String(c.vcard), displayName: c.displayName });
+      }
+    }
+  }
+  if (Array.isArray(payload?.contacts)) {
+    for (const c of payload.contacts) {
+      if (typeof c === 'string' && c.includes('BEGIN:VCARD')) {
+        vCardInputs.push({ vcard: c });
+      } else if (c && typeof c === 'object' && c.vcard) {
+        vCardInputs.push({ vcard: String(c.vcard), displayName: c.displayName || c.fullName });
+      }
+    }
+  }
+
+  if (vCardInputs.length > 0) {
+    const parsedContacts: WahaSharedContactItem[] = [];
+    const seen = new Set<string>();
+    for (const entry of vCardInputs) {
+      const parsed = parseVCardString(entry.vcard, entry.displayName);
+      if (!parsed) continue;
+      const key = `${parsed.fullName}|${parsed.phones.join(',')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      parsedContacts.push(parsed);
+    }
+    if (parsedContacts.length > 0) {
+      const first = parsedContacts[0];
+      const firstPhone = first.phones[0] ? ` (+${first.phones[0].replace(/^\+/, '')})` : '';
+      const extraCount = parsedContacts.length > 1 ? ` +${parsedContacts.length - 1} kontak lainnya` : '';
+      return {
+        messageType: 'CONTACT',
+        body: `[Kontak] ${first.fullName}${firstPhone}${extraCount}`,
+        metadata: {
+          kind: 'CONTACT',
+          sharedContacts: parsedContacts,
+        },
+      };
+    }
+  }
+
+  // 5. Stickers (clear dedicated metadata + clean sticker flag)
+  if (mediaMeta.isSticker) {
+    const isAnimated = Boolean(msg?.stickerMessage?.isAnimated);
+    return {
+      messageType: 'MEDIA',
+      body: '[Stiker]',
+      metadata: {
+        kind: 'STICKER',
+        sticker: { isAnimated },
+      },
+    };
+  }
+
+  // 6. Polls (pollCreationMessage / V2 / V3)
+  const pollMsg =
+    msg?.pollCreationMessageV3 ||
+    msg?.pollCreationMessageV2 ||
+    msg?.pollCreationMessage ||
+    payload?.poll;
+  if (pollMsg && (pollMsg.name || pollMsg.question)) {
+    const question = String(pollMsg.name || pollMsg.question).trim();
+    const rawOpts = Array.isArray(pollMsg.options) ? pollMsg.options : [];
+    const options = rawOpts
+      .map((o: any) => (typeof o === 'string' ? o : String(o?.optionName || o?.name || '').trim()))
+      .filter(Boolean);
+    const selectableCount = Number(pollMsg.selectableOptionsCount ?? pollMsg.selectableCount);
+    const multipleAnswers = Number.isFinite(selectableCount) ? selectableCount !== 1 : Boolean(pollMsg.multipleAnswers);
+    if (question) {
+      const summaryLines = [`[Polling] ${question}`, ...options.map((o: string, i: number) => `${i + 1}. ${o}`)];
+      return {
+        messageType: 'POLL',
+        body: summaryLines.join('\n'),
+        metadata: {
+          kind: 'POLL',
+          poll: {
+            question,
+            options,
+            multipleAnswers,
+          },
+        },
+      };
+    }
+  }
+
+  // 7. Catalog Product / Order / Group Invite / Call log
+  if (msg?.orderMessage && typeof msg.orderMessage === 'object') {
+    const om = msg.orderMessage;
+    const itemCount = Number(om.itemCount || 0);
+    const orderTitle = String(om.orderTitle || om.message || 'Pesanan WhatsApp').trim();
+    const totalAmount = om.totalAmount1000 ? Math.round(Number(om.totalAmount1000) / 1000) : undefined;
+    const currency = String(om.totalCurrencyCode || 'IDR').trim();
+    return {
+      messageType: 'TEXT',
+      body: `[Pesanan] ${orderTitle}${itemCount > 0 ? ` (${itemCount} item)` : ''}`,
+      metadata: {
+        kind: 'ORDER',
+        order: {
+          orderId: om.orderId || undefined,
+          title: orderTitle,
+          itemCount: itemCount || undefined,
+          totalAmount,
+          currency,
+        },
+      },
+    };
+  }
+
+  if (msg?.productMessage?.product && typeof msg.productMessage.product === 'object') {
+    const prod = msg.productMessage.product;
+    const title = String(prod.title || 'Produk Katalog').trim();
+    const desc = String(prod.description || '').trim() || undefined;
+    const price = prod.priceAmount1000 ? Math.round(Number(prod.priceAmount1000) / 1000) : undefined;
+    const currency = String(prod.currencyCode || 'IDR').trim();
+    return {
+      messageType: 'TEXT',
+      body: `[Produk Katalog] ${title}`,
+      metadata: {
+        kind: 'PRODUCT',
+        product: {
+          productId: prod.productId || undefined,
+          title,
+          description: desc,
+          price,
+          currency,
+        },
+      },
+    };
+  }
+
+  if (msg?.groupInviteMessage && typeof msg.groupInviteMessage === 'object') {
+    const gi = msg.groupInviteMessage;
+    const groupName = String(gi.groupName || 'Grup WhatsApp').trim();
+    const caption = String(gi.caption || '').trim() || undefined;
+    return {
+      messageType: 'TEXT',
+      body: `[Undangan Grup] ${groupName}${caption ? ` — ${caption}` : ''}`,
+      metadata: {
+        kind: 'GROUP_INVITE',
+        groupInvite: {
+          groupJid: gi.groupJid || undefined,
+          groupName,
+          inviteCode: gi.inviteCode || undefined,
+          caption,
+        },
+      },
+    };
+  }
+
+  if (mediaMeta.hasMedia || mediaMeta.mediaType) {
+    return {
+      messageType: 'MEDIA',
+      body: fallbackText || '',
+      metadata: null,
+    };
+  }
+
+  return {
+    messageType: 'TEXT',
+    body: fallbackText || '',
+    metadata: null,
+  };
+}
+
 export function extractInboundWahaText(payload: any): string {
   const msg = payload?._data?.message || payload?._data?.Message || {};
   const viewOnceMsg =
@@ -98,6 +386,7 @@ export function extractInboundWahaText(payload: any): string {
     msg?.listResponseMessage?.title,
     msg?.templateButtonReplyMessage?.selectedDisplayText,
     msg?.interactiveResponseMessage?.body?.text,
+    msg?.pollUpdateMessage ? '[Suara polling diterima]' : null,
   ];
   for (const c of candidates) {
     if (typeof c === 'string' && c.trim()) return c;
@@ -598,6 +887,22 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       const { event, session: webhookSession, payload } = req.body || {};
       console.log(`[WAHA Webhook] Received event: ${event}`);
 
+      try {
+        await wahaService.verifyActiveExternalGowsIfNeeded();
+      } catch (engineErr: any) {
+        if (engineErr?.code === 'WAHA_ENGINE_NOT_GOWS') {
+          wahaService.recordWebhookEvent({
+            receivedAt: new Date().toISOString(),
+            event: event || 'unknown',
+            session: webhookSession || payload?.name || null,
+            from: null,
+            outcome: 'IGNORED',
+            note: engineErr.message,
+          });
+          return reply.status(422).send({ success: false, error: engineErr.message });
+        }
+      }
+
       if (event === 'session.status') {
         wahaService.recordWebhookEvent({
           receivedAt: new Date().toISOString(),
@@ -814,6 +1119,77 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         }
       }
 
+      // 1c. Message Reactions (message.reaction event) & Revocations (message.revoked event)
+      if ((event === 'message.reaction' || event === 'message.revoked') && payload) {
+        const now = new Date();
+        const richReaction = extractInboundWahaRichData(payload, {
+          hasMedia: false,
+          rawMediaUrl: null,
+          inlineBase64: null,
+          mimetype: null,
+          mediaType: null,
+          mediaName: null,
+          isSticker: false,
+        });
+
+        const targetIdCandidate =
+          event === 'message.reaction'
+            ? richReaction.reaction?.targetMessageId || payload?.reaction?.messageId || null
+            : richReaction.revokedTargetId || payload?.revokedMessageId || payload?.id || null;
+
+        if (targetIdCandidate) {
+          const cleanTarget = String(targetIdCandidate).trim();
+          const stanzaPart = cleanTarget.includes('_') ? cleanTarget.split('_').pop() || cleanTarget : cleanTarget;
+          const targetMsgs = await db
+            .select()
+            .from(chatMessages)
+            .where(or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`)))
+            .limit(1);
+          if (targetMsgs[0]) {
+            const targetMsg = targetMsgs[0];
+            let prevMeta: Record<string, any> = {};
+            if (targetMsg.metadataJson) {
+              try {
+                prevMeta = JSON.parse(targetMsg.metadataJson);
+              } catch {
+                prevMeta = {};
+              }
+            }
+
+            if (event === 'message.reaction') {
+              const actor = String(payload?.from || payload?.participant || 'contact').trim();
+              const actorName = String(payload?.pushName || payload?._data?.Info?.PushName || '').trim() || undefined;
+              const emoji = String(richReaction.reaction?.emoji ?? payload?.reaction?.text ?? '').trim();
+              const prevList: Array<any> = Array.isArray(prevMeta.reactions) ? prevMeta.reactions : [];
+              const filtered = prevList.filter((r) => !(r && r.actor === actor && !r.isOutbound));
+              if (emoji) {
+                filtered.push({ emoji, actor, ...(actorName ? { actorName } : {}), isOutbound: false });
+              }
+              await db
+                .update(chatMessages)
+                .set({ metadataJson: JSON.stringify({ ...prevMeta, reactions: filtered }) })
+                .where(eq(chatMessages.id, targetMsg.id));
+            } else {
+              await db
+                .update(chatMessages)
+                .set({ metadataJson: JSON.stringify({ ...prevMeta, revoked: true }) })
+                .where(eq(chatMessages.id, targetMsg.id));
+            }
+
+            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId });
+            wahaService.recordWebhookEvent({
+              receivedAt: now.toISOString(),
+              event,
+              session: webhookSession || null,
+              from: payload?.from || null,
+              outcome: 'PROCESSED',
+              note: event === 'message.reaction' ? 'Reaksi pesan diperbarui' : 'Pesan ditandai ditarik',
+            });
+            return reply.send({ success: true, message: `${event} processed` });
+          }
+        }
+      }
+
       // 2. Incoming Messages (message / message.any) - personal 1:1 chats (@c.us / @s.whatsapp.net / @lid)
       const isInboundMessageEvent = event === 'message' || event === 'message.any';
       const rawFrom = String(
@@ -887,6 +1263,83 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         const mediaName = mediaMeta.mediaName;
         const hasMedia = mediaMeta.hasMedia;
         const rawText = extractInboundWahaText(payload);
+        const richData = extractInboundWahaRichData(payload, mediaMeta, rawText);
+
+        // Handle inline reactionMessage delivered on standard message / message.any channel
+        if (richData.reaction) {
+          const cleanTarget = richData.reaction.targetMessageId;
+          const stanzaPart = cleanTarget.includes('_') ? cleanTarget.split('_').pop() || cleanTarget : cleanTarget;
+          const targetMsgs = await db
+            .select()
+            .from(chatMessages)
+            .where(or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`)))
+            .limit(1);
+          if (targetMsgs[0]) {
+            const targetMsg = targetMsgs[0];
+            let prevMeta: Record<string, any> = {};
+            if (targetMsg.metadataJson) {
+              try {
+                prevMeta = JSON.parse(targetMsg.metadataJson);
+              } catch {
+                prevMeta = {};
+              }
+            }
+            const actor = String(payload?.participant || payload?.from || 'contact').trim();
+            const actorName = String(payload?._data?.notifyName || payload?._data?.Info?.PushName || '').trim() || undefined;
+            const prevList: Array<any> = Array.isArray(prevMeta.reactions) ? prevMeta.reactions : [];
+            const filtered = prevList.filter((r) => !(r && r.actor === actor && !r.isOutbound));
+            if (richData.reaction.emoji) {
+              filtered.push({
+                emoji: richData.reaction.emoji,
+                actor,
+                ...(actorName ? { actorName } : {}),
+                isOutbound: false,
+              });
+            }
+            await db
+              .update(chatMessages)
+              .set({ metadataJson: JSON.stringify({ ...prevMeta, reactions: filtered }) })
+              .where(eq(chatMessages.id, targetMsg.id));
+            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId });
+          }
+          wahaService.recordWebhookEvent({
+            receivedAt: now.toISOString(),
+            event,
+            session: inboundSession,
+            from: rawFrom,
+            outcome: 'PROCESSED',
+            note: 'Reaksi pesan diperbarui',
+          });
+          return reply.send({ success: true, message: 'Inline reaction processed' });
+        }
+
+        // Handle inline message revocation protocolMessage delivered on message.any
+        if (richData.revokedTargetId) {
+          const cleanTarget = richData.revokedTargetId;
+          const stanzaPart = cleanTarget.includes('_') ? cleanTarget.split('_').pop() || cleanTarget : cleanTarget;
+          const targetMsgs = await db
+            .select()
+            .from(chatMessages)
+            .where(or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`)))
+            .limit(1);
+          if (targetMsgs[0]) {
+            const targetMsg = targetMsgs[0];
+            let prevMeta: Record<string, any> = {};
+            if (targetMsg.metadataJson) {
+              try {
+                prevMeta = JSON.parse(targetMsg.metadataJson);
+              } catch {
+                prevMeta = {};
+              }
+            }
+            await db
+              .update(chatMessages)
+              .set({ metadataJson: JSON.stringify({ ...prevMeta, revoked: true }) })
+              .where(eq(chatMessages.id, targetMsg.id));
+            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId });
+          }
+          return reply.send({ success: true, message: 'Message revocation processed' });
+        }
 
         // Download & persist inbound WAHA media locally so files never disappear when WAHA purges /api/files/
         if (hasMedia) {
@@ -934,7 +1387,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             ? `[Dokumen: ${mediaName}]`
             : '[Dokumen]'
           : '[Lampiran Media]';
-        const body = rawText || (hasMedia ? mediaFallbackLabel : '');
+        const body = richData.body || (hasMedia ? mediaFallbackLabel : '');
 
         const quotedWahaId =
           (typeof payload.replyTo === 'string' ? payload.replyTo : payload.replyTo?.id) ||
@@ -949,7 +1402,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           payload._data?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text ||
           null;
 
-        if (!body && !hasMedia) {
+        if (!body && !hasMedia && !richData.metadata) {
           wahaService.recordWebhookEvent({
             receivedAt: now.toISOString(),
             event,
@@ -1305,7 +1758,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           conversationId: convId,
           contactId: contact.id,
           direction: 'INBOUND',
-          messageType: mediaType ? 'MEDIA' : 'TEXT',
+          messageType: richData.messageType,
           channel: 'WHATSAPP',
           wahaSession: inboundSession,
           senderJid: isGroupChat ? groupSenderJid : rawFrom || null,
@@ -1314,7 +1767,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           body,
           mediaUrl,
           mediaType,
-          mediaName,
+          mediaName: mediaMeta.isSticker && !mediaName ? 'sticker.webp' : mediaName,
+          metadataJson: richData.metadata ? JSON.stringify(richData.metadata) : null,
           replyToMessageId,
           replyToBody,
           replyToSender,
@@ -1362,6 +1816,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       } else if (
         event &&
         event !== 'message.ack' &&
+        event !== 'message.reaction' &&
+        event !== 'message.revoked' &&
         event !== 'session.status' &&
         event !== 'presence.update'
       ) {

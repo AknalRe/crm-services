@@ -9,6 +9,8 @@ import {
   Plus,
   Lock,
   Users,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -202,6 +204,8 @@ export const Settings: React.FC<SettingsProps> = ({
   const [savingRole, setSavingRole] = useState(false);
   const [confirmDeleteRole, setConfirmDeleteRole] = useState<CrmRoleItem | null>(null);
   const [internalTab, setInternalTab] = useState<SettingsSection>('whatsapp');
+  const [showMobileWahaTest, setShowMobileWahaTest] = useState(false);
+  const [showMobileWahaWebhook, setShowMobileWahaWebhook] = useState(false);
   const settingsTab = activeSection ?? internalTab;
   const setSettingsTab = (sec: SettingsSection) => {
     setInternalTab(sec);
@@ -582,13 +586,14 @@ export const Settings: React.FC<SettingsProps> = ({
       });
       const tierLabel = res.tier ? ` (${res.tier})` : '';
       const verLabel = res.version ? ` v${res.version}` : '';
+      const engLabel = res.engine ? ` • Engine: ${res.engine}` : '';
       const coreNote =
         res.tier?.toUpperCase() === 'CORE'
           ? ' Catatan: WAHA Core hanya mendukung 1 sesi ("default"); multi-sesi memerlukan WAHA Plus.'
           : '';
       setExternalTestResult({
         ok: true,
-        text: `Koneksi berhasil ke WAHA${tierLabel}${verLabel}. Ditemukan ${res.sessionCount} sesi.${coreNote}`,
+        text: `Koneksi berhasil ke WAHA${tierLabel}${verLabel}${engLabel}. Ditemukan ${res.sessionCount} sesi.${coreNote}`,
       });
     } catch (err: any) {
       setExternalTestResult({
@@ -784,11 +789,14 @@ export const Settings: React.FC<SettingsProps> = ({
     : sessions;
   const effectiveSessionStatus = (
     wahaStatus && !wahaStatus.connected
-      ? 'OFFLINE'
+      ? wahaStatus.sessionStatus === 'UNSUPPORTED_ENGINE'
+        ? 'UNSUPPORTED_ENGINE'
+        : 'OFFLINE'
       : activeSessionItem?.status || wahaStatus?.sessionStatus || 'STOPPED'
   ).toUpperCase();
   const isActiveWorking = wahaStatus?.connected && effectiveSessionStatus === 'WORKING';
-  const isServerOffline = effectiveSessionStatus === 'OFFLINE';
+  const isServerOffline =
+    effectiveSessionStatus === 'OFFLINE' || effectiveSessionStatus === 'UNSUPPORTED_ENGINE';
   const canStopOrLogout =
     !isServerOffline && effectiveSessionStatus !== 'STOPPED' && effectiveSessionStatus !== 'NOT_FOUND';
   const connectedMe =
@@ -828,6 +836,13 @@ export const Settings: React.FC<SettingsProps> = ({
         rowLabel: 'NOT FOUND',
         cardLabel: 'SESI BELUM TERDAFTAR',
         cls: 'bg-amber-50 text-amber-800 border-amber-200',
+      };
+    }
+    if (st === 'UNSUPPORTED_ENGINE') {
+      return {
+        rowLabel: 'ENGINE TIDAK DIDUKUNG',
+        cardLabel: 'WAJIB ENGINE GOWS',
+        cls: 'bg-red-50 text-red-700 border-red-200',
       };
     }
     if (st === 'OFFLINE') {
@@ -935,8 +950,41 @@ export const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const mobileSettingsTabs: Array<{ id: SettingsSection; label: string }> = [
+    { id: 'whatsapp', label: 'WhatsApp' },
+    { id: 'omnichannel', label: 'Omnichannel' },
+    { id: 'quick_replies', label: 'Balasan Cepat' },
+    { id: 'products', label: 'Produk' },
+    { id: 'labels', label: 'Label' },
+    { id: 'templates', label: 'Template' },
+    { id: 'automation', label: 'Balas Otomatis' },
+    { id: 'sla_csat', label: 'SLA & CSAT' },
+    ...(canManageAgents ? [{ id: 'agents' as const, label: 'Multi-CS & Role' }] : []),
+  ];
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
+      {/* Mobile Quick Section Switcher */}
+      <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-1">
+        {mobileSettingsTabs.map((tab) => {
+          const isActive = settingsTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setSettingsTab(tab.id)}
+              className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
+                isActive
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
       {settingsTab !== 'agents' && !canEditSettings && (
         <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
           <Lock className="w-4 h-4 text-amber-600 shrink-0" />
@@ -947,12 +995,12 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
       )}
       {settingsTab === 'whatsapp' && (
-      <div className="space-y-5">
+      <div className="space-y-4 sm:space-y-5">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">Koneksi Layanan WhatsApp (WAHA)</h1>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <h1 className="text-base sm:text-lg font-semibold text-gray-900">Koneksi Layanan WhatsApp (WAHA)</h1>
+          <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">
             Atur server WAHA lokal Docker atau gateway WhatsApp eksternal dengan API Key.
           </p>
         </div>
@@ -968,9 +1016,9 @@ export const Settings: React.FC<SettingsProps> = ({
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
-        <div className="lg:col-span-2 space-y-5">
-          <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-5">
+          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
             <div className="flex flex-wrap items-start justify-between gap-2.5">
               <div>
                 <h3 className="font-semibold text-gray-900 text-sm">Mode Koneksi WhatsApp</h3>
@@ -1029,14 +1077,19 @@ export const Settings: React.FC<SettingsProps> = ({
                     <Globe className="w-4 h-4 text-blue-600 shrink-0" />
                     <span>WAHA Eksternal</span>
                   </div>
-                  {wahaStatus?.config && savedMode === 'EXTERNAL' && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                      Aktif
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                      Wajib GOWS
                     </span>
-                  )}
+                    {wahaStatus?.config && savedMode === 'EXTERNAL' && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Aktif
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <p className="text-[11px] text-gray-500 leading-relaxed">
-                  Gunakan URL dan API Key gateway WAHA eksternal milik Anda sendiri dengan dukungan multi-sesi.
+                  Gunakan URL dan API Key gateway WAHA eksternal milik Anda sendiri (wajib engine <code className="font-mono text-gray-700">GOWS</code>).
                 </p>
               </button>
             </div>
@@ -1088,6 +1141,9 @@ export const Settings: React.FC<SettingsProps> = ({
               </div>
             ) : (
               <form onSubmit={handleSaveWahaSettings} className="space-y-3.5 pt-1">
+                <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                  <strong>Persyaratan Engine GOWS:</strong> Koneksi WAHA Eksternal wajib menjalankan engine <code className="font-mono font-semibold">GOWS</code> (<code className="font-mono">WHATSAPP_DEFAULT_ENGINE=GOWS</code>). Server dengan engine <code className="font-mono">WEBJS</code> atau <code className="font-mono">NOWEB</code> tidak dapat disimpan atau digunakan.
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -1230,7 +1286,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         placeholder="Tambah nama sesi baru (contoh: cs-1, sales)"
                         value={newSessionName}
                         onChange={(e) => setNewSessionName(e.target.value)}
-                        disabled={!canEditSettings || sessions.length >= maxSessions}
+                        disabled={!canEditSettings || isServerOffline || sessions.length >= maxSessions}
                         className="w-full flex-none sm:flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
                       />
                       <Button
@@ -1238,7 +1294,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         variant="primary"
                         size="md"
                         isLoading={creatingSession}
-                        disabled={!canEditSettings || !newSessionName.trim() || sessions.length >= maxSessions}
+                        disabled={!canEditSettings || isServerOffline || !newSessionName.trim() || sessions.length >= maxSessions}
                         className="w-full sm:w-auto shrink-0"
                       >
                         Tambah Sesi
@@ -1379,13 +1435,29 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
-            <div>
-              <h3 className="font-semibold text-gray-900 text-sm">Kirim Pesan Uji Coba</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Verifikasi pengiriman pesan langsung ke nomor WhatsApp tujuan.
-              </p>
-            </div>
+          <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
+            <button
+              type="button"
+              onClick={() => setShowMobileWahaTest((v) => !v)}
+              className="lg:pointer-events-none w-full flex items-center justify-between gap-2 text-left"
+            >
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm">Kirim Pesan Uji Coba</h3>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 hidden sm:block">
+                  Verifikasi pengiriman pesan langsung ke nomor WhatsApp tujuan.
+                </p>
+              </div>
+              <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
+                <span>{showMobileWahaTest ? 'Tutup' : 'Buka'}</span>
+                {showMobileWahaTest ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </span>
+            </button>
+
+            <div className={`${showMobileWahaTest ? 'space-y-3.5' : 'hidden lg:block lg:space-y-4'}`}>
 
             {sessions.length > 0 && (
               <div>
@@ -1439,6 +1511,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 variant="secondary"
                 size="md"
                 isLoading={testSending}
+                disabled={isPendingModeSwitch || isServerOffline}
                 className="w-full sm:w-auto shrink-0"
               >
                 Kirim Pesan Tes
@@ -1456,6 +1529,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 {testResult.text}
               </div>
             )}
+            </div>
           </form>
         </div>
 
@@ -1499,6 +1573,11 @@ export const Settings: React.FC<SettingsProps> = ({
               <div className="text-xs text-gray-600 pt-1">
                 Session: <strong className="font-mono text-gray-900">{inspectedSession}</strong>
               </div>
+              {wahaStatus?.engine && (
+                <div className="text-[11px] font-mono text-gray-600">
+                  Engine: <strong>{wahaStatus.engine}</strong>
+                </div>
+              )}
               {isActiveWorking && (connectedPushName || connectedPhone) && (
                 <div className="text-[11px] text-emerald-700 font-medium">
                   {connectedPushName ? `${connectedPushName}` : 'WhatsApp'}
@@ -1587,10 +1666,24 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 text-xs space-y-3">
+          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 text-xs space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-gray-900 font-semibold text-sm">Webhook Masuk &amp; Tracking (WAHA)</h3>
-              <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setShowMobileWahaWebhook((v) => !v)}
+                className="lg:pointer-events-none flex-1 min-w-0 text-left flex items-center justify-between gap-2"
+              >
+                <h3 className="text-gray-900 font-semibold text-sm truncate">Webhook Masuk &amp; Tracking (WAHA)</h3>
+                <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
+                  <span>{showMobileWahaWebhook ? 'Tutup' : 'Detail'}</span>
+                  {showMobileWahaWebhook ? (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  )}
+                </span>
+              </button>
+              <div className={`${showMobileWahaWebhook ? 'flex' : 'hidden lg:flex'} items-center gap-1.5`}>
                 <Button
                   type="button"
                   variant="secondary"
@@ -1611,6 +1704,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 </Button>
               </div>
             </div>
+            <div className={`${showMobileWahaWebhook ? 'space-y-3' : 'hidden lg:block lg:space-y-3'}`}>
             <p className="text-gray-500 text-[11px] leading-relaxed">
               WAHA mengirimkan event <code className="font-mono text-gray-800">message</code> (chat masuk ke Inbox) dan <code className="font-mono text-gray-800">message.ack</code> (status centang dua/biru) ke endpoint ini:
             </p>
@@ -1691,6 +1785,7 @@ export const Settings: React.FC<SettingsProps> = ({
               ) : (
                 <span>Belum ada event webhook diterima sejak backend CRM dimulai.</span>
               )}
+            </div>
             </div>
           </div>
         </div>

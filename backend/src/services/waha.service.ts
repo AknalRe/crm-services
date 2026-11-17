@@ -351,6 +351,137 @@ export interface WahaInteractiveButtonInput {
   copyCode?: string;
 }
 
+export interface WahaSharedContactItem {
+  fullName: string;
+  phones: string[];
+  waId?: string;
+  organization?: string;
+  email?: string;
+  vcard?: string;
+}
+
+export interface WahaLocationData {
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
+  url?: string;
+  isLive?: boolean;
+  accuracyInMeters?: number;
+}
+
+export function parseVCardString(
+  rawVcard: string,
+  fallbackName?: string | null
+): WahaSharedContactItem | null {
+  const clean = String(rawVcard || '').trim();
+  if (!clean && !fallbackName) return null;
+
+  // Unfold RFC 2425/6350 folded lines before splitting
+  const unfolded = clean.replace(/\r?\n[ \t]/g, '');
+  const lines = unfolded.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  let fn = '';
+  let nFallback = '';
+  let org = '';
+  let email = '';
+  let waId = '';
+  const phones: string[] = [];
+  const seenPhones = new Set<string>();
+
+  const pushPhone = (val: string) => {
+    const rawTrim = val.trim();
+    if (!rawTrim) return;
+    const norm = normalizePhoneNumber(rawTrim);
+    const digitsOnly = rawTrim.replace(/[^\d]/g, '');
+    const key = norm || (digitsOnly.length >= 6 ? digitsOnly : rawTrim);
+    if (!key || seenPhones.has(key)) return;
+    seenPhones.add(key);
+    phones.push(norm || rawTrim);
+  };
+
+  for (const line of lines) {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx <= 0) continue;
+    const rawProp = line.slice(0, colonIdx);
+    const val = line.slice(colonIdx + 1).trim();
+    if (!val) continue;
+
+    // Strip itemN. grouping prefix if present (e.g. item1.TEL)
+    const propWithoutGroup = rawProp.includes('.') ? rawProp.split('.').slice(1).join('.') : rawProp;
+    const [propNameRaw, ...paramParts] = propWithoutGroup.split(';');
+    const propName = propNameRaw.trim().toUpperCase();
+
+    for (const p of paramParts) {
+      const m = p.match(/waid=([^;:]+)/i);
+      if (m && m[1]) {
+        const waDigits = m[1].replace(/[^\d]/g, '');
+        if (waDigits.length >= 6) {
+          waId = waDigits;
+          pushPhone(waDigits);
+        }
+      }
+    }
+
+    if (propName === 'FN') {
+      fn = val;
+    } else if (propName === 'N' && !nFallback) {
+      const parts = val.split(';').map((s) => s.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        nFallback = `${parts[1]} ${parts[0]}`.trim();
+      } else if (parts.length === 1) {
+        nFallback = parts[0];
+      }
+    } else if (propName === 'ORG') {
+      org = val.replace(/;+/g, ' ').trim();
+    } else if (propName === 'EMAIL' && !email) {
+      email = val;
+    } else if (propName === 'TEL') {
+      pushPhone(val);
+    }
+  }
+
+  const fullName =
+    (fn || nFallback || String(fallbackName || '').trim() || (phones[0] ? `+${phones[0]}` : 'Kontak WhatsApp')).trim();
+
+  if (!fullName && phones.length === 0) return null;
+
+  return {
+    fullName,
+    phones,
+    ...(waId ? { waId } : {}),
+    ...(org ? { organization: org } : {}),
+    ...(email ? { email } : {}),
+    ...(clean ? { vcard: clean } : {}),
+  };
+}
+
+export function buildVCardString(contact: {
+  fullName: string;
+  phoneNumber: string;
+  organization?: string;
+  email?: string;
+}): string {
+  const safeName = contact.fullName.trim().replace(/\r?\n/g, ' ');
+  const norm = normalizePhoneNumber(contact.phoneNumber) || contact.phoneNumber.replace(/[^\d]/g, '');
+  const displayTel = norm ? `+${norm}` : contact.phoneNumber.trim();
+  const lines = [
+    'BEGIN:VCARD',
+    'VERSION:3.0',
+    `N:;${safeName};;;`,
+    `FN:${safeName}`,
+  ];
+  if (contact.organization?.trim()) {
+    lines.push(`ORG:${contact.organization.trim().replace(/\r?\n/g, ' ')}`);
+  }
+  if (contact.email?.trim()) {
+    lines.push(`EMAIL:${contact.email.trim().replace(/\r?\n/g, ' ')}`);
+  }
+  lines.push(`TEL;type=CELL;type=VOICE;waid=${norm || displayTel}:${displayTel}`);
+  lines.push('END:VCARD');
+  return lines.join('\n');
+}
+
 export interface WahaSendResult {
   success: boolean;
   messageId?: string;
@@ -451,10 +582,19 @@ export class WahaService {
   private static instance: WahaService;
   private webhookSyncAt = new Map<string, number>();
   private lidPhoneCache = new Map<string, string>();
+  private externalEngineCache = new Map<
+    string,
+    { engine: string | null; version: string | null; tier: string | null; checkedAt: number }
+  >();
+  private readonly EXTERNAL_ENGINE_CACHE_MS = 60_000;
   private lastWebhookEvent: WahaWebhookTelemetry | null = null;
   private lastDetectedPublicBaseUrl = '';
 
   private constructor() { }
+
+  public invalidateExternalEngineCache(): void {
+    this.externalEngineCache.clear();
+  }
 
   public recordWebhookEvent(entry: WahaWebhookTelemetry): void {
     this.lastWebhookEvent = entry;
@@ -566,9 +706,141 @@ export class WahaService {
   }
 
   private wrapWahaError(err: any, fallbackPrefix?: string): Error {
+    if (err?.code === 'WAHA_ENGINE_NOT_GOWS') {
+      return err;
+    }
     const wrapped: any = new Error(this.extractWahaError(err, fallbackPrefix));
     wrapped.statusCode = err?.statusCode || err?.response?.status || 502;
     return wrapped;
+  }
+
+  private normalizeWahaEngine(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const cleaned = raw.trim().toUpperCase();
+    return cleaned || null;
+  }
+
+  private buildNonGowsError(engine: string | null): Error {
+    const msg = engine
+      ? `WAHA Eksternal tidak dapat digunakan: wajib menggunakan engine GOWS, sedangkan server terdeteksi menggunakan engine ${engine}. Ubah WHATSAPP_DEFAULT_ENGINE=GOWS pada server WAHA eksternal Anda.`
+      : `WAHA Eksternal tidak dapat digunakan: server tidak melaporkan engine GOWS pada endpoint /api/version. Pastikan server WAHA eksternal menggunakan engine GOWS (WHATSAPP_DEFAULT_ENGINE=GOWS).`;
+    const err: any = new Error(msg);
+    err.statusCode = 422;
+    err.code = 'WAHA_ENGINE_NOT_GOWS';
+    err.detectedEngine = engine;
+    return err;
+  }
+
+  private async fetchServerVersionInfo(client: AxiosInstance): Promise<{
+    version: string | null;
+    tier: string | null;
+    engine: string | null;
+  }> {
+    let data: any = null;
+    try {
+      const res = await client.get('/api/version', { timeout: 6000 });
+      data = res?.data;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status && status !== 404 && status !== 405 && status !== 501) {
+        throw err;
+      }
+      if (!status && err?.code) {
+        throw err;
+      }
+    }
+
+    if (!data || (!data.engine && !data.version && !data.tier)) {
+      try {
+        const res = await client.get('/api/server/version', { timeout: 6000 });
+        if (res?.data && typeof res.data === 'object') {
+          data = res.data;
+        }
+      } catch (err: any) {
+        const status = err?.response?.status;
+        if (status && status !== 404 && status !== 405 && status !== 501) {
+          throw err;
+        }
+        if (!status && err?.code) {
+          throw err;
+        }
+      }
+    }
+
+    const version = data?.version ? String(data.version).trim() || null : null;
+    const tier = data?.tier ? String(data.tier).trim() || null : null;
+    const engine = this.normalizeWahaEngine(
+      data?.engine || data?.whatsappEngine || data?.defaultEngine
+    );
+    return { version, tier, engine };
+  }
+
+  private async ensureExternalGowsEngine(
+    client: AxiosInstance,
+    baseUrl: string,
+    apiKey?: string,
+    opts?: { bypassCache?: boolean }
+  ): Promise<{ version: string | null; tier: string | null; engine: string }> {
+    const cacheKey = `${String(baseUrl || '').trim().replace(/\/+$/, '')}|${String(apiKey || '').trim()}`;
+    const now = Date.now();
+    if (!opts?.bypassCache) {
+      const cached = this.externalEngineCache.get(cacheKey);
+      if (cached && now - cached.checkedAt < this.EXTERNAL_ENGINE_CACHE_MS) {
+        if (cached.engine !== 'GOWS') {
+          throw this.buildNonGowsError(cached.engine);
+        }
+        return { version: cached.version, tier: cached.tier, engine: 'GOWS' };
+      }
+    }
+
+    const info = await this.fetchServerVersionInfo(client);
+    this.externalEngineCache.set(cacheKey, {
+      engine: info.engine,
+      version: info.version,
+      tier: info.tier,
+      checkedAt: now,
+    });
+
+    if (info.engine !== 'GOWS') {
+      throw this.buildNonGowsError(info.engine);
+    }
+    return { version: info.version, tier: info.tier, engine: 'GOWS' };
+  }
+
+  public async assertExternalGowsEngine(params: {
+    baseUrl: string;
+    apiKey?: string;
+  }): Promise<{ version: string | null; tier: string | null; engine: string }> {
+    const stored = await this.getConfig(false);
+    const savedExtKey =
+      stored.externalConfig?.apiKey !== undefined
+        ? stored.externalConfig.apiKey
+        : stored.mode === 'EXTERNAL'
+          ? stored.apiKey
+          : '';
+    const effectiveKey =
+      params.apiKey === undefined || params.apiKey === '••••••••'
+        ? savedExtKey
+        : params.apiKey;
+    const client = this.createHttpClient(params.baseUrl, effectiveKey, 10000);
+    try {
+      return await this.ensureExternalGowsEngine(client, params.baseUrl, effectiveKey, {
+        bypassCache: true,
+      });
+    } catch (err: any) {
+      throw this.wrapWahaError(err, 'Verifikasi WAHA Eksternal gagal');
+    }
+  }
+
+  public async verifyActiveExternalGowsIfNeeded(): Promise<void> {
+    const conf = await this.getConfig(false);
+    if (conf.mode !== 'EXTERNAL') return;
+    const client = this.createHttpClient(conf.baseUrl, conf.apiKey, 10000);
+    try {
+      await this.ensureExternalGowsEngine(client, conf.baseUrl, conf.apiKey);
+    } catch (err: any) {
+      throw this.wrapWahaError(err);
+    }
   }
 
   private isWahaCoreSingleSessionError(err: any): boolean {
@@ -691,19 +963,29 @@ export class WahaService {
   /**
    * Create Axios client with authentication headers
    */
-  private async getClient(): Promise<{
+  private async getClient(opts?: { bypassEngineCache?: boolean }): Promise<{
     client: AxiosInstance;
     session: string;
     ownerPrefix: string | null;
     mode: 'INTERNAL' | 'EXTERNAL';
+    engine?: string | null;
   }> {
-    const conf = await this.getConfig();
+    const conf = await this.getConfig(false);
     const mode: 'INTERNAL' | 'EXTERNAL' = conf.mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
     const ownerPrefix = this.getOwnerPrefix(mode);
     const activeSession =
       ownerPrefix && !this.isOwnedSession(conf.session, ownerPrefix) ? ownerPrefix : conf.session;
     const client = this.createHttpClient(conf.baseUrl, conf.apiKey, 30000);
-    return { client, session: activeSession, ownerPrefix, mode };
+
+    let engine: string | null = null;
+    if (mode === 'EXTERNAL') {
+      const verified = await this.ensureExternalGowsEngine(client, conf.baseUrl, conf.apiKey, {
+        bypassCache: opts?.bypassEngineCache,
+      });
+      engine = verified.engine;
+    }
+
+    return { client, session: activeSession, ownerPrefix, mode, engine };
   }
 
   /**
@@ -719,6 +1001,8 @@ export class WahaService {
     baseUrl: string;
     version?: string | null;
     tier?: string | null;
+    engine?: string | null;
+    isGows?: boolean;
     sessionCount: number;
     sessions: Array<{ name: string; status: string }>;
   }> {
@@ -750,6 +1034,19 @@ export class WahaService {
     const ownerPrefix = this.getOwnerPrefix(targetMode);
 
     try {
+      let verInfo: { version: string | null; tier: string | null; engine: string | null };
+      if (targetMode === 'EXTERNAL') {
+        verInfo = await this.ensureExternalGowsEngine(client, targetUrl, targetKey, {
+          bypassCache: true,
+        });
+      } else {
+        verInfo = await this.fetchServerVersionInfo(client).catch(() => ({
+          version: null,
+          tier: null,
+          engine: null,
+        }));
+      }
+
       const rawList = await this.fetchRawSessionList(client);
       const sessions = rawList
         .map((item: any) => ({
@@ -758,17 +1055,14 @@ export class WahaService {
         }))
         .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
 
-      const verRes = await client
-        .get('/api/version')
-        .catch(() => client.get('/api/server/version'))
-        .catch(() => null);
-
       return {
         connected: true,
         mode: targetMode,
         baseUrl: targetUrl.replace(/\/+$/, ''),
-        version: verRes?.data?.version ? String(verRes.data.version) : null,
-        tier: verRes?.data?.tier ? String(verRes.data.tier) : null,
+        version: verInfo.version,
+        tier: verInfo.tier,
+        engine: verInfo.engine,
+        isGows: verInfo.engine === 'GOWS',
         sessionCount: sessions.length,
         sessions,
       };
@@ -926,6 +1220,8 @@ export class WahaService {
   public async getStatus(requestBaseUrl?: string | null): Promise<{
     connected: boolean;
     sessionStatus?: string;
+    engine?: string | null;
+    engineSupported?: boolean;
     activeSession?: string;
     connectedSessions?: number;
     totalSessions?: number;
@@ -946,7 +1242,9 @@ export class WahaService {
       currentConfig.mode !== 'EXTERNAL' || resolvedWebhook.isPublic;
 
     try {
-      const { client, session, ownerPrefix } = await this.getClient();
+      const { client, session, ownerPrefix, engine } = await this.getClient({
+        bypassEngineCache: currentConfig.mode === 'EXTERNAL',
+      });
       currentConfig.session = session;
 
       const rawList = await this.fetchRawSessionList(client);
@@ -995,6 +1293,8 @@ export class WahaService {
       return {
         connected: true,
         sessionStatus: status,
+        engine: engine ?? null,
+        engineSupported: true,
         activeSession: resolvedActiveSession,
         connectedSessions,
         totalSessions: sessionSummaries.length,
@@ -1006,9 +1306,12 @@ export class WahaService {
         config: currentConfig,
       };
     } catch (err: any) {
+      const isEngineBlocked = err?.code === 'WAHA_ENGINE_NOT_GOWS';
       return {
         connected: false,
-        sessionStatus: 'OFFLINE',
+        sessionStatus: isEngineBlocked ? 'UNSUPPORTED_ENGINE' : 'OFFLINE',
+        engine: isEngineBlocked ? (err?.detectedEngine ?? null) : null,
+        engineSupported: !isEngineBlocked,
         activeSession: currentConfig.session,
         connectedSessions: 0,
         totalSessions: 0,
@@ -1308,6 +1611,7 @@ export class WahaService {
     if (!clean || !/^[a-zA-Z0-9_-]+$/.test(clean)) {
       throw new Error('Nama sesi hanya boleh huruf, angka, tanda hubung (-), atau underscore (_)');
     }
+    await this.verifyActiveExternalGowsIfNeeded();
     const conf = await this.getConfig();
     const ownerPrefix = this.getOwnerPrefix(conf.mode);
     this.assertOwnedSession(clean, ownerPrefix);
@@ -1930,6 +2234,181 @@ export class WahaService {
   }
 
   /**
+   * Send WhatsApp sticker (WebP preferred; falls back to sendImage when engine omits sendSticker)
+   */
+  public async sendSticker(
+    phone: string,
+    file: { base64: string; mimetype?: string; filename?: string; replyTo?: string },
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanBase64 = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
+    const mimetype = file.mimetype?.trim() || 'image/webp';
+    const filename = file.filename?.trim() || 'sticker.webp';
+
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      const payload = {
+        session: targetSession,
+        chatId,
+        file: {
+          mimetype,
+          filename,
+          data: cleanBase64,
+        },
+        ...(file.replyTo ? { reply_to: file.replyTo } : {}),
+      };
+      try {
+        const res = await client.post('/api/sendSticker', payload, { timeout: 45000 });
+        return res.data;
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501 || this.isWahaFeatureUnsupported(err)) {
+          const fallbackRes = await client.post(
+            '/api/sendImage',
+            { ...payload, caption: '' },
+            { timeout: 45000 }
+          );
+          return fallbackRes.data;
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Send WhatsApp location pin via WAHA (with text Maps link fallback if unsupported)
+   */
+  public async sendLocation(
+    phone: string,
+    data: { latitude: number; longitude: number; title?: string; address?: string; replyTo?: string },
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const mapsUrl = `https://www.google.com/maps?q=${data.latitude},${data.longitude}`;
+    const displayTitle = [data.title?.trim(), data.address?.trim()].filter(Boolean).join(' — ');
+
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.post('/api/sendLocation', {
+          session: targetSession,
+          chatId,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          ...(displayTitle ? { title: displayTitle } : {}),
+          ...(data.replyTo ? { reply_to: data.replyTo } : {}),
+        });
+        return res.data;
+      } catch (err: any) {
+        if (!this.isWahaFeatureUnsupported(err)) throw err;
+        const fallbackText = displayTitle ? `📍 *${displayTitle}*\n${mapsUrl}` : `📍 *Lokasi*\n${mapsUrl}`;
+        const fallbackRes = await client.post('/api/sendText', {
+          session: targetSession,
+          chatId,
+          text: fallbackText,
+          linkPreview: true,
+          ...(data.replyTo ? { reply_to: data.replyTo } : {}),
+        });
+        return {
+          __wahaMeta: {
+            usedFallbackText: true,
+            fallbackReason: this.extractWahaError(err),
+          },
+          data: fallbackRes.data,
+        };
+      }
+    });
+  }
+
+  /**
+   * Share one or more contact cards (vCard) via WAHA (with formatted text fallback if unsupported)
+   */
+  public async sendContactVcard(
+    phone: string,
+    contactsList: Array<{
+      fullName: string;
+      phoneNumber: string;
+      organization?: string;
+      email?: string;
+    }>,
+    sessionName?: string,
+    replyTo?: string
+  ): Promise<WahaSendResult> {
+    const formattedContacts = contactsList.map((c) => {
+      const norm = normalizePhoneNumber(c.phoneNumber) || c.phoneNumber.replace(/[^\d]/g, '');
+      return {
+        fullName: c.fullName.trim(),
+        organization: c.organization?.trim() || undefined,
+        phoneNumber: norm ? `+${norm}` : c.phoneNumber.trim(),
+        whatsappId: norm || undefined,
+        vcard: buildVCardString(c),
+      };
+    });
+
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.post('/api/sendContactVcard', {
+          session: targetSession,
+          chatId,
+          contacts: formattedContacts,
+          ...(replyTo ? { reply_to: replyTo } : {}),
+        });
+        return res.data;
+      } catch (err: any) {
+        if (!this.isWahaFeatureUnsupported(err)) throw err;
+        const lines = formattedContacts.map(
+          (c) => `👤 *${c.fullName}*${c.organization ? ` (${c.organization})` : ''}\n${c.phoneNumber}`
+        );
+        const fallbackRes = await client.post('/api/sendText', {
+          session: targetSession,
+          chatId,
+          text: lines.join('\n\n'),
+          ...(replyTo ? { reply_to: replyTo } : {}),
+        });
+        return {
+          __wahaMeta: {
+            usedFallbackText: true,
+            fallbackReason: this.extractWahaError(err),
+          },
+          data: fallbackRes.data,
+        };
+      }
+    });
+  }
+
+  /**
+   * React to a WhatsApp message with an emoji (empty string removes reaction)
+   */
+  public async sendReaction(
+    phone: string,
+    data: { messageId: string; reaction: string },
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanMsgId = String(data.messageId || '').trim();
+    if (!cleanMsgId) {
+      return {
+        success: false,
+        error: 'ID pesan WAHA tidak ditemukan untuk mengirim reaksi emoji.',
+      };
+    }
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession) => {
+      const payload = {
+        session: targetSession,
+        messageId: cleanMsgId,
+        reaction: data.reaction || '',
+      };
+      try {
+        const res = await client.put('/api/reaction', payload, { timeout: 10000 });
+        return res.data;
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501) {
+          const fallbackRes = await client.post('/api/reaction', payload, { timeout: 10000 });
+          return fallbackRes.data;
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
    * Download inbound media file securely from configured WAHA server using unmasked X-Api-Key
    */
   public async downloadMedia(
@@ -1946,6 +2425,9 @@ export class WahaService {
       const err: any = new Error('Base URL WAHA belum valid');
       err.statusCode = 400;
       throw err;
+    }
+    if (conf.mode === 'EXTERNAL') {
+      await this.verifyActiveExternalGowsIfNeeded();
     }
     const targetUrl = resolveWahaMediaTargetUrl(clean, conf.baseUrl);
     if (!targetUrl) {

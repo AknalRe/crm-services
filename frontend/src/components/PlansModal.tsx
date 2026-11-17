@@ -478,8 +478,8 @@ export const PlansModal: React.FC<PlansModalProps> = ({
               </div>
             )}
 
-            <div className="p-4 rounded-lg border border-gray-200 bg-white space-y-3">
-              <div className="flex items-start justify-between border-b border-gray-200 pb-3">
+            <div className="p-3.5 sm:p-4 rounded-lg border border-gray-200 bg-white space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 border-b border-gray-200 pb-3">
                 <div>
                   <span className="text-[10px] uppercase font-semibold text-gray-400 tracking-wider">
                     Penerbit
@@ -487,7 +487,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   <h4 className="font-semibold text-gray-900 text-sm">Reneo Platform</h4>
                   <p className="text-gray-500 text-[11px]">Gateway Pembayaran Panel Reneo</p>
                 </div>
-                <div className="text-right">
+                <div className="sm:text-right">
                   <span className="text-[10px] uppercase font-semibold text-gray-400 tracking-wider">
                     Ditagihkan Kepada
                   </span>
