@@ -42,6 +42,12 @@ import {
   Users,
   EyeOff,
   RefreshCw,
+  SlidersHorizontal,
+  MoreVertical,
+  MoreHorizontal,
+  ChevronRight,
+  Send,
+  Info,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -237,9 +243,9 @@ function readContactPanelPref(): boolean {
     return false;
   }
   try {
-    return localStorage.getItem(CONTACT_PANEL_KEY) !== 'closed';
+    return localStorage.getItem(CONTACT_PANEL_KEY) === 'open';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -284,6 +290,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [selectedSession, setSelectedSession] = useState<string>('');
   const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
   const [showContactPanel, setShowContactPanel] = useState<boolean>(readContactPanelPref);
+  const [showListFilters, setShowListFilters] = useState(false);
+  const [showMobileChatActions, setShowMobileChatActions] = useState(false);
+  const [showComposerTools, setShowComposerTools] = useState(false);
+  const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null);
+  const [openProfileSections, setOpenProfileSections] = useState<Record<string, boolean>>({});
+
+  const toggleProfileSection = (key: string) => {
+    setOpenProfileSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   // Composer enhancements: Internal note mode, Emoji picker, Product Quick Quote, Link & Interactive, File attachment
   const [composerMode, setComposerMode] = useState<'REPLY' | 'NOTE'>(() =>
@@ -706,6 +721,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setShowProductPicker((v) => (target === 'PRODUCT' ? !v : false));
     setShowLinkComposer((v) => (target === 'LINK' ? !v : false));
     setShowInteractiveComposer((v) => (target === 'INTERACTIVE' ? !v : false));
+    if (target) setShowComposerTools(false);
   };
 
   const stopOutboundTyping = useCallback(
@@ -1456,39 +1472,72 @@ export const Conversations: React.FC<ConversationsProps> = ({
   });
 
   const activeLabels = getLabelList(selectedConversation);
+  const activeAdvancedFilterCount =
+    (metricFilter !== 'ALL' ? 1 : 0) +
+    (channelFilter !== 'ALL' ? 1 : 0) +
+    (accountFilter !== 'ALL' ? 1 : 0) +
+    (assigneeFilter !== 'ALL' ? 1 : 0);
 
   return (
-    <div className="relative bg-white rounded-lg border border-gray-200 overflow-hidden h-[calc(100vh-76px)] supports-[height:100dvh]:h-[calc(100dvh-76px)] sm:h-[calc(100vh-100px)] sm:supports-[height:100dvh]:h-[calc(100dvh-100px)] lg:h-[calc(100vh-108px)] lg:supports-[height:100dvh]:h-[calc(100dvh-108px)] flex flex-col md:flex-row">
+    <div className="relative bg-white rounded-none border-t border-gray-200 sm:rounded-lg sm:border overflow-hidden flex-1 min-h-0 h-full flex flex-col md:flex-row">
       {/* Left List */}
       <div
         className={`w-full md:w-64 lg:w-72 xl:w-80 border-b md:border-b-0 md:border-r border-gray-200 flex-col shrink-0 bg-gray-50/50 ${
           selectedConversation ? 'hidden md:flex' : 'flex flex-1 md:flex-none min-h-0'
         }`}
       >
-        <div className="p-3 border-b border-gray-200 bg-white space-y-2">
+        <div className="p-2.5 sm:p-3 border-b border-gray-200 bg-white space-y-2">
           <div className="flex items-center gap-1.5">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <div className="relative flex-1 min-w-0">
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Cari obrolan, label, atau sesi..."
+                placeholder="Cari obrolan, label, sesi..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full h-9 pl-9 pr-3 bg-gray-50 border border-gray-200 rounded-md text-xs placeholder-gray-400 focus:outline-none focus:border-indigo-500"
+                className="w-full h-8 sm:h-9 pl-8 pr-7 bg-gray-50 border border-gray-200 rounded-md text-xs placeholder-gray-400 focus:outline-none focus:border-indigo-500"
               />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  title="Bersihkan pencarian"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
+            <button
+              type="button"
+              onClick={() => setShowListFilters((v) => !v)}
+              title="Filter lanjutan (Penilaian, Channel, Agent, Akun)"
+              className={`h-8 sm:h-9 px-2 rounded-md border text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors ${
+                showListFilters || activeAdvancedFilterCount > 0
+                  ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              {activeAdvancedFilterCount > 0 && (
+                <span className="px-1 min-w-[16px] h-4 rounded-full bg-indigo-600 text-white text-[10px] font-bold inline-flex items-center justify-center tabular-nums">
+                  {activeAdvancedFilterCount}
+                </span>
+              )}
+            </button>
             {canManageConversation && (
               <button
                 type="button"
                 onClick={() => void handleOpenNewChatModal()}
                 title="Buka Percakapan Baru"
-                className="h-9 px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors"
+                className="h-8 sm:h-9 px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Baru</span>
+                <span className="hidden sm:inline">Baru</span>
               </button>
             )}
           </div>
+
           <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
             {(['ALL', 'OPEN', 'PENDING', 'RESOLVED'] as const).map((st) => (
               <button
@@ -1506,81 +1555,145 @@ export const Conversations: React.FC<ConversationsProps> = ({
             ))}
           </div>
 
-          <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[10px]">
-            {(
-              [
-                { id: 'ALL', label: 'Semua' },
-                { id: 'ASSESSED', label: 'Dinilai' },
-                { id: 'EXCLUDED', label: 'Non-Nilai' },
-                { id: 'GROUPS', label: 'Grup WA' },
-              ] as const
-            ).map((mf) => (
+          {!showListFilters && activeAdvancedFilterCount > 0 && (
+            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-indigo-50/70 border border-indigo-100 text-[10px] text-indigo-800">
+              <span className="truncate font-medium">
+                Filter aktif:{' '}
+                {[
+                  metricFilter !== 'ALL'
+                    ? metricFilter === 'ASSESSED'
+                      ? 'Dinilai'
+                      : metricFilter === 'EXCLUDED'
+                      ? 'Non-Nilai'
+                      : 'Grup WA'
+                    : null,
+                  channelFilter !== 'ALL' ? CHANNEL_META[channelFilter]?.short || channelFilter : null,
+                  assigneeFilter !== 'ALL'
+                    ? assigneeFilter === 'MINE'
+                      ? 'Milik Saya'
+                      : 'Belum Ditugaskan'
+                    : null,
+                  accountFilter !== 'ALL' ? 'Akun Khusus' : null,
+                ]
+                  .filter(Boolean)
+                  .join(' • ')}
+              </span>
               <button
-                key={mf.id}
                 type="button"
-                onClick={() => setMetricFilter(mf.id)}
-                className={`py-1 rounded font-medium transition-colors truncate px-1 ${
-                  metricFilter === mf.id
-                    ? 'bg-white text-indigo-700 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
+                onClick={() => {
+                  setMetricFilter('ALL');
+                  setChannelFilter('ALL');
+                  setAssigneeFilter('ALL');
+                  setAccountFilter('ALL');
+                }}
+                className="font-semibold text-indigo-700 hover:underline shrink-0"
               >
-                {mf.label}
+                Reset
               </button>
-            ))}
-          </div>
+            </div>
+          )}
 
-          <div className={`grid gap-1.5 ${assignableAgents.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-            <select
-              value={channelFilter}
-              onChange={(e) => {
-                setChannelFilter(e.target.value as any);
-                setAccountFilter('ALL');
-              }}
-              aria-label="Filter Channel"
-              className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="ALL">Semua Channel</option>
-              <option value="WHATSAPP">WhatsApp</option>
-              <option value="WHATSAPP_CLOUD">WA Business Cloud</option>
-              <option value="INSTAGRAM">Instagram</option>
-              <option value="FACEBOOK">Facebook</option>
-              <option value="THREADS">Threads</option>
-              <option value="TELEGRAM">Telegram</option>
-            </select>
-
-            {assignableAgents.length > 0 && (
-              <select
-                value={assigneeFilter}
-                onChange={(e) => setAssigneeFilter(e.target.value as any)}
-                aria-label="Filter Agent"
-                className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
-              >
-                <option value="ALL">
-                  {canViewAllConversations ? 'Semua Agent' : 'Akses Saya & Terbuka'}
-                </option>
-                <option value="MINE">Milik Saya</option>
-                <option value="UNASSIGNED">Belum Ditugaskan</option>
-              </select>
-            )}
-          </div>
-
-          {channelAccounts.length > 0 && (
-            <select
-              value={accountFilter}
-              onChange={(e) => setAccountFilter(e.target.value)}
-              aria-label="Filter Akun Kanal"
-              className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
-            >
-              <option value="ALL">Semua Akun Kanal ({channelAccounts.length})</option>
-              {channelAccounts
-                .filter((acc) => channelFilter === 'ALL' || acc.channel === channelFilter)
-                .map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {CHANNEL_META[acc.channel]?.short || acc.channel} • {acc.name}
-                  </option>
+          {showListFilters && (
+            <div className="pt-2 border-t border-gray-100 space-y-2">
+              <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[10px]">
+                {(
+                  [
+                    { id: 'ALL', label: 'Semua' },
+                    { id: 'ASSESSED', label: 'Dinilai' },
+                    { id: 'EXCLUDED', label: 'Non-Nilai' },
+                    { id: 'GROUPS', label: 'Grup WA' },
+                  ] as const
+                ).map((mf) => (
+                  <button
+                    key={mf.id}
+                    type="button"
+                    onClick={() => setMetricFilter(mf.id)}
+                    className={`py-1 rounded font-medium transition-colors truncate px-1 ${
+                      metricFilter === mf.id
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {mf.label}
+                  </button>
                 ))}
-            </select>
+              </div>
+
+              <div className={`grid gap-1.5 ${assignableAgents.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <select
+                  value={channelFilter}
+                  onChange={(e) => {
+                    setChannelFilter(e.target.value as any);
+                    setAccountFilter('ALL');
+                  }}
+                  aria-label="Filter Channel"
+                  className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="ALL">Semua Channel</option>
+                  <option value="WHATSAPP">WhatsApp</option>
+                  <option value="WHATSAPP_CLOUD">WA Business Cloud</option>
+                  <option value="INSTAGRAM">Instagram</option>
+                  <option value="FACEBOOK">Facebook</option>
+                  <option value="THREADS">Threads</option>
+                  <option value="TELEGRAM">Telegram</option>
+                </select>
+
+                {assignableAgents.length > 0 && (
+                  <select
+                    value={assigneeFilter}
+                    onChange={(e) => setAssigneeFilter(e.target.value as any)}
+                    aria-label="Filter Agent"
+                    className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="ALL">
+                      {canViewAllConversations ? 'Semua Agent' : 'Akses Saya & Terbuka'}
+                    </option>
+                    <option value="MINE">Milik Saya</option>
+                    <option value="UNASSIGNED">Belum Ditugaskan</option>
+                  </select>
+                )}
+              </div>
+
+              {channelAccounts.length > 0 && (
+                <select
+                  value={accountFilter}
+                  onChange={(e) => setAccountFilter(e.target.value)}
+                  aria-label="Filter Akun Kanal"
+                  className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="ALL">Semua Akun Kanal ({channelAccounts.length})</option>
+                  {channelAccounts
+                    .filter((acc) => channelFilter === 'ALL' || acc.channel === channelFilter)
+                    .map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {CHANNEL_META[acc.channel]?.short || acc.channel} • {acc.name}
+                      </option>
+                    ))}
+                </select>
+              )}
+
+              <div className="flex items-center justify-between text-[11px] pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMetricFilter('ALL');
+                    setChannelFilter('ALL');
+                    setAssigneeFilter('ALL');
+                    setAccountFilter('ALL');
+                  }}
+                  className="text-gray-500 hover:text-gray-800"
+                >
+                  Reset Filter
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowListFilters(false)}
+                  className="font-medium text-indigo-700 hover:underline"
+                >
+                  Tutup Filter
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
@@ -1607,16 +1720,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     if (selectedConversation?.id !== conv.id) {
                       setHighlightedCsatWindow(null);
                       setReplyingToMessage(null);
+                      setShowMobileChatActions(false);
+                      setShowComposerTools(false);
+                      setActiveMessageMenuId(null);
+                      setOpenProfileSections({});
                     }
                     setSelectedConversation(conv);
                   }}
-                  className={`w-full p-3 text-left flex items-start gap-2.5 transition-colors ${
+                  className={`w-full px-3 py-2.5 text-left flex items-start gap-2.5 transition-colors ${
                     isSelected
                       ? 'bg-indigo-50/70 border-l-2 border-indigo-600'
                       : 'hover:bg-gray-100/70 bg-white'
                   }`}
                 >
-                  <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0">
+                  <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0 mt-0.5">
                     {getConversationDisplayTitle(conv).slice(0, 2).toUpperCase()}
                   </div>
 
@@ -1625,22 +1742,22 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <span className="font-semibold text-gray-900 text-xs truncate">
                         {getConversationDisplayTitle(conv)}
                       </span>
-                      {conv.lastMessageAt && (
-                        <span className="text-[10px] text-gray-400 font-mono tabular-nums shrink-0">
-                          {new Date(conv.lastMessageAt).toLocaleTimeString('id-ID', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {conv.unreadCount > 0 && (
+                          <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-indigo-600 text-white tabular-nums">
+                            {conv.unreadCount}
+                          </span>
+                        )}
+                        {conv.lastMessageAt && (
+                          <span className="text-[10px] text-gray-400 font-mono tabular-nums">
+                            {new Date(conv.lastMessageAt).toLocaleTimeString('id-ID', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    {conv.contact?.nama_lengkap &&
-                      getConversationDisplayTitle(conv).toLowerCase() !==
-                        conv.contact.nama_lengkap.trim().toLowerCase() && (
-                        <p className="text-[10px] text-indigo-600/80 truncate">
-                          Kontak: {conv.contact.nama_lengkap}
-                        </p>
-                      )}
 
                     <p className="text-[11px] text-gray-500 truncate mt-0.5">
                       {presenceByConvId[conv.id]?.status === 'typing' ? (
@@ -1656,13 +1773,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       )}
                     </p>
 
-                    <div className="flex items-center flex-wrap gap-1 mt-1.5">
+                    <div className="flex items-center gap-1.5 mt-1 text-[10px] overflow-hidden">
                       {(() => {
                         const ch = ((conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
                         const meta = CHANNEL_META[ch] || CHANNEL_META.WHATSAPP;
                         return (
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border ${meta.cls}`}>
+                          <span className={`inline-flex items-center px-1.5 py-0.2 rounded font-semibold border shrink-0 ${meta.cls}`}>
                             {meta.short}
+                            {conv.wahaSession ? ` • ${conv.wahaSession}` : ''}
                           </span>
                         );
                       })()}
@@ -1675,65 +1793,36 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           slaTargetMinutes * 60_000 && (
                           <span
                             title={`Belum dibalas melebihi target SLA ${slaTargetMinutes} menit`}
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-red-50 text-red-700 border border-red-200"
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded font-semibold bg-red-50 text-red-700 border border-red-200 shrink-0"
                           >
                             <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                            SLA Terlewat
+                            SLA
                           </span>
                         )}
-                      {conv.isGroup && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-teal-50 text-teal-700 border border-teal-200">
-                          <Users className="w-2.5 h-2.5" />
-                          Grup WA
+                      {conv.isGroup ? (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded font-medium bg-teal-50 text-teal-700 border border-teal-200 shrink-0">
+                          Grup
                         </span>
-                      )}
-                      {conv.excludeFromMetrics && (
+                      ) : conv.excludeFromMetrics ? (
                         <span
                           title={`Tidak masuk penilaian (${conv.excludeReason || 'Non-Customer'})`}
-                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-300"
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded font-medium bg-gray-100 text-gray-600 border border-gray-300 shrink-0"
                         >
-                          <EyeOff className="w-2.5 h-2.5" />
-                          {conv.excludeReason || 'Non-Penilaian'}
+                          Non-Nilai
+                        </span>
+                      ) : conv.assignedAgentName ? (
+                        <span className="text-sky-700 font-medium truncate">
+                          • {conv.assignedAgentName}
+                        </span>
+                      ) : null}
+                      {convLabels.length > 0 && (
+                        <span className="text-indigo-700 font-medium truncate ml-auto shrink-0">
+                          #{convLabels[0]}
+                          {convLabels.length > 1 ? ` +${convLabels.length - 1}` : ''}
                         </span>
                       )}
-                      {conv.wahaSession && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          {conv.wahaSession}
-                        </span>
-                      )}
-                      {conv.channelAccountName && !conv.wahaSession && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 text-slate-700 border border-slate-200 truncate max-w-[120px]">
-                          {conv.channelAccountName}
-                        </span>
-                      )}
-                      {conv.assignedAgentName && !conv.excludeFromMetrics && !conv.isGroup && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-sky-50 text-sky-700 border border-sky-200">
-                          <UserCheck className="w-2.5 h-2.5" />
-                          {conv.assignedAgentName}
-                        </span>
-                      )}
-                      {(conv.csatOverallScore ?? conv.csatRating) && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                          <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-500" />
-                          {Number(conv.csatOverallScore ?? conv.csatRating).toFixed(1).replace(/\.0$/, '')}
-                        </span>
-                      )}
-                      {convLabels.slice(0, 2).map((lbl) => (
-                        <span
-                          key={lbl}
-                          className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
-                        >
-                          {lbl}
-                        </span>
-                      ))}
                     </div>
                   </div>
-
-                  {conv.unreadCount > 0 && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-600 text-white shrink-0 tabular-nums">
-                      {conv.unreadCount}
-                    </span>
-                  )}
                 </button>
               );
               })}
@@ -1758,51 +1847,127 @@ export const Conversations: React.FC<ConversationsProps> = ({
       {/* Middle Chat Feed */}
       {selectedConversation ? (
         <div className="flex flex-1 flex-col bg-gray-50 min-w-0 min-h-0">
-          <div className="min-h-[3.5rem] bg-white border-b border-gray-200 px-3 sm:px-4 py-2 flex flex-col md:flex-row md:flex-wrap md:items-center justify-between gap-2 shrink-0">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <button
-                type="button"
-                onClick={() => setSelectedConversation(null)}
-                title="Kembali ke Daftar Obrolan"
-                className="md:hidden p-1.5 -ml-1 rounded-md text-gray-600 hover:bg-gray-100 shrink-0"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0">
-                {getConversationDisplayTitle(selectedConversation).slice(0, 2).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <h4 className="font-semibold text-gray-900 text-xs truncate">
-                    {getConversationDisplayTitle(selectedConversation)}
-                  </h4>
-                  {selectedConversation.contact?.nama_lengkap &&
-                    getConversationDisplayTitle(selectedConversation).toLowerCase() !==
-                      selectedConversation.contact.nama_lengkap.trim().toLowerCase() && (
-                      <span className="text-[10px] text-gray-500 truncate">
-                        (Kontak: {selectedConversation.contact.nama_lengkap})
-                      </span>
-                    )}
-                  {(() => {
-                    const ch = ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
-                    const meta = CHANNEL_META[ch] || CHANNEL_META.WHATSAPP;
-                    return (
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${meta.cls}`}>
-                        {meta.label}
-                      </span>
-                    );
-                  })()}
-                  {selectedConversation.wahaSession && (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP' && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                      <Smartphone className="w-2.5 h-2.5" />
-                      {selectedConversation.wahaSession}
-                    </span>
-                  )}
-                  {selectedConversation.channelAccountName && !selectedConversation.wahaSession && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
-                      {selectedConversation.channelAccountName}
-                    </span>
-                  )}
+          {(() => {
+            const isExcludedConv = Boolean(
+              selectedConversation.excludeFromMetrics || selectedConversation.isGroup
+            );
+            const ch = ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+            const channelMeta = CHANNEL_META[ch] || CHANNEL_META.WHATSAPP;
+            const activePresence = presenceByConvId[selectedConversation.id]?.status;
+
+            return (
+              <div className="relative min-h-[3.25rem] bg-white border-b border-gray-200 px-2.5 sm:px-4 py-2 flex items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedConversation(null);
+                      setShowMobileChatActions(false);
+                    }}
+                    title="Kembali ke Daftar Obrolan"
+                    className="md:hidden p-1.5 -ml-1 rounded-md text-gray-600 hover:bg-gray-100 shrink-0"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleContactPanel(true)}
+                    title="Klik untuk membuka Detail Kontak & Opsi Percakapan"
+                    className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-md hover:bg-gray-50/80 p-0.5 -m-0.5 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0">
+                      {getConversationDisplayTitle(selectedConversation).slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <h4 className="font-semibold text-gray-900 text-xs sm:text-[13px] truncate">
+                          {getConversationDisplayTitle(selectedConversation)}
+                        </h4>
+                        <span
+                          className={`hidden sm:inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold border shrink-0 ${channelMeta.cls}`}
+                        >
+                          {channelMeta.short}
+                        </span>
+                        {selectedConversation.excludeFromMetrics && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-300 shrink-0">
+                            <EyeOff className="w-2.5 h-2.5" />
+                            <span className="hidden sm:inline">Non-Penilaian</span>
+                          </span>
+                        )}
+                        {(ch === 'INSTAGRAM' || ch === 'FACEBOOK') && (() => {
+                          const latestInbound =
+                            selectedConversation.lastInboundAt ||
+                            [...messages].reverse().find((m) => m.direction === 'INBOUND')?.createdAt ||
+                            selectedConversation.firstInboundAt;
+                          if (!latestInbound) return null;
+                          const remainingMs = new Date(latestInbound).getTime() + 24 * 3600_000 - Date.now();
+                          if (remainingMs <= 0) {
+                            return (
+                              <span
+                                title="Jendela balas 24 jam Meta telah berakhir."
+                                className="hidden lg:inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 shrink-0 whitespace-nowrap"
+                              >
+                                <Clock className="w-2.5 h-2.5" />
+                                Jendela 24j Berakhir
+                              </span>
+                            );
+                          }
+                          const hrs = Math.floor(remainingMs / 3600_000);
+                          const mins = Math.floor((remainingMs % 3600_000) / 60_000);
+                          return (
+                            <span
+                              title="Sisa waktu jendela balas 24 jam Meta"
+                              className={`hidden lg:inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold border shrink-0 whitespace-nowrap ${
+                                hrs < 4
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : 'bg-sky-50 text-sky-700 border-sky-200'
+                              }`}
+                            >
+                              <Clock className="w-2.5 h-2.5" />
+                              {hrs}j {mins}m
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="text-[11px] text-gray-500 truncate flex items-center gap-1.5">
+                        {activePresence ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 font-medium">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            {activePresence === 'typing'
+                              ? 'Mengetik...'
+                              : activePresence === 'recording'
+                              ? 'Merekam audio...'
+                              : 'Online'}
+                          </span>
+                        ) : (
+                          <>
+                            <span className="font-mono truncate">
+                              {selectedConversation.contact?.nomor_whatsapp
+                                ? `+${selectedConversation.contact.nomor_whatsapp}`
+                                : selectedConversation.isGroup
+                                ? 'Grup WhatsApp'
+                                : channelMeta.label}
+                            </span>
+                            {selectedConversation.wahaSession && (
+                              <span className="hidden sm:inline text-emerald-700 font-mono truncate">
+                                • {selectedConversation.wahaSession}
+                              </span>
+                            )}
+                            {selectedConversation.assignedAgentName && !isExcludedConv && (
+                              <span className="lg:hidden text-sky-700 font-medium truncate">
+                                • {selectedConversation.assignedAgentName}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Compact Desktop Inline Controls (lg+) */}
+                <div className="hidden lg:flex items-center gap-1.5 shrink-0">
                   {selectedConversation.isGroup && (
                     <button
                       type="button"
@@ -1810,8 +1975,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         setShowParticipantsModal(true);
                         void fetchParticipants(selectedConversation.id, true);
                       }}
-                      title="Lihat daftar partisipan & anggota yang mengirim pesan di grup ini"
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 shrink-0 transition-colors"
+                      title="Lihat daftar partisipan grup"
+                      className="h-7 px-2 rounded-md border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-800 text-[11px] font-semibold inline-flex items-center gap-1 shrink-0 transition-colors"
                     >
                       <Users className="w-3 h-3" />
                       <span>
@@ -1822,256 +1987,437 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </span>
                     </button>
                   )}
-                  {selectedConversation.excludeFromMetrics && (
+
+                  {sessions.length > 0 && ch === 'WHATSAPP' && (
+                    <select
+                      value={selectedSession}
+                      onChange={(e) => setSelectedSession(e.target.value)}
+                      title="Pilih sesi WAHA pengirim"
+                      className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] font-mono text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[160px]"
+                    >
+                      {sessions.map((s) => (
+                        <option key={s.name} value={s.name}>
+                          {s.name} • {s.status === 'WORKING' ? 'Aktif' : s.status}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {!isExcludedConv && assignableAgents.length > 0 && (
+                    <select
+                      value={selectedConversation.assignedAgentId || ''}
+                      disabled={!canManageConversation}
+                      onChange={(e) => void handleAssignAgent(e.target.value || null)}
+                      title={
+                        canManageConversation
+                          ? 'Tugaskan ke Agent'
+                          : 'Role Anda tidak memiliki izin menugaskan CS'
+                      }
+                      className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[130px] disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <option value="">Belum Ditugaskan</option>
+                      {assignableAgents.map((ag) => (
+                        <option key={ag.id} value={ag.id}>
+                          {ag.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {!isExcludedConv && (
+                    <select
+                      value={selectedConversation.status || 'OPEN'}
+                      disabled={!canManageConversation}
+                      onChange={(e) =>
+                        handleStatusChange(e.target.value as 'OPEN' | 'PENDING' | 'RESOLVED')
+                      }
+                      title={
+                        canManageConversation
+                          ? 'Status Percakapan'
+                          : 'Role Anda tidak memiliki izin mengubah status percakapan'
+                      }
+                      className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none shrink-0 disabled:opacity-70 disabled:cursor-not-allowed ${
+                        selectedConversation.status === 'RESOLVED'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : selectedConversation.status === 'PENDING'
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-blue-50 text-blue-700 border-blue-200'
+                      }`}
+                    >
+                      <option value="OPEN">Open</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="RESOLVED">Resolved</option>
+                    </select>
+                  )}
+
+                  {!isExcludedConv &&
+                    canManageConversation &&
+                    (selectedConversation.status === 'RESOLVED' ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleStatusChange('OPEN')}
+                        title="Buka kembali percakapan ini"
+                        className="h-7 px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
+                      >
+                        <RotateCcw className="w-3 h-3 shrink-0" />
+                        <span>Buka Kembali</span>
+                      </button>
+                    ) : (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowResolveMenu((prev) => !prev)}
+                          title="Akhiri percakapan (pilih dengan atau tanpa CSAT)"
+                          className="h-7 px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
+                        >
+                          <CheckCircle2 className="w-3 h-3 shrink-0" />
+                          <span>Akhiri</span>
+                          <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
+                        </button>
+                        {showResolveMenu && (
+                          <>
+                            <div
+                              className="fixed inset-0 z-10"
+                              onClick={() => setShowResolveMenu(false)}
+                            />
+                            <div className="absolute right-0 mt-1 w-48 rounded-md bg-white border border-gray-200 shadow-lg py-1 z-20">
+                              {canSendCsat && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleStatusChange('RESOLVED', true)}
+                                  className="w-full text-left px-3 py-1.5 text-[11px] text-gray-800 hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-1.5 whitespace-nowrap"
+                                >
+                                  <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                  <span>Akhiri &amp; Kirim CSAT</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => void handleStatusChange('RESOLVED', false)}
+                                className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 whitespace-nowrap"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Akhiri Tanpa CSAT</span>
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+
+                  <button
+                    type="button"
+                    onClick={handleMarkRead}
+                    disabled={markingRead}
+                    title="Tandai Dibaca & Kirim Centang Biru (Seen) ke WhatsApp"
+                    className="h-7 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 hover:text-indigo-700 text-[11px] font-medium inline-flex items-center gap-1 shrink-0 transition-colors disabled:opacity-50"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                    <span className="hidden xl:inline">Dibaca</span>
+                  </button>
+
+                  {!isExcludedConv && canSendCsat && (
                     <button
                       type="button"
-                      onClick={() => toggleContactPanel(true)}
-                      title="Percakapan ini dikecualikan dari penilaian SLA/CSAT. Klik untuk ubah di Detail Kontak."
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200 shrink-0"
+                      onClick={handleSendCsatCta}
+                      disabled={sendingCsat}
+                      title="Kirim Tautan Rating CSAT ke Pelanggan"
+                      className="h-7 px-2.5 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-50"
                     >
-                      <EyeOff className="w-2.5 h-2.5" />
-                      <span>Non-Penilaian: {selectedConversation.excludeReason || 'Bukan Customer'}</span>
+                      <Star className="w-3 h-3 fill-amber-400 text-amber-500 shrink-0" />
+                      <span>Kirim CSAT</span>
                     </button>
                   )}
-                  {presenceByConvId[selectedConversation.id]?.status && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      {presenceByConvId[selectedConversation.id].status === 'typing'
-                        ? 'Mengetik...'
-                        : presenceByConvId[selectedConversation.id].status === 'recording'
-                        ? 'Merekam audio...'
-                        : 'Online'}
-                    </span>
-                  )}
-                  {(selectedConversation.channel === 'INSTAGRAM' || selectedConversation.channel === 'FACEBOOK') && (() => {
-                    const latestInbound =
-                      selectedConversation.lastInboundAt ||
-                      [...messages].reverse().find((m) => m.direction === 'INBOUND')?.createdAt ||
-                      selectedConversation.firstInboundAt;
-                    if (!latestInbound) return null;
-                    const remainingMs = new Date(latestInbound).getTime() + 24 * 3600_000 - Date.now();
-                    if (remainingMs <= 0) {
-                      return (
-                        <span
-                          title="Jendela balas 24 jam Meta telah berakhir. Menunggu pesan masuk baru dari pelanggan."
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 shrink-0 whitespace-nowrap"
-                        >
-                          <Clock className="w-2.5 h-2.5" />
-                          Jendela 24j Berakhir
-                        </span>
-                      );
-                    }
-                    const hrs = Math.floor(remainingMs / 3600_000);
-                    const mins = Math.floor((remainingMs % 3600_000) / 60_000);
-                    const isLow = hrs < 4;
-                    return (
-                      <span
-                        title="Sisa waktu jendela balas 24 jam sesuai kebijakan Meta Messaging"
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border shrink-0 whitespace-nowrap ${
-                          isLow
-                            ? 'bg-amber-50 text-amber-700 border-amber-200'
-                            : 'bg-sky-50 text-sky-700 border-sky-200'
-                        }`}
-                      >
-                        <Clock className="w-2.5 h-2.5" />
-                        Jendela Meta: {hrs}j {mins}m
-                      </span>
-                    );
-                  })()}
-                  {selectedConversation.contextTitle && (
-                    <span className="text-[10px] text-gray-500 truncate">
-                      • {selectedConversation.contextTitle}
-                    </span>
-                  )}
-                </div>
-                {selectedConversation.contact?.nomor_whatsapp ? (
-                  <a
-                    href={`https://wa.me/${selectedConversation.contact.nomor_whatsapp}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] text-indigo-600 font-mono hover:underline inline-flex items-center gap-1"
+
+                  <button
+                    type="button"
+                    onClick={() => toggleContactPanel()}
+                    title={showContactPanel ? 'Tutup Detail Kontak' : 'Buka Detail Kontak'}
+                    className="h-7 w-7 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 inline-flex items-center justify-center shrink-0"
                   >
-                    <Phone className="w-2.5 h-2.5" />
-                    <span>+{selectedConversation.contact.nomor_whatsapp}</span>
-                  </a>
-                ) : (
-                  <span className="text-[11px] text-gray-500">
-                    {selectedConversation.contact?.nama_panggilan ||
-                      ((selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
-                        ? 'WhatsApp ID Tertaut'
-                        : 'Kontak Omnichannel')}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center flex-wrap gap-1.5 min-w-0 w-full md:w-auto justify-between md:justify-end">
-              {sessions.length > 0 && (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP' && (
-                <select
-                  value={selectedSession}
-                  onChange={(e) => setSelectedSession(e.target.value)}
-                  title="Pilih sesi WAHA pengirim"
-                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] font-mono text-gray-700 focus:outline-none focus:border-indigo-500 flex-1 sm:flex-none min-w-[100px] sm:max-w-[200px]"
-                >
-                  {sessions.map((s) => (
-                    <option key={s.name} value={s.name}>
-                      {s.name} • {s.status === 'WORKING' ? 'Aktif' : s.status}
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              {(() => {
-                const isExcludedConv = Boolean(
-                  selectedConversation.excludeFromMetrics || selectedConversation.isGroup
-                );
-                return (
-                  <>
-                    {!isExcludedConv && assignableAgents.length > 0 && (
-                      <select
-                        value={selectedConversation.assignedAgentId || ''}
-                        disabled={!canManageConversation}
-                        onChange={(e) => void handleAssignAgent(e.target.value || null)}
-                        title={
-                          canManageConversation
-                            ? 'Tugaskan ke Agent'
-                            : 'Role Anda tidak memiliki izin menugaskan CS'
-                        }
-                        className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 flex-1 sm:flex-none min-w-[100px] sm:max-w-[140px] disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        <option value="">Belum Ditugaskan</option>
-                        {assignableAgents.map((ag) => (
-                          <option key={ag.id} value={ag.id}>
-                            {ag.name}
-                          </option>
-                        ))}
-                      </select>
+                    {showContactPanel ? (
+                      <PanelRightClose className="w-3.5 h-3.5" />
+                    ) : (
+                      <PanelRightOpen className="w-3.5 h-3.5" />
                     )}
+                  </button>
+                </div>
 
-                    {!isExcludedConv && (
-                      <select
-                        value={selectedConversation.status || 'OPEN'}
-                        disabled={!canManageConversation}
-                        onChange={(e) =>
-                          handleStatusChange(e.target.value as 'OPEN' | 'PENDING' | 'RESOLVED')
-                        }
-                        title={
-                          canManageConversation
-                            ? 'Status Percakapan'
-                            : 'Role Anda tidak memiliki izin mengubah status percakapan'
-                        }
-                        className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none shrink-0 disabled:opacity-70 disabled:cursor-not-allowed ${
-                          selectedConversation.status === 'RESOLVED'
+                {/* Minimal Mobile & Tablet Header Controls (<lg) */}
+                <div className="flex lg:hidden items-center gap-1 shrink-0">
+                  {selectedConversation.isGroup && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowParticipantsModal(true);
+                        void fetchParticipants(selectedConversation.id, true);
+                      }}
+                      title="Partisipan Grup"
+                      className="h-8 px-2 rounded-md border border-teal-200 bg-teal-50 text-teal-800 text-[11px] font-semibold inline-flex items-center gap-1"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      {participantsData && participantsData.participants.length > 0 && (
+                        <span className="tabular-nums">{participantsData.participants.length}</span>
+                      )}
+                    </button>
+                  )}
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowMobileChatActions((v) => !v)}
+                      title="Aksi Percakapan (Status, Agent, Sesi, CSAT)"
+                      className={`h-8 px-2 rounded-md border text-[11px] font-semibold inline-flex items-center gap-1 transition-colors ${
+                        !isExcludedConv
+                          ? selectedConversation.status === 'RESOLVED'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : selectedConversation.status === 'PENDING'
                             ? 'bg-amber-50 text-amber-700 border-amber-200'
                             : 'bg-blue-50 text-blue-700 border-blue-200'
-                        }`}
-                      >
-                        <option value="OPEN">Open</option>
-                        <option value="PENDING">Pending</option>
-                        <option value="RESOLVED">Resolved</option>
-                      </select>
-                    )}
+                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span>
+                        {!isExcludedConv
+                          ? selectedConversation.status === 'RESOLVED'
+                            ? 'Selesai'
+                            : selectedConversation.status === 'PENDING'
+                            ? 'Pending'
+                            : 'Open'
+                          : 'Aksi'}
+                      </span>
+                      <MoreVertical className="w-3.5 h-3.5" />
+                    </button>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {!isExcludedConv &&
-                        canManageConversation &&
-                        (selectedConversation.status === 'RESOLVED' ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleStatusChange('OPEN')}
-                            title="Buka kembali percakapan ini"
-                            className="h-7 px-2 sm:px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
-                          >
-                            <RotateCcw className="w-3 h-3 shrink-0" />
-                            <span>Buka Kembali</span>
-                          </button>
-                        ) : (
-                          <div className="relative">
-                            <button
-                              type="button"
-                              onClick={() => setShowResolveMenu((prev) => !prev)}
-                              title="Akhiri percakapan (pilih dengan atau tanpa CSAT)"
-                              className="h-7 px-2 sm:px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
-                            >
-                              <CheckCircle2 className="w-3 h-3 shrink-0" />
-                              <span>Akhiri</span>
-                              <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
-                            </button>
-                            {showResolveMenu && (
-                              <>
-                                <div
-                                  className="fixed inset-0 z-10"
-                                  onClick={() => setShowResolveMenu(false)}
-                                />
-                                <div className="absolute right-0 mt-1 w-48 rounded-md bg-white border border-gray-200 shadow-lg py-1 z-20">
+                    {showMobileChatActions && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-20"
+                          onClick={() => setShowMobileChatActions(false)}
+                        />
+                        <div className="absolute right-0 mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg bg-white border border-gray-200 shadow-xl p-3 z-30 space-y-2.5 text-xs">
+                          <div className="flex items-center justify-between gap-2 pb-2 border-b border-gray-100">
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${channelMeta.cls}`}>
+                              {channelMeta.label}
+                            </span>
+                            {selectedConversation.contact?.nomor_whatsapp && (
+                              <a
+                                href={`https://wa.me/${selectedConversation.contact.nomor_whatsapp}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] font-mono text-indigo-600 hover:underline inline-flex items-center gap-1"
+                              >
+                                <Phone className="w-3 h-3" />
+                                +{selectedConversation.contact.nomor_whatsapp}
+                              </a>
+                            )}
+                          </div>
+
+                          {(ch === 'INSTAGRAM' || ch === 'FACEBOOK') && (() => {
+                            const latestInbound =
+                              selectedConversation.lastInboundAt ||
+                              [...messages].reverse().find((m) => m.direction === 'INBOUND')?.createdAt ||
+                              selectedConversation.firstInboundAt;
+                            if (!latestInbound) return null;
+                            const remainingMs = new Date(latestInbound).getTime() + 24 * 3600_000 - Date.now();
+                            const hrs = Math.max(0, Math.floor(remainingMs / 3600_000));
+                            const mins = Math.max(0, Math.floor((remainingMs % 3600_000) / 60_000));
+                            return (
+                              <div
+                                className={`px-2 py-1 rounded border text-[10px] font-semibold flex items-center gap-1.5 ${
+                                  remainingMs <= 0
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : hrs < 4
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-sky-50 text-sky-700 border-sky-200'
+                                }`}
+                              >
+                                <Clock className="w-3 h-3 shrink-0" />
+                                <span>
+                                  {remainingMs <= 0
+                                    ? 'Jendela balas 24 jam Meta berakhir'
+                                    : `Jendela Meta tersisa: ${hrs}j ${mins}m`}
+                                </span>
+                              </div>
+                            );
+                          })()}
+
+                          {sessions.length > 0 && ch === 'WHATSAPP' && (
+                            <div className="space-y-1">
+                              <span className="block text-[10px] font-medium text-gray-500">
+                                Sesi WAHA Pengirim
+                              </span>
+                              <select
+                                value={selectedSession}
+                                onChange={(e) => setSelectedSession(e.target.value)}
+                                className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono text-gray-700"
+                              >
+                                {sessions.map((s) => (
+                                  <option key={s.name} value={s.name}>
+                                    {s.name} • {s.status === 'WORKING' ? 'Aktif' : s.status}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {!isExcludedConv && assignableAgents.length > 0 && (
+                            <div className="space-y-1">
+                              <span className="block text-[10px] font-medium text-gray-500">
+                                Tugaskan CS
+                              </span>
+                              <select
+                                value={selectedConversation.assignedAgentId || ''}
+                                disabled={!canManageConversation}
+                                onChange={(e) => {
+                                  void handleAssignAgent(e.target.value || null);
+                                  setShowMobileChatActions(false);
+                                }}
+                                className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] text-gray-700 disabled:opacity-60"
+                              >
+                                <option value="">Belum Ditugaskan</option>
+                                {assignableAgents.map((ag) => (
+                                  <option key={ag.id} value={ag.id}>
+                                    {ag.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {!isExcludedConv && (
+                            <div className="space-y-1">
+                              <span className="block text-[10px] font-medium text-gray-500">
+                                Status Percakapan
+                              </span>
+                              <div className="grid grid-cols-3 gap-1">
+                                {(['OPEN', 'PENDING', 'RESOLVED'] as const).map((st) => (
+                                  <button
+                                    key={st}
+                                    type="button"
+                                    disabled={!canManageConversation}
+                                    onClick={() => {
+                                      void handleStatusChange(st);
+                                      setShowMobileChatActions(false);
+                                    }}
+                                    className={`h-7 rounded border text-[11px] font-medium transition-colors disabled:opacity-60 ${
+                                      selectedConversation.status === st
+                                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-semibold'
+                                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {st === 'OPEN' ? 'Open' : st === 'PENDING' ? 'Pending' : 'Resolved'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="pt-1 border-t border-gray-100 space-y-1">
+                            {!isExcludedConv &&
+                              canManageConversation &&
+                              (selectedConversation.status === 'RESOLVED' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleStatusChange('OPEN');
+                                    setShowMobileChatActions(false);
+                                  }}
+                                  className="w-full h-8 px-2.5 rounded border border-blue-200 bg-blue-50 text-blue-700 text-[11px] font-medium flex items-center gap-2"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>Buka Kembali Percakapan</span>
+                                </button>
+                              ) : (
+                                <>
                                   {canSendCsat && (
                                     <button
                                       type="button"
-                                      onClick={() => void handleStatusChange('RESOLVED', true)}
-                                      className="w-full text-left px-3 py-1.5 text-[11px] text-gray-800 hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-1.5 whitespace-nowrap"
+                                      onClick={() => {
+                                        void handleStatusChange('RESOLVED', true);
+                                        setShowMobileChatActions(false);
+                                      }}
+                                      className="w-full h-8 px-2.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-800 text-[11px] font-medium flex items-center gap-2"
                                     >
-                                      <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                      <Star className="w-3.5 h-3.5 text-amber-500" />
                                       <span>Akhiri &amp; Kirim CSAT</span>
                                     </button>
                                   )}
                                   <button
                                     type="button"
-                                    onClick={() => void handleStatusChange('RESOLVED', false)}
-                                    className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 whitespace-nowrap"
+                                    onClick={() => {
+                                      void handleStatusChange('RESOLVED', false);
+                                      setShowMobileChatActions(false);
+                                    }}
+                                    className="w-full h-8 px-2.5 rounded border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-[11px] font-medium flex items-center gap-2"
                                   >
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                                     <span>Akhiri Tanpa CSAT</span>
                                   </button>
-                                </div>
-                              </>
+                                </>
+                              ))}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handleMarkRead();
+                                setShowMobileChatActions(false);
+                              }}
+                              disabled={markingRead}
+                              className="w-full h-8 px-2.5 rounded border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-[11px] font-medium flex items-center gap-2 disabled:opacity-50"
+                            >
+                              <CheckCheck className="w-3.5 h-3.5 text-sky-600" />
+                              <span>Tandai Dibaca (Centang Biru)</span>
+                            </button>
+
+                            {!isExcludedConv && canSendCsat && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleSendCsatCta();
+                                  setShowMobileChatActions(false);
+                                }}
+                                disabled={sendingCsat}
+                                className="w-full h-8 px-2.5 rounded border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-medium flex items-center gap-2 disabled:opacity-50"
+                              >
+                                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                                <span>Kirim Tautan Rating CSAT</span>
+                              </button>
                             )}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowMobileChatActions(false);
+                                toggleContactPanel(true);
+                              }}
+                              className="w-full h-8 px-2.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 text-[11px] font-semibold flex items-center gap-2"
+                            >
+                              <Info className="w-3.5 h-3.5" />
+                              <span>Lihat Detail Kontak</span>
+                            </button>
                           </div>
-                        ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
 
-                      <button
-                        type="button"
-                        onClick={handleMarkRead}
-                        disabled={markingRead}
-                        title="Tandai Dibaca & Kirim Centang Biru (Seen) ke WhatsApp"
-                        className="h-7 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 hover:text-indigo-700 text-[11px] font-medium inline-flex items-center gap-1 shrink-0 transition-colors disabled:opacity-50"
-                      >
-                        <CheckCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                        <span className="hidden lg:inline">Dibaca</span>
-                      </button>
-
-                      {!isExcludedConv && canSendCsat && (
-                        <button
-                          type="button"
-                          onClick={handleSendCsatCta}
-                          disabled={sendingCsat}
-                          title="Kirim Tautan Rating CSAT ke Pelanggan"
-                          className="h-7 px-2.5 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-50"
-                        >
-                          <Star className="w-3 h-3 fill-amber-400 text-amber-500 shrink-0" />
-                          <span className="hidden sm:inline">Kirim CSAT</span>
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => toggleContactPanel()}
-                        title={showContactPanel ? 'Tutup Detail Kontak' : 'Buka Detail Kontak'}
-                        className="h-7 w-7 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 inline-flex items-center justify-center shrink-0"
-                      >
-                        {showContactPanel ? (
-                          <PanelRightClose className="w-3.5 h-3.5" />
-                        ) : (
-                          <PanelRightOpen className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleContactPanel()}
+                    title={showContactPanel ? 'Tutup Detail Kontak' : 'Buka Detail Kontak'}
+                    className={`h-8 w-8 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors ${
+                      showContactPanel
+                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                        : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'
+                    }`}
+                  >
+                    <Info className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {highlightedCsatWindow && (
             <div className="px-4 py-1.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2 text-[11px] text-amber-900">
@@ -2111,7 +2457,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </div>
           )}
 
-          <div className="flex-1 p-4 overflow-y-auto space-y-2.5">
+          <div className="flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2 sm:space-y-2.5">
             {loadingMessages && messages.length === 0 ? (
               <LoadingState message="Memuat pesan..." />
             ) : messages.length === 0 ? (
@@ -2629,17 +2975,38 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         )}
 
                         <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-gray-500 font-mono tabular-nums">
-                          <div className="mr-auto flex items-center gap-2">
+                          <div className="mr-auto flex items-center gap-1.5">
+                            {(canReplyConversation || canManageConversation) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActiveMessageMenuId((prev) => (prev === msg.id ? null : msg.id))
+                                }
+                                title="Opsi pesan (Balas / Hapus)"
+                                className={`sm:hidden inline-flex items-center justify-center p-0.5 rounded transition-colors ${
+                                  activeMessageMenuId === msg.id
+                                    ? 'bg-indigo-100 text-indigo-700'
+                                    : 'text-gray-400 hover:text-gray-700'
+                                }`}
+                              >
+                                <MoreHorizontal className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             {canReplyConversation && (
                               <button
                                 type="button"
                                 onClick={() => {
                                   setReplyingToMessage(msg);
                                   setComposerMode('REPLY');
+                                  setActiveMessageMenuId(null);
                                   replyInputRef.current?.focus();
                                 }}
                                 title="Balas pesan ini"
-                                className="opacity-80 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center gap-0.5 text-[10px] font-sans text-indigo-600 hover:text-indigo-800 transition-opacity"
+                                className={`${
+                                  activeMessageMenuId === msg.id
+                                    ? 'inline-flex opacity-100'
+                                    : 'hidden sm:inline-flex sm:opacity-0 group-hover:opacity-100 focus:opacity-100'
+                                } items-center gap-0.5 text-[10px] font-sans text-indigo-600 hover:text-indigo-800 transition-opacity`}
                               >
                                 <Reply className="w-3 h-3" />
                                 <span>Balas</span>
@@ -2648,9 +3015,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             {(canReplyConversation || canManageConversation) && (
                               <button
                                 type="button"
-                                onClick={() => setDeleteMessageTarget(msg)}
+                                onClick={() => {
+                                  setActiveMessageMenuId(null);
+                                  setDeleteMessageTarget(msg);
+                                }}
                                 title="Hapus Pesan (Tarik / Hapus Pribadi)"
-                                className="opacity-80 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center gap-0.5 text-[10px] font-sans text-gray-500 hover:text-red-600 transition-opacity"
+                                className={`${
+                                  activeMessageMenuId === msg.id
+                                    ? 'inline-flex opacity-100'
+                                    : 'hidden sm:inline-flex sm:opacity-0 group-hover:opacity-100 focus:opacity-100'
+                                } items-center gap-0.5 text-[10px] font-sans text-gray-500 hover:text-red-600 transition-opacity`}
                               >
                                 <Trash2 className="w-3 h-3" />
                                 <span>Hapus</span>
@@ -2698,8 +3072,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </span>
             </div>
           ) : (
-          <div className="bg-white border-t border-gray-200 p-2.5 sm:p-3 space-y-2 shrink-0">
-            <div className="flex items-center justify-between gap-2 overflow-x-auto">
+          <div className="bg-white border-t border-gray-200 p-2 sm:p-3 space-y-1.5 sm:space-y-2 shrink-0">
+            <div className="hidden sm:flex items-center justify-between gap-2 overflow-x-auto">
               <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50 text-[11px] shrink-0">
                 {canReplyConversation && (
                   <button
@@ -2736,6 +3110,24 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 )}
               </div>
             </div>
+
+            {composerMode === 'NOTE' && (
+              <div className="sm:hidden flex items-center justify-between gap-2 px-2.5 py-1 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+                <span className="inline-flex items-center gap-1 font-medium truncate">
+                  <StickyNote className="w-3 h-3 text-amber-600 shrink-0" />
+                  Mode Catatan Internal (Tim)
+                </span>
+                {canReplyConversation && (
+                  <button
+                    type="button"
+                    onClick={() => setComposerMode('REPLY')}
+                    className="font-semibold text-indigo-700 hover:underline shrink-0"
+                  >
+                    Mode Balas
+                  </button>
+                )}
+              </div>
+            )}
 
             {composerMode === 'REPLY' &&
               (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP' &&
@@ -3492,7 +3884,80 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </form>
               )}
 
-              <form onSubmit={handleSendMessage} className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 min-w-0">
+              {showComposerTools && (
+                <div className="sm:hidden mb-2 p-2 rounded-lg bg-gray-50 border border-gray-200 grid grid-cols-3 gap-1.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => openComposerPicker('EMOJI')}
+                    className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                  >
+                    <Smile className="w-4 h-4 text-gray-600" />
+                    <span>Emotikon</span>
+                  </button>
+                  {canManageConversation && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (composerMode === 'NOTE') {
+                          setComposerMode('REPLY');
+                        } else {
+                          setComposerMode('NOTE');
+                          setPendingAttachment(null);
+                          openComposerPicker(null);
+                          stopOutboundTyping(selectedConversation.id);
+                        }
+                        setShowComposerTools(false);
+                      }}
+                      className={`flex flex-col items-center justify-center gap-1 p-2 rounded-md border ${
+                        composerMode === 'NOTE'
+                          ? 'bg-amber-50 border-amber-300 text-amber-900 font-semibold'
+                          : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      <StickyNote className="w-4 h-4 text-amber-600" />
+                      <span>{composerMode === 'NOTE' ? 'Mode Balas' : 'Catatan'}</span>
+                    </button>
+                  )}
+                  {composerMode === 'REPLY' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openComposerPicker('CANNED')}
+                        className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                      >
+                        <Zap className="w-4 h-4 text-amber-600" />
+                        <span>Template /</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openComposerPicker('PRODUCT')}
+                        className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                      >
+                        <Package className="w-4 h-4 text-indigo-600" />
+                        <span>Produk</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openComposerPicker('LINK')}
+                        className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                      >
+                        <Link2 className="w-4 h-4 text-sky-600" />
+                        <span>Tautan</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openComposerPicker('INTERACTIVE')}
+                        className="flex flex-col items-center justify-center gap-1 p-2 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                      >
+                        <ListChecks className="w-4 h-4 text-emerald-600" />
+                        <span>Tombol/Poll</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -3500,79 +3965,100 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 onChange={handleFilePick}
                 className="hidden"
               />
-              <div className="flex items-center justify-between sm:justify-start gap-1.5 shrink-0">
-                <div className="flex items-center gap-1.5 shrink-0">
+              {/* Mobile Compact Trigger & Attachment */}
+              <div className="flex sm:hidden items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowComposerTools((v) => !v)}
+                  title="Buka Alat Pesan (Template, Produk, Tautan, Catatan)"
+                  className={`h-9 w-9 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors ${
+                    showComposerTools || composerMode === 'NOTE'
+                      ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600'
+                  }`}
+                >
+                  {showComposerTools ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                </button>
+                {composerMode === 'REPLY' && (
                   <button
                     type="button"
-                    onClick={() => openComposerPicker('EMOJI')}
-                    title="Sisipkan Emotikon"
-                    className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Lampirkan Gambar, Video, Audio, atau Dokumen (maks. 10 MB)"
+                    className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
                   >
-                    <Smile className="w-4 h-4" />
+                    <Paperclip className="w-4 h-4" />
                   </button>
-                  {composerMode === 'REPLY' && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => openComposerPicker('CANNED')}
-                        title="Balasan Cepat (Canned Responses)"
-                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-amber-600 inline-flex items-center justify-center shrink-0"
-                      >
-                        <Zap className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openComposerPicker('PRODUCT')}
-                        title="Sisipkan Katalog Produk (Quick Quote)"
-                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
-                      >
-                        <Package className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openComposerPicker('LINK')}
-                        title="Kirim Tautan (Send Link Preview)"
-                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-sky-600 inline-flex items-center justify-center shrink-0"
-                      >
-                        <Link2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openComposerPicker('INTERACTIVE')}
-                        title="Kirim Tombol Interaktif / Polling WhatsApp"
-                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-emerald-600 inline-flex items-center justify-center shrink-0"
-                      >
-                        <ListChecks className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        title="Lampirkan Gambar, Video, Audio, atau Dokumen (maks. 10 MB)"
-                        className="h-8 w-8 sm:h-9 sm:w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
-                      >
-                        <Paperclip className="w-4 h-4" />
-                      </button>
-                    </>
-                  )}
-                </div>
-                {composerMode === 'REPLY' && (
-                  <span className="sm:hidden text-[10px] text-gray-400 font-mono truncate">
-                    Ketik / untuk template
-                  </span>
                 )}
               </div>
+
+              {/* Desktop Quick Tool Buttons (sm+) */}
+              <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => openComposerPicker('EMOJI')}
+                  title="Sisipkan Emotikon"
+                  className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
+                >
+                  <Smile className="w-4 h-4" />
+                </button>
+                {composerMode === 'REPLY' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => openComposerPicker('CANNED')}
+                      title="Balasan Cepat (Canned Responses)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-amber-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <Zap className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openComposerPicker('PRODUCT')}
+                      title="Sisipkan Katalog Produk (Quick Quote)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <Package className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openComposerPicker('LINK')}
+                      title="Kirim Tautan (Send Link Preview)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-sky-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <Link2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openComposerPicker('INTERACTIVE')}
+                      title="Kirim Tombol Interaktif / Polling WhatsApp"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-emerald-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <ListChecks className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      title="Lampirkan Gambar, Video, Audio, atau Dokumen (maks. 10 MB)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <Paperclip className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+              </div>
+
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                 <input
                   ref={replyInputRef}
                   type="text"
                   placeholder={
                     composerMode === 'NOTE'
-                      ? 'Tulis catatan internal tim (tidak dikirim ke pelanggan)...'
-                      : `Ketik balasan ${
+                      ? 'Catatan internal tim...'
+                      : `Balas ${
                           CHANNEL_META[
                             ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType
-                          ]?.label || 'WhatsApp'
-                        }...`
+                          ]?.short || 'WA'
+                        } (ketik / utk template)...`
                   }
                   value={inputText}
                   onChange={(e) => handleReplyTextChange(e.target.value)}
@@ -3589,9 +4075,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   size="md"
                   isLoading={sending}
                   disabled={!inputText.trim() && !pendingAttachment}
-                  className="shrink-0"
+                  className="shrink-0 h-9 px-2.5 sm:px-3.5"
                 >
-                  {composerMode === 'NOTE' ? 'Simpan' : 'Kirim'}
+                  <Send className="w-3.5 h-3.5 sm:hidden" />
+                  <span className="hidden sm:inline">
+                    {composerMode === 'NOTE' ? 'Simpan' : 'Kirim'}
+                  </span>
                 </Button>
               </div>
             </form>
@@ -3661,537 +4150,673 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   <span className="truncate">Kanal: {selectedConversation.channelAccountName}</span>
                 </span>
               )}
+              {selectedConversation.contextTitle && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-gray-100 text-gray-700 border border-gray-200 max-w-full truncate">
+                  {selectedConversation.contextTitle}
+                </span>
+              )}
             </div>
           </div>
 
-          <div className="py-4 space-y-4 flex-1 text-xs text-gray-700">
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-gray-600">
-                  Nama di Kanal/Sesi Ini
+          <div className="py-3 space-y-2 flex-1 text-xs text-gray-700">
+            {/* 1. Nama di Kanal / Sesi */}
+            <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleProfileSection('channelName')}
+                className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-gray-50 transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-gray-700 truncate">
+                  Nama Kanal / Push Name
                 </span>
-                {selectedConversation.pushName && (
-                  <span
-                    title="Push name yang diterima dari pengirim di kanal/sesi ini"
-                    className="text-[10px] text-gray-500 truncate max-w-[140px]"
-                  >
-                    Push: <strong className="text-gray-700">{selectedConversation.pushName}</strong>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] text-gray-500 truncate max-w-[110px]">
+                    {selectedConversation.channelDisplayName ||
+                      selectedConversation.pushName ||
+                      'Default'}
                   </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  disabled={!canManageConversation}
-                  value={channelDisplayNameDraft}
-                  onChange={(e) => setChannelDisplayNameDraft(e.target.value)}
-                  placeholder={selectedConversation.pushName || selectedConversation.contact.nama_lengkap}
-                  className="flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
-                />
-                {canManageConversation && (
-                  <>
-                    <button
-                      type="button"
-                      disabled={savingChannelName}
-                      onClick={() => void handleSaveChannelDisplayName(channelDisplayNameDraft)}
-                      className="px-2 py-1 text-[11px] font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 shrink-0"
-                    >
-                      {savingChannelName ? '...' : 'Simpan'}
-                    </button>
-                    {selectedConversation.channelDisplayName && (
-                      <button
-                        type="button"
-                        disabled={savingChannelName}
-                        onClick={() => void handleSaveChannelDisplayName(null)}
-                        title="Reset nama tampilan kanal ke Push Name / Kontak Utama"
-                        className="px-1.5 py-1 text-[11px] font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 shrink-0"
-                      >
-                        Reset
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-              <p className="text-[10px] text-gray-400 leading-snug">
-                Hanya mengubah tampilan percakapan ini, tanpa menimpa kontak utama atau kanal lain.
-              </p>
-            </div>
-
-            {/* Penilaian & Kategori SLA/CSAT Toggle */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-gray-700 flex items-center gap-1">
-                  <EyeOff className="w-3 h-3 text-gray-500" />
-                  Status Penilaian (SLA &amp; CSAT)
-                </span>
-                <span
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
-                    selectedConversation.excludeFromMetrics
-                      ? 'bg-amber-50 text-amber-800 border-amber-200'
-                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  }`}
-                >
-                  {selectedConversation.excludeFromMetrics ? 'Non-Penilaian' : 'Dinilai'}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  disabled={savingExclude || !canManageConversation}
-                  onClick={() => void handleUpdateMetricExclusion(false, null)}
-                  className={`py-1 px-2 rounded border text-[11px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
-                    !selectedConversation.excludeFromMetrics
-                      ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
-                      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  Customer (Dinilai)
-                </button>
-                <button
-                  type="button"
-                  disabled={savingExclude || !canManageConversation}
-                  onClick={() =>
-                    void handleUpdateMetricExclusion(
-                      true,
-                      excludeReasonDraft || (selectedConversation.isGroup ? 'Grup WhatsApp' : 'Bukan Customer')
-                    )
-                  }
-                  className={`py-1 px-2 rounded border text-[11px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
-                    selectedConversation.excludeFromMetrics
-                      ? 'border-amber-600 bg-amber-50 text-amber-900'
-                      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
-                  }`}
-                >
-                  Bukan Penilaian
-                </button>
-              </div>
-
-              {selectedConversation.excludeFromMetrics && (
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex flex-wrap gap-1">
-                    {['Bukan Customer', 'Internal / Tim', 'Grup WhatsApp', 'Spam / Bot', 'Lainnya'].map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        disabled={savingExclude || !canManageConversation}
-                        onClick={() => {
-                          setExcludeReasonDraft(preset);
-                          void handleUpdateMetricExclusion(true, preset);
-                        }}
-                        className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors disabled:opacity-60 ${
-                          (selectedConversation.excludeReason || '') === preset
-                            ? 'bg-amber-100 border-amber-400 text-amber-900 font-semibold'
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
+                  {openProfileSections.channelName ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                  )}
+                </div>
+              </button>
+              {openProfileSections.channelName && (
+                <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60 space-y-1.5">
+                  {selectedConversation.pushName && (
+                    <div className="text-[10px] text-gray-500">
+                      Push name WA: <strong className="text-gray-800">{selectedConversation.pushName}</strong>
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5">
                     <input
                       type="text"
                       disabled={!canManageConversation}
-                      value={excludeReasonDraft}
-                      onChange={(e) => setExcludeReasonDraft(e.target.value)}
-                      placeholder="Alasan / keterangan lain..."
-                      className="flex-1 min-w-0 px-2 py-1 text-[11px] bg-white border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
+                      value={channelDisplayNameDraft}
+                      onChange={(e) => setChannelDisplayNameDraft(e.target.value)}
+                      placeholder={selectedConversation.pushName || selectedConversation.contact.nama_lengkap}
+                      className="flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
                     />
                     {canManageConversation && (
-                      <button
-                        type="button"
-                        disabled={savingExclude}
-                        onClick={() => void handleUpdateMetricExclusion(true, excludeReasonDraft)}
-                        className="px-2 py-1 text-[11px] font-medium rounded bg-gray-800 text-white hover:bg-gray-900 disabled:opacity-50 shrink-0"
-                      >
-                        Simpan
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          disabled={savingChannelName}
+                          onClick={() => void handleSaveChannelDisplayName(channelDisplayNameDraft)}
+                          className="px-2 py-1 text-[11px] font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 shrink-0"
+                        >
+                          {savingChannelName ? '...' : 'Simpan'}
+                        </button>
+                        {selectedConversation.channelDisplayName && (
+                          <button
+                            type="button"
+                            disabled={savingChannelName}
+                            onClick={() => void handleSaveChannelDisplayName(null)}
+                            title="Reset nama tampilan kanal ke Push Name / Kontak Utama"
+                            className="px-1.5 py-1 text-[11px] font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 shrink-0"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
+                  <p className="text-[10px] text-gray-400 leading-snug">
+                    Hanya mengubah tampilan percakapan ini, tanpa menimpa kontak utama atau kanal lain.
+                  </p>
                 </div>
               )}
-
-              <p className="text-[10px] text-gray-400 leading-snug">
-                Penanda Non-Penilaian disimpan ke profil kontak dan otomatis berlaku ke semua obrolan aktif serta percakapan baru berikutnya (dikecualikan dari analitik SLA, CSAT, peringatan telat balas, &amp; CSAT otomatis).
-              </p>
             </div>
 
-            {selectedConversation.isGroup && (
-              <div className="bg-teal-50/50 border border-teal-200 rounded-lg p-2.5 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold text-teal-900 flex items-center gap-1">
-                    <Users className="w-3.5 h-3.5 text-teal-700" />
-                    Partisipan Grup ({participantsData?.participants.length || 0})
+            {/* 2. Penilaian & Kategori SLA/CSAT */}
+            <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleProfileSection('metrics')}
+                className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-gray-50 transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-gray-700 flex items-center gap-1.5 truncate">
+                  <EyeOff className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  <span>Penilaian SLA &amp; CSAT</span>
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                      selectedConversation.excludeFromMetrics
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}
+                  >
+                    {selectedConversation.excludeFromMetrics ? 'Non-Penilaian' : 'Dinilai'}
                   </span>
-                  <div className="flex items-center gap-1.5">
+                  {openProfileSections.metrics ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                  )}
+                </div>
+              </button>
+              {openProfileSections.metrics && (
+                <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60 space-y-2">
+                  <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
-                      disabled={loadingParticipants}
-                      onClick={() => void fetchParticipants(selectedConversation.id, true)}
-                      title="Sinkronkan daftar anggota grup dari WAHA"
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white border border-teal-200 text-[10px] font-medium text-teal-800 hover:bg-teal-100 disabled:opacity-50"
+                      disabled={savingExclude || !canManageConversation}
+                      onClick={() => void handleUpdateMetricExclusion(false, null)}
+                      className={`py-1 px-2 rounded border text-[11px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                        !selectedConversation.excludeFromMetrics
+                          ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
+                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
+                      }`}
                     >
-                      <RefreshCw className={`w-2.5 h-2.5 ${loadingParticipants ? 'animate-spin' : ''}`} />
-                      Sync
+                      Customer (Dinilai)
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowParticipantsModal(true);
-                        void fetchParticipants(selectedConversation.id, true);
-                      }}
-                      className="text-[10px] font-semibold text-indigo-700 hover:underline"
+                      disabled={savingExclude || !canManageConversation}
+                      onClick={() =>
+                        void handleUpdateMetricExclusion(
+                          true,
+                          excludeReasonDraft || (selectedConversation.isGroup ? 'Grup WhatsApp' : 'Bukan Customer')
+                        )
+                      }
+                      className={`py-1 px-2 rounded border text-[11px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                        selectedConversation.excludeFromMetrics
+                          ? 'border-amber-600 bg-amber-50 text-amber-900'
+                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
+                      }`}
                     >
-                      Semua
+                      Bukan Penilaian
                     </button>
                   </div>
-                </div>
 
-                {loadingParticipants && !participantsData ? (
-                  <p className="text-[11px] text-gray-500">Memuat partisipan grup...</p>
-                ) : !participantsData || participantsData.participants.length === 0 ? (
-                  <p className="text-[11px] text-gray-500">
-                    Partisipan akan terisi saat anggota mengirim pesan atau klik Sync.
+                  {selectedConversation.excludeFromMetrics && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex flex-wrap gap-1">
+                        {['Bukan Customer', 'Internal / Tim', 'Grup WhatsApp', 'Spam / Bot', 'Lainnya'].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            disabled={savingExclude || !canManageConversation}
+                            onClick={() => {
+                              setExcludeReasonDraft(preset);
+                              void handleUpdateMetricExclusion(true, preset);
+                            }}
+                            className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors disabled:opacity-60 ${
+                              (selectedConversation.excludeReason || '') === preset
+                                ? 'bg-amber-100 border-amber-400 text-amber-900 font-semibold'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          disabled={!canManageConversation}
+                          value={excludeReasonDraft}
+                          onChange={(e) => setExcludeReasonDraft(e.target.value)}
+                          placeholder="Alasan / keterangan lain..."
+                          className="flex-1 min-w-0 px-2 py-1 text-[11px] bg-white border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
+                        />
+                        {canManageConversation && (
+                          <button
+                            type="button"
+                            disabled={savingExclude}
+                            onClick={() => void handleUpdateMetricExclusion(true, excludeReasonDraft)}
+                            className="px-2 py-1 text-[11px] font-medium rounded bg-gray-800 text-white hover:bg-gray-900 disabled:opacity-50 shrink-0"
+                          >
+                            Simpan
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-[10px] text-gray-400 leading-snug">
+                    Disimpan ke profil kontak dan otomatis berlaku untuk obrolan aktif maupun pesan masuk berikutnya.
                   </p>
-                ) : (
-                  <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5">
-                    {participantsData.participants.slice(0, 8).map((part) => (
-                      <div
-                        key={part.jid}
-                        className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-teal-100 text-[11px]"
+                </div>
+              )}
+            </div>
+
+            {/* 3. Partisipan Grup */}
+            {selectedConversation.isGroup && (
+              <div className="border border-teal-200 rounded-lg bg-white overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleProfileSection('participants')}
+                  className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-teal-50/40 transition-colors"
+                >
+                  <span className="text-[11px] font-semibold text-teal-900 flex items-center gap-1.5 truncate">
+                    <Users className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                    <span>Partisipan Grup</span>
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] font-mono font-semibold text-teal-700">
+                      {participantsData?.participants.length || 0}
+                    </span>
+                    {openProfileSections.participants ? (
+                      <ChevronDown className="w-3.5 h-3.5 text-teal-600" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 text-teal-600" />
+                    )}
+                  </div>
+                </button>
+                {openProfileSections.participants && (
+                  <div className="px-3 pb-3 pt-2 border-t border-teal-100 bg-teal-50/30 space-y-2">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={loadingParticipants}
+                        onClick={() => void fetchParticipants(selectedConversation.id, true)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-teal-200 text-[10px] font-medium text-teal-800 hover:bg-teal-100 disabled:opacity-50"
                       >
-                        <div className="min-w-0">
-                          <div className="font-medium text-gray-900 truncate flex items-center gap-1">
-                            <span>{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
-                            {part.role !== 'member' && (
-                              <span className="px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                                {part.role === 'superadmin' ? 'Owner' : 'Admin'}
+                        <RefreshCw className={`w-2.5 h-2.5 ${loadingParticipants ? 'animate-spin' : ''}`} />
+                        Sync
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowParticipantsModal(true);
+                          void fetchParticipants(selectedConversation.id, true);
+                        }}
+                        className="text-[10px] font-semibold text-indigo-700 hover:underline"
+                      >
+                        Lihat Semua Modal
+                      </button>
+                    </div>
+                    {loadingParticipants && !participantsData ? (
+                      <p className="text-[11px] text-gray-500">Memuat partisipan grup...</p>
+                    ) : !participantsData || participantsData.participants.length === 0 ? (
+                      <p className="text-[11px] text-gray-500">
+                        Partisipan akan terisi saat anggota mengirim pesan atau klik Sync.
+                      </p>
+                    ) : (
+                      <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5">
+                        {participantsData.participants.slice(0, 8).map((part) => (
+                          <div
+                            key={part.jid}
+                            className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-teal-100 text-[11px]"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-medium text-gray-900 truncate flex items-center gap-1">
+                                <span>{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
+                                {part.role !== 'member' && (
+                                  <span className="px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                    {part.role === 'superadmin' ? 'Owner' : 'Admin'}
+                                  </span>
+                                )}
+                              </div>
+                              {part.phone && (
+                                <div className="text-[10px] font-mono text-gray-500 truncate">
+                                  +{part.phone}
+                                </div>
+                              )}
+                            </div>
+                            {part.messageCount > 0 && (
+                              <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
+                                {part.messageCount} chat
                               </span>
                             )}
                           </div>
-                          {part.phone && (
-                            <div className="text-[10px] font-mono text-gray-500 truncate">
-                              +{part.phone}
-                            </div>
-                          )}
-                        </div>
-                        {part.messageCount > 0 && (
-                          <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
-                            {part.messageCount} chat
-                          </span>
-                        )}
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
             )}
 
-            <div>
-              <span className="block text-[11px] text-gray-400 font-medium mb-0.5">WhatsApp</span>
-              {selectedConversation.contact.nomor_whatsapp ? (
-                <div className="font-mono text-gray-900 flex items-center gap-1.5">
-                  <Phone className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>+{selectedConversation.contact.nomor_whatsapp}</span>
-                </div>
-              ) : (
-                <div className="text-gray-600 text-[11px] font-mono break-all">
-                  {selectedConversation.isGroup
-                    ? `Grup WA (${selectedConversation.externalThreadId || '@g.us'})`
-                    : (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
-                    ? 'WhatsApp Privacy ID (@lid)'
-                    : 'Akun Omnichannel'}
-                </div>
-              )}
-            </div>
-
-            {selectedConversation.contact.tanggal_lahir && (
-              <div>
-                <span className="block text-[11px] text-gray-400 font-medium mb-0.5">
-                  Tanggal Lahir
+            {/* 4. Info Profil & Alamat */}
+            <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleProfileSection('contactInfo')}
+                className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-gray-50 transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-gray-700 truncate">
+                  Info Nomor, TTL &amp; Alamat
                 </span>
-                <div className="flex items-center gap-1.5 text-gray-900">
-                  <Calendar className="w-3.5 h-3.5 text-amber-600" />
-                  <span>
-                    {new Date(selectedConversation.contact.tanggal_lahir).toLocaleDateString(
-                      'id-ID',
-                      { day: 'numeric', month: 'long', year: 'numeric' }
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] font-mono text-gray-500 truncate max-w-[115px]">
+                    {selectedConversation.contact.nomor_whatsapp
+                      ? `+${selectedConversation.contact.nomor_whatsapp}`
+                      : 'Detail'}
+                  </span>
+                  {openProfileSections.contactInfo ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                  )}
+                </div>
+              </button>
+              {openProfileSections.contactInfo && (
+                <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60 space-y-2.5">
+                  <div>
+                    <span className="block text-[10px] text-gray-400 font-medium mb-0.5">WhatsApp / ID</span>
+                    {selectedConversation.contact.nomor_whatsapp ? (
+                      <div className="font-mono text-gray-900 flex items-center gap-1.5">
+                        <Phone className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>+{selectedConversation.contact.nomor_whatsapp}</span>
+                      </div>
+                    ) : (
+                      <div className="text-gray-600 text-[11px] font-mono break-all">
+                        {selectedConversation.isGroup
+                          ? `Grup WA (${selectedConversation.externalThreadId || '@g.us'})`
+                          : (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
+                          ? 'WhatsApp Privacy ID (@lid)'
+                          : 'Akun Omnichannel'}
+                      </div>
                     )}
-                  </span>
-                </div>
-              </div>
-            )}
+                  </div>
 
-            {selectedConversation.contact.alamat && (
-              <div>
-                <span className="block text-[11px] text-gray-400 font-medium mb-0.5">Alamat</span>
-                <div className="flex items-start gap-1.5 text-gray-900 leading-snug">
-                  <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
-                  <span>{selectedConversation.contact.alamat}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Labels Editor */}
-            <div className="pt-2 border-t border-gray-100 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-1 text-[11px] text-gray-500 font-medium">
-                  <Tag className="w-3 h-3" />
-                  Label Percakapan
-                </span>
-                {canManageMaster && onOpenSettings && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenSettings('labels')}
-                    className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap"
-                  >
-                    Kelola
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {activeLabels.map((lbl) => {
-                  const matched = masterLabels.find(
-                    (m) => m.name.toLowerCase() === lbl.toLowerCase()
-                  );
-                  const badgeCls =
-                    (matched && LABEL_COLOR_MAP[matched.color]?.badge) ||
-                    'bg-indigo-50 text-indigo-700 border-indigo-200';
-                  return (
-                    <span
-                      key={lbl}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${badgeCls}`}
-                    >
-                      {lbl}
-                      {canManageConversation && (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleLabel(lbl)}
-                          className="opacity-75 hover:opacity-100"
-                        >
-                          <X className="w-2.5 h-2.5" />
-                        </button>
-                      )}
-                    </span>
-                  );
-                })}
-                {canManageConversation &&
-                  (masterLabels.length > 0 ? masterLabels.map((m) => m.name) : PRESET_LABELS)
-                    .filter((p) => !activeLabels.some((a) => a.toLowerCase() === p.toLowerCase()))
-                    .map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => handleToggleLabel(preset)}
-                        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-gray-50 hover:bg-gray-100 text-gray-600 border border-dashed border-gray-300"
-                      >
-                        <Plus className="w-2.5 h-2.5" />
-                        {preset}
-                      </button>
-                    ))}
-              </div>
-              {canManageConversation && (
-                <form onSubmit={handleAddCustomLabel} className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={newLabel}
-                    onChange={(e) => setNewLabel(e.target.value)}
-                    placeholder="Tambah label..."
-                    className="flex-1 min-w-0 h-8 sm:h-7 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    type="submit"
-                    className="h-8 sm:h-7 px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-[11px] font-medium shrink-0"
-                  >
-                    Tambah
-                  </button>
-                </form>
-              )}
-            </div>
-
-            {/* Contact Notes */}
-            <div className="pt-2 border-t border-gray-100 space-y-1.5">
-              <span className="block text-[11px] text-gray-500 font-medium">
-                Catatan Kontak
-              </span>
-              <textarea
-                rows={3}
-                disabled={!canManageConversation}
-                value={contactNotesDraft}
-                onChange={(e) => setContactNotesDraft(e.target.value)}
-                placeholder="Tambahkan catatan permanen untuk kontak ini..."
-                className="w-full p-2 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500 disabled:opacity-70"
-              />
-              {canManageConversation && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  isLoading={savingMeta}
-                  onClick={handleSaveContactNotes}
-                  className="w-full justify-center"
-                >
-                  Simpan Catatan Kontak
-                </Button>
-              )}
-            </div>
-
-            {/* CSAT Rating History */}
-            <div className="pt-2 border-t border-gray-100 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="block text-[11px] text-gray-500 font-medium">
-                  Riwayat Penilaian CSAT
-                </span>
-                {selectedConversation.csatHistory && selectedConversation.csatHistory.length > 0 && (
-                  <span className="text-[10px] font-medium text-gray-400">
-                    {selectedConversation.csatHistory.length} sesi
-                  </span>
-                )}
-              </div>
-              {selectedConversation.csatHistory && selectedConversation.csatHistory.length > 0 ? (
-                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-0.5">
-                  {selectedConversation.csatHistory.map((csat) => {
-                    const scoreVal = csat.overallScore ?? csat.rating;
-                    const hasDetails = Boolean(csat.criteriaDetails && csat.criteriaDetails.length > 0);
-                    const isOpen = expandedCsatId === csat.id;
-                    return (
-                      <div
-                        key={csat.id}
-                        onClick={() => hasDetails && setExpandedCsatId(isOpen ? null : csat.id)}
-                        className={`p-2 rounded-md border space-y-1 ${
-                          scoreVal
-                            ? 'bg-amber-50 border-amber-200'
-                            : 'bg-gray-50 border-gray-200'
-                        } ${hasDetails ? 'cursor-pointer hover:border-amber-300' : ''}`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          {scoreVal ? (
-                            <div className="flex items-center gap-0.5">
-                              {[1, 2, 3, 4, 5].map((s) => (
-                                <Star
-                                  key={s}
-                                  className={`w-3 h-3 ${
-                                    s <= Math.round(scoreVal)
-                                      ? 'text-amber-400 fill-amber-400'
-                                      : 'text-gray-300'
-                                  }`}
-                                />
-                              ))}
-                              <span className="text-[11px] font-semibold font-mono text-amber-900 ml-1">
-                                {Number(scoreVal).toFixed(2).replace(/\.?0+$/, '')}/5
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] font-medium text-gray-500">
-                              Menunggu penilaian
-                            </span>
+                  {selectedConversation.contact.tanggal_lahir && (
+                    <div>
+                      <span className="block text-[10px] text-gray-400 font-medium mb-0.5">
+                        Tanggal Lahir
+                      </span>
+                      <div className="flex items-center gap-1.5 text-gray-900">
+                        <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                        <span>
+                          {new Date(selectedConversation.contact.tanggal_lahir).toLocaleDateString(
+                            'id-ID',
+                            { day: 'numeric', month: 'long', year: 'numeric' }
                           )}
-                          <span className="text-[10px] text-gray-400 shrink-0">
-                            {new Date(csat.submittedAt || csat.sentAt).toLocaleDateString('id-ID', {
-                              day: '2-digit',
-                              month: 'short',
-                            })}
-                          </span>
-                        </div>
-                        {csat.profileName && (
-                          <div className="text-[10px] text-indigo-700 font-medium">
-                            Target: {csat.profileName}
-                          </div>
-                        )}
-                        {(csat.conversationStartedAt || csat.conversationResolvedAt) && (
-                          <div className="text-[10px] text-gray-500 font-mono">
-                            Sesi:{' '}
-                            {csat.conversationStartedAt
-                              ? new Date(csat.conversationStartedAt).toLocaleString('id-ID', {
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedConversation.contact.alamat && (
+                    <div>
+                      <span className="block text-[10px] text-gray-400 font-medium mb-0.5">Alamat</span>
+                      <div className="flex items-start gap-1.5 text-gray-900 leading-snug">
+                        <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
+                        <span>{selectedConversation.contact.alamat}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 5. Label Percakapan */}
+            <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleProfileSection('labels')}
+                className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-gray-50 transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-gray-700 flex items-center gap-1.5 truncate">
+                  <Tag className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  <span>Label Percakapan</span>
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] font-medium text-indigo-700">
+                    {activeLabels.length > 0 ? `${activeLabels.length} aktif` : 'Kosong'}
+                  </span>
+                  {openProfileSections.labels ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                  )}
+                </div>
+              </button>
+              {openProfileSections.labels && (
+                <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60 space-y-2">
+                  {canManageMaster && onOpenSettings && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => onOpenSettings('labels')}
+                        className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap"
+                      >
+                        Kelola Master Label
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-1">
+                    {activeLabels.map((lbl) => {
+                      const matched = masterLabels.find(
+                        (m) => m.name.toLowerCase() === lbl.toLowerCase()
+                      );
+                      const badgeCls =
+                        (matched && LABEL_COLOR_MAP[matched.color]?.badge) ||
+                        'bg-indigo-50 text-indigo-700 border-indigo-200';
+                      return (
+                        <span
+                          key={lbl}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${badgeCls}`}
+                        >
+                          {lbl}
+                          {canManageConversation && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLabel(lbl)}
+                              className="opacity-75 hover:opacity-100"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                    {canManageConversation &&
+                      (masterLabels.length > 0 ? masterLabels.map((m) => m.name) : PRESET_LABELS)
+                        .filter((p) => !activeLabels.some((a) => a.toLowerCase() === p.toLowerCase()))
+                        .map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => handleToggleLabel(preset)}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-white hover:bg-gray-100 text-gray-600 border border-dashed border-gray-300"
+                          >
+                            <Plus className="w-2.5 h-2.5" />
+                            {preset}
+                          </button>
+                        ))}
+                  </div>
+                  {canManageConversation && (
+                    <form onSubmit={handleAddCustomLabel} className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={newLabel}
+                        onChange={(e) => setNewLabel(e.target.value)}
+                        placeholder="Tambah label..."
+                        className="flex-1 min-w-0 h-8 sm:h-7 px-2 bg-white border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        type="submit"
+                        className="h-8 sm:h-7 px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-[11px] font-medium shrink-0"
+                      >
+                        Tambah
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 6. Catatan Kontak */}
+            <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleProfileSection('notes')}
+                className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-gray-50 transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-gray-700 truncate">
+                  Catatan Kontak
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] text-gray-500">
+                    {contactNotesDraft.trim() ? 'Terisi' : 'Kosong'}
+                  </span>
+                  {openProfileSections.notes ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                  )}
+                </div>
+              </button>
+              {openProfileSections.notes && (
+                <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60 space-y-1.5">
+                  <textarea
+                    rows={3}
+                    disabled={!canManageConversation}
+                    value={contactNotesDraft}
+                    onChange={(e) => setContactNotesDraft(e.target.value)}
+                    placeholder="Tambahkan catatan permanen untuk kontak ini..."
+                    className="w-full p-2 bg-white border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500 disabled:opacity-70"
+                  />
+                  {canManageConversation && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      isLoading={savingMeta}
+                      onClick={handleSaveContactNotes}
+                      className="w-full justify-center"
+                    >
+                      Simpan Catatan Kontak
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 7. Riwayat Penilaian CSAT */}
+            <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggleProfileSection('csat')}
+                className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-gray-50 transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-gray-700 flex items-center gap-1.5 truncate">
+                  <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span>Riwayat Penilaian CSAT</span>
+                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] font-mono text-gray-500">
+                    {selectedConversation.csatHistory?.length || (selectedConversation.csatRating ? 1 : 0)} sesi
+                  </span>
+                  {openProfileSections.csat ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                  )}
+                </div>
+              </button>
+              {openProfileSections.csat && (
+                <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60">
+                  {selectedConversation.csatHistory && selectedConversation.csatHistory.length > 0 ? (
+                    <div className="space-y-1.5 max-h-60 overflow-y-auto pr-0.5">
+                      {selectedConversation.csatHistory.map((csat) => {
+                        const scoreVal = csat.overallScore ?? csat.rating;
+                        const hasDetails = Boolean(csat.criteriaDetails && csat.criteriaDetails.length > 0);
+                        const isOpen = expandedCsatId === csat.id;
+                        return (
+                          <div
+                            key={csat.id}
+                            onClick={() => hasDetails && setExpandedCsatId(isOpen ? null : csat.id)}
+                            className={`p-2 rounded-md border space-y-1 ${
+                              scoreVal
+                                ? 'bg-amber-50 border-amber-200'
+                                : 'bg-white border-gray-200'
+                            } ${hasDetails ? 'cursor-pointer hover:border-amber-300' : ''}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              {scoreVal ? (
+                                <div className="flex items-center gap-0.5">
+                                  {[1, 2, 3, 4, 5].map((s) => (
+                                    <Star
+                                      key={s}
+                                      className={`w-3 h-3 ${
+                                        s <= Math.round(scoreVal)
+                                          ? 'text-amber-400 fill-amber-400'
+                                          : 'text-gray-300'
+                                      }`}
+                                    />
+                                  ))}
+                                  <span className="text-[11px] font-semibold font-mono text-amber-900 ml-1">
+                                    {Number(scoreVal).toFixed(2).replace(/\.?0+$/, '')}/5
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] font-medium text-gray-500">
+                                  Menunggu penilaian
+                                </span>
+                              )}
+                              <span className="text-[10px] text-gray-400 shrink-0">
+                                {new Date(csat.submittedAt || csat.sentAt).toLocaleDateString('id-ID', {
                                   day: '2-digit',
                                   month: 'short',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : '-'}{' '}
-                            →{' '}
-                            {csat.conversationResolvedAt
-                              ? new Date(csat.conversationResolvedAt).toLocaleTimeString('id-ID', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : new Date(csat.sentAt).toLocaleTimeString('id-ID', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
                                 })}
-                          </div>
-                        )}
-                        {csat.feedback && (
-                          <p className="text-[11px] text-amber-900 italic break-words">
-                            &ldquo;{csat.feedback}&rdquo;
-                          </p>
-                        )}
-                        {hasDetails && isOpen && (
-                          <div className="pt-1.5 mt-1 border-t border-amber-200/80 space-y-0.5 text-[10px]">
-                            {csat.criteriaDetails!.map((cd) => (
-                              <div key={cd.key} className="flex items-center justify-between text-gray-700">
-                                <span className="truncate">{cd.label}</span>
-                                <span className="font-mono font-semibold text-amber-900 shrink-0">
-                                  {cd.score}/5
-                                </span>
+                              </span>
+                            </div>
+                            {csat.profileName && (
+                              <div className="text-[10px] text-indigo-700 font-medium">
+                                Target: {csat.profileName}
                               </div>
-                            ))}
+                            )}
+                            {(csat.conversationStartedAt || csat.conversationResolvedAt) && (
+                              <div className="text-[10px] text-gray-500 font-mono">
+                                Sesi:{' '}
+                                {csat.conversationStartedAt
+                                  ? new Date(csat.conversationStartedAt).toLocaleString('id-ID', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })
+                                  : '-'}{' '}
+                                →{' '}
+                                {csat.conversationResolvedAt
+                                  ? new Date(csat.conversationResolvedAt).toLocaleTimeString('id-ID', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })
+                                  : new Date(csat.sentAt).toLocaleTimeString('id-ID', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                              </div>
+                            )}
+                            {csat.feedback && (
+                              <p className="text-[11px] text-amber-900 italic break-words">
+                                &ldquo;{csat.feedback}&rdquo;
+                              </p>
+                            )}
+                            {hasDetails && isOpen && (
+                              <div className="pt-1.5 mt-1 border-t border-amber-200/80 space-y-0.5 text-[10px]">
+                                {csat.criteriaDetails!.map((cd) => (
+                                  <div key={cd.key} className="flex items-center justify-between text-gray-700">
+                                    <span className="truncate">{cd.label}</span>
+                                    <span className="font-mono font-semibold text-amber-900 shrink-0">
+                                      {cd.score}/5
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div className="text-[10px] text-gray-400 flex items-center justify-between gap-1">
+                              <span>
+                                {csat.triggerType === 'AUTO_RESOLVE' ? 'Saat Akhiri' : 'Kirim Manual'}
+                                {hasDetails ? (isOpen ? ' • Sembunyikan' : ' • Detail skor') : ''}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setHighlightedCsatWindow({
+                                    token: csat.token,
+                                    startedAt: csat.conversationStartedAt || null,
+                                    resolvedAt: csat.conversationResolvedAt || csat.sentAt || null,
+                                  });
+                                }}
+                                className="text-indigo-600 hover:underline font-medium shrink-0"
+                              >
+                                Sorot di chat
+                              </button>
+                            </div>
                           </div>
-                        )}
-                        <div className="text-[10px] text-gray-400 flex items-center justify-between gap-1">
-                          <span>
-                            {csat.triggerType === 'AUTO_RESOLVE' ? 'Saat Akhiri' : 'Kirim Manual'}
-                            {hasDetails ? (isOpen ? ' • Sembunyikan' : ' • Detail skor') : ''}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setHighlightedCsatWindow({
-                                token: csat.token,
-                                startedAt: csat.conversationStartedAt || null,
-                                resolvedAt: csat.conversationResolvedAt || csat.sentAt || null,
-                              });
-                            }}
-                            className="text-indigo-600 hover:underline font-medium shrink-0"
-                          >
-                            Sorot di chat
-                          </button>
-                        </div>
+                        );
+                      })}
+                    </div>
+                  ) : selectedConversation.csatRating ? (
+                    <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 space-y-1">
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star
+                            key={s}
+                            className={`w-3.5 h-3.5 ${
+                              s <= (selectedConversation.csatRating || 0)
+                                ? 'text-amber-400 fill-amber-400'
+                                : 'text-gray-300'
+                            }`}
+                          />
+                        ))}
+                        <span className="text-[11px] font-semibold text-amber-900 ml-1">
+                          {selectedConversation.csatRating}/5
+                        </span>
                       </div>
-                    );
-                  })}
-                </div>
-              ) : selectedConversation.csatRating ? (
-                <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 space-y-1">
-                  <div className="flex items-center gap-1">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star
-                        key={s}
-                        className={`w-3.5 h-3.5 ${
-                          s <= (selectedConversation.csatRating || 0)
-                            ? 'text-amber-400 fill-amber-400'
-                            : 'text-gray-300'
-                        }`}
-                      />
-                    ))}
-                    <span className="text-[11px] font-semibold text-amber-900 ml-1">
-                      {selectedConversation.csatRating}/5
-                    </span>
-                  </div>
-                  {selectedConversation.csatFeedback && (
-                    <p className="text-[11px] text-amber-900 italic">
-                      &ldquo;{selectedConversation.csatFeedback}&rdquo;
+                      {selectedConversation.csatFeedback && (
+                        <p className="text-[11px] text-amber-900 italic">
+                          &ldquo;{selectedConversation.csatFeedback}&rdquo;
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-gray-400">
+                      {selectedConversation.excludeFromMetrics || selectedConversation.isGroup
+                        ? 'Obrolan ini bertanda Non-Penilaian (tidak menggunakan Status, Penugasan CS, atau survei CSAT).'
+                        : 'Belum ada penilaian. Gunakan tombol "Kirim CSAT" atau pilih "Akhiri & Kirim CSAT".'}
                     </p>
                   )}
                 </div>
-              ) : (
-                <p className="text-[11px] text-gray-400">
-                  {selectedConversation.excludeFromMetrics || selectedConversation.isGroup
-                    ? 'Obrolan ini bertanda Non-Penilaian (tidak menggunakan Status, Penugasan CS, atau survei CSAT).'
-                    : 'Belum ada penilaian. Gunakan tombol "Kirim CSAT" atau pilih "Akhiri & Kirim CSAT".'}
-                </p>
               )}
             </div>
           </div>

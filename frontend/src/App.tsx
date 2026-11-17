@@ -520,8 +520,20 @@ function AppShell() {
           isRefreshing={isRefreshing}
         />
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-2.5 sm:p-5 lg:p-6">
-          <div className="w-full min-w-0">
+        <main
+          className={
+            currentTab === 'conversations'
+              ? 'flex-1 min-h-0 flex flex-col overflow-hidden p-0 sm:p-4 lg:p-5'
+              : 'flex-1 overflow-y-auto overflow-x-hidden p-2.5 sm:p-5 lg:p-6'
+          }
+        >
+          <div
+            className={
+              currentTab === 'conversations'
+                ? 'w-full min-w-0 flex-1 min-h-0 flex flex-col'
+                : 'w-full min-w-0'
+            }
+          >
             {currentTab === 'dashboard' && (
               <Dashboard
                 currentUser={authStatus?.user}
