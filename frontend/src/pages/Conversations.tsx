@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   MessageSquare,
   Search,
@@ -52,6 +52,7 @@ import {
   SmilePlus,
   Compass,
   UserPlus,
+  AtSign,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -174,9 +175,12 @@ function parseChatMessageMeta(msg: ChatMessage): ChatMessageMetadata | null {
   }
 }
 
-function renderTextWithClickableLinks(text: string): React.ReactNode {
+function renderTextWithClickableLinks(
+  text: string,
+  participantsLookup?: Map<string, string>
+): React.ReactNode {
   if (!text) return null;
-  const parts = text.split(/(https?:\/\/[^\s<>]+)/gi);
+  const parts = text.split(/(https?:\/\/[^\s<>]+|@\d{8,16}|@[a-zA-Z0-9_.-]+)/gi);
   return parts.map((part, idx) => {
     if (/^https?:\/\/[^\s<>]+$/i.test(part)) {
       const clean = part.replace(/[.,);!?]+$/, '');
@@ -187,7 +191,7 @@ function renderTextWithClickableLinks(text: string): React.ReactNode {
             href={clean}
             target="_blank"
             rel="noopener noreferrer"
-            className="underline text-indigo-700 hover:text-indigo-900 break-all"
+            className="underline text-indigo-700 dark:text-indigo-400 hover:text-indigo-900 break-all"
           >
             {clean}
           </a>
@@ -195,6 +199,27 @@ function renderTextWithClickableLinks(text: string): React.ReactNode {
         </React.Fragment>
       );
     }
+
+    if (/^@(\d{8,16}|[a-zA-Z0-9_.-]+)$/.test(part)) {
+      const rawTarget = part.slice(1);
+      const cleanPhone = rawTarget.replace(/\D/g, '');
+      const matchedName =
+        (cleanPhone && participantsLookup?.get(cleanPhone)) ||
+        participantsLookup?.get(rawTarget.toLowerCase()) ||
+        (cleanPhone ? `+${cleanPhone}` : rawTarget);
+
+      return (
+        <span
+          key={idx}
+          className="inline-flex items-center gap-0.5 font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 rounded px-1.5 py-0.2 text-[11px] mx-0.5 align-baseline font-mono select-all hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shadow-2xs"
+          title={`Mention: @${rawTarget}${matchedName !== rawTarget ? ` (${matchedName})` : ''}`}
+        >
+          <AtSign className="w-2.5 h-2.5 inline text-indigo-500 shrink-0" />
+          <span>{matchedName}</span>
+        </span>
+      );
+    }
+
     return <React.Fragment key={idx}>{part}</React.Fragment>;
   });
 }
@@ -440,6 +465,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
     startedAt?: string | null;
     resolvedAt?: string | null;
   } | null>(null);
+
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [showMentionPicker, setShowMentionPicker] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState('');
+  const [mentionAnchorIndex, setMentionAnchorIndex] = useState<number | null>(null);
 
   const msgElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -785,6 +815,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       | 'INTERACTIVE'
       | 'LOCATION'
       | 'CONTACT'
+      | 'MENTION'
       | null
   ) => {
     if (target === 'EMOJI') {
@@ -802,7 +833,149 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setShowInteractiveComposer((v) => (target === 'INTERACTIVE' ? !v : false));
     setShowLocationComposer((v) => (target === 'LOCATION' ? !v : false));
     setShowContactSharePicker((v) => (target === 'CONTACT' ? !v : false));
+    setShowMentionPicker((v) => (target === 'MENTION' ? !v : false));
+    if (target === 'MENTION') {
+      setMentionFilter('');
+      setMentionAnchorIndex(inputText.length);
+    }
     if (target) setShowComposerTools(false);
+  };
+
+  const handleJumpToMessage = (replyToId?: string | null, replyToBody?: string | null) => {
+    if (!replyToId && !replyToBody) return;
+    const cleanBody = replyToBody?.trim();
+    const target = messages.find(
+      (m) =>
+        (replyToId && (m.id === replyToId || m.wahaMessageId === replyToId)) ||
+        (cleanBody && m.body && m.body.trim() === cleanBody)
+    );
+    const targetId = target ? target.id : replyToId;
+    if (!targetId) return;
+
+    const element = msgElementRefs.current[targetId];
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedMessageId(targetId);
+      setTimeout(() => {
+        setHighlightedMessageId((curr) => (curr === targetId ? null : curr));
+      }, 2000);
+    } else {
+      toast.info('Pesan yang dikutip belum termuat atau berada di luar riwayat');
+    }
+  };
+
+  const participantsLookup = useMemo(() => {
+    const map = new Map<string, string>();
+    if (selectedConversation?.contact?.nomor_whatsapp) {
+      const p = selectedConversation.contact.nomor_whatsapp.replace(/\D/g, '');
+      if (p) map.set(p, selectedConversation.contact.nama_lengkap || `+${p}`);
+    }
+    if (participantsData?.participants) {
+      for (const part of participantsData.participants) {
+        const p = part.phone ? part.phone.replace(/\D/g, '') : '';
+        if (p) {
+          map.set(p, part.contactName || part.name || `+${p}`);
+        }
+        if (part.name) {
+          map.set(part.name.toLowerCase(), part.contactName || part.name);
+        }
+      }
+    }
+    for (const m of messages) {
+      if (m.senderPhone) {
+        const p = m.senderPhone.replace(/\D/g, '');
+        if (p && !map.has(p)) {
+          map.set(p, m.senderName || `+${p}`);
+        }
+      }
+    }
+    return map;
+  }, [selectedConversation, participantsData, messages]);
+
+  const availableMentionCandidates = useMemo(() => {
+    const list: Array<{
+      jid: string;
+      phone: string;
+      name: string;
+      contactName?: string | null;
+      role?: string;
+    }> = [];
+    const seen = new Set<string>();
+
+    if (participantsData?.participants) {
+      for (const p of participantsData.participants) {
+        const key = p.phone || p.jid;
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          list.push({
+            jid: p.jid,
+            phone: p.phone || '',
+            name: p.contactName || p.name || (p.phone ? `+${p.phone}` : 'Anggota'),
+            contactName: p.contactName,
+            role: p.role,
+          });
+        }
+      }
+    }
+
+    for (const m of messages) {
+      if (m.senderPhone || m.senderJid) {
+        const key = m.senderPhone || m.senderJid || '';
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          list.push({
+            jid: m.senderJid || `${m.senderPhone}@c.us`,
+            phone: m.senderPhone || '',
+            name: m.senderName || (m.senderPhone ? `+${m.senderPhone}` : 'Partisipan'),
+          });
+        }
+      }
+    }
+
+    if (selectedConversation?.contact?.nomor_whatsapp) {
+      const p = selectedConversation.contact.nomor_whatsapp.replace(/\D/g, '');
+      if (p && !seen.has(p)) {
+        seen.add(p);
+        list.push({
+          jid: `${p}@c.us`,
+          phone: p,
+          name: selectedConversation.contact.nama_lengkap || `+${p}`,
+          contactName: selectedConversation.contact.nama_lengkap,
+        });
+      }
+    }
+
+    if (!mentionFilter) return list;
+    const q = mentionFilter.toLowerCase();
+    return list.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.phone.includes(q) ||
+        (c.contactName && c.contactName.toLowerCase().includes(q))
+    );
+  }, [participantsData, messages, selectedConversation, mentionFilter]);
+
+  const handleSelectMention = (candidate: { phone?: string; name?: string; jid?: string }) => {
+    const cleanPhone = candidate.phone ? candidate.phone.replace(/\D/g, '') : '';
+    const token = cleanPhone ? `@${cleanPhone} ` : candidate.name ? `@${candidate.name.replace(/\s+/g, '_')} ` : '';
+    if (!token) return;
+
+    const cursorPos = replyInputRef.current?.selectionStart ?? inputText.length;
+    const anchor = mentionAnchorIndex !== null && mentionAnchorIndex !== -1 ? mentionAnchorIndex : inputText.lastIndexOf('@');
+    let nextText: string;
+    if (anchor !== -1 && anchor <= cursorPos) {
+      nextText = inputText.slice(0, anchor) + token + inputText.slice(cursorPos);
+    } else {
+      nextText = inputText + (inputText && !inputText.endsWith(' ') ? ' ' : '') + token;
+    }
+    setInputText(nextText);
+    setShowMentionPicker(false);
+    setMentionFilter('');
+    setMentionAnchorIndex(null);
+
+    setTimeout(() => {
+      replyInputRef.current?.focus();
+    }, 50);
   };
 
   const stopOutboundTyping = useCallback(
@@ -824,6 +997,26 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
   const handleReplyTextChange = (nextVal: string) => {
     setInputText(nextVal);
+
+    // Detect @ mention trigger while typing
+    const cursorPos = replyInputRef.current?.selectionStart ?? nextVal.length;
+    const textBeforeCursor = nextVal.slice(0, cursorPos);
+    const lastAt = textBeforeCursor.lastIndexOf('@');
+    if (lastAt !== -1 && (lastAt === 0 || /\s/.test(textBeforeCursor[lastAt - 1]))) {
+      const query = textBeforeCursor.slice(lastAt + 1);
+      if (!/\s/.test(query) && query.length <= 25) {
+        setMentionFilter(query.toLowerCase());
+        setMentionAnchorIndex(lastAt);
+        setShowMentionPicker(true);
+      } else {
+        setShowMentionPicker(false);
+      }
+    } else if (showMentionPicker && !mentionFilter) {
+      // Keep open if opened explicitly via toolbar button
+    } else {
+      setShowMentionPicker(false);
+    }
+
     if (
       !selectedConversation ||
       composerMode !== 'REPLY' ||
@@ -1027,6 +1220,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
     stopOutboundTyping(selectedConversation.id);
     setSending(true);
     try {
+      const textMentions = Array.from(text.matchAll(/@(\d{8,16})/g)).map((m) => `${m[1]}@c.us`);
       const newMsg = await api.sendConversationMessage(selectedConversation.id, {
         body: text,
         session: selectedSession || undefined,
@@ -1034,11 +1228,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
         mediaMimetype: pendingAttachment?.mimetype,
         mediaName: pendingAttachment?.name,
         replyToMessageId: replyingToMessage?.id,
+        mentions: textMentions.length > 0 ? textMentions : undefined,
       });
       setInputText('');
       setPendingAttachment(null);
       setReplyingToMessage(null);
       setShowEmojiPicker(false);
+      setShowMentionPicker(false);
+      setMentionFilter('');
+      setMentionAnchorIndex(null);
       setMessages((prev) => [...prev, newMsg]);
       if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
         toast.error(newMsg.errorMessage || 'Gagal mengirim pesan WhatsApp');
@@ -3060,7 +3258,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%] min-w-0`}
+                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%] min-w-0 transition-all duration-300 ${
+                          highlightedMessageId === msg.id
+                            ? 'scale-[1.02] ring-2 ring-indigo-500 ring-offset-2 rounded-lg'
+                            : ''
+                        }`}
                       >
                         <div
                           className={`w-full min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
@@ -3101,20 +3303,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         {(msg.replyToBody || msg.replyToMessageId) && (
                           <button
                             type="button"
-                            onClick={() => {
-                              if (msg.replyToMessageId && msgElementRefs.current[msg.replyToMessageId]) {
-                                msgElementRefs.current[msg.replyToMessageId]?.scrollIntoView({
-                                  behavior: 'smooth',
-                                  block: 'center',
-                                });
-                              }
-                            }}
-                            className="w-full text-left px-2.5 py-1.5 rounded bg-black/5 hover:bg-black/10 border-l-2 border-indigo-500 text-[11px] space-y-0.5 transition-colors"
+                            onClick={() => handleJumpToMessage(msg.replyToMessageId, msg.replyToBody)}
+                            className="w-full text-left px-2.5 py-1.5 rounded bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 border-l-2 border-indigo-500 text-[11px] space-y-0.5 transition-colors cursor-pointer group"
+                            title="Klik untuk melompat ke pesan yang dikutip"
                           >
-                            <div className="font-semibold text-indigo-700 truncate">
-                              {msg.replyToSender || 'Pesan sebelumnya'}
+                            <div className="font-semibold text-indigo-700 dark:text-indigo-400 truncate flex items-center gap-1">
+                              <Reply className="w-3 h-3 shrink-0 inline text-indigo-500" />
+                              <span>{msg.replyToSender || 'Pesan sebelumnya'}</span>
                             </div>
-                            <div className="text-gray-600 truncate">
+                            <div className="text-gray-600 dark:text-gray-300 truncate">
                               {msg.replyToBody || 'Pesan dikutip'}
                             </div>
                           </button>
@@ -3283,7 +3480,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               <div className="space-y-1.5">
                                 {meta.linkPreview.caption && (
                                   <div className="whitespace-pre-wrap break-words">
-                                    {renderTextWithClickableLinks(meta.linkPreview.caption)}
+                                    {renderTextWithClickableLinks(meta.linkPreview.caption, participantsLookup)}
                                   </div>
                                 )}
                                 <a
@@ -3332,7 +3529,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   </div>
                                 )}
                                 <div className="whitespace-pre-wrap break-words">
-                                  {renderTextWithClickableLinks(meta.interactiveButtons.body)}
+                                  {renderTextWithClickableLinks(meta.interactiveButtons.body, participantsLookup)}
                                 </div>
                                 {meta.interactiveButtons.footer && (
                                   <div className="text-[10px] text-gray-500">
@@ -3583,7 +3780,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           }
                           return (
                             <div className="whitespace-pre-wrap break-words">
-                              {renderTextWithClickableLinks(msg.body)}
+                              {renderTextWithClickableLinks(msg.body, participantsLookup)}
                             </div>
                           );
                         })()}
@@ -3840,8 +4037,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <span>
                       Membalas{' '}
                       {replyingToMessage.direction === 'OUTBOUND'
-                        ? 'Tim CS'
-                        : getConversationDisplayTitle(selectedConversation)}
+                        ? (replyingToMessage.senderName || 'Anda')
+                        : (replyingToMessage.senderName || getConversationDisplayTitle(selectedConversation))}
                     </span>
                   </div>
                   <p className="text-[11px] text-gray-600 truncate">{replyingToMessage.body}</p>
@@ -5030,8 +5227,78 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         <ListChecks className="w-4 h-4 text-emerald-600" />
                         <span>Tombol</span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => openComposerPicker('MENTION')}
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-indigo-700 hover:bg-gray-100"
+                      >
+                        <AtSign className="w-4 h-4 text-indigo-600" />
+                        <span>Mention</span>
+                      </button>
                     </>
                   )}
+                </div>
+              )}
+
+              {showMentionPicker && (
+                <div className="absolute bottom-full left-0 mb-2 z-30 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2.5 w-80 sm:w-96 max-w-[calc(100vw-2.5rem)] space-y-2">
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100 dark:border-gray-800">
+                    <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center gap-1.5 whitespace-nowrap truncate">
+                      <AtSign className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Sebut / Mention Partisipan</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowMentionPicker(false)}
+                      title="Tutup Menu Mention"
+                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <input
+                    type="text"
+                    placeholder="Cari nama atau nomor partisipan..."
+                    value={mentionFilter}
+                    onChange={(e) => setMentionFilter(e.target.value)}
+                    className="w-full h-8 px-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                  />
+
+                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
+                    {availableMentionCandidates.length === 0 ? (
+                      <div className="py-4 text-center text-[11px] text-gray-500">
+                        {mentionFilter
+                          ? `Tidak ada partisipan cocok dengan "${mentionFilter}"`
+                          : 'Tidak ada partisipan terdeteksi di obrolan ini'}
+                      </div>
+                    ) : (
+                      availableMentionCandidates.slice(0, 20).map((cand: any, idx: number) => (
+                        <button
+                          key={cand.jid || cand.phone || idx}
+                          type="button"
+                          onClick={() => handleSelectMention(cand)}
+                          className="w-full text-left py-2 px-2 hover:bg-indigo-50/80 dark:hover:bg-indigo-950/40 rounded flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">
+                              {cand.name}
+                            </div>
+                            {cand.phone && (
+                              <div className="text-[10px] font-mono text-gray-500 truncate">
+                                +{cand.phone}
+                              </div>
+                            )}
+                          </div>
+                          {cand.role && cand.role !== 'member' && (
+                            <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0">
+                              {cand.role}
+                            </span>
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -5139,6 +5406,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     </button>
                     <button
                       type="button"
+                      onClick={() => openComposerPicker('MENTION')}
+                      title="Sebut / Mention Partisipan (@)"
+                      className={`h-9 w-9 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors ${
+                        showMentionPicker
+                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600'
+                      }`}
+                    >
+                      <AtSign className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => fileInputRef.current?.click()}
                       title="Lampirkan Gambar, Video, Audio, atau Dokumen (maks. 10 MB)"
                       className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
@@ -5160,7 +5439,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           CHANNEL_META[
                             ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType
                           ]?.short || 'WA'
-                        } (ketik / utk template)...`
+                        } (ketik / utk template, @ utk mention)...`
                   }
                   value={inputText}
                   onChange={(e) => handleReplyTextChange(e.target.value)}

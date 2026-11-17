@@ -1467,6 +1467,21 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           payload._data?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text ||
           null;
 
+        const rawMentions: string[] = [
+          ...(Array.isArray(payload?.mentions) ? payload.mentions : []),
+          ...(Array.isArray(payload?._data?.mentionedJidList) ? payload._data.mentionedJidList : []),
+          ...(Array.isArray(payload?._data?.message?.extendedTextMessage?.contextInfo?.mentionedJid)
+            ? payload._data.message.extendedTextMessage.contextInfo.mentionedJid
+            : []),
+          ...(Array.isArray(payload?._data?.Message?.extendedTextMessage?.contextInfo?.mentionedJid)
+            ? payload._data.Message.extendedTextMessage.contextInfo.mentionedJid
+            : []),
+        ].map((x) => String(typeof x === 'string' ? x : x?._serialized || x?.id || '').trim()).filter(Boolean);
+        const inboundMentions = Array.from(new Set(rawMentions));
+        if (inboundMentions.length > 0) {
+          richData.metadata = { ...(richData.metadata || {}), mentions: inboundMentions };
+        }
+
         if (!body && !hasMedia && !richData.metadata) {
           wahaService.recordWebhookEvent({
             receivedAt: now.toISOString(),
@@ -1812,6 +1827,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         let replyToBody: string | null = quotedRawBody ? String(quotedRawBody).slice(0, 160) : null;
         let replyToSender: string | null = null;
         if (quotedWahaId) {
+          const rawQuotedStr = String(quotedWahaId).trim();
+          const quotedStanza = rawQuotedStr.includes('_') ? rawQuotedStr.split('_').pop()! : rawQuotedStr;
           const quotedRows = await db
             .select({
               id: chatMessages.id,
@@ -1820,15 +1837,39 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               senderName: chatMessages.senderName,
             })
             .from(chatMessages)
-            .where(and(eq(chatMessages.companyId, companyId), eq(chatMessages.wahaMessageId, String(quotedWahaId))))
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                eq(chatMessages.conversationId, convId),
+                or(
+                  eq(chatMessages.wahaMessageId, rawQuotedStr),
+                  eq(chatMessages.wahaMessageId, quotedStanza),
+                  like(chatMessages.wahaMessageId, `%_${quotedStanza}`)
+                )
+              )
+            )
             .limit(1);
           if (quotedRows[0]) {
             replyToMessageId = quotedRows[0].id;
             if (!replyToBody) replyToBody = quotedRows[0].body.slice(0, 160);
             replyToSender =
               quotedRows[0].direction === 'OUTBOUND'
-                ? 'Tim CS'
-                : (quotedRows[0].senderName || contact.namaLengkap || 'Pelanggan');
+                ? (quotedRows[0].senderName || 'Tim CS')
+                : (quotedRows[0].senderName || (isGroupChat ? (groupSenderName || 'Anggota Grup') : (contact.namaLengkap || 'Pelanggan')));
+          } else {
+            const quotedParticipant = String(
+              payload.replyTo?.participant ||
+              payload._data?.quotedParticipant ||
+              payload._data?.message?.extendedTextMessage?.contextInfo?.participant ||
+              payload._data?.Message?.extendedTextMessage?.contextInfo?.participant ||
+              ''
+            ).trim();
+            if (quotedParticipant) {
+              const qPhone = normalizePhoneNumber(quotedParticipant.replace(/@.*$/, ''));
+              replyToSender = qPhone ? `+${qPhone}` : quotedParticipant;
+            } else {
+              replyToSender = isGroupChat ? 'Anggota Grup' : (contact.namaLengkap || 'Pelanggan');
+            }
           }
         }
 

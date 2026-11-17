@@ -228,6 +228,7 @@ export const api = {
       mediaName?: string;
       mediaUrl?: string;
       replyToMessageId?: string;
+      mentions?: string[];
       messageKind?: 'TEXT' | 'MEDIA' | 'STICKER' | 'LOCATION' | 'CONTACT' | 'LINK_PREVIEW' | 'BUTTONS' | 'POLL';
       linkPreview?: {
         url: string;

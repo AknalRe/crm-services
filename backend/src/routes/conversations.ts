@@ -1660,6 +1660,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       mediaName?: string;
       mediaUrl?: string;
       replyToMessageId?: string;
+      mentions?: string[];
       messageKind?: OutboundMessageKind;
       linkPreview?: OutboundLinkPreviewPayload;
       interactiveButtons?: OutboundButtonsPayload;
@@ -1682,6 +1683,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         mediaName,
         mediaUrl,
         replyToMessageId,
+        mentions,
         messageKind,
         linkPreview,
         interactiveButtons,
@@ -1689,6 +1691,19 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         location,
         sharedContacts,
       } = req.body || {};
+
+      const currentUser = await getCurrentAuthUser(req);
+      const currentAgentName = currentUser?.name || 'Tim CS';
+
+      const textPhoneMentions = Array.from(bodyText.matchAll(/@(\d{8,16})/g)).map(
+        (m) => `${m[1]}@c.us`
+      );
+      const effectiveMentions = Array.from(
+        new Set([
+          ...(Array.isArray(mentions) ? mentions : []),
+          ...textPhoneMentions,
+        ])
+      ).map((m) => (m.includes('@') ? m : `${m}@c.us`));
 
       const inferredKind: OutboundMessageKind =
         messageKind ||
@@ -2144,6 +2159,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               filename: mediaName || 'attachment',
               caption: bodyText,
               replyTo: quotedWahaId,
+              mentions: effectiveMentions.length > 0 ? effectiveMentions : undefined,
             },
             targetSession
           );
@@ -2152,9 +2168,16 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             targetWa,
             bodyText,
             targetSession,
-            quotedWahaId ? { replyTo: quotedWahaId } : undefined
+            {
+              replyTo: quotedWahaId,
+              mentions: effectiveMentions.length > 0 ? effectiveMentions : undefined,
+            }
           );
         }
+      }
+
+      if (effectiveMentions.length > 0) {
+        metadataRecord = { ...(metadataRecord || {}), mentions: effectiveMentions };
       }
 
       const now = new Date();
@@ -2172,6 +2195,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           conversationId: conversation.conv.id,
           contactId: conversation.conv.contactId,
           direction: 'OUTBOUND',
+          senderName: currentAgentName,
           messageType: persistedMessageType,
           channel: convChannel,
           externalMessageId: convChannel === 'WHATSAPP' ? null : (sendResult.messageId || null),

@@ -2059,7 +2059,7 @@ export class WahaService {
     phone: string,
     text: string,
     sessionName?: string,
-    opts?: { replyTo?: string; linkPreview?: boolean; linkPreviewHighQuality?: boolean }
+    opts?: { replyTo?: string; linkPreview?: boolean; linkPreviewHighQuality?: boolean; mentions?: string[] }
   ): Promise<WahaSendResult> {
     return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
       const response = await client.post('/api/sendText', {
@@ -2071,6 +2071,7 @@ export class WahaService {
           ? { linkPreviewHighQuality: opts.linkPreviewHighQuality }
           : {}),
         ...(opts?.replyTo ? { reply_to: opts.replyTo } : {}),
+        ...(opts?.mentions && opts.mentions.length > 0 ? { mentions: opts.mentions } : {}),
       });
       return response.data;
     });
@@ -2249,7 +2250,7 @@ export class WahaService {
    */
   public async sendMediaMessage(
     phone: string,
-    file: { base64: string; mimetype: string; filename: string; caption?: string; replyTo?: string },
+    file: { base64: string; mimetype: string; filename: string; caption?: string; replyTo?: string; mentions?: string[] },
     sessionName?: string
   ): Promise<WahaSendResult> {
     const cleanBase64 = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
@@ -2267,6 +2268,7 @@ export class WahaService {
         },
         caption: file.caption || '',
         ...(file.replyTo ? { reply_to: file.replyTo } : {}),
+        ...(file.mentions && file.mentions.length > 0 ? { mentions: file.mentions } : {}),
       };
       const mediaConfig = { timeout: 60000 };
 
