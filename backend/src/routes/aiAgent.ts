@@ -780,37 +780,52 @@ export default async function aiAgentRouter(fastify: FastifyInstance) {
       }
 
       const now = new Date();
-      const [upserted] = await db
-        .insert(aiSkills)
-        .values({
-          id: crypto.randomUUID(),
-          slug: preset.slug,
-          name: preset.name,
-          description: preset.description,
-          category: preset.category,
-          triggerHint: preset.triggerHint,
-          instructions: preset.instructions,
-          linkedTools: JSON.stringify(preset.linkedTools),
-          sourceType: 'PRESET',
-          sourceUrl: null,
-          isActive: true,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: aiSkills.slug,
-          set: {
+      const existing = await db
+        .select()
+        .from(aiSkills)
+        .where(eq(aiSkills.slug, preset.slug))
+        .limit(1);
+
+      let upserted: typeof aiSkills.$inferSelect;
+      if (existing.length > 0) {
+        const [updated] = await db
+          .update(aiSkills)
+          .set({
             name: preset.name,
             description: preset.description,
             category: preset.category,
             triggerHint: preset.triggerHint,
             instructions: preset.instructions,
             linkedTools: JSON.stringify(preset.linkedTools),
+            sourceType: 'PRESET',
+            sourceUrl: null,
             isActive: true,
             updatedAt: now,
-          },
-        })
-        .returning();
+          })
+          .where(eq(aiSkills.id, existing[0].id))
+          .returning();
+        upserted = updated;
+      } else {
+        const [inserted] = await db
+          .insert(aiSkills)
+          .values({
+            id: crypto.randomUUID(),
+            slug: preset.slug,
+            name: preset.name,
+            description: preset.description,
+            category: preset.category,
+            triggerHint: preset.triggerHint,
+            instructions: preset.instructions,
+            linkedTools: JSON.stringify(preset.linkedTools),
+            sourceType: 'PRESET',
+            sourceUrl: null,
+            isActive: true,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+        upserted = inserted;
+      }
 
       return reply.status(201).send({ success: true, data: serializeSkill(upserted) });
     } catch (error: any) {
