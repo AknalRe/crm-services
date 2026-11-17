@@ -8,6 +8,7 @@ import {
   DashboardStats,
   WahaStatus,
   WahaSessionItem,
+  WahaPrivacyConfig,
   BirthdaySetting,
   LicenseInfo,
   AuthStatus,
@@ -203,7 +204,7 @@ export const api = {
   },
   markConversationRead: async (
     id: string
-  ): Promise<{ seenSent: boolean; error?: string }> => {
+  ): Promise<{ seenSent: boolean; skippedByPrivacy?: boolean; error?: string }> => {
     const res = await client.post(`/conversations/${id}/read`);
     return res.data.data || { seenSent: false };
   },
@@ -513,6 +514,14 @@ export const api = {
   },
   updateCrmSettings: async (data: Partial<CrmSlaCsatSettings>): Promise<CrmSlaCsatSettings> => {
     const res = await client.post('/settings/crm', data);
+    return res.data.data;
+  },
+  getWahaPrivacy: async (): Promise<WahaPrivacyConfig> => {
+    const res = await client.get('/settings/waha/privacy');
+    return res.data.data;
+  },
+  updateWahaPrivacy: async (payload: Partial<WahaPrivacyConfig>): Promise<WahaPrivacyConfig> => {
+    const res = await client.put('/settings/waha/privacy', payload);
     return res.data.data;
   },
 

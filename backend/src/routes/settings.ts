@@ -4,7 +4,7 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { birthdaySettings, autoReplyRules, webhookDeliveries, DEFAULT_COMPANY_ID } from '../db/schema';
 import { BirthdayService } from '../services/birthday.service';
-import { wahaService } from '../services/waha.service';
+import { WahaPrivacyConfig, wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { notifyAlertWebhook } from '../services/automation.service';
@@ -42,11 +42,13 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         const settingMap = await getCompanySettingMap(companyId);
         const slaRaw = Number.parseInt(settingMap.sla_target_minutes || '15', 10);
         const slaTargetMinutes = Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : 15;
+        const wahaPrivacy = await wahaService.getPrivacyConfig(companyId);
 
         return reply.send({
           success: true,
           data: {
             waha: wahaConfig,
+            wahaPrivacy,
             birthday: list[0] || null,
             crm: {
               csatTemplate: settingMap.csat_template || DEFAULT_CSAT_CTA_TEMPLATE,
@@ -138,6 +140,50 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       return reply.status(error.statusCode || 502).send({ success: false, error: error.message });
     }
   });
+
+  // GET WAHA privacy & read-receipt settings (General & per-session)
+  fastify.get(
+    '/waha/privacy',
+    { preHandler: requirePermission('settings', 'conversations') },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const companyId = getRequestCompanyId(req);
+        const data = await wahaService.getPrivacyConfig(companyId);
+        return reply.send({ success: true, data });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // PUT/POST update WAHA privacy & read-receipt settings (General & per-session)
+  const handleSavePrivacy = async (
+    req: FastifyRequest<{ Body: Partial<WahaPrivacyConfig> }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const saved = await wahaService.savePrivacyConfig(req.body || {}, companyId);
+      liveEvents.emit('waha:status', { action: 'privacy_settings' }, companyId);
+      return reply.send({
+        success: true,
+        data: saved,
+        message: 'Pengaturan privasi & tanda baca WhatsApp berhasil disimpan',
+      });
+    } catch (error: any) {
+      return reply.status(error?.statusCode || 500).send({ success: false, error: error.message });
+    }
+  };
+  fastify.put<{ Body: Partial<WahaPrivacyConfig> }>(
+    '/waha/privacy',
+    { preHandler: requirePermission('settings.edit') },
+    handleSavePrivacy
+  );
+  fastify.post<{ Body: Partial<WahaPrivacyConfig> }>(
+    '/waha/privacy',
+    { preHandler: requirePermission('settings.edit') },
+    handleSavePrivacy
+  );
 
   // GET birthday settings & celebrants
   fastify.get('/birthday', { preHandler: requirePermission('birthday') }, async (req: FastifyRequest, reply: FastifyReply) => {

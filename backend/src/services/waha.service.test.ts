@@ -5,6 +5,8 @@ import { config } from '../config';
 import {
   buildVCardString,
   parseVCardString,
+  parseWahaPrivacyConfig,
+  resolveSessionPrivacyRule,
   WahaConfig,
   wahaService,
 } from './waha.service';
@@ -1864,6 +1866,75 @@ test('extractWahaContextInfo, extractWahaForwardingMeta, and pickBestContactDisp
     pickBestContactDisplayName(null, null, '6281234567890'),
     '+6281234567890'
   );
+});
+
+test('parseWahaPrivacyConfig, resolveSessionPrivacyRule, and getGroupInfo participants endpoint integration work accurately', async (t) => {
+  const parsed = parseWahaPrivacyConfig({
+    general: { autoReadOnOpen: false, sendOnlinePresence: true, readReceipts: true },
+    sessions: {
+      sales_vip: { autoReadOnOpen: true, sendOnlinePresence: false, readReceipts: false },
+      cs_bot: { autoReadOnOpen: true },
+    },
+  });
+
+  assert.deepEqual(resolveSessionPrivacyRule(parsed, 'default'), {
+    autoReadOnOpen: false,
+    sendOnlinePresence: true,
+    readReceipts: true,
+  });
+  assert.deepEqual(resolveSessionPrivacyRule(parsed, 'sales_vip'), {
+    autoReadOnOpen: true,
+    sendOnlinePresence: false,
+    readReceipts: false,
+  });
+  assert.deepEqual(resolveSessionPrivacyRule(parsed, 'cs_bot'), {
+    autoReadOnOpen: true,
+    sendOnlinePresence: true,
+    readReceipts: true,
+  });
+
+  // Verify getGroupInfo calls /groups/{id}/participants and merges participants cleanly
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha-gows.example.com',
+    apiKey: 'test-key',
+    session: 'sales',
+  });
+  const origCreate = axios.create;
+  const hitUrls: string[] = [];
+  (axios as any).create = () => ({
+    get: async (url: string) => {
+      hitUrls.push(url);
+      if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      if (url === '/api/sessions') return { data: [{ name: 'sales', status: 'WORKING' }] };
+      if (url.endsWith('/groups/12036300112233%40g.us')) {
+        return { data: { subject: 'Grup VIP Sales', participants: [] } };
+      }
+      if (url.endsWith('/groups/12036300112233%40g.us/participants')) {
+        return {
+          data: [
+            { id: '6281111222333@c.us', pushName: 'Andi Buyer', admin: null },
+            { id: '99887766@lid', phoneNumber: '6285555666777', FullName: 'Dewi Admin', isAdmin: true },
+          ],
+        };
+      }
+      throw { response: { status: 404 } };
+    },
+    post: async () => ({ data: {} }),
+    put: async () => ({ data: {} }),
+  });
+  t.after(() => {
+    (axios as any).create = origCreate;
+  });
+
+  const grp = await wahaService.getGroupInfo('12036300112233@g.us', 'sales');
+  assert.ok(grp);
+  assert.equal(grp.subject, 'Grup VIP Sales');
+  assert.equal(grp.participants.length, 2);
+  assert.equal(grp.participants[0].name, 'Andi Buyer');
+  assert.equal(grp.participants[1].phone, '6285555666777');
+  assert.equal(grp.participants[1].role, 'admin');
+  assert.ok(hitUrls.some((u) => u.endsWith('/participants')));
 });
 
 

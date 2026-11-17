@@ -13,6 +13,97 @@ import {
 } from './tenantContext';
 import { fromWahaChatId, isPhoneWahaJid, normalizePhoneNumber, toWahaChatId } from './phone.utils';
 
+export interface WahaSessionPrivacyRule {
+  autoReadOnOpen: boolean;
+  sendOnlinePresence: boolean;
+  readReceipts: boolean;
+}
+
+export interface WahaPrivacyConfig {
+  general: WahaSessionPrivacyRule;
+  sessions: Record<string, Partial<WahaSessionPrivacyRule>>;
+}
+
+export const DEFAULT_WAHA_PRIVACY_RULE: WahaSessionPrivacyRule = {
+  autoReadOnOpen: true,
+  sendOnlinePresence: true,
+  readReceipts: true,
+};
+
+export const DEFAULT_WAHA_PRIVACY_CONFIG: WahaPrivacyConfig = {
+  general: { ...DEFAULT_WAHA_PRIVACY_RULE },
+  sessions: {},
+};
+
+export function sanitizeWahaPrivacyRule(raw: any, fallback: WahaSessionPrivacyRule = DEFAULT_WAHA_PRIVACY_RULE): WahaSessionPrivacyRule {
+  return {
+    autoReadOnOpen: typeof raw?.autoReadOnOpen === 'boolean' ? raw.autoReadOnOpen : fallback.autoReadOnOpen,
+    sendOnlinePresence: typeof raw?.sendOnlinePresence === 'boolean' ? raw.sendOnlinePresence : fallback.sendOnlinePresence,
+    readReceipts: typeof raw?.readReceipts === 'boolean' ? raw.readReceipts : fallback.readReceipts,
+  };
+}
+
+export function parseWahaPrivacyConfig(raw: unknown): WahaPrivacyConfig {
+  let obj: any = raw;
+  if (typeof raw === 'string') {
+    try {
+      obj = JSON.parse(raw);
+    } catch {
+      obj = null;
+    }
+  }
+  if (!obj || typeof obj !== 'object') {
+    return {
+      general: { ...DEFAULT_WAHA_PRIVACY_RULE },
+      sessions: {},
+    };
+  }
+  const general = sanitizeWahaPrivacyRule(obj.general, DEFAULT_WAHA_PRIVACY_RULE);
+  const sessions: Record<string, Partial<WahaSessionPrivacyRule>> = {};
+  if (obj.sessions && typeof obj.sessions === 'object') {
+    for (const [k, v] of Object.entries(obj.sessions)) {
+      const cleanName = String(k || '').trim();
+      if (!cleanName || !v || typeof v !== 'object') continue;
+      const entry: Partial<WahaSessionPrivacyRule> = {};
+      if (typeof (v as any).autoReadOnOpen === 'boolean') {
+        entry.autoReadOnOpen = (v as any).autoReadOnOpen;
+      }
+      if (typeof (v as any).sendOnlinePresence === 'boolean') {
+        entry.sendOnlinePresence = (v as any).sendOnlinePresence;
+      }
+      if (typeof (v as any).readReceipts === 'boolean') {
+        entry.readReceipts = (v as any).readReceipts;
+      }
+      if (Object.keys(entry).length > 0) {
+        sessions[cleanName] = entry;
+      }
+    }
+  }
+  return { general, sessions };
+}
+
+export function resolveSessionPrivacyRule(
+  privacyConfig: WahaPrivacyConfig,
+  sessionName?: string | null
+): WahaSessionPrivacyRule {
+  const cleanSession = String(sessionName || '').trim();
+  const specific = cleanSession ? privacyConfig.sessions?.[cleanSession] : undefined;
+  return {
+    autoReadOnOpen:
+      typeof specific?.autoReadOnOpen === 'boolean'
+        ? specific.autoReadOnOpen
+        : privacyConfig.general.autoReadOnOpen,
+    sendOnlinePresence:
+      typeof specific?.sendOnlinePresence === 'boolean'
+        ? specific.sendOnlinePresence
+        : privacyConfig.general.sendOnlinePresence,
+    readReceipts:
+      typeof specific?.readReceipts === 'boolean'
+        ? specific.readReceipts
+        : privacyConfig.general.readReceipts,
+  };
+}
+
 export function resolveWahaMediaTargetUrl(
   rawUrl?: string | null,
   wahaBaseUrl?: string | null
@@ -332,13 +423,28 @@ export function normalizeWahaGroupInfo(
       (isPhoneWahaJid(rawJid) ? extractValidNormalizedPhone(rawJid) : null) ||
       (lidPhoneMap?.get(rawJid) ? extractValidNormalizedPhone(lidPhoneMap.get(rawJid)) : null);
 
-    const isSuper = Boolean(p.isSuperAdmin || p.IsSuperAdmin || p.admin === 'superadmin');
-    const isAdmin = Boolean(p.isAdmin || p.IsAdmin || p.admin === 'admin');
+    const isSuper = Boolean(p.isSuperAdmin || p.IsSuperAdmin || p.admin === 'superadmin' || p.role === 'superadmin');
+    const isAdmin = Boolean(p.isAdmin || p.IsAdmin || p.admin === 'admin' || p.role === 'admin');
     const role: WahaGroupParticipant['role'] = isSuper ? 'superadmin' : isAdmin ? 'admin' : 'member';
-    const rawName = p.name || p.pushName || p.PushName || p.FullName || p.notify || null;
+    const rawName =
+      p.name ||
+      p.pushName ||
+      p.pushname ||
+      p.PushName ||
+      p.FullName ||
+      p.DisplayName ||
+      p.BusinessName ||
+      p.notify ||
+      null;
     const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : null;
 
-    byParticipant.set(rawJid, { jid: rawJid, phone, name, role });
+    const prev = byParticipant.get(rawJid);
+    byParticipant.set(rawJid, {
+      jid: rawJid,
+      phone: phone || prev?.phone || null,
+      name: name || prev?.name || null,
+      role: role !== 'member' ? role : (prev?.role || 'member'),
+    });
   }
 
   return {
@@ -2943,7 +3049,121 @@ export class WahaService {
   }
 
   /**
+   * Privacy, auto-read, and online presence configuration (General & per-session)
+   */
+  public async getPrivacyConfig(companyId?: string | null): Promise<WahaPrivacyConfig> {
+    const cid = getActiveCompanyId(companyId);
+    const map = await getCompanySettingMap(cid);
+    return parseWahaPrivacyConfig(map['waha_privacy_config']);
+  }
+
+  public async savePrivacyConfig(
+    payload: Partial<WahaPrivacyConfig>,
+    companyId?: string | null
+  ): Promise<WahaPrivacyConfig> {
+    const cid = getActiveCompanyId(companyId);
+    const current = await this.getPrivacyConfig(cid);
+    const next: WahaPrivacyConfig = {
+      general: payload.general
+        ? sanitizeWahaPrivacyRule(payload.general, current.general)
+        : current.general,
+      sessions:
+        payload.sessions !== undefined
+          ? parseWahaPrivacyConfig({ general: current.general, sessions: payload.sessions }).sessions
+          : current.sessions,
+    };
+    await upsertCompanySetting('waha_privacy_config', JSON.stringify(next), cid);
+    void this.syncAllSessionsPrivacyToWaha(next, cid).catch(() => {});
+    return next;
+  }
+
+  public async resolveSessionPrivacy(
+    sessionName?: string | null,
+    companyId?: string | null
+  ): Promise<WahaSessionPrivacyRule> {
+    const cfg = await this.getPrivacyConfig(companyId);
+    return resolveSessionPrivacyRule(cfg, sessionName);
+  }
+
+  public async setSessionPresence(
+    sessionName: string,
+    online: boolean
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const cfg = await this.getConfig(false);
+      if (cfg.mode === 'EXTERNAL') {
+        await this.assertExternalGowsEngine({ baseUrl: cfg.baseUrl, apiKey: cfg.apiKey });
+      }
+      const client = this.createHttpClient(cfg.baseUrl, cfg.apiKey, 6000);
+      const presenceValue = online ? 'available' : 'unavailable';
+      try {
+        await client.post(
+          `/api/${encodeURIComponent(sessionName)}/presence`,
+          { presence: presenceValue },
+          { timeout: 6000 }
+        );
+        return { success: true };
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501) {
+          await client.post(
+            '/api/presence',
+            { session: sessionName, presence: presenceValue },
+            { timeout: 6000 }
+          );
+          return { success: true };
+        }
+        throw err;
+      }
+    } catch (err: any) {
+      return { success: false, error: this.extractWahaError(err) };
+    }
+  }
+
+  public async syncSessionPrivacyToWaha(
+    sessionName: string,
+    rule: WahaSessionPrivacyRule
+  ): Promise<void> {
+    await this.setSessionPresence(sessionName, rule.sendOnlinePresence).catch(() => {});
+    try {
+      const cfg = await this.getConfig(false);
+      const client = this.createHttpClient(cfg.baseUrl, cfg.apiKey, 5000);
+      // Best-effort WAHA WhatsApp privacy settings sync (readreceipts: 'all' | 'none', online: 'all' | 'match_last_seen')
+      await client
+        .put(
+          `/api/${encodeURIComponent(sessionName)}/profile/privacy`,
+          {
+            readreceipts: rule.readReceipts ? 'all' : 'none',
+            online: rule.sendOnlinePresence ? 'all' : 'match_last_seen',
+          },
+          { timeout: 4000 }
+        )
+        .catch(() => {});
+    } catch {
+      // Optional WAHA privacy endpoint may vary by WAHA version
+    }
+  }
+
+  public async syncAllSessionsPrivacyToWaha(
+    privacyConfig?: WahaPrivacyConfig,
+    companyId?: string | null
+  ): Promise<void> {
+    const cfg = privacyConfig || (await this.getPrivacyConfig(companyId));
+    const sessionsRes = await this.listSessions().catch(() => ({
+      sessions: [],
+      activeSession: '',
+    }));
+    const sessionsList = Array.isArray(sessionsRes?.sessions) ? sessionsRes.sessions : [];
+    for (const s of sessionsList) {
+      if (s.status !== 'WORKING') continue;
+      const rule = resolveSessionPrivacyRule(cfg, s.name);
+      await this.syncSessionPrivacyToWaha(s.name, rule);
+    }
+  }
+
+  /**
    * Fetch WhatsApp group metadata (subject & participants) from WAHA
+   * Calls both /groups/{id} and /groups/{id}/participants to ensure complete member list
    */
   public async getGroupInfo(
     groupJid: string,
@@ -2954,25 +3174,79 @@ export class WahaService {
 
     try {
       const { client, targetSession } = await this.resolveReadableSession(sessionName);
-      const res = await client.get(
-        `/api/${encodeURIComponent(targetSession)}/groups/${encodeURIComponent(cleanJid)}`,
-        { timeout: 10000 }
-      );
-      if (!res?.data) return null;
+      const encodedSession = encodeURIComponent(targetSession);
+      const encodedGroup = encodeURIComponent(cleanJid);
 
-      const rawParticipants =
-        res.data?.participants ||
-        res.data?.Participants ||
-        res.data?.groupMetadata?.participants ||
-        [];
-      const hasLidOnly =
-        Array.isArray(rawParticipants) &&
-        rawParticipants.some((p: any) => {
-          const jid = String(p?.id?._serialized || p?.id || p?.JID || '').toLowerCase();
-          return jid.endsWith('@lid') && !p?.phoneNumber && !p?.PhoneNumber && !p?.pn;
+      let groupData: any = null;
+      try {
+        const res = await client.get(`/api/${encodedSession}/groups/${encodedGroup}`, {
+          timeout: 10000,
         });
+        if (res?.data && typeof res.data === 'object') {
+          groupData = res.data;
+        }
+      } catch {
+        // Group metadata endpoint may fail while /participants still succeeds
+      }
+
+      let endpointParticipants: any[] = [];
+      try {
+        const pRes = await client.get(`/api/${encodedSession}/groups/${encodedGroup}/participants`, {
+          timeout: 10000,
+        });
+        const pData = pRes?.data;
+        if (Array.isArray(pData)) {
+          endpointParticipants = pData;
+        } else if (Array.isArray(pData?.participants)) {
+          endpointParticipants = pData.participants;
+        } else if (Array.isArray(pData?.Participants)) {
+          endpointParticipants = pData.Participants;
+        }
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          try {
+            const pV2Res = await client.get(
+              `/api/${encodedSession}/groups/${encodedGroup}/participants/v2`,
+              { timeout: 10000 }
+            );
+            const pV2Data = pV2Res?.data;
+            if (Array.isArray(pV2Data)) {
+              endpointParticipants = pV2Data;
+            } else if (Array.isArray(pV2Data?.participants)) {
+              endpointParticipants = pV2Data.participants;
+            }
+          } catch {
+            // ignore fallback 404
+          }
+        }
+      }
+
+      if (!groupData && endpointParticipants.length === 0) {
+        return null;
+      }
+
+      const baseParticipants: any[] = Array.isArray(groupData?.participants)
+        ? groupData.participants
+        : Array.isArray(groupData?.Participants)
+        ? groupData.Participants
+        : Array.isArray(groupData?.groupMetadata?.participants)
+        ? groupData.groupMetadata.participants
+        : [];
+      const mergedParticipants = [...baseParticipants, ...endpointParticipants];
+
+      const hasLidOnly = mergedParticipants.some((p: any) => {
+        const jid = String(p?.id?._serialized || p?.id?.id || p?.id || p?.JID || p?.jid || '').toLowerCase();
+        return jid.endsWith('@lid') && !p?.phoneNumber && !p?.PhoneNumber && !p?.pn && !p?.PN;
+      });
       const lidMap = hasLidOnly ? await this.fetchLidPhoneLookup(client, targetSession) : undefined;
-      return normalizeWahaGroupInfo(cleanJid, res.data, lidMap);
+      return normalizeWahaGroupInfo(
+        cleanJid,
+        {
+          ...(groupData && typeof groupData === 'object' ? groupData : {}),
+          participants: mergedParticipants,
+        },
+        lidMap
+      );
     } catch {
       return null;
     }

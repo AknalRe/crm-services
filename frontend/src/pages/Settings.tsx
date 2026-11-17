@@ -11,6 +11,7 @@ import {
   Users,
   ChevronDown,
   ChevronRight,
+  Eye,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -28,6 +29,8 @@ import {
   SettingsSection,
   WahaSessionItem,
   WahaStatus,
+  WahaPrivacyConfig,
+  WahaSessionPrivacyRule,
 } from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
@@ -206,6 +209,16 @@ export const Settings: React.FC<SettingsProps> = ({
   const [internalTab, setInternalTab] = useState<SettingsSection>('whatsapp');
   const [showMobileWahaTest, setShowMobileWahaTest] = useState(false);
   const [showMobileWahaWebhook, setShowMobileWahaWebhook] = useState(false);
+  const [privacyConfig, setPrivacyConfig] = useState<WahaPrivacyConfig>({
+    general: {
+      autoReadOnOpen: true,
+      sendOnlinePresence: true,
+      readReceipts: true,
+    },
+    sessions: {},
+  });
+  const [privacyScope, setPrivacyScope] = useState<string>('__GENERAL__');
+  const [savingPrivacy, setSavingPrivacy] = useState(false);
   const settingsTab = activeSection ?? internalTab;
   const setSettingsTab = (sec: SettingsSection) => {
     setInternalTab(sec);
@@ -243,6 +256,89 @@ export const Settings: React.FC<SettingsProps> = ({
   useEffect(() => {
     void fetchAgents();
   }, [fetchAgents]);
+
+  useEffect(() => {
+    api
+      .getWahaPrivacy()
+      .then((cfg) => {
+        if (cfg?.general) setPrivacyConfig(cfg);
+      })
+      .catch(() => {});
+  }, []);
+
+  const activePrivacyRule: WahaSessionPrivacyRule = useMemo(() => {
+    if (privacyScope === '__GENERAL__') return privacyConfig.general;
+    const override = privacyConfig.sessions?.[privacyScope];
+    return {
+      autoReadOnOpen:
+        typeof override?.autoReadOnOpen === 'boolean'
+          ? override.autoReadOnOpen
+          : privacyConfig.general.autoReadOnOpen,
+      sendOnlinePresence:
+        typeof override?.sendOnlinePresence === 'boolean'
+          ? override.sendOnlinePresence
+          : privacyConfig.general.sendOnlinePresence,
+      readReceipts:
+        typeof override?.readReceipts === 'boolean'
+          ? override.readReceipts
+          : privacyConfig.general.readReceipts,
+    };
+  }, [privacyConfig, privacyScope]);
+
+  const isSessionPrivacyOverridden =
+    privacyScope !== '__GENERAL__' && Boolean(privacyConfig.sessions?.[privacyScope]);
+
+  const handleTogglePrivacyField = (
+    field: keyof WahaSessionPrivacyRule,
+    nextVal: boolean
+  ) => {
+    setPrivacyConfig((prev) => {
+      if (privacyScope === '__GENERAL__') {
+        return {
+          ...prev,
+          general: {
+            ...prev.general,
+            [field]: nextVal,
+          },
+        };
+      }
+      return {
+        ...prev,
+        sessions: {
+          ...prev.sessions,
+          [privacyScope]: {
+            ...(prev.sessions?.[privacyScope] || {}),
+            [field]: nextVal,
+          },
+        },
+      };
+    });
+  };
+
+  const handleResetSessionPrivacyOverride = (sessionName: string) => {
+    setPrivacyConfig((prev) => {
+      const nextSessions = { ...(prev.sessions || {}) };
+      delete nextSessions[sessionName];
+      return {
+        ...prev,
+        sessions: nextSessions,
+      };
+    });
+  };
+
+  const handleSavePrivacyConfig = async () => {
+    if (!canEditSettings || savingPrivacy) return;
+    setSavingPrivacy(true);
+    try {
+      const saved = await api.updateWahaPrivacy(privacyConfig);
+      setPrivacyConfig(saved);
+      toast.success('Pengaturan privasi & tanda baca WhatsApp berhasil disimpan.');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menyimpan pengaturan privasi.');
+    } finally {
+      setSavingPrivacy(false);
+    }
+  };
 
   const resetAgentForm = () => {
     setEditingAgentId(null);
@@ -1432,6 +1528,143 @@ export const Settings: React.FC<SettingsProps> = ({
                   </div>
                 </>
               )}
+            </div>
+          </div>
+
+          {/* Privacy, Auto-Read & Online Presence Card (General & Per-Session) */}
+          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>Privasi, Auto-Read &amp; Status Online WhatsApp</span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Atur otomatis baca saat buka chat, visibilitas status Online/mengetik, dan centang 2 biru secara general atau per sesi WhatsApp.
+                </p>
+              </div>
+              {Object.keys(privacyConfig.sessions || {}).length > 0 && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  {Object.keys(privacyConfig.sessions).length} Sesi Kustom
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <label className="text-xs font-medium text-gray-700 shrink-0">
+                  Target Pengaturan:
+                </label>
+                <select
+                  value={privacyScope}
+                  onChange={(e) => setPrivacyScope(e.target.value)}
+                  className="h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500 min-w-[200px]"
+                >
+                  <option value="__GENERAL__">General (Default Semua Sesi)</option>
+                  {Array.from(
+                    new Set([
+                      ...sessions.map((s) => s.name),
+                      ...Object.keys(privacyConfig.sessions || {}),
+                    ])
+                  )
+                    .filter(Boolean)
+                    .map((sName) => (
+                      <option key={sName} value={sName}>
+                        Sesi: {sName}
+                        {privacyConfig.sessions?.[sName] ? ' (Kustom)' : ' (Ikuti General)'}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {isSessionPrivacyOverridden && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!canEditSettings}
+                  onClick={() => handleResetSessionPrivacyOverride(privacyScope)}
+                >
+                  Ikuti Pengaturan General
+                </Button>
+              )}
+            </div>
+
+            <div className="divide-y divide-gray-100 border border-gray-200 rounded-md bg-gray-50/40">
+              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-gray-900">
+                    Otomatis Baca Chat WhatsApp Saat Buka Percakapan
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                    Jika aktif, membuka percakapan di Live Chat CRM otomatis mengirim tanda dibaca (<code className="font-mono">sendSeen</code>) ke WhatsApp pelanggan. Nonaktifkan jika ingin membaca chat di CRM tanpa langsung memicu centang 2 biru.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={activePrivacyRule.autoReadOnOpen}
+                  disabled={!canEditSettings}
+                  onChange={(e) => handleTogglePrivacyField('autoReadOnOpen', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                />
+              </label>
+
+              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-gray-900">
+                    Mode Online &amp; Status Sedang Mengetik
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                    Jika aktif, CRM menampilkan status <span className="font-medium">Online</span> dan indikator <span className="font-medium">Sedang mengetik...</span> ke WhatsApp lawan bicara. Nonaktifkan untuk menyembunyikan status online (mode privasi offline).
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={activePrivacyRule.sendOnlinePresence}
+                  disabled={!canEditSettings}
+                  onChange={(e) => handleTogglePrivacyField('sendOnlinePresence', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                />
+              </label>
+
+              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-gray-900">
+                    Izinkan Centang 2 Biru (Read Receipts WhatsApp)
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                    Jika dinonaktifkan, CRM tidak akan pernah mengirim tanda baca centang 2 biru (<code className="font-mono">sendSeen</code>) ke WhatsApp baik secara otomatis maupun tombol manual, sekaligus menyinkronkan privasi tanda baca sesi WAHA.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={activePrivacyRule.readReceipts}
+                  disabled={!canEditSettings}
+                  onChange={(e) => handleTogglePrivacyField('readReceipts', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-[11px] text-gray-500">
+                {privacyScope === '__GENERAL__'
+                  ? 'Berlaku sebagai default untuk seluruh sesi yang tidak memiliki aturan khusus.'
+                  : isSessionPrivacyOverridden
+                  ? `Menampilkan aturan khusus untuk sesi "${privacyScope}".`
+                  : `Sesi "${privacyScope}" saat ini mengikuti aturan General. Ubah opsi di atas lalu simpan untuk membuat aturan khusus.`}
+              </span>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                isLoading={savingPrivacy}
+                disabled={!canEditSettings}
+                onClick={() => void handleSavePrivacyConfig()}
+                className="shrink-0"
+              >
+                Simpan Privasi WA
+              </Button>
             </div>
           </div>
 

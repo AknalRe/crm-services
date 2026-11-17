@@ -311,10 +311,25 @@ async function markWhatsAppConversationSeen(
   contact: typeof contacts.$inferSelect,
   messagesList: Array<typeof chatMessages.$inferSelect>,
   force = false
-): Promise<{ seenSent: boolean; error?: string }> {
+): Promise<{ seenSent: boolean; skippedByPrivacy?: boolean; error?: string }> {
   if (((conv.channel || 'WHATSAPP').toUpperCase()) !== 'WHATSAPP') {
     return { seenSent: false };
   }
+
+  const privacy = await wahaService.resolveSessionPrivacy(conv.wahaSession, conv.companyId);
+  if (!privacy.readReceipts) {
+    return {
+      seenSent: false,
+      skippedByPrivacy: true,
+      error: force
+        ? 'Centang 2 biru (Read Receipts) dinonaktifkan pada pengaturan privasi sesi ini.'
+        : undefined,
+    };
+  }
+  if (!force && !privacy.autoReadOnOpen) {
+    return { seenSent: false, skippedByPrivacy: true };
+  }
+
   const inboundIds = messagesList
     .filter((m) => m.direction === 'INBOUND' && Boolean(m.wahaMessageId))
     .slice(-10)
@@ -1075,15 +1090,20 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         }
       }
 
-      // Enrich with CRM contacts when phone numbers match
+      // Enrich with CRM contacts when phone numbers match across common formats
       const phones = Array.from(
         new Set(Array.from(byKey.values()).map((x) => x.phone).filter(Boolean) as string[])
       );
       if (phones.length > 0) {
+        const phoneVariants = Array.from(
+          new Set(
+            phones.flatMap((p) => [p, `+${p}`, p.startsWith('62') ? `0${p.slice(2)}` : ''].filter(Boolean))
+          )
+        );
         const matchedContacts = await db
           .select({ id: contacts.id, namaLengkap: contacts.namaLengkap, nomorWhatsapp: contacts.nomorWhatsapp })
           .from(contacts)
-          .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phones)));
+          .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phoneVariants)));
         const contactByPhone = new Map(
           matchedContacts
             .filter((c) => Boolean(c.nomorWhatsapp))
@@ -1189,6 +1209,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         return reply.send({ success: false, skipped: true });
       }
       const targetSession = req.body?.session?.trim() || row.conv.wahaSession || undefined;
+      const privacy = await wahaService.resolveSessionPrivacy(targetSession, companyId);
+      if (!privacy.sendOnlinePresence) {
+        return reply.send({ success: true, skippedByPrivacy: true });
+      }
       const res = await wahaService.setTyping(targetWa, Boolean(req.body?.typing), targetSession);
       return reply.send({ success: res.success, error: res.error });
     } catch (error: any) {

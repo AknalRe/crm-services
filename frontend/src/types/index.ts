@@ -76,6 +76,17 @@ export interface CampaignRecipient {
 
 export type OmnichannelType = 'WHATSAPP' | 'WHATSAPP_CLOUD' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
 
+export interface WahaSessionPrivacyRule {
+  autoReadOnOpen: boolean;
+  sendOnlinePresence: boolean;
+  readReceipts: boolean;
+}
+
+export interface WahaPrivacyConfig {
+  general: WahaSessionPrivacyRule;
+  sessions: Record<string, Partial<WahaSessionPrivacyRule>>;
+}
+
 export interface ChannelAccount {
   id: string;
   channel: OmnichannelType;

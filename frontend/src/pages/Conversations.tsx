@@ -75,6 +75,7 @@ import {
   ProductItem,
   SavedStickerItem,
   SharedContactMetadataItem,
+  WahaPrivacyConfig,
   WahaSessionItem,
 } from '../types';
 import {
@@ -413,6 +414,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [sessions, setSessions] = useState<WahaSessionItem[]>([]);
   const [defaultWahaSession, setDefaultWahaSession] = useState<string>('');
   const [selectedSession, setSelectedSession] = useState<string>('');
+  const [wahaPrivacy, setWahaPrivacy] = useState<WahaPrivacyConfig | null>(null);
   const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
   const [showContactPanel, setShowContactPanel] = useState<boolean>(readContactPanelPref);
   const [showListFilters, setShowListFilters] = useState(false);
@@ -692,6 +694,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
       .getChannels()
       .then((list) => setChannelAccounts(list || []))
       .catch(() => {});
+    api
+      .getWahaPrivacy()
+      .then((priv) => setWahaPrivacy(priv || null))
+      .catch(() => {});
 
     const unsubSla = subscribeLiveEvent('sla:breach', (data: any) => {
       toast.error(`SLA terlewat (${data?.waitingMinutes || '?'} mnt belum dibalas)`);
@@ -746,7 +752,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setChannelDisplayNameDraft(selectedConversation.channelDisplayName || '');
       setExcludeReasonDraft(selectedConversation.excludeReason || 'Bukan Customer');
       if (selectedConversation.isGroup || selectedConversation.externalThreadId?.endsWith('@g.us')) {
-        void fetchParticipants(selectedConversation.id, false);
+        void fetchParticipants(selectedConversation.id, true);
       } else {
         setParticipantsData(null);
       }
@@ -929,7 +935,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setShowInteractiveComposer((v) => (target === 'INTERACTIVE' ? !v : false));
     setShowLocationComposer((v) => (target === 'LOCATION' ? !v : false));
     setShowContactSharePicker((v) => (target === 'CONTACT' ? !v : false));
-    setShowMentionPicker((v) => (target === 'MENTION' ? !v : false));
+    setShowMentionPicker((v) => {
+      const nextOpen = target === 'MENTION' ? !v : false;
+      if (
+        nextOpen &&
+        selectedConversation &&
+        (selectedConversation.isGroup || selectedConversation.externalThreadId?.endsWith('@g.us')) &&
+        (!participantsData || participantsData.participants.length === 0 || participantsData.syncError)
+      ) {
+        void fetchParticipants(selectedConversation.id, true);
+      }
+      return nextOpen;
+    });
     if (target === 'MENTION') {
       setMentionFilter('');
       setMentionAnchorIndex(inputText.length);
@@ -1226,6 +1243,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
       if (!/\s/.test(query) && query.length <= 25) {
         setMentionFilter(query.toLowerCase());
         setMentionAnchorIndex(lastAt);
+        if (
+          !showMentionPicker &&
+          selectedConversation &&
+          (selectedConversation.isGroup || selectedConversation.externalThreadId?.endsWith('@g.us')) &&
+          (!participantsData || participantsData.participants.length === 0 || participantsData.syncError)
+        ) {
+          void fetchParticipants(selectedConversation.id, true);
+        }
         setShowMentionPicker(true);
       } else {
         setShowMentionPicker(false);
@@ -1241,6 +1266,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
       composerMode !== 'REPLY' ||
       ((selectedConversation.channel || 'WHATSAPP').toUpperCase() !== 'WHATSAPP')
     ) {
+      return;
+    }
+    const activePrivacySession = selectedSession || selectedConversation.wahaSession || '';
+    const sessionPrivacyOverride = activePrivacySession ? wahaPrivacy?.sessions?.[activePrivacySession] : undefined;
+    const allowOnlinePresence =
+      typeof sessionPrivacyOverride?.sendOnlinePresence === 'boolean'
+        ? sessionPrivacyOverride.sendOnlinePresence
+        : wahaPrivacy?.general?.sendOnlinePresence ?? true;
+    if (!allowOnlinePresence) {
       return;
     }
     const convId = selectedConversation.id;
@@ -1271,6 +1305,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
       if ((selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP') {
         if (res.seenSent) {
           toast.success('Pesan ditandai dibaca & tanda seen dikirim ke WhatsApp');
+        } else if (res.skippedByPrivacy) {
+          toast.info(res.error || 'Unread CRM direset (centang biru dinonaktifkan di pengaturan privasi)');
         } else if (res.error) {
           toast.error(`Unread CRM direset, namun WhatsApp seen gagal: ${res.error}`);
         } else {
@@ -2247,6 +2283,71 @@ export const Conversations: React.FC<ConversationsProps> = ({
     );
   }
 
+  const unifiedSessionOptions = useMemo(() => {
+    const options: Array<{
+      value: string;
+      label: string;
+      channel: OmnichannelType;
+    }> = [];
+    const seen = new Set<string>();
+
+    for (const s of sessions) {
+      if (!s.name) continue;
+      const val = `WA:${s.name}`;
+      if (seen.has(val)) continue;
+      seen.add(val);
+      const mePhone = s.me?.id ? s.me.id.split('@')[0] : '';
+      const suffix = s.me?.pushName || mePhone;
+      options.push({
+        value: val,
+        label: `WA • ${s.name}${suffix ? ` (${suffix})` : ''}`,
+        channel: 'WHATSAPP',
+      });
+    }
+
+    for (const c of conversations) {
+      const ch = ((c.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+      if (ch === 'WHATSAPP' && c.wahaSession) {
+        const val = `WA:${c.wahaSession.trim()}`;
+        if (!seen.has(val)) {
+          seen.add(val);
+          options.push({
+            value: val,
+            label: `WA • ${c.wahaSession.trim()}`,
+            channel: 'WHATSAPP',
+          });
+        }
+      }
+      if (c.channelAccountId && !seen.has(`ACC:${c.channelAccountId}`)) {
+        seen.add(`ACC:${c.channelAccountId}`);
+        const accLabel = c.channelAccountName || c.channelAccountId;
+        options.push({
+          value: `ACC:${c.channelAccountId}`,
+          label: `${CHANNEL_META[ch]?.short || ch} • ${accLabel}`,
+          channel: ch,
+        });
+      }
+    }
+
+    for (const acc of channelAccounts) {
+      const val = `ACC:${acc.id}`;
+      if (seen.has(val)) continue;
+      seen.add(val);
+      options.push({
+        value: val,
+        label: `${CHANNEL_META[acc.channel]?.short || acc.channel} • ${acc.name}`,
+        channel: acc.channel,
+      });
+    }
+
+    return options;
+  }, [sessions, conversations, channelAccounts]);
+
+  const filteredUnifiedSessionOptions = useMemo(
+    () => unifiedSessionOptions.filter((opt) => channelFilter === 'ALL' || opt.channel === channelFilter),
+    [unifiedSessionOptions, channelFilter]
+  );
+
   const filteredConversations = conversations.filter((c) => {
     const convStatus = (c.status || 'OPEN').toUpperCase();
     const convChannel = (c.channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
@@ -2255,7 +2356,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
     if (metricFilter === 'EXCLUDED' && !c.excludeFromMetrics && !c.isGroup) return false;
     if (metricFilter === 'GROUPS' && !c.isGroup) return false;
     if (channelFilter !== 'ALL' && convChannel !== channelFilter) return false;
-    if (accountFilter !== 'ALL' && c.channelAccountId !== accountFilter) return false;
+    if (accountFilter !== 'ALL') {
+      if (accountFilter.startsWith('WA:')) {
+        const targetSess = accountFilter.slice(3).toLowerCase();
+        if (convChannel !== 'WHATSAPP' || (c.wahaSession || '').trim().toLowerCase() !== targetSess) {
+          return false;
+        }
+      } else if (accountFilter.startsWith('ACC:')) {
+        if (c.channelAccountId !== accountFilter.slice(4)) return false;
+      } else if (c.channelAccountId !== accountFilter) {
+        return false;
+      }
+    }
     if (assigneeFilter === 'MINE' && (!currentUser?.id || c.assignedAgentId !== currentUser.id)) {
       return false;
     }
@@ -2361,6 +2473,36 @@ export const Conversations: React.FC<ConversationsProps> = ({
             ))}
           </div>
 
+          {unifiedSessionOptions.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <select
+                value={accountFilter}
+                onChange={(e) => setAccountFilter(e.target.value)}
+                aria-label="Filter Sesi atau Akun Kanal"
+                className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500"
+              >
+                <option value="ALL">
+                  Semua Sesi / Akun ({filteredUnifiedSessionOptions.length})
+                </option>
+                {filteredUnifiedSessionOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              {accountFilter !== 'ALL' && (
+                <button
+                  type="button"
+                  onClick={() => setAccountFilter('ALL')}
+                  title="Reset filter sesi"
+                  className="h-8 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[11px] font-medium text-gray-600 shrink-0"
+                >
+                  Semua
+                </button>
+              )}
+            </div>
+          )}
+
           {!showListFilters && activeAdvancedFilterCount > 0 && (
             <div className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-indigo-50/70 border border-indigo-100 text-[10px] text-indigo-800">
               <span className="truncate font-medium">
@@ -2379,7 +2521,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       ? 'Milik Saya'
                       : 'Belum Ditugaskan'
                     : null,
-                  accountFilter !== 'ALL' ? 'Akun Khusus' : null,
+                  accountFilter !== 'ALL'
+                    ? unifiedSessionOptions.find((o) => o.value === accountFilter)?.label || 'Sesi/Akun Khusus'
+                    : null,
                 ]
                   .filter(Boolean)
                   .join(' • ')}
@@ -2460,21 +2604,21 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 )}
               </div>
 
-              {channelAccounts.length > 0 && (
+              {unifiedSessionOptions.length > 0 && (
                 <select
                   value={accountFilter}
                   onChange={(e) => setAccountFilter(e.target.value)}
-                  aria-label="Filter Akun Kanal"
+                  aria-label="Filter Sesi atau Akun Kanal"
                   className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="ALL">Semua Akun Kanal ({channelAccounts.length})</option>
-                  {channelAccounts
-                    .filter((acc) => channelFilter === 'ALL' || acc.channel === channelFilter)
-                    .map((acc) => (
-                      <option key={acc.id} value={acc.id}>
-                        {CHANNEL_META[acc.channel]?.short || acc.channel} • {acc.name}
-                      </option>
-                    ))}
+                  <option value="ALL">
+                    Semua Sesi / Akun ({filteredUnifiedSessionOptions.length})
+                  </option>
+                  {filteredUnifiedSessionOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
                 </select>
               )}
 
@@ -5522,14 +5666,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <AtSign className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                       <span>Sebut / Mention Partisipan</span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowMentionPicker(false)}
-                      title="Tutup Menu Mention"
-                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0 cursor-pointer"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {(selectedConversation.isGroup || selectedConversation.externalThreadId?.endsWith('@g.us')) && (
+                        <button
+                          type="button"
+                          disabled={loadingParticipants}
+                          onClick={() => void fetchParticipants(selectedConversation.id, true)}
+                          title="Muat ulang daftar partisipan dari WAHA"
+                          className="h-6 px-1.5 rounded text-[10px] font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 inline-flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${loadingParticipants ? 'animate-spin' : ''}`} />
+                          <span>Sync WAHA</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowMentionPicker(false)}
+                        title="Tutup Menu Mention"
+                        className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   <input
@@ -5541,7 +5699,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   />
 
                   <div className="max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
-                    {availableMentionCandidates.length === 0 ? (
+                    {loadingParticipants && availableMentionCandidates.length === 0 ? (
+                      <div className="py-4 text-center text-[11px] text-indigo-600">
+                        Mengambil daftar partisipan dari WAHA...
+                      </div>
+                    ) : availableMentionCandidates.length === 0 ? (
                       <div className="py-4 text-center text-[11px] text-gray-500">
                         {mentionFilter
                           ? `Tidak ada partisipan cocok dengan "${mentionFilter}"`
