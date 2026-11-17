@@ -625,6 +625,16 @@ export const api = {
     const res = await client.post('/auth/setup', payload);
     return res.data.data;
   },
+  registerCompany: async (payload: {
+    companyName: string;
+    name: string;
+    email: string;
+    password: string;
+    phone?: string;
+  }): Promise<{ user: { name: string; email: string } }> => {
+    const res = await client.post('/auth/register-company', payload);
+    return res.data.data;
+  },
   loginAuth: async (payload: { email: string; password: string }): Promise<{ user: { name: string; email: string } }> => {
     const res = await client.post('/auth/login', payload);
     return res.data.data;

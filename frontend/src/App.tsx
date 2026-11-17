@@ -254,7 +254,7 @@ function AppShell() {
       setAuthStatus(data);
     } catch (err) {
       console.error('Failed to get Auth status:', err);
-      setAuthStatus({ initialized: false, authenticated: false, user: null });
+      setAuthStatus({ initialized: true, authenticated: false, user: null });
     } finally {
       setAuthChecked(true);
     }

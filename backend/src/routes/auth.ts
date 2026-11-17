@@ -584,47 +584,54 @@ export async function getCurrentAuthUser(req: FastifyRequest): Promise<AuthUserS
     return (req as any)._authUser || null;
   }
 
-  const sysMap = await getSystemSettingMap();
-  await ensurePrimaryAdminSeeded(sysMap);
+  try {
+    const sysMap = await getSystemSettingMap();
+    await ensurePrimaryAdminSeeded(sysMap);
 
-  const secret = sysMap['crm_auth_secret'] || '';
-  const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
-  const verified = token && secret ? verifyToken(token, secret) : null;
-  if (!verified?.email) {
+    const secret = sysMap['crm_auth_secret'] || '';
+    const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
+    const verified = token && secret ? verifyToken(token, secret) : null;
+    if (!verified?.email) {
+      (req as any)._authResolved = true;
+      (req as any)._authUser = null;
+      return null;
+    }
+
+    const rows = await db
+      .select()
+      .from(crmAgents)
+      .where(eq(crmAgents.email, verified.email.toLowerCase()));
+    const agent = rows[0];
+    if (!agent || !agent.isActive) {
+      (req as any)._authResolved = true;
+      (req as any)._authUser = null;
+      return null;
+    }
+
+    const headerOverride = String(req.headers['x-company-id'] || '').trim() || undefined;
+    const session = await resolveAgentRoleSession(
+      agent,
+      headerOverride || verified.activeCompanyId || undefined
+    );
+
+    // Block suspended tenant logins/sessions for non-platform admins
+    if (!session.isPlatformAdmin && session.companyStatus === 'SUSPENDED') {
+      (req as any)._authResolved = true;
+      (req as any)._authUser = null;
+      return null;
+    }
+
+    (req as any)._authResolved = true;
+    (req as any)._authUser = session;
+    (req as any).authUser = session;
+    (req as any).companyId = session.companyId;
+    return session;
+  } catch (err: any) {
+    req.log?.warn?.({ err }, 'Failed to resolve current auth user session');
     (req as any)._authResolved = true;
     (req as any)._authUser = null;
     return null;
   }
-
-  const rows = await db
-    .select()
-    .from(crmAgents)
-    .where(eq(crmAgents.email, verified.email.toLowerCase()));
-  const agent = rows[0];
-  if (!agent || !agent.isActive) {
-    (req as any)._authResolved = true;
-    (req as any)._authUser = null;
-    return null;
-  }
-
-  const headerOverride = String(req.headers['x-company-id'] || '').trim() || undefined;
-  const session = await resolveAgentRoleSession(
-    agent,
-    headerOverride || verified.activeCompanyId || undefined
-  );
-
-  // Block suspended tenant logins/sessions for non-platform admins
-  if (!session.isPlatformAdmin && session.companyStatus === 'SUSPENDED') {
-    (req as any)._authResolved = true;
-    (req as any)._authUser = null;
-    return null;
-  }
-
-  (req as any)._authResolved = true;
-  (req as any)._authUser = session;
-  (req as any).authUser = session;
-  (req as any).companyId = session.companyId;
-  return session;
 }
 
 export { SESSION_COOKIE };
@@ -648,11 +655,29 @@ export function requirePermission(...allowed: PermissionKey[]) {
 export default async function authRouter(fastify: FastifyInstance) {
   fastify.get('/status', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const map = await getSystemSettingMap();
-      await ensurePrimaryAdminSeeded(map);
+      let map: Record<string, string> = {};
+      try {
+        map = await getSystemSettingMap();
+      } catch (err: any) {
+        req.log?.warn?.({ err }, 'Failed getSystemSettingMap in /status');
+      }
 
-      const agents = await db.select().from(crmAgents);
-      const initialized = agents.length > 0 || Boolean(map['crm_admin_email'] && map['crm_admin_password_hash']);
+      try {
+        await ensurePrimaryAdminSeeded(map);
+      } catch (err: any) {
+        req.log?.warn?.({ err }, 'Failed ensurePrimaryAdminSeeded in /status');
+      }
+
+      let agentsCount = 0;
+      try {
+        const agents = await db.select({ id: crmAgents.id }).from(crmAgents).limit(10);
+        agentsCount = agents.length;
+      } catch (err: any) {
+        req.log?.warn?.({ err }, 'Failed to query crmAgents in /status');
+      }
+
+      const initialized =
+        agentsCount > 0 || Boolean(map['crm_admin_email'] && map['crm_admin_password_hash']);
       const saasRegistrationEnabled = map['saas_registration_enabled'] !== 'false';
 
       if (!initialized) {
@@ -662,7 +687,13 @@ export default async function authRouter(fastify: FastifyInstance) {
         });
       }
 
-      const user = await getCurrentAuthUser(req);
+      let user: AuthUserSession | null = null;
+      try {
+        user = await getCurrentAuthUser(req);
+      } catch (err: any) {
+        req.log?.warn?.({ err }, 'Failed getCurrentAuthUser in /status');
+      }
+
       return reply.send({
         success: true,
         data: {
@@ -673,7 +704,17 @@ export default async function authRouter(fastify: FastifyInstance) {
         },
       });
     } catch (err: any) {
-      return reply.status(500).send({ success: false, error: err.message });
+      req.log?.error?.({ err }, 'Unhandled error in /status');
+      // Default to initialized: true so user is never trapped in setup mode
+      return reply.send({
+        success: true,
+        data: {
+          initialized: true,
+          authenticated: false,
+          saasRegistrationEnabled: true,
+          user: null,
+        },
+      });
     }
   });
 
