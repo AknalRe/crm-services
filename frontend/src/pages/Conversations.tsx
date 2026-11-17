@@ -1716,16 +1716,34 @@ export const Conversations: React.FC<ConversationsProps> = ({
         scope,
         selectedSession || undefined
       );
-      const deletedId = deleteMessageTarget.id;
-      setMessages((prev) => prev.filter((m) => m.id !== deletedId));
-      if (replyingToMessage?.id === deletedId) {
+      const targetId = deleteMessageTarget.id;
+      const nowIso = new Date().toISOString();
+      const currentActorName = currentUser?.name || 'CS';
+
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== targetId) return m;
+          const prevMeta = parseChatMessageMeta(m) || {};
+          return {
+            ...m,
+            metadataJson: JSON.stringify({
+              ...prevMeta,
+              revoked: true,
+              revokeScope: scope,
+              revokedAt: nowIso,
+              revokedBy: currentActorName,
+            }),
+          };
+        })
+      );
+      if (replyingToMessage?.id === targetId) {
         setReplyingToMessage(null);
       }
       setDeleteMessageTarget(null);
       toast.success(
         scope === 'EVERYONE'
-          ? 'Pesan berhasil ditarik dari WhatsApp dan dihapus dari CRM'
-          : 'Pesan dihapus dari riwayat CRM'
+          ? 'Pesan berhasil ditarik dari WhatsApp dan ditandai ditarik di CRM'
+          : 'Pesan ditandai dihapus pada riwayat CRM'
       );
       void fetchConversations();
     } catch (err: any) {
@@ -3864,6 +3882,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 }
 
                 const msgMeta = parseChatMessageMeta(msg);
+                const isRevoked = Boolean(msgMeta?.revoked);
                 const isStickerMsg = Boolean(
                   msgMeta?.kind === 'STICKER' ||
                     (msg.mediaUrl && msg.mediaType === 'image' && msg.body.trim() === '[Stiker]')
@@ -3894,7 +3913,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           className={`w-full min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
                             isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
                           } ${
-                            isStickerMsg && msg.mediaUrl
+                            isRevoked
+                              ? 'bg-rose-50/85 border-rose-300 text-rose-950'
+                              : isStickerMsg && msg.mediaUrl
                               ? 'bg-transparent border-transparent px-1 py-1'
                               : isFailed
                               ? 'bg-red-50/70 border-red-200 text-gray-900'
@@ -3905,6 +3926,26 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               : 'bg-white border-gray-200 text-gray-900'
                           }`}
                         >
+                        {isRevoked && (
+                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-100/90 border border-rose-300 text-[11px] font-semibold text-rose-900">
+                            <Trash2 className="w-3.5 h-3.5 shrink-0 text-rose-600" />
+                            <span>
+                              {msgMeta?.revokeScope === 'EVERYONE'
+                                ? 'Pesan ditarik (WhatsApp & CRM)'
+                                : msgMeta?.revokeScope === 'ME'
+                                ? 'Pesan dihapus di CRM'
+                                : 'Pesan ditarik oleh pengirim'}
+                              {msgMeta?.revokedBy && (
+                                <span className="font-normal"> • oleh {msgMeta.revokedBy}</span>
+                              )}
+                              {msgMeta?.revokedAt && (
+                                <span className="ml-1 text-[10px] font-mono font-normal opacity-80">
+                                  ({new Date(msgMeta.revokedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        )}
                         {!isOutbound &&
                           !isCsat &&
                           (selectedConversation.isGroup || msg.senderName || msg.senderPhone) && (
@@ -4219,13 +4260,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                     Terkirim via fallback teks terformat (tombol native dibatasi engine WAHA)
                                   </div>
                                 )}
-                              </div>
-                            );
-                          }
-                          if (meta?.revoked) {
-                            return (
-                              <div className="italic text-[11px] text-gray-500">
-                                Pesan ini telah ditarik oleh pengirim
                               </div>
                             );
                           }
@@ -4672,15 +4706,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 <span>Reaksi</span>
                               </button>
                             )}
-                            <button
-                              type="button"
-                              onClick={() => setDeleteMessageTarget(msg)}
-                              title="Hapus Pesan (Tarik / Hapus Pribadi)"
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 text-gray-600 hover:text-red-600 font-medium transition-colors"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              <span>Hapus</span>
-                            </button>
+                            {!isRevoked && (
+                              <button
+                                type="button"
+                                onClick={() => setDeleteMessageTarget(msg)}
+                                title="Hapus Pesan (Tarik / Hapus Pribadi)"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 text-gray-600 hover:text-red-600 font-medium transition-colors"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Hapus</span>
+                              </button>
+                            )}
                           </div>
                         )}
 
@@ -7571,7 +7607,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </div>
                       <p className="text-[11px] text-red-700/90 leading-snug">
                         {pullDisabledReason ||
-                          'Menarik pesan agar terhapus di WhatsApp pelanggan/grup sekaligus menghapusnya dari riwayat CRM.'}
+                          'Menarik pesan agar terhapus di WhatsApp pelanggan/grup. Di CRM pesan tetap tersimpan untuk audit dengan tanda merah ditarik.'}
                       </p>
                     </button>
 
@@ -7584,7 +7620,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <div className="font-semibold text-gray-900 flex items-center justify-between gap-2">
                         <span>
                           {deletingMessageScope === 'ME'
-                            ? 'Menghapus dari CRM...'
+                            ? 'Menandai pesan dihapus...'
                             : 'Hapus Pribadi (Hanya di CRM)'}
                         </span>
                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-600">
@@ -7592,7 +7628,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-gray-600 leading-snug">
-                        Menghapus pesan dari kotak masuk CRM di sisi kita saja, tanpa menarik pesan di WhatsApp pelanggan.
+                        Menandai pesan sebagai dihapus pada riwayat CRM dengan label merah untuk audit, tanpa menarik pesan di WhatsApp pelanggan.
                       </p>
                     </button>
                   </div>

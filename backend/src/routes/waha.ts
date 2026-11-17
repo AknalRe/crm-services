@@ -1603,10 +1603,34 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 .set({ metadataJson: JSON.stringify({ ...prevMeta, reactions: filtered }) })
                 .where(eq(chatMessages.id, targetMsg.id));
             } else {
+              const nowIso = now.toISOString();
               await db
                 .update(chatMessages)
-                .set({ metadataJson: JSON.stringify({ ...prevMeta, revoked: true }) })
+                .set({
+                  metadataJson: JSON.stringify({
+                    ...prevMeta,
+                    revoked: true,
+                    revokedAt: nowIso,
+                    revokeScope: 'EVERYONE',
+                  }),
+                })
                 .where(eq(chatMessages.id, targetMsg.id));
+
+              const latestMsgRows = await db
+                .select({ id: chatMessages.id })
+                .from(chatMessages)
+                .where(eq(chatMessages.conversationId, targetMsg.conversationId))
+                .orderBy(desc(chatMessages.createdAt))
+                .limit(1);
+              if (latestMsgRows[0]?.id === targetMsg.id) {
+                await db
+                  .update(conversations)
+                  .set({
+                    lastMessage: '🚫 Pesan ditarik',
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(conversations.id, targetMsg.conversationId));
+              }
             }
 
             liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId }, companyId);
@@ -2233,10 +2257,34 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 prevMeta = {};
               }
             }
+            const nowIso = new Date().toISOString();
             await db
               .update(chatMessages)
-              .set({ metadataJson: JSON.stringify({ ...prevMeta, revoked: true }) })
+              .set({
+                metadataJson: JSON.stringify({
+                  ...prevMeta,
+                  revoked: true,
+                  revokedAt: nowIso,
+                  revokeScope: 'EVERYONE',
+                }),
+              })
               .where(eq(chatMessages.id, targetMsg.id));
+
+            const latestMsgRows = await db
+              .select({ id: chatMessages.id })
+              .from(chatMessages)
+              .where(eq(chatMessages.conversationId, targetMsg.conversationId))
+              .orderBy(desc(chatMessages.createdAt))
+              .limit(1);
+            if (latestMsgRows[0]?.id === targetMsg.id) {
+              await db
+                .update(conversations)
+                .set({
+                  lastMessage: '🚫 Pesan ditarik',
+                  updatedAt: new Date(),
+                })
+                .where(eq(conversations.id, targetMsg.conversationId));
+            }
             liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId }, companyId);
           }
           return reply.send({ success: true, message: 'Message revocation processed' });

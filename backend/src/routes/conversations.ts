@@ -2945,7 +2945,35 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         }
       }
 
-      await db.delete(chatMessages).where(eq(chatMessages.id, msg.id));
+      // Preserve audit trail: soft delete by updating metadataJson with revoked status
+      const currentUser = await getCurrentAuthUser(req);
+      const revokedBy = currentUser?.name || 'CS';
+      const revokedAt = new Date().toISOString();
+
+      let prevMeta: Record<string, any> = {};
+      if (msg.metadataJson) {
+        try {
+          prevMeta = JSON.parse(msg.metadataJson);
+        } catch {
+          prevMeta = {};
+        }
+      }
+
+      const updatedMeta = {
+        ...prevMeta,
+        revoked: true,
+        revokedAt,
+        revokedBy,
+        revokeScope: scope,
+      };
+
+      const [updatedMsg] = await db
+        .update(chatMessages)
+        .set({
+          metadataJson: JSON.stringify(updatedMeta),
+        })
+        .where(eq(chatMessages.id, msg.id))
+        .returning();
 
       const remainingLatest = await db
         .select()
@@ -2960,10 +2988,25 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .limit(1);
 
       const nextLast = remainingLatest[0];
+      let nextLastBody: string | null = null;
+      if (nextLast) {
+        let meta: any = {};
+        if (nextLast.metadataJson) {
+          try {
+            meta = JSON.parse(nextLast.metadataJson);
+          } catch {}
+        }
+        if (meta?.revoked) {
+          nextLastBody = meta.revokeScope === 'EVERYONE' ? '🚫 Pesan ditarik' : '🚫 Pesan dihapus';
+        } else {
+          nextLastBody = nextLast.body;
+        }
+      }
+
       await db
         .update(conversations)
         .set({
-          lastMessage: nextLast ? nextLast.body : null,
+          lastMessage: nextLastBody,
           lastMessageAt: nextLast ? nextLast.createdAt : null,
           updatedAt: new Date(),
         })
@@ -2975,7 +3018,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         success: true,
         data: {
           deletedId: msg.id,
+          revokedId: msg.id,
           scope,
+          message: updatedMsg || { ...msg, metadataJson: JSON.stringify(updatedMeta) },
         },
       });
     } catch (error: any) {

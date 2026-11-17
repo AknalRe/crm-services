@@ -293,6 +293,9 @@ export interface ChatMessageMetadata {
   usedFallbackText?: boolean;
   fallbackReason?: string;
   revoked?: boolean;
+  revokedAt?: string;
+  revokedBy?: string;
+  revokeScope?: 'ME' | 'EVERYONE';
   forwarded?: boolean;
   forwardingScore?: number;
   forwardedFromSender?: string;
