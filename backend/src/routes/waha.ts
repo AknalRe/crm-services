@@ -500,12 +500,14 @@ export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta 
 
 export function extractPhoneCandidatesFromWahaPayload(payload: any): string[] {
   const raw = [
+    payload?.to,
     payload?.from,
     payload?.chatId,
     payload?._data?.Info?.SenderAlt,
     payload?._data?.Info?.Chat,
     payload?._data?.Info?.RecipientAlt,
     payload?._data?.key?.remoteJidAlt,
+    payload?._data?.key?.remoteJid,
     payload?._data?.key?.senderPn,
     payload?._data?.key?.participantPn,
     payload?.participant,
@@ -1220,15 +1222,27 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         }
       }
 
-      // 2. Incoming Messages (message / message.any) - personal 1:1 chats (@c.us / @s.whatsapp.net / @lid)
+      // 2. Incoming & Direct Outgoing Messages (message / message.any)
       const isInboundMessageEvent = event === 'message' || event === 'message.any';
-      const rawFrom = String(
-        payload?.from ||
-        payload?.chatId ||
-        payload?._data?.Info?.Chat ||
-        payload?._data?.key?.remoteJid ||
-        ''
-      ).trim();
+      const isFromMe = isWahaFromMe(payload);
+      const rawTarget = isFromMe
+        ? String(
+            payload?.to ||
+            payload?.chatId ||
+            payload?._data?.key?.remoteJid ||
+            payload?._data?.Info?.Chat ||
+            payload?.from ||
+            ''
+          ).trim()
+        : String(
+            payload?.from ||
+            payload?.chatId ||
+            payload?._data?.Info?.Chat ||
+            payload?._data?.key?.remoteJid ||
+            ''
+          ).trim();
+
+      const rawFrom = rawTarget;
       const rawChatId = String(payload?.chatId || rawFrom).trim();
       const lowerFrom = rawFrom.toLowerCase();
       const lowerChat = rawChatId.toLowerCase();
@@ -1249,9 +1263,6 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
       if (isInboundMessageEvent && payload) {
         const now = new Date();
-        if (isWahaFromMe(payload)) {
-          return reply.send({ success: true, message: 'Webhook ignored (fromMe)' });
-        }
         if (!isPersonalChat && !isGroupChat) {
           wahaService.recordWebhookEvent({
             receivedAt: now.toISOString(),
@@ -1268,11 +1279,25 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         const { exactIds } = extractWahaMessageIds(payload);
         const msgId = exactIds[0] || null;
 
+        // Dedup: for group chats, scope by session so each session inbox is populated independently.
+        // For personal chats, global dedup by wahaMessageId is sufficient.
         if (msgId) {
+          const isGroupForDedup =
+            !rawFrom ||
+            rawFrom.toLowerCase().endsWith('@g.us') ||
+            String(payload?.chatId || '').toLowerCase().endsWith('@g.us');
+          const dedupConditions = isGroupForDedup && inboundSession
+            ? and(
+                eq(chatMessages.companyId, companyId),
+                eq(chatMessages.wahaMessageId, msgId),
+                eq(chatMessages.wahaSession, inboundSession)
+              )
+            : and(eq(chatMessages.companyId, companyId), eq(chatMessages.wahaMessageId, msgId));
+
           const dupMsg = await db
             .select({ id: chatMessages.id, conversationId: chatMessages.conversationId })
             .from(chatMessages)
-            .where(and(eq(chatMessages.companyId, companyId), eq(chatMessages.wahaMessageId, msgId)))
+            .where(dedupConditions)
             .limit(1);
           if (dupMsg[0]) {
             wahaService.recordWebhookEvent({
@@ -1281,7 +1306,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               session: inboundSession,
               from: rawFrom,
               outcome: 'DEDUP',
-              note: 'Pesan duplikat diabaikan',
+              note: isFromMe ? 'Pesan keluar WA (fromMe) sudah dicatat sebelumnya' : 'Pesan duplikat diabaikan',
             }, companyId);
             return reply.send({ success: true, deduplicated: true, message: 'Duplicate webhook ignored' });
           }
@@ -1733,10 +1758,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             status: 'OPEN',
             lastMessage: effectiveConversationPreview,
             lastMessageAt: now,
-            firstInboundAt: now,
-            lastInboundAt: now,
+            firstInboundAt: isFromMe ? null : now,
+            firstResponseAt: isFromMe ? now : null,
+            lastInboundAt: isFromMe ? null : now,
             sessionStartedAt: now,
-            unreadCount: 1,
+            unreadCount: isFromMe ? 0 : 1,
             createdAt: now,
             updatedAt: now,
           });
@@ -1770,11 +1796,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 ? now
                 : existingConv.sessionStartedAt || existingConv.firstInboundAt || existingConv.createdAt,
               resolvedAt: isReopeningFromResolved ? null : existingConv.resolvedAt,
-              firstInboundAt: existingConv.firstInboundAt || now,
-              lastInboundAt: now,
+              firstInboundAt: isFromMe ? existingConv.firstInboundAt : (existingConv.firstInboundAt || now),
+              firstResponseAt: isFromMe ? sql`COALESCE(${conversations.firstResponseAt}, ${now})` : existingConv.firstResponseAt,
+              lastInboundAt: isFromMe ? existingConv.lastInboundAt : now,
               lastMessage: effectiveConversationPreview,
               lastMessageAt: now,
-              unreadCount: sql`${conversations.unreadCount} + 1`,
+              unreadCount: isFromMe ? existingConv.unreadCount : sql`${conversations.unreadCount} + 1`,
               updatedAt: now,
             })
             .where(eq(conversations.id, convId));
@@ -1811,13 +1838,13 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           companyId,
           conversationId: convId,
           contactId: contact.id,
-          direction: 'INBOUND',
+          direction: isFromMe ? 'OUTBOUND' : 'INBOUND',
           messageType: richData.messageType,
           channel: 'WHATSAPP',
           wahaSession: inboundSession,
           senderJid: isGroupChat ? groupSenderJid : rawFrom || null,
           senderPhone: isGroupChat ? groupSenderPhone : fromPhone || null,
-          senderName: isGroupChat ? groupSenderName : notifyName || null,
+          senderName: isGroupChat ? groupSenderName : isFromMe ? (notifyName || 'WhatsApp Langsung') : notifyName || null,
           body,
           mediaUrl,
           mediaType,
@@ -1827,8 +1854,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           replyToBody,
           replyToSender,
           wahaMessageId: msgId,
-          status: 'DELIVERED',
-          ackStatus: 2,
+          status: isFromMe ? 'SENT' : 'DELIVERED',
+          ackStatus: isFromMe ? 1 : 2,
+          sentAt: isFromMe ? now : null,
           createdAt: now,
         });
 
@@ -1838,7 +1866,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           session: inboundSession,
           from: isGroupChat ? (groupSenderPhone || groupJid || rawFrom) : (fromPhone || rawFrom),
           outcome: 'PROCESSED',
-          note: existingConv
+          note: isFromMe
+            ? 'Pesan keluar dari WA langsung (fromMe) dicatat ke inbox'
+            : existingConv
             ? isGroupChat
               ? 'Pesan grup masuk ditambahkan ke inbox'
               : 'Pesan masuk ditambahkan ke inbox'
@@ -1856,7 +1886,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         liveEvents.emit('conversations:update', { conversationId: convId }, companyId);
         liveEvents.emit('tracking:update', { conversationId: convId }, companyId);
 
-        if (body && !isGroupChat && !contact.excludeFromMetrics && !existingConv?.excludeFromMetrics) {
+        if (body && !isFromMe && !isGroupChat && !contact.excludeFromMetrics && !existingConv?.excludeFromMetrics) {
           void runWithCompany(companyId, () =>
             handleInboundAutomation({
               conversationId: convId,

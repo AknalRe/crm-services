@@ -578,9 +578,14 @@ export const api = {
     await client.delete(`/agents/roles/${roleId}`);
   },
 
-  // Open Conversation with any contact
-  openConversation: async (contactId: string, session?: string): Promise<Conversation> => {
-    const res = await client.post('/conversations/open', { contactId, session });
+  // Open Conversation with any contact or phone
+  openConversation: async (
+    contactId?: string,
+    session?: string,
+    phone?: string,
+    name?: string
+  ): Promise<Conversation> => {
+    const res = await client.post('/conversations/open', { contactId, session, phone, name });
     return res.data.data;
   },
 

@@ -1,10 +1,10 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { sql, desc, eq, gte, isNotNull, or } from 'drizzle-orm';
+import { and, sql, desc, eq, gte, isNotNull, isNull, or } from 'drizzle-orm';
 import { db } from '../db';
-import { contacts, campaigns, campaignRecipients, conversations, csatResponses } from '../db/schema';
+import { contacts, campaigns, campaignRecipients, conversations, csatResponses, chatMessages } from '../db/schema';
 import { formatCampaign, formatRecipient } from './broadcasts';
 import { CsatCriterionScoreDetail, extractCsatCriteriaDetails } from '../services/csat.service';
-import { getSettingMap, requirePermission } from './auth';
+import { getRequestCompanyId, getSettingMap, requirePermission } from './auth';
 
 function toWibDateKey(d: Date | string | null | undefined): string | null {
   if (!d) return null;
@@ -86,14 +86,18 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
     }
     return requirePermission('dashboard')(req, reply);
   });
-  fastify.get('/stats', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/stats', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const settings = await getSettingMap();
+      const companyId = getRequestCompanyId(req);
+      const settings = await getSettingMap(companyId);
       const slaRaw = Number.parseInt(settings.sla_target_minutes || String(DEFAULT_SLA_TARGET_MINUTES), 10);
       const slaTargetMinutes = Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : DEFAULT_SLA_TARGET_MINUTES;
       const slaTargetSeconds = slaTargetMinutes * 60;
 
-      // Parallel aggregations
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      // Parallel aggregations scoped to companyId
       const [
         allContactsList,
         totalCampaignsRes,
@@ -102,6 +106,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         recentActivityList,
         conversationRows,
         csatRows,
+        todayMsgRows,
       ] = await Promise.all([
         db
           .select({
@@ -110,8 +115,12 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             tanggalLahir: contacts.tanggalLahir,
             nomorWhatsapp: contacts.nomorWhatsapp,
           })
-          .from(contacts),
-        db.select({ count: sql<number>`count(*)` }).from(campaigns),
+          .from(contacts)
+          .where(eq(contacts.companyId, companyId)),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(campaigns)
+          .where(eq(campaigns.companyId, companyId)),
         db
           .select({
             status: campaignRecipients.status,
@@ -120,8 +129,14 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             readAt: campaignRecipients.readAt,
             createdAt: campaignRecipients.createdAt,
           })
-          .from(campaignRecipients),
-        db.select().from(campaigns).orderBy(desc(campaigns.createdAt)).limit(5),
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.companyId, companyId)),
+        db
+          .select()
+          .from(campaigns)
+          .where(eq(campaigns.companyId, companyId))
+          .orderBy(desc(campaigns.createdAt))
+          .limit(5),
         db
           .select({
             recipient: campaignRecipients,
@@ -131,6 +146,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           .from(campaignRecipients)
           .leftJoin(contacts, eq(campaignRecipients.contactId, contacts.id))
           .leftJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
+          .where(eq(campaignRecipients.companyId, companyId))
           .orderBy(desc(campaignRecipients.updatedAt))
           .limit(10),
         db
@@ -139,8 +155,18 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             contact: contacts,
           })
           .from(conversations)
-          .leftJoin(contacts, eq(conversations.contactId, contacts.id)),
-        db.select().from(csatResponses).where(isNotNull(csatResponses.rating)),
+          .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+          .where(eq(conversations.companyId, companyId)),
+        db
+          .select()
+          .from(csatResponses)
+          .where(and(eq(csatResponses.companyId, companyId), isNotNull(csatResponses.rating))),
+        db
+          .select({
+            direction: chatMessages.direction,
+          })
+          .from(chatMessages)
+          .where(and(eq(chatMessages.companyId, companyId), gte(chatMessages.createdAt, todayStart))),
       ]);
 
       const customerContacts = allContactsList.filter(
@@ -246,6 +272,13 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       let openCount = 0;
       let pendingCount = 0;
       let resolvedCount = 0;
+      let unansweredCount = 0;
+      let todayInboundCount = 0;
+      let todayOutboundCount = 0;
+      for (const m of todayMsgRows) {
+        if (m.direction === 'INBOUND') todayInboundCount++;
+        else if (m.direction === 'OUTBOUND') todayOutboundCount++;
+      }
       let frtTotalSec = 0;
       let frtCount = 0;
       let slaMetCount = 0;
@@ -343,6 +376,10 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         if (st === 'RESOLVED') resolvedCount++;
         else if (st === 'PENDING') pendingCount++;
         else openCount++;
+
+        if (st === 'OPEN' && c.firstInboundAt && !c.firstResponseAt) {
+          unansweredCount++;
+        }
 
         const ch = (c.channel || 'WHATSAPP').toUpperCase();
         const chEntry = channelMap.get(ch) || {
@@ -524,8 +561,13 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         openCount,
         pendingCount,
         resolvedCount,
+        unansweredCount,
+        todayInboundCount,
+        todayOutboundCount,
         avgFirstResponseSeconds: frtCount > 0 ? Math.round(frtTotalSec / frtCount) : null,
+        avgFirstResponseMinutes: frtCount > 0 ? Number((frtTotalSec / frtCount / 60).toFixed(1)) : null,
         avgResolutionSeconds: resCount > 0 ? Math.round(resTotalSec / resCount) : null,
+        avgResolutionMinutes: resCount > 0 ? Number((resTotalSec / resCount / 60).toFixed(1)) : null,
         slaTargetSeconds,
         slaMeasuredCount: frtCount,
         slaMetCount,
@@ -604,13 +646,18 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
     Querystring: { kind?: string; filter?: string; value?: string; q?: string };
   }>('/drilldown', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const kind = String(req.query?.kind || 'conversations').toLowerCase().trim();
       const filter = String(req.query?.filter || 'all').toLowerCase().trim();
       const value = req.query?.value !== undefined ? String(req.query.value).trim() : '';
       const q = String(req.query?.q || '').trim().toLowerCase();
 
       if (kind === 'contacts') {
-        const rows = await db.select().from(contacts).orderBy(desc(contacts.createdAt));
+        const rows = await db
+          .select()
+          .from(contacts)
+          .where(eq(contacts.companyId, companyId))
+          .orderBy(desc(contacts.createdAt));
         const nonGroupContacts = rows.filter(
           (c) => (c.kategori || '').trim().toLowerCase() !== 'grup whatsapp'
         );
@@ -679,6 +726,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           .from(campaignRecipients)
           .leftJoin(contacts, eq(campaignRecipients.contactId, contacts.id))
           .leftJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
+          .where(eq(campaignRecipients.companyId, companyId))
           .orderBy(desc(campaignRecipients.updatedAt));
 
         let matched = rows;
@@ -740,12 +788,13 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           db
             .select()
             .from(csatResponses)
-            .where(isNotNull(csatResponses.rating))
+            .where(and(eq(csatResponses.companyId, companyId), isNotNull(csatResponses.rating)))
             .orderBy(desc(csatResponses.submittedAt)),
           db
             .select({ conv: conversations, contact: contacts })
             .from(conversations)
-            .leftJoin(contacts, eq(conversations.contactId, contacts.id)),
+            .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+            .where(eq(conversations.companyId, companyId)),
         ]);
 
         const convMap = new Map(convRows.map((r) => [r.conv.id, r]));
@@ -812,7 +861,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       }
 
       // Default: kind === 'conversations'
-      const settings = await getSettingMap();
+      const settings = await getSettingMap(companyId);
       const slaRaw = Number.parseInt(settings.sla_target_minutes || String(DEFAULT_SLA_TARGET_MINUTES), 10);
       const slaTargetSeconds =
         (Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : DEFAULT_SLA_TARGET_MINUTES) * 60;
@@ -821,6 +870,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         .select({ conv: conversations, contact: contacts })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(eq(conversations.companyId, companyId))
         .orderBy(desc(conversations.updatedAt));
 
       let matched = convRows;
@@ -833,6 +883,13 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           filter === 'date' ? convRows : convRows.filter((r) => !isExcludedConversation(r.conv));
         if (filter === 'open') {
           matched = assessedOnly.filter((r) => (r.conv.status || 'OPEN').toUpperCase() === 'OPEN');
+        } else if (filter === 'unanswered') {
+          matched = assessedOnly.filter(
+            (r) =>
+              (r.conv.status || 'OPEN').toUpperCase() === 'OPEN' &&
+              Boolean(r.conv.firstInboundAt) &&
+              !r.conv.firstResponseAt
+          );
         } else if (filter === 'pending') {
           matched = assessedOnly.filter((r) => (r.conv.status || 'OPEN').toUpperCase() === 'PENDING');
         } else if (filter === 'resolved') {
@@ -944,6 +1001,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
     '/export',
     async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const exportType = (req.query?.type || 'conversations').toLowerCase();
         const escapeCsv = (val: unknown): string => {
           const s = val === null || val === undefined ? '' : String(val);
@@ -959,7 +1017,11 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         };
 
         if (exportType === 'broadcasts') {
-          const list = await db.select().from(campaigns).orderBy(desc(campaigns.createdAt));
+          const list = await db
+            .select()
+            .from(campaigns)
+            .where(eq(campaigns.companyId, companyId))
+            .orderBy(desc(campaigns.createdAt));
           const csv = toCsv(
             ['ID', 'Judul', 'Tipe', 'Status', 'Total', 'Terkirim', 'Sampai', 'Dibaca', 'Gagal', 'Dibuat'],
             list.map((c) => [
@@ -980,7 +1042,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           return reply.send(csv);
         }
 
-        const settings = await getSettingMap();
+        const settings = await getSettingMap(companyId);
         const slaRaw = Number.parseInt(settings.sla_target_minutes || String(DEFAULT_SLA_TARGET_MINUTES), 10);
         const slaTargetSeconds =
           (Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : DEFAULT_SLA_TARGET_MINUTES) * 60;
@@ -989,10 +1051,14 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           .select({ conv: conversations, contact: contacts })
           .from(conversations)
           .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+          .where(eq(conversations.companyId, companyId))
           .orderBy(desc(conversations.updatedAt));
 
         if (exportType === 'agents') {
-          const csatRows = await db.select().from(csatResponses).where(isNotNull(csatResponses.rating));
+          const csatRows = await db
+            .select()
+            .from(csatResponses)
+            .where(and(eq(csatResponses.companyId, companyId), isNotNull(csatResponses.rating)));
           const map = new Map<
             string,
             {
@@ -1109,7 +1175,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         const allRatedCsat = await db
           .select()
           .from(csatResponses)
-          .where(isNotNull(csatResponses.rating))
+          .where(and(eq(csatResponses.companyId, companyId), isNotNull(csatResponses.rating)))
           .orderBy(desc(csatResponses.submittedAt));
         const latestCsatByConv = new Map<string, CsatCriterionScoreDetail[]>();
         const convCriterionLabels = new Map<string, string>();

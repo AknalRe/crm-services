@@ -199,6 +199,32 @@ function renderTextWithClickableLinks(text: string): React.ReactNode {
   });
 }
 
+function shouldRenderMediaCaption(body?: string | null, mediaName?: string | null, _mediaType?: string | null): boolean {
+  if (!body) return false;
+  const trimmed = body.trim();
+  if (!trimmed) return false;
+
+  // Auto-generated synthetic fallback labels: e.g. [Dokumen: file.pdf], [Dokumen], [Lampiran: file.pdf], [Lampiran Media], [Gambar], [Video], [Audio], [Stiker]
+  if (/^\[(Dokumen|Lampiran|Gambar|Video|Audio|Stiker|Lampiran Media)(:\s*.*)?\]$/i.test(trimmed)) {
+    return false;
+  }
+
+  // If body is identical to mediaName or clean filename
+  if (mediaName) {
+    const cleanName = mediaName.trim().toLowerCase();
+    const lowerBody = trimmed.toLowerCase();
+    if (
+      lowerBody === cleanName ||
+      lowerBody === `[dokumen: ${cleanName}]` ||
+      lowerBody === `[lampiran: ${cleanName}]`
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function getConversationDisplayTitle(conv?: Conversation | null): string {
   if (!conv) return 'WhatsApp';
   return (
@@ -1589,13 +1615,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setShowNewChatModal(false);
       const updated = await api.getConversations();
       setConversations(updated);
-      const target = updated.find((c) => c.id === opened.id);
-      if (target) {
-        setSelectedConversation(target);
-      }
+      const target = updated.find((c) => c.id === opened.id) || opened;
+      setSelectedConversation(target);
       toast.success('Percakapan dibuka');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal membuka percakapan');
+    } finally {
+      setOpeningContactId(null);
+    }
+  };
+
+  const handleStartConversationWithPhone = async (phone: string) => {
+    setOpeningContactId('new_phone');
+    try {
+      const opened = await api.openConversation(undefined, selectedSession || undefined, phone);
+      setShowNewChatModal(false);
+      const updated = await api.getConversations();
+      setConversations(updated);
+      const target = updated.find((c) => c.id === opened.id) || opened;
+      setSelectedConversation(target);
+      toast.success('Percakapan baru dibuka');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal membuka percakapan dengan nomor baru');
     } finally {
       setOpeningContactId(null);
     }
@@ -3536,6 +3577,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 </div>
                               </div>
                             );
+                          }
+                          if ((msg.mediaType || msg.mediaUrl) && !shouldRenderMediaCaption(msg.body, msg.mediaName, msg.mediaType)) {
+                            return null;
                           }
                           return (
                             <div className="whitespace-pre-wrap break-words">
@@ -6017,6 +6061,41 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+              {(() => {
+                const searchDigits = contactSearch.replace(/\D/g, '');
+                if (searchDigits.length >= 7) {
+                  const normalizedSearch = searchDigits.startsWith('0')
+                    ? `62${searchDigits.slice(1)}`
+                    : searchDigits;
+                  return (
+                    <button
+                      type="button"
+                      disabled={openingContactId === 'new_phone'}
+                      onClick={() => void handleStartConversationWithPhone(normalizedSearch)}
+                      className="w-full px-4 py-2.5 text-left bg-indigo-50/70 hover:bg-indigo-100/80 border-b border-indigo-100 flex items-center justify-between gap-3 transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-indigo-950 truncate">
+                            Mulai Chat ke Nomor Baru
+                          </div>
+                          <div className="text-[11px] text-indigo-700 font-mono">
+                            +{normalizedSearch}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-semibold text-indigo-700 bg-white px-2 py-1 rounded border border-indigo-200 shrink-0">
+                        {openingContactId === 'new_phone' ? 'Membuka...' : 'Mulai Chat'}
+                      </span>
+                    </button>
+                  );
+                }
+                return null;
+              })()}
+
               {loadingContacts ? (
                 <div className="p-6 text-center text-xs text-gray-500">Memuat kontak...</div>
               ) : contactsList.length === 0 ? (

@@ -367,13 +367,14 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     if (
       req.method === 'POST' &&
       (routePath.endsWith('/messages') ||
+        routePath.endsWith('/open') ||
         routePath.endsWith('/retry') ||
         routePath.endsWith('/typing') ||
         routePath.endsWith('/reaction') ||
         routePath.endsWith('/stickers') ||
         routePath.endsWith('/save-shared-contact'))
     ) {
-      return requirePermission('conversations.reply')(req, reply);
+      return requirePermission('conversations.reply', 'conversations.manage')(req, reply);
     }
     if (
       (req.method === 'PATCH' || req.method === 'POST' || req.method === 'DELETE') &&
@@ -1194,22 +1195,67 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // POST open or create a conversation for a contact
+  // POST open or create a conversation for a contact or direct phone number
   fastify.post('/open', async (req: FastifyRequest<{
-    Body: { contactId?: string; session?: string };
+    Body: { contactId?: string; phone?: string; name?: string; session?: string };
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
       const contactId = String(req.body?.contactId || '').trim();
-      if (!contactId) {
-        return reply.status(400).send({ success: false, error: 'contactId wajib diisi' });
+      const rawPhone = String(req.body?.phone || '').trim();
+      const customName = String(req.body?.name || '').trim();
+
+      if (!contactId && !rawPhone) {
+        return reply.status(400).send({ success: false, error: 'contactId atau nomor telepon WhatsApp wajib diisi' });
       }
 
-      const contactRows = await db
-        .select()
-        .from(contacts)
-        .where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId)));
-      const contact = contactRows[0];
+      let contact: typeof contacts.$inferSelect | undefined;
+      const now = new Date();
+
+      if (contactId) {
+        const contactRows = await db
+          .select()
+          .from(contacts)
+          .where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId)));
+        contact = contactRows[0];
+      } else if (rawPhone) {
+        const normalized = normalizePhoneNumber(rawPhone) || rawPhone.replace(/\D/g, '');
+        if (!normalized) {
+          return reply.status(400).send({ success: false, error: 'Format nomor WhatsApp tidak valid' });
+        }
+        const phoneVariants = Array.from(
+          new Set([
+            normalized,
+            `+${normalized}`,
+            normalized.startsWith('62') ? `0${normalized.slice(2)}` : '',
+          ].filter(Boolean))
+        );
+        const contactRows = await db
+          .select()
+          .from(contacts)
+          .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phoneVariants)))
+          .limit(1);
+        if (contactRows[0]) {
+          contact = contactRows[0];
+        } else {
+          const newId = crypto.randomUUID();
+          const displayName = customName || `Kontak +${normalized}`;
+          const [inserted] = await db
+            .insert(contacts)
+            .values({
+              id: newId,
+              companyId,
+              namaLengkap: displayName,
+              nomorWhatsapp: normalized,
+              tags: 'Chat Baru',
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
+          contact = inserted;
+        }
+      }
+
       if (!contact) {
         return reply.status(404).send({ success: false, error: 'Kontak tidak ditemukan' });
       }
@@ -1226,13 +1272,14 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         )
         .orderBy(desc(conversations.updatedAt));
 
-      const now = new Date();
       const requestedSession = req.body?.session?.trim() || null;
       const matchedExisting = requestedSession
         ? existingRows.find((c) => c.wahaSession === requestedSession) ||
           existingRows.find((c) => !c.wahaSession)
         : existingRows[0];
       const targetSession = requestedSession || matchedExisting?.wahaSession || null;
+
+      let convRow: typeof conversations.$inferSelect;
 
       if (matchedExisting) {
         const isReopeningFromResolved = matchedExisting.status === 'RESOLVED';
@@ -1249,30 +1296,47 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           })
           .where(eq(conversations.id, matchedExisting.id))
           .returning();
+        convRow = updated[0];
         liveEvents.emit('conversations:update', { conversationId: matchedExisting.id }, companyId);
-        return reply.send({ success: true, data: updated[0] });
+      } else {
+        const created = await db
+          .insert(conversations)
+          .values({
+            id: crypto.randomUUID(),
+            companyId,
+            contactId: contact.id,
+            channel: 'WHATSAPP',
+            status: 'OPEN',
+            excludeFromMetrics: Boolean(contact.excludeFromMetrics),
+            excludeReason: contact.excludeFromMetrics ? (contact.excludeReason || 'Bukan Customer') : null,
+            sessionStartedAt: now,
+            wahaSession: targetSession,
+            unreadCount: 0,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+        convRow = created[0];
+        liveEvents.emit('conversations:update', { conversationId: convRow.id }, companyId);
       }
 
-      const created = await db
-        .insert(conversations)
-        .values({
-          id: crypto.randomUUID(),
-          companyId,
-          contactId: contact.id,
-          channel: 'WHATSAPP',
-          status: 'OPEN',
-          excludeFromMetrics: Boolean(contact.excludeFromMetrics),
-          excludeReason: contact.excludeFromMetrics ? (contact.excludeReason || 'Bukan Customer') : null,
-          sessionStartedAt: now,
-          wahaSession: targetSession,
-          unreadCount: 0,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+      const formatted = {
+        ...convRow,
+        contact: {
+          id: contact.id,
+          nama_lengkap: contact.namaLengkap,
+          nama_panggilan: contact.namaPanggilan,
+          tanggal_lahir: contact.tanggalLahir,
+          nomor_whatsapp: contact.nomorWhatsapp,
+          tags: contact.tags,
+          notes: contact.notes,
+          alamat: contact.alamat,
+          exclude_from_metrics: Boolean(contact.excludeFromMetrics),
+          exclude_reason: contact.excludeReason || null,
+        },
+      };
 
-      liveEvents.emit('conversations:update', { conversationId: created[0].id }, companyId);
-      return reply.status(201).send({ success: true, data: created[0] });
+      return reply.send({ success: true, data: formatted });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }

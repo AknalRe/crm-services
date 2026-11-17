@@ -256,16 +256,16 @@ export const Settings: React.FC<SettingsProps> = ({
       csStarter
         ? csStarter.permissions
         : [
-          'dashboard',
-          'contacts',
-          'contacts.create',
-          'contacts.edit',
-          'conversations',
-          'conversations.reply',
-          'conversations.manage',
-          'conversations.csat',
-          'tracking',
-        ]
+            'dashboard',
+            'contacts',
+            'contacts.create',
+            'contacts.edit',
+            'conversations',
+            'conversations.reply',
+            'conversations.manage',
+            'conversations.csat',
+            'tracking',
+          ]
     );
     setShowAgentForm(false);
   };
@@ -391,14 +391,14 @@ export const Settings: React.FC<SettingsProps> = ({
         resolvedRole === 'ADMIN'
           ? 'role_admin'
           : agentRoleId === '__CUSTOM__'
-            ? null
-            : agentRoleId || null;
+          ? null
+          : agentRoleId || null;
       const effectivePerms =
         resolvedRole === 'ADMIN'
           ? [...ALL_PERMISSION_KEYS]
           : resolvedRoleId
-            ? roles.find((r) => r.id === resolvedRoleId)?.permissions || agentPermissions
-            : agentPermissions;
+          ? roles.find((r) => r.id === resolvedRoleId)?.permissions || agentPermissions
+          : agentPermissions;
 
       if (editingAgentId) {
         await api.updateAgent(editingAgentId, {
@@ -487,9 +487,9 @@ export const Settings: React.FC<SettingsProps> = ({
       const ext = wahaStatus.config.externalConfig ?? (
         mode === 'EXTERNAL'
           ? {
-            baseUrl: wahaStatus.config.baseUrl || '',
-            apiKey: wahaStatus.config.apiKey || '',
-          }
+              baseUrl: wahaStatus.config.baseUrl || '',
+              apiKey: wahaStatus.config.apiKey || '',
+            }
           : null
       );
       if (ext && !externalDirtyRef.current) {
@@ -779,13 +779,13 @@ export const Settings: React.FC<SettingsProps> = ({
   const workingSessionsCount = sessions.filter((s) => s.status === 'WORKING').length;
   const filteredSessions = sessionSearch.trim()
     ? sessions.filter((s) => {
-      const q = sessionSearch.trim().toLowerCase();
-      return (
-        s.name.toLowerCase().includes(q) ||
-        (s.me?.pushName || '').toLowerCase().includes(q) ||
-        (s.me?.id || '').toLowerCase().includes(q)
-      );
-    })
+        const q = sessionSearch.trim().toLowerCase();
+        return (
+          s.name.toLowerCase().includes(q) ||
+          (s.me?.pushName || '').toLowerCase().includes(q) ||
+          (s.me?.id || '').toLowerCase().includes(q)
+        );
+      })
     : sessions;
   const effectiveSessionStatus = (
     wahaStatus && !wahaStatus.connected
@@ -973,10 +973,11 @@ export const Settings: React.FC<SettingsProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setSettingsTab(tab.id)}
-              className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${isActive
-                ? 'bg-indigo-600 text-white border-indigo-600'
-                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                }`}
+              className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap shrink-0 transition-colors ${
+                isActive
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+              }`}
             >
               {tab.label}
             </button>
@@ -994,38 +995,87 @@ export const Settings: React.FC<SettingsProps> = ({
         </div>
       )}
       {settingsTab === 'whatsapp' && (
-        <div className="space-y-4 sm:space-y-5">
-          {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h1 className="text-base sm:text-lg font-semibold text-gray-900">Koneksi Layanan WhatsApp (WAHA)</h1>
-              <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">
-                Atur server WAHA lokal Docker atau gateway WhatsApp eksternal dengan API Key.
-              </p>
+      <div className="space-y-4 sm:space-y-5">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-base sm:text-lg font-semibold text-gray-900">Koneksi Layanan WhatsApp (WAHA)</h1>
+          <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5">
+            Atur server WAHA lokal Docker atau gateway WhatsApp eksternal dengan API Key.
+          </p>
+        </div>
+
+        <Button
+          variant="secondary"
+          size="md"
+          isLoading={checkingConnection}
+          onClick={handleCheckConnection}
+          className="self-start sm:self-auto shrink-0"
+        >
+          Periksa Koneksi
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-5">
+          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-2.5">
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm">Mode Koneksi WhatsApp</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {configMode === 'INTERNAL'
+                    ? 'WAHA Internal terkonfigurasi otomatis dari server dan terkunci. Anda cukup mengelola sesi WhatsApp.'
+                    : 'Hubungkan ke server atau gateway WAHA eksternal menggunakan Base URL dan API Key.'}
+                </p>
+              </div>
+              {configMode === 'INTERNAL' && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                  Terkunci Otomatis
+                </span>
+              )}
             </div>
 
-            <Button
-              variant="secondary"
-              size="md"
-              isLoading={checkingConnection}
-              onClick={handleCheckConnection}
-              className="self-start sm:self-auto shrink-0"
-            >
-              Periksa Koneksi
-            </Button>
-          </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={!canEditSettings}
+                onClick={() => handleSelectMode('INTERNAL')}
+                className={`p-3.5 rounded-lg border text-left transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                  configMode === 'INTERNAL'
+                    ? 'border-indigo-600 bg-indigo-50/40 text-gray-900'
+                    : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-2 font-semibold text-xs text-gray-900">
+                    <Server className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>WAHA Internal (Otomatis)</span>
+                  </div>
+                  {wahaStatus?.config && savedMode === 'INTERNAL' && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                      Aktif
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  Terhubung otomatis ke runtime WAHA internal Reneo dengan dukungan multi-sesi.
+                </p>
+              </button>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5 items-start">
-            <div className="lg:col-span-2 space-y-4 sm:space-y-5">
-              <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-2.5">
-                  <div>
-                    <h3 className="font-semibold text-gray-900 text-sm">Mode Koneksi WhatsApp</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {configMode === 'INTERNAL'
-                        ? 'WAHA Internal terkonfigurasi otomatis dari server dan terkunci. Anda cukup mengelola sesi WhatsApp.'
-                        : 'Hubungkan ke server atau gateway WAHA eksternal menggunakan Base URL dan API Key.'}
-                    </p>
+              <button
+                type="button"
+                disabled={!canEditSettings}
+                onClick={() => handleSelectMode('EXTERNAL')}
+                className={`p-3.5 rounded-lg border text-left transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                  configMode === 'EXTERNAL'
+                    ? 'border-indigo-600 bg-indigo-50/40 text-gray-900'
+                    : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-2 font-semibold text-xs text-gray-900">
+                    <Globe className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>WAHA Eksternal</span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-50 text-amber-800 border border-amber-200">
@@ -1044,6 +1094,8 @@ export const Settings: React.FC<SettingsProps> = ({
               </button>
             </div>
 
+            {configMode === 'INTERNAL' ? (
+              <div className="space-y-3 pt-1">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -1139,215 +1191,93 @@ export const Settings: React.FC<SettingsProps> = ({
                         : 'bg-red-50 text-red-800 border-red-200'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <div className="flex items-center gap-2 font-semibold text-xs text-gray-900">
-                        <Server className="w-4 h-4 text-indigo-600 shrink-0" />
-                        <span>WAHA Internal (Otomatis)</span>
-                      </div>
-                      {wahaStatus?.config && savedMode === 'INTERNAL' && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                          Aktif
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-gray-500 leading-relaxed">
-                      Terhubung otomatis ke runtime WAHA internal Reneo dengan dukungan multi-sesi.
-                    </p>
-                  </button>
+                    {externalTestResult.text}
+                  </div>
+                )}
 
-                  <button
+                <div className="pt-3 border-t border-gray-200 flex flex-wrap items-center justify-end gap-2">
+                  <Button
                     type="button"
-                    disabled={!canEditSettings}
-                    onClick={() => handleSelectMode('EXTERNAL')}
-                    className={`p-3.5 rounded-lg border text-left transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${configMode === 'EXTERNAL'
-                      ? 'border-indigo-600 bg-indigo-50/40 text-gray-900'
-                      : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
-                      }`}
+                    variant="secondary"
+                    isLoading={testingExternal}
+                    onClick={handleTestExternalConnection}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <div className="flex items-center gap-2 font-semibold text-xs text-gray-900">
-                        <Globe className="w-4 h-4 text-blue-600 shrink-0" />
-                        <span>WAHA Eksternal</span>
-                      </div>
-                      {wahaStatus?.config && savedMode === 'EXTERNAL' && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                          Aktif
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-gray-500 leading-relaxed">
-                      Gunakan URL dan API Key gateway WAHA eksternal milik Anda sendiri dengan dukungan multi-sesi.
-                    </p>
-                  </button>
+                    Tes Koneksi WAHA
+                  </Button>
+                  <Button type="submit" variant="primary" isLoading={saving} disabled={!canEditSettings}>
+                    {savedMode !== 'EXTERNAL'
+                      ? 'Simpan & Aktifkan WAHA Eksternal'
+                      : 'Simpan Konfigurasi WAHA'}
+                  </Button>
                 </div>
+              </form>
+            )}
 
-                {configMode === 'INTERNAL' ? (
-                  <div className="space-y-3 pt-1">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
-                          Base URL WAHA Internal
-                        </label>
-                        <input
-                          type="text"
-                          disabled
-                          readOnly
-                          value={internalDisplayUrl || 'Terhubung otomatis dari environment'}
-                          className="w-full h-9 px-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-md text-[13px] font-mono cursor-not-allowed"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
-                          API Key WAHA Internal
-                        </label>
-                        <input
-                          type="text"
-                          disabled
-                          readOnly
-                          value={internalHasKey ? '•••••••• (Dikelola otomatis)' : 'Tidak memerlukan API key'}
-                          className="w-full h-9 px-3 bg-gray-50 text-gray-600 border border-gray-200 rounded-md text-[13px] font-mono cursor-not-allowed"
-                        />
-                      </div>
-                    </div>
-                    {savedMode !== 'INTERNAL' && (
-                      <div className="pt-2 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-[11px] text-amber-800">
-                          Mode aktif saat ini masih <strong>WAHA Eksternal</strong>. Pengaturan eksternal Anda tetap tersimpan jika hanya melihat tab ini.
-                        </span>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          isLoading={activatingInternal}
-                          disabled={!canEditSettings}
-                          onClick={() => void handleActivateInternalMode()}
-                        >
-                          Simpan &amp; Aktifkan WAHA Internal
-                        </Button>
-                      </div>
+            {/* Multi-Session Management (Internal & External) */}
+            <div className="pt-3.5 border-t border-gray-200 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-xs font-semibold text-gray-900">Daftar Sesi WhatsApp (Multi-Sesi)</h4>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-gray-100 text-gray-700 border border-gray-200 tabular-nums">
+                      {sessions.length}/{maxSessions} sesi
+                    </span>
+                    {workingSessionsCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 tabular-nums">
+                        {workingSessionsCount} Aktif Bersamaan
+                      </span>
+                    )}
+                    {!isMultiSessionAllowed && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                        Terkunci (1 Sesi)
+                      </span>
                     )}
                   </div>
-                ) : (
-                  <form onSubmit={handleSaveWahaSettings} className="space-y-3.5 pt-1">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
-                          Base URL Server WAHA <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="https://wa.domainanda.com"
-                          value={baseUrl}
-                          onChange={(e) => {
-                            externalDirtyRef.current = true;
-                            setBaseUrl(e.target.value);
-                            writeWahaUiDraft({ configMode: 'EXTERNAL', baseUrl: e.target.value });
-                          }}
-                          className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
-                          API Key / Secret Token (Opsional)
-                        </label>
-                        <input
-                          type="password"
-                          placeholder="Kosongkan jika tanpa auth"
-                          value={apiKey}
-                          onChange={(e) => {
-                            externalDirtyRef.current = true;
-                            setApiKey(e.target.value);
-                          }}
-                          className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                        <span className="text-[11px] text-gray-400 mt-1 block">
-                          Dikirim via header <code className="font-mono">X-Api-Key</code>
-                        </span>
-                      </div>
-                    </div>
-
-                    {externalTestResult && (
-                      <div
-                        className={`p-3 rounded-md text-xs font-medium border ${externalTestResult.ok
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                          : 'bg-red-50 text-red-800 border-red-200'
-                          }`}
-                      >
-                        {externalTestResult.text}
-                      </div>
-                    )}
-
-                    <div className="pt-3 border-t border-gray-200 flex flex-wrap items-center justify-end gap-2">
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Semua sesi berstatus WORKING aktif bersamaan untuk terima chat, balas Live Chat, dan siaran otomatis. Klik satu baris untuk mengontrolnya di panel kanan.
+                  </p>
+                </div>
+                {!isPendingModeSwitch && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    {!isMultiSessionAllowed && onOpenPlans && (
                       <Button
                         type="button"
                         variant="secondary"
-                        isLoading={testingExternal}
-                        onClick={handleTestExternalConnection}
+                        size="sm"
+                        onClick={onOpenPlans}
                       >
-                        Tes Koneksi WAHA
+                        Upgrade Multi-Sesi
                       </Button>
-                      <Button type="submit" variant="primary" isLoading={saving} disabled={!canEditSettings}>
-                        {savedMode !== 'EXTERNAL'
-                          ? 'Simpan & Aktifkan WAHA Eksternal'
-                          : 'Simpan Konfigurasi WAHA'}
-                      </Button>
-                    </div>
-                  </form>
-                )}
-
-                {/* Multi-Session Management (Internal & External) */}
-                <div className="pt-3.5 border-t border-gray-200 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h4 className="text-xs font-semibold text-gray-900">Daftar Sesi WhatsApp (Multi-Sesi)</h4>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-gray-100 text-gray-700 border border-gray-200 tabular-nums">
-                          {sessions.length}/{maxSessions} sesi
-                        </span>
-                        {workingSessionsCount > 0 && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 tabular-nums">
-                            {workingSessionsCount} Aktif Bersamaan
-                          </span>
-                        )}
-                        {!isMultiSessionAllowed && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                            Terkunci (1 Sesi)
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-gray-500 mt-0.5">
-                        Semua sesi berstatus WORKING aktif bersamaan untuk terima chat, balas Live Chat, dan siaran otomatis. Klik satu baris untuk mengontrolnya di panel kanan.
-                      </p>
-                    </div>
-                    {!isPendingModeSwitch && (
-                      <div className="flex items-center gap-2 shrink-0">
-                        {!isMultiSessionAllowed && onOpenPlans && (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={onOpenPlans}
-                          >
-                            Upgrade Multi-Sesi
-                          </Button>
-                        )}
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => void Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()])}
-                          isLoading={sessionsLoading}
-                        >
-                          Muat Ulang
-                        </Button>
-                      </div>
                     )}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()])}
+                      isLoading={sessionsLoading}
+                    >
+                      Muat Ulang
+                    </Button>
                   </div>
+                )}
+              </div>
 
-                  {isPendingModeSwitch ? (
-                    <div className="p-3 rounded-md bg-sky-50/70 border border-sky-200 text-xs text-sky-900">
-                      Mode aktif di server saat ini masih <strong>WAHA {savedMode === 'EXTERNAL' ? 'Eksternal' : 'Internal'}</strong>. Klik tombol <strong>Simpan &amp; Aktifkan</strong> di atas terlebih dahulu jika Anda ingin berpindah dan mengelola sesi di server <strong>WAHA {configMode === 'EXTERNAL' ? 'Eksternal' : 'Internal'}</strong>.
+              {isPendingModeSwitch ? (
+                <div className="p-3 rounded-md bg-sky-50/70 border border-sky-200 text-xs text-sky-900">
+                  Mode aktif di server saat ini masih <strong>WAHA {savedMode === 'EXTERNAL' ? 'Eksternal' : 'Internal'}</strong>. Klik tombol <strong>Simpan &amp; Aktifkan</strong> di atas terlebih dahulu jika Anda ingin berpindah dan mengelola sesi di server <strong>WAHA {configMode === 'EXTERNAL' ? 'Eksternal' : 'Internal'}</strong>.
+                </div>
+              ) : (
+                <>
+                  {(!isMultiSessionAllowed && sessions.length >= 1) ? (
+                    <div className="p-3 rounded-md bg-amber-50/70 border border-amber-200 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        Paket <strong>{licenseInfo?.plan || 'Saat Ini'}</strong> hanya mendukung 1 sesi WhatsApp. Upgrade ke Pro Bulanan atau Enterprise untuk menambah sesi.
+                      </span>
+                      {onOpenPlans && (
+                        <Button type="button" variant="secondary" size="sm" onClick={onOpenPlans}>
+                          Lihat Paket
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <form onSubmit={handleCreateSession} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
@@ -1372,180 +1302,209 @@ export const Settings: React.FC<SettingsProps> = ({
                     </form>
                   )}
 
-                      {sessions.length > 1 && (
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            placeholder="Cari nama sesi, nama akun, atau nomor WhatsApp..."
-                            value={sessionSearch}
-                            onChange={(e) => setSessionSearch(e.target.value)}
-                            className="w-full h-9 pl-8 pr-3 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:bg-white focus:border-indigo-500"
-                          />
-                        </div>
-                      )}
-
-                      {sessionsError && (
-                        <div className="p-3 rounded-md bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
-                          {sessionsError}
-                        </div>
-                      )}
-
-                      <div className="divide-y divide-gray-200 border border-gray-200 rounded-md overflow-hidden">
-                        {sessions.length === 0 ? (
-                          <div className="p-3 text-xs text-gray-500 text-center bg-gray-50">
-                            {sessionsLoading
-                              ? 'Memuat daftar sesi...'
-                              : sessionsError
-                                ? 'Daftar sesi tidak dapat dimuat karena koneksi WAHA bermasalah.'
-                                : `Belum ada sesi terdaftar di server WAHA. Sesi target saat ini: ${liveActiveSession}`}
-                          </div>
-                        ) : filteredSessions.length === 0 ? (
-                          <div className="p-3 text-xs text-gray-500 text-center bg-gray-50">
-                            Tidak ada sesi yang cocok dengan "{sessionSearch.trim()}".
-                          </div>
-                        ) : (
-                          filteredSessions.map((item) => {
-                            const isDefaultFallback = item.name === liveActiveSession;
-                            const isInspected = item.name === inspectedSession;
-                            const isWorking = item.status === 'WORKING';
-                            const isBusy = sessionBusyName === item.name;
-                            const accountLabel = item.me?.pushName || item.me?.id?.split('@')[0];
-                            const statusMeta = getSessionStatusMeta(item.status);
-                            const canDelete = sessions.length > 1 || item.status === 'FAILED' || configMode === 'EXTERNAL';
-                            return (
-                              <div
-                                key={item.name}
-                                onClick={() => setInspectedSessionName(item.name)}
-                                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 text-xs cursor-pointer transition-colors ${isInspected ? 'bg-indigo-50/40' : 'bg-white hover:bg-gray-50'
-                                  }`}
-                              >
-                                <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                                  <span className="font-mono font-semibold text-gray-900 truncate">
-                                    {item.name}
-                                  </span>
-                                  {accountLabel && (
-                                    <span className="text-[11px] text-gray-500 font-mono truncate">
-                                      ({accountLabel})
-                                    </span>
-                                  )}
-                                  <span
-                                    className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${statusMeta.cls}`}
-                                  >
-                                    {statusMeta.rowLabel}
-                                  </span>
-                                  {isWorking && (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                      Aktif
-                                    </span>
-                                  )}
-                                  {isDefaultFallback && (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                      Default
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end shrink-0" onClick={(e) => e.stopPropagation()}>
-                                  {!isDefaultFallback && (
-                                    <Button
-                                      type="button"
-                                      variant="secondary"
-                                      size="sm"
-                                      disabled={!canEditSettings || isBusy}
-                                      onClick={() => handleSwitchActiveSession(item.name)}
-                                    >
-                                      Jadikan Default
-                                    </Button>
-                                  )}
-                                  {!isWorking && (
-                                    <>
-                                      <Button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        disabled={!canEditSettings || isBusy}
-                                        onClick={() => void handleQuickStartSession(item.name)}
-                                      >
-                                        Start
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        disabled={!canEditSettings}
-                                        onClick={() => onOpenQr(item.name)}
-                                      >
-                                        Scan QR
-                                      </Button>
-                                    </>
-                                  )}
-                                  {canDelete && (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      disabled={!canEditSettings || isBusy}
-                                      className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                                      onClick={() => setConfirmDeleteSession(item.name)}
-                                      aria-label={`Hapus sesi ${item.name}`}
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
-                <button
-                  type="button"
-                  onClick={() => setShowMobileWahaTest((v) => !v)}
-                  className="lg:pointer-events-none w-full flex items-center justify-between gap-2 text-left"
-                >
-                  <div>
-                    <h3 className="font-semibold text-gray-900 text-sm">Kirim Pesan Uji Coba</h3>
-                    <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 hidden sm:block">
-                      Verifikasi pengiriman pesan langsung ke nomor WhatsApp tujuan.
-                    </p>
-                  </div>
-                  <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
-                    <span>{showMobileWahaTest ? 'Tutup' : 'Buka'}</span>
-                    {showMobileWahaTest ? (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    )}
-                  </span>
-                </button>
-
-                <div className={`${showMobileWahaTest ? 'space-y-3.5' : 'hidden lg:block lg:space-y-4'}`}>
-
-                  {sessions.length > 0 && (
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Sesi WhatsApp Pengirim
-                      </label>
-                      <select
-                        value={testSession || inspectedSession}
-                        onChange={(e) => setTestSession(e.target.value)}
-                        className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
-                      >
-                        {sessions.map((s) => (
-                          <option key={s.name} value={s.name}>
-                            {s.name} ({s.status})
-                          </option>
-                        ))}
-                      </select>
+                  {sessions.length > 1 && (
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Cari nama sesi, nama akun, atau nomor WhatsApp..."
+                        value={sessionSearch}
+                        onChange={(e) => setSessionSearch(e.target.value)}
+                        className="w-full h-9 pl-8 pr-3 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:bg-white focus:border-indigo-500"
+                      />
                     </div>
                   )}
+
+                  {sessionsError && (
+                    <div className="p-3 rounded-md bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+                      {sessionsError}
+                    </div>
+                  )}
+
+                  <div className="divide-y divide-gray-200 border border-gray-200 rounded-md overflow-hidden">
+                    {sessions.length === 0 ? (
+                      <div className="p-3 text-xs text-gray-500 text-center bg-gray-50">
+                        {sessionsLoading
+                          ? 'Memuat daftar sesi...'
+                          : sessionsError
+                            ? 'Daftar sesi tidak dapat dimuat karena koneksi WAHA bermasalah.'
+                            : `Belum ada sesi terdaftar di server WAHA. Sesi target saat ini: ${liveActiveSession}`}
+                      </div>
+                    ) : filteredSessions.length === 0 ? (
+                      <div className="p-3 text-xs text-gray-500 text-center bg-gray-50">
+                        Tidak ada sesi yang cocok dengan "{sessionSearch.trim()}".
+                      </div>
+                    ) : (
+                      filteredSessions.map((item) => {
+                        const isDefaultFallback = item.name === liveActiveSession;
+                        const isInspected = item.name === inspectedSession;
+                        const isWorking = item.status === 'WORKING';
+                        const isBusy = sessionBusyName === item.name;
+                        const accountLabel = item.me?.pushName || item.me?.id?.split('@')[0];
+                        const statusMeta = getSessionStatusMeta(item.status);
+                        const canDelete = sessions.length > 1 || item.status === 'FAILED' || configMode === 'EXTERNAL';
+                        return (
+                          <div
+                            key={item.name}
+                            onClick={() => setInspectedSessionName(item.name)}
+                            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 text-xs cursor-pointer transition-colors ${
+                              isInspected ? 'bg-indigo-50/40' : 'bg-white hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                              <span className="font-mono font-semibold text-gray-900 truncate">
+                                {item.name}
+                              </span>
+                              {accountLabel && (
+                                <span className="text-[11px] text-gray-500 font-mono truncate">
+                                  ({accountLabel})
+                                </span>
+                              )}
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${statusMeta.cls}`}
+                              >
+                                {statusMeta.rowLabel}
+                              </span>
+                              {isWorking && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  Aktif
+                                </span>
+                              )}
+                              {isDefaultFallback && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  Default
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end shrink-0" onClick={(e) => e.stopPropagation()}>
+                              {!isDefaultFallback && (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  disabled={!canEditSettings || isBusy}
+                                  onClick={() => handleSwitchActiveSession(item.name)}
+                                >
+                                  Jadikan Default
+                                </Button>
+                              )}
+                              {!isWorking && (
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    disabled={!canEditSettings || isBusy}
+                                    onClick={() => void handleQuickStartSession(item.name)}
+                                  >
+                                    Start
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    disabled={!canEditSettings}
+                                    onClick={() => onOpenQr(item.name)}
+                                  >
+                                    Scan QR
+                                  </Button>
+                                </>
+                              )}
+                              {canDelete && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={!canEditSettings || isBusy}
+                                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                                  onClick={() => setConfirmDeleteSession(item.name)}
+                                  aria-label={`Hapus sesi ${item.name}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
+            <button
+              type="button"
+              onClick={() => setShowMobileWahaTest((v) => !v)}
+              className="lg:pointer-events-none w-full flex items-center justify-between gap-2 text-left"
+            >
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm">Kirim Pesan Uji Coba</h3>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 hidden sm:block">
+                  Verifikasi pengiriman pesan langsung ke nomor WhatsApp tujuan.
+                </p>
+              </div>
+              <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
+                <span>{showMobileWahaTest ? 'Tutup' : 'Buka'}</span>
+                {showMobileWahaTest ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </span>
+            </button>
+
+            <div className={`${showMobileWahaTest ? 'space-y-3.5' : 'hidden lg:block lg:space-y-4'}`}>
+
+            {sessions.length > 0 && (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Sesi WhatsApp Pengirim
+                </label>
+                <select
+                  value={testSession || inspectedSession}
+                  onChange={(e) => setTestSession(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+                >
+                  {sessions.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} ({s.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+              <div className="sm:w-48 md:w-52 shrink-0">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Nomor WhatsApp Tujuan
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="08123456789"
+                  value={testPhone}
+                  onChange={(e) => setTestPhone(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="w-full flex-none sm:flex-1 min-w-0">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Isi Pesan Uji Coba
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={testMessage}
+                  onChange={(e) => setTestMessage(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
+                />
+              </div>
 
               <Button
                 type="submit"
@@ -1559,29 +1518,31 @@ export const Settings: React.FC<SettingsProps> = ({
               </Button>
             </div>
 
-                    <div className="w-full flex-none sm:flex-1 min-w-0">
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Isi Pesan Uji Coba
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={testMessage}
-                        onChange={(e) => setTestMessage(e.target.value)}
-                        className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
+            {testResult && (
+              <div
+                className={`p-3 rounded-md text-xs font-medium border ${
+                  testResult.ok
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : 'bg-red-50 text-red-800 border-red-200'
+                }`}
+              >
+                {testResult.text}
+              </div>
+            )}
+            </div>
+          </form>
+        </div>
 
-                    <Button
-                      type="submit"
-                      variant="secondary"
-                      size="md"
-                      isLoading={testSending}
-                      className="w-full sm:w-auto shrink-0"
-                    >
-                      Kirim Pesan Tes
-                    </Button>
-                  </div>
+        <div className="space-y-5">
+          <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
+            <div>
+              <h3 className="font-semibold text-gray-900 text-sm">
+                Status Sesi WhatsApp
+              </h3>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Semua sesi berstatus WORKING aktif bersamaan. Pilih sesi di bawah untuk kontrol Start, Stop, atau Logout.
+              </p>
+            </div>
 
             {sessions.length > 1 && !isPendingModeSwitch && (
               <div>
@@ -1624,261 +1585,212 @@ export const Settings: React.FC<SettingsProps> = ({
                     <span className="font-mono text-emerald-800"> ({connectedPhone})</span>
                   ) : null}
                 </div>
-              </form>
+              )}
+              {wahaStatus?.connected && workingSessionsCount > 1 && (
+                <div className="text-[11px] text-emerald-700 font-medium">
+                  {workingSessionsCount} dari {sessions.length} sesi aktif bersamaan
+                </div>
+              )}
+              <div className="text-[11px] text-gray-500 font-mono truncate">
+                {wahaStatus?.config?.baseUrl || '-'}
+              </div>
             </div>
 
-            <div className="space-y-5">
-              <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
-                <div>
-                  <h3 className="font-semibold text-gray-900 text-sm">
-                    Status Sesi WhatsApp
-                  </h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5">
-                    Semua sesi berstatus WORKING aktif bersamaan. Pilih sesi di bawah untuk kontrol Start, Stop, atau Logout.
-                  </p>
-                </div>
+            {isPendingModeSwitch && (
+              <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800 leading-relaxed">
+                Anda sedang meninjau tab <strong className="font-mono">WAHA {configMode}</strong>. Status aktif di server saat ini masih <strong className="font-mono">WAHA {savedMode}</strong> sampai tombol <strong>Simpan &amp; Aktifkan</strong> ditekan.
+              </div>
+            )}
 
-                {sessions.length > 1 && !isPendingModeSwitch && (
-                  <div>
-                    <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                      Sesi yang Dikontrol ({workingSessionsCount}/{sessions.length} Aktif)
-                    </label>
-                    <select
-                      value={inspectedSession}
-                      onChange={(e) => setInspectedSessionName(e.target.value)}
-                      className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
-                    >
-                      {sessions.map((s) => (
-                        <option key={s.name} value={s.name}>
-                          {s.name} ({s.status})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+            {wahaStatus && !wahaStatus.connected && wahaStatus.error && (
+              <div className="p-3 rounded-md bg-red-50 border border-red-200 text-[11px] text-red-700 leading-relaxed">
+                <strong>Detail koneksi:</strong> {wahaStatus.error}
+              </div>
+            )}
 
-                <div className="p-4 rounded-md bg-gray-50 border border-gray-200 text-center space-y-1.5">
-                  <span
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold border ${activeStatusMeta.cls}`}
-                  >
-                    {activeStatusMeta.cardLabel}
-                  </span>
+            {wahaStatus?.connected && effectiveSessionStatus === 'NOT_FOUND' && (
+              <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800 leading-relaxed">
+                Sesi <strong className="font-mono">{inspectedSession}</strong> belum terdaftar di server WAHA. Klik <strong>Buka Scanner QR</strong> atau <strong>Start Sesi</strong> untuk membuatnya, atau pilih sesi lain di daftar kiri.
+              </div>
+            )}
 
-                  <div className="text-xs text-gray-600 pt-1">
-                    Session: <strong className="font-mono text-gray-900">{inspectedSession}</strong>
-                  </div>
-                  {isActiveWorking && (connectedPushName || connectedPhone) && (
-                    <div className="text-[11px] text-emerald-700 font-medium">
-                      {connectedPushName ? `${connectedPushName}` : 'WhatsApp'}
-                      {connectedPhone ? (
-                        <span className="font-mono text-emerald-800"> ({connectedPhone})</span>
-                      ) : null}
-                    </div>
+            {wahaStatus?.connected && effectiveSessionStatus === 'FAILED' && (
+              <div className="p-3 rounded-md bg-red-50 border border-red-200 text-[11px] text-red-700 leading-relaxed">
+                Sesi <strong className="font-mono">{inspectedSession}</strong> gagal berjalan di server WAHA. Klik <strong>Buka Scanner QR</strong> atau <strong>Start Sesi</strong> untuk memulihkan sesi.
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {!isActiveWorking && (
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="w-full"
+                  disabled={!canEditSettings || isServerOffline || sessionActionLoading}
+                  onClick={() => onOpenQr(inspectedSession)}
+                >
+                  Buka Scanner QR WhatsApp
+                </Button>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={handleStartSession}
+                  disabled={!canEditSettings || isActiveWorking || isServerOffline || sessionActionLoading}
+                  isLoading={sessionActionLoading}
+                >
+                  Start Sesi
+                </Button>
+
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => setConfirmAction('stop')}
+                  disabled={!canEditSettings || !canStopOrLogout || sessionActionLoading}
+                >
+                  Stop Sesi
+                </Button>
+              </div>
+
+              <Button
+                variant="secondary"
+                size="md"
+                className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
+                onClick={() => setConfirmAction('logout')}
+                disabled={!canEditSettings || !canStopOrLogout || sessionActionLoading}
+              >
+                Logout Sesi WhatsApp
+              </Button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 text-xs space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setShowMobileWahaWebhook((v) => !v)}
+                className="lg:pointer-events-none flex-1 min-w-0 text-left flex items-center justify-between gap-2"
+              >
+                <h3 className="text-gray-900 font-semibold text-sm truncate">Webhook Masuk &amp; Tracking (WAHA)</h3>
+                <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
+                  <span>{showMobileWahaWebhook ? 'Tutup' : 'Detail'}</span>
+                  {showMobileWahaWebhook ? (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5" />
                   )}
-                  {wahaStatus?.connected && workingSessionsCount > 1 && (
-                    <div className="text-[11px] text-emerald-700 font-medium">
-                      {workingSessionsCount} dari {sessions.length} sesi aktif bersamaan
-                    </div>
-                  )}
-                  <div className="text-[11px] text-gray-500 font-mono truncate">
-                    {wahaStatus?.config?.baseUrl || '-'}
-                  </div>
-                </div>
+                </span>
+              </button>
+              <div className={`${showMobileWahaWebhook ? 'flex' : 'hidden lg:flex'} items-center gap-1.5`}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={syncingWebhook}
+                  disabled={!canEditSettings || isPendingModeSwitch || isServerOffline}
+                  onClick={() => void handleSyncWebhooksNow()}
+                >
+                  Sinkronkan
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleCopyWebhook()}
+                >
+                  {webhookCopied ? 'Tersalin' : 'Salin'}
+                </Button>
+              </div>
+            </div>
+            <div className={`${showMobileWahaWebhook ? 'space-y-3' : 'hidden lg:block lg:space-y-3'}`}>
+            <p className="text-gray-500 text-[11px] leading-relaxed">
+              WAHA mengirimkan event <code className="font-mono text-gray-800">message</code> (chat masuk ke Inbox) dan <code className="font-mono text-gray-800">message.ack</code> (status centang dua/biru) ke endpoint ini:
+            </p>
+            <div className="bg-gray-50 p-2.5 rounded-md font-mono text-[11px] text-gray-800 break-all select-all border border-gray-200">
+              {webhookUrlValue}
+            </div>
 
-                {isPendingModeSwitch && (
-                  <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800 leading-relaxed">
-                    Anda sedang meninjau tab <strong className="font-mono">WAHA {configMode}</strong>. Status aktif di server saat ini masih <strong className="font-mono">WAHA {savedMode}</strong> sampai tombol <strong>Simpan &amp; Aktifkan</strong> ditekan.
-                  </div>
-                )}
-
-                {wahaStatus && !wahaStatus.connected && wahaStatus.error && (
-                  <div className="p-3 rounded-md bg-red-50 border border-red-200 text-[11px] text-red-700 leading-relaxed">
-                    <strong>Detail koneksi:</strong> {wahaStatus.error}
-                  </div>
-                )}
-
-                {wahaStatus?.connected && effectiveSessionStatus === 'NOT_FOUND' && (
-                  <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800 leading-relaxed">
-                    Sesi <strong className="font-mono">{inspectedSession}</strong> belum terdaftar di server WAHA. Klik <strong>Buka Scanner QR</strong> atau <strong>Start Sesi</strong> untuk membuatnya, atau pilih sesi lain di daftar kiri.
-                  </div>
-                )}
-
-                {wahaStatus?.connected && effectiveSessionStatus === 'FAILED' && (
-                  <div className="p-3 rounded-md bg-red-50 border border-red-200 text-[11px] text-red-700 leading-relaxed">
-                    Sesi <strong className="font-mono">{inspectedSession}</strong> gagal berjalan di server WAHA. Klik <strong>Buka Scanner QR</strong> atau <strong>Start Sesi</strong> untuk memulihkan sesi.
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  {!isActiveWorking && (
-                    <Button
-                      variant="primary"
-                      size="md"
-                      className="w-full"
-                      disabled={!canEditSettings || isServerOffline || sessionActionLoading}
-                      onClick={() => onOpenQr(inspectedSession)}
-                    >
-                      Buka Scanner QR WhatsApp
-                    </Button>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      onClick={handleStartSession}
-                      disabled={!canEditSettings || isActiveWorking || isServerOffline || sessionActionLoading}
-                      isLoading={sessionActionLoading}
-                    >
-                      Start Sesi
-                    </Button>
-
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      onClick={() => setConfirmAction('stop')}
-                      disabled={!canEditSettings || !canStopOrLogout || sessionActionLoading}
-                    >
-                      Stop Sesi
-                    </Button>
-                  </div>
-
+            {webhookWarning && (
+              <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-2 leading-relaxed">
+                <p>
+                  URL di atas masih alamat internal Docker sehingga server <strong>WAHA Eksternal</strong> tidak dapat mengirim chat masuk ke CRM. Masukkan URL HTTPS publik CRM Anda di bawah lalu simpan.
+                </p>
+                {browserPublicWebhook && (
                   <Button
-                    variant="secondary"
-                    size="md"
-                    className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
-                    onClick={() => setConfirmAction('logout')}
-                    disabled={!canEditSettings || !canStopOrLogout || sessionActionLoading}
-                  >
-                    Logout Sesi WhatsApp
-                  </Button>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 text-xs space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <button
                     type="button"
-                    onClick={() => setShowMobileWahaWebhook((v) => !v)}
-                    className="lg:pointer-events-none flex-1 min-w-0 text-left flex items-center justify-between gap-2"
+                    variant="secondary"
+                    size="sm"
+                    isLoading={savingWebhook}
+                    onClick={() => void handleSaveWebhookUrl(browserPublicWebhook)}
                   >
-                    <h3 className="text-gray-900 font-semibold text-sm truncate">Webhook Masuk &amp; Tracking (WAHA)</h3>
-                    <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
-                      <span>{showMobileWahaWebhook ? 'Tutup' : 'Detail'}</span>
-                      {showMobileWahaWebhook ? (
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      ) : (
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      )}
-                    </span>
-                  </button>
-                  <div className={`${showMobileWahaWebhook ? 'flex' : 'hidden lg:flex'} items-center gap-1.5`}>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      isLoading={syncingWebhook}
-                      disabled={!canEditSettings || isPendingModeSwitch || isServerOffline}
-                      onClick={() => void handleSyncWebhooksNow()}
-                    >
-                      Sinkronkan
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => void handleCopyWebhook()}
-                    >
-                      {webhookCopied ? 'Tersalin' : 'Salin'}
-                    </Button>
-                  </div>
-                </div>
-                <div className={`${showMobileWahaWebhook ? 'space-y-3' : 'hidden lg:block lg:space-y-3'}`}>
-                  <p className="text-gray-500 text-[11px] leading-relaxed">
-                    WAHA mengirimkan event <code className="font-mono text-gray-800">message</code> (chat masuk ke Inbox) dan <code className="font-mono text-gray-800">message.ack</code> (status centang dua/biru) ke endpoint ini:
-                  </p>
-                  <div className="bg-gray-50 p-2.5 rounded-md font-mono text-[11px] text-gray-800 break-all select-all border border-gray-200">
-                    {webhookUrlValue}
-                  </div>
-
-                  {webhookWarning && (
-                    <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-2 leading-relaxed">
-                      <p>
-                        URL di atas masih alamat internal Docker sehingga server <strong>WAHA Eksternal</strong> tidak dapat mengirim chat masuk ke CRM. Masukkan URL HTTPS publik CRM Anda di bawah lalu simpan.
-                      </p>
-                      {browserPublicWebhook && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          isLoading={savingWebhook}
-                          onClick={() => void handleSaveWebhookUrl(browserPublicWebhook)}
-                        >
-                          Pakai URL Publik Ini &amp; Terapkan
-                        </Button>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="space-y-1.5 pt-1 border-t border-gray-100">
-                    <label className="block text-[11px] font-medium text-gray-700">
-                      Override URL Webhook Publik (Opsional)
-                    </label>
-                    <div className="flex flex-col sm:flex-row gap-1.5">
-                      <input
-                        type="url"
-                        placeholder={browserPublicWebhook || 'https://crm.domainanda.com/api/waha/webhook'}
-                        value={webhookUrlDraft}
-                        onChange={(e) => {
-                          webhookDirtyRef.current = true;
-                          setWebhookUrlDraft(e.target.value);
-                        }}
-                        className="w-full flex-none sm:flex-1 h-8 px-2.5 bg-white border border-gray-200 rounded-md text-[11px] font-mono focus:outline-none focus:border-indigo-500"
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        isLoading={savingWebhook}
-                        disabled={!canEditSettings}
-                        onClick={() => void handleSaveWebhookUrl()}
-                        className="shrink-0"
-                      >
-                        Simpan
-                      </Button>
-                    </div>
-                    <p className="text-[10px] text-gray-400">
-                      Kosongkan lalu klik Simpan untuk memakai deteksi URL otomatis.
-                    </p>
-                  </div>
-
-                  <div className="pt-2 border-t border-gray-100 text-[11px] text-gray-500">
-                    {wahaStatus?.lastWebhook ? (
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span
-                          className={`inline-block w-2 h-2 rounded-full ${wahaStatus.lastWebhook.outcome === 'ERROR'
-                            ? 'bg-red-500'
-                            : wahaStatus.lastWebhook.outcome === 'IGNORED'
-                              ? 'bg-amber-500'
-                              : 'bg-emerald-500'
-                            }`}
-                        />
-                        <span>
-                          Terakhir diterima: <strong className="font-mono text-gray-700">{wahaStatus.lastWebhook.event}</strong>
-                          {wahaStatus.lastWebhook.session ? ` (${wahaStatus.lastWebhook.session})` : ''}
-                          {' • '}
-                          {new Date(wahaStatus.lastWebhook.receivedAt).toLocaleTimeString('id-ID')}
-                        </span>
-                      </div>
-                    ) : (
-                      <span>Belum ada event webhook diterima sejak backend CRM dimulai.</span>
-                    )}
-                  </div>
-                </div>
+                    Pakai URL Publik Ini &amp; Terapkan
+                  </Button>
+                )}
               </div>
+            )}
+
+            <div className="space-y-1.5 pt-1 border-t border-gray-100">
+              <label className="block text-[11px] font-medium text-gray-700">
+                Override URL Webhook Publik (Opsional)
+              </label>
+              <div className="flex flex-col sm:flex-row gap-1.5">
+                <input
+                  type="url"
+                  placeholder={browserPublicWebhook || 'https://crm.domainanda.com/api/waha/webhook'}
+                  value={webhookUrlDraft}
+                  onChange={(e) => {
+                    webhookDirtyRef.current = true;
+                    setWebhookUrlDraft(e.target.value);
+                  }}
+                  className="w-full flex-none sm:flex-1 h-8 px-2.5 bg-white border border-gray-200 rounded-md text-[11px] font-mono focus:outline-none focus:border-indigo-500"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={savingWebhook}
+                  disabled={!canEditSettings}
+                  onClick={() => void handleSaveWebhookUrl()}
+                  className="shrink-0"
+                >
+                  Simpan
+                </Button>
+              </div>
+              <p className="text-[10px] text-gray-400">
+                Kosongkan lalu klik Simpan untuk memakai deteksi URL otomatis.
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-gray-100 text-[11px] text-gray-500">
+              {wahaStatus?.lastWebhook ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span
+                    className={`inline-block w-2 h-2 rounded-full ${
+                      wahaStatus.lastWebhook.outcome === 'ERROR'
+                        ? 'bg-red-500'
+                        : wahaStatus.lastWebhook.outcome === 'IGNORED'
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                    }`}
+                  />
+                  <span>
+                    Terakhir diterima: <strong className="font-mono text-gray-700">{wahaStatus.lastWebhook.event}</strong>
+                    {wahaStatus.lastWebhook.session ? ` (${wahaStatus.lastWebhook.session})` : ''}
+                    {' • '}
+                    {new Date(wahaStatus.lastWebhook.receivedAt).toLocaleTimeString('id-ID')}
+                  </span>
+                </div>
+              ) : (
+                <span>Belum ada event webhook diterima sejak backend CRM dimulai.</span>
+              )}
+            </div>
             </div>
           </div>
         </div>
+      </div>
+      </div>
       )}
 
       {/* Pengaturan SLA, Routing Agent & Survei CSAT */}
@@ -1921,10 +1833,11 @@ export const Settings: React.FC<SettingsProps> = ({
                   <button
                     type="button"
                     onClick={() => setAgentsSubTab('agents')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${agentsSubTab === 'agents'
-                      ? 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
-                      }`}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                      agentsSubTab === 'agents'
+                        ? 'bg-white text-gray-900 shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
                   >
                     <Users className="w-3.5 h-3.5" />
                     <span>Akun CS ({agents.length})</span>
@@ -1932,10 +1845,11 @@ export const Settings: React.FC<SettingsProps> = ({
                   <button
                     type="button"
                     onClick={() => setAgentsSubTab('roles')}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${agentsSubTab === 'roles'
-                      ? 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
-                      }`}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                      agentsSubTab === 'roles'
+                        ? 'bg-white text-gray-900 shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
                   >
                     <ShieldCheck className="w-3.5 h-3.5" />
                     <span>Role &amp; Batasan ({roles.length})</span>
@@ -2134,8 +2048,9 @@ export const Settings: React.FC<SettingsProps> = ({
                                       return (
                                         <label
                                           key={perm.id}
-                                          className={`flex items-start gap-2 text-xs ${restrictedForSubAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                                            }`}
+                                          className={`flex items-start gap-2 text-xs ${
+                                            restrictedForSubAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                          }`}
                                         >
                                           <input
                                             type="checkbox"
@@ -2148,10 +2063,11 @@ export const Settings: React.FC<SettingsProps> = ({
                                             <div className="flex flex-wrap items-center gap-1.5">
                                               <span className="font-medium text-gray-800">{perm.label}</span>
                                               <span
-                                                className={`px-1 py-0.2 rounded text-[9px] font-semibold uppercase ${perm.kind === 'menu'
-                                                  ? 'bg-sky-50 text-sky-700 border border-sky-200'
-                                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                                  }`}
+                                                className={`px-1 py-0.2 rounded text-[9px] font-semibold uppercase ${
+                                                  perm.kind === 'menu'
+                                                    ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                                }`}
                                               >
                                                 {perm.kind === 'menu' ? 'Menu' : 'Tombol'}
                                               </span>
@@ -2201,10 +2117,11 @@ export const Settings: React.FC<SettingsProps> = ({
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
                                 <span
-                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${ag.role === 'ADMIN'
-                                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                    : 'bg-sky-50 text-sky-700 border border-sky-200'
-                                    }`}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                    ag.role === 'ADMIN'
+                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                      : 'bg-sky-50 text-sky-700 border border-sky-200'
+                                  }`}
                                 >
                                   {ag.roleName || (ag.role === 'ADMIN' ? 'Administrator' : 'Custom')}
                                 </span>
@@ -2212,10 +2129,11 @@ export const Settings: React.FC<SettingsProps> = ({
                                   type="button"
                                   disabled={isSelf || cannotTouchAdmin}
                                   onClick={() => void handleToggleAgentActive(ag)}
-                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${ag.isActive
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    : 'bg-gray-100 text-gray-500 border border-gray-200'
-                                    } ${isSelf || cannotTouchAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                    ag.isActive
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      : 'bg-gray-100 text-gray-500 border border-gray-200'
+                                  } ${isSelf || cannotTouchAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                                 >
                                   {ag.isActive ? 'Aktif' : 'Nonaktif'}
                                 </button>
@@ -2294,10 +2212,11 @@ export const Settings: React.FC<SettingsProps> = ({
                                 </td>
                                 <td className="py-2.5 px-3">
                                   <span
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold ${ag.role === 'ADMIN'
-                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                      : 'bg-sky-50 text-sky-700 border border-sky-200'
-                                      }`}
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                      ag.role === 'ADMIN'
+                                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                        : 'bg-sky-50 text-sky-700 border border-sky-200'
+                                    }`}
                                   >
                                     {ag.roleName || (ag.role === 'ADMIN' ? 'Administrator' : 'Custom Manual')}
                                   </span>
@@ -2328,10 +2247,11 @@ export const Settings: React.FC<SettingsProps> = ({
                                     type="button"
                                     disabled={isSelf || cannotTouchAdmin}
                                     onClick={() => void handleToggleAgentActive(ag)}
-                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${ag.isActive
-                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                      : 'bg-gray-100 text-gray-500 border border-gray-200'
-                                      } ${isSelf || cannotTouchAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                      ag.isActive
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        : 'bg-gray-100 text-gray-500 border border-gray-200'
+                                    } ${isSelf || cannotTouchAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                                   >
                                     {ag.isActive ? 'Aktif' : 'Nonaktif'}
                                   </button>
@@ -2540,8 +2460,9 @@ export const Settings: React.FC<SettingsProps> = ({
                                 return (
                                   <label
                                     key={perm.id}
-                                    className={`flex items-start gap-2 text-xs ${restrictedForSubAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                                      }`}
+                                    className={`flex items-start gap-2 text-xs ${
+                                      restrictedForSubAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                    }`}
                                   >
                                     <input
                                       type="checkbox"
@@ -2558,10 +2479,11 @@ export const Settings: React.FC<SettingsProps> = ({
                                       <div className="flex flex-wrap items-center gap-1.5">
                                         <span className="font-medium text-gray-800">{perm.label}</span>
                                         <span
-                                          className={`px-1 py-0.2 rounded text-[9px] font-semibold uppercase ${perm.kind === 'menu'
-                                            ? 'bg-sky-50 text-sky-700 border border-sky-200'
-                                            : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                            }`}
+                                          className={`px-1 py-0.2 rounded text-[9px] font-semibold uppercase ${
+                                            perm.kind === 'menu'
+                                              ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                          }`}
                                         >
                                           {perm.kind === 'menu' ? 'Menu' : 'Tombol / Aksi'}
                                         </span>
@@ -2603,10 +2525,11 @@ export const Settings: React.FC<SettingsProps> = ({
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="text-xs font-semibold text-gray-900">{r.name}</span>
                               <span
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${r.isSystem
-                                  ? 'bg-gray-50 text-gray-600 border-gray-200'
-                                  : 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                  }`}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                                  r.isSystem
+                                    ? 'bg-gray-50 text-gray-600 border-gray-200'
+                                    : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                }`}
                               >
                                 {r.isSystem ? 'Bawaan' : 'Custom'}
                               </span>
@@ -2667,11 +2590,11 @@ export const Settings: React.FC<SettingsProps> = ({
         settingsTab === 'products' ||
         settingsTab === 'labels' ||
         settingsTab === 'templates') && (
-          <MasterDataSettings
-            section={settingsTab as MasterDataSection}
-            canEdit={canEditSettings}
-          />
-        )}
+        <MasterDataSettings
+          section={settingsTab as MasterDataSection}
+          canEdit={canEditSettings}
+        />
+      )}
       {settingsTab === 'automation' && <AutomationSettings canEdit={canEditSettings} />}
       {settingsTab === 'omnichannel' && <OmnichannelSettings canEdit={canEditSettings} />}
 

@@ -362,8 +362,13 @@ export interface ConversationAnalytics {
   openCount: number;
   pendingCount: number;
   resolvedCount: number;
+  unansweredCount?: number;
+  todayInboundCount?: number;
+  todayOutboundCount?: number;
   avgFirstResponseSeconds: number | null;
+  avgFirstResponseMinutes?: number | null;
   avgResolutionSeconds: number | null;
+  avgResolutionMinutes?: number | null;
   slaTargetSeconds: number;
   slaMeasuredCount: number;
   slaMetCount: number;

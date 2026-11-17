@@ -229,6 +229,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
     openCount: 0,
     pendingCount: 0,
     resolvedCount: 0,
+    unansweredCount: 0,
+    todayInboundCount: 0,
+    todayOutboundCount: 0,
     avgFirstResponseSeconds: null,
     avgResolutionSeconds: null,
     slaTargetSeconds: 900,
@@ -1001,21 +1004,50 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                   {convAnalytics.resolvedCount} Done
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={() =>
-                  void openDrilldown({
-                    title: 'Semua Percakapan Customer (Dinilai)',
-                    kind: 'conversations',
-                    filter: 'assessed',
-                    shortcutTab: 'conversations',
-                    shortcutLabel: 'Buka Live Chat',
-                  })
-                }
-                className="text-[10px] text-indigo-700/80 hover:underline mt-0.5 cursor-pointer"
-              >
-                Total {convAnalytics.totalConversations} obrolan dinilai
-              </button>
+              <div className="flex items-center justify-between gap-1 text-[10px] mt-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void openDrilldown({
+                      title: 'Semua Percakapan Customer (Dinilai)',
+                      kind: 'conversations',
+                      filter: 'assessed',
+                      shortcutTab: 'conversations',
+                      shortcutLabel: 'Buka Live Chat',
+                    })
+                  }
+                  className="text-indigo-700/80 hover:underline cursor-pointer truncate"
+                >
+                  Total {convAnalytics.totalConversations} dinilai
+                </button>
+                {(convAnalytics.unansweredCount || 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void openDrilldown({
+                        title: 'Percakapan Open Belum Dibalas',
+                        subtitle: 'Daftar obrolan yang sedang menunggu balasan pertama dari agen',
+                        kind: 'conversations',
+                        filter: 'unanswered',
+                        shortcutTab: 'conversations',
+                        shortcutLabel: 'Buka Live Chat',
+                      })
+                    }
+                    className="text-rose-600 font-semibold hover:underline shrink-0 cursor-pointer"
+                    title="Obrolan open yang belum dibalas agen"
+                  >
+                    {convAnalytics.unansweredCount} belum dibalas
+                  </button>
+                )}
+              </div>
+              {((convAnalytics.todayInboundCount || 0) > 0 || (convAnalytics.todayOutboundCount || 0) > 0) && (
+                <div className="text-[10px] text-gray-500 pt-1 mt-1 border-t border-indigo-100 flex items-center justify-between">
+                  <span>Hari Ini:</span>
+                  <span className="font-mono text-indigo-900 font-medium">
+                    +{convAnalytics.todayInboundCount || 0} masuk / {convAnalytics.todayOutboundCount || 0} keluar
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
