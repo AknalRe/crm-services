@@ -1,7 +1,7 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { eq, and, ne, sql } from 'drizzle-orm';
 import { redisConnection } from './redis';
-import { db } from '../db';
+import { db, waitForDbInitialized } from '../db';
 import {
   campaigns,
   campaignRecipients,
@@ -47,6 +47,7 @@ export const broadcastQueue = new Queue<SendMessageJobData>(BROADCAST_QUEUE_NAME
 export const broadcastWorker = new Worker<SendMessageJobData>(
   BROADCAST_QUEUE_NAME,
   async (job: Job<SendMessageJobData>) => {
+    await waitForDbInitialized();
     const {
       companyId: rawCompanyId,
       recipientId,
