@@ -2303,35 +2303,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   };
 
-  if (!isLiveChatUnlocked) {
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 p-8 max-w-xl mx-auto mt-8 text-center space-y-4">
-        <div className="w-11 h-11 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto">
-          <Lock className="w-5 h-5" />
-        </div>
-        <div className="space-y-1.5">
-          <h3 className="text-base font-semibold text-gray-900">
-            Menu Live Chat CRM Terkunci oleh Lisensi
-          </h3>
-          <p className="text-xs text-gray-500 leading-relaxed">
-            Paket Anda saat ini (<strong className="text-gray-800">{licenseInfo?.plan || 'Belum Diaktivasi'}</strong>) tidak menyertakan fitur percakapan langsung (Live Chat CRM). Upgrade ke paket <strong className="text-gray-800">Pro Bulanan</strong> atau <strong className="text-gray-800">Enterprise Tahunan</strong> untuk membuka percakapan pelanggan dan balasan multi-sesi.
-          </p>
-        </div>
-        {onOpenPlans && (
-          <div className="pt-2">
-            <Button
-              variant="primary"
-              size="md"
-              onClick={onOpenPlans}
-            >
-              Lihat &amp; Upgrade Paket Lisensi
-            </Button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   const unifiedSessionOptions = useMemo(() => {
     const options: Array<{
       value: string;
@@ -2396,6 +2367,45 @@ export const Conversations: React.FC<ConversationsProps> = ({
     () => unifiedSessionOptions.filter((opt) => channelFilter === 'ALL' || opt.channel === channelFilter),
     [unifiedSessionOptions, channelFilter]
   );
+
+  if (!licenseInfo) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-8 max-w-xl mx-auto mt-8 text-center space-y-2">
+        <div className="text-xs font-medium text-gray-500">
+          Memeriksa status lisensi Live Chat CRM...
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLiveChatUnlocked) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-8 max-w-xl mx-auto mt-8 text-center space-y-4">
+        <div className="w-11 h-11 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center mx-auto">
+          <Lock className="w-5 h-5" />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-base font-semibold text-gray-900">
+            Menu Live Chat CRM Terkunci oleh Lisensi
+          </h3>
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Paket Anda saat ini (<strong className="text-gray-800">{licenseInfo?.plan || 'Belum Diaktivasi'}</strong>) tidak menyertakan fitur percakapan langsung (Live Chat CRM). Upgrade ke paket <strong className="text-gray-800">Pro Bulanan</strong> atau <strong className="text-gray-800">Enterprise Tahunan</strong> untuk membuka percakapan pelanggan dan balasan multi-sesi.
+          </p>
+        </div>
+        {onOpenPlans && (
+          <div className="pt-2">
+            <Button
+              variant="primary"
+              size="md"
+              onClick={onOpenPlans}
+            >
+              Lihat &amp; Upgrade Paket Lisensi
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const filteredConversations = conversations.filter((c) => {
     const convStatus = (c.status || 'OPEN').toUpperCase();

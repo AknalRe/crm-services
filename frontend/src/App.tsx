@@ -660,6 +660,53 @@ function AppShell() {
   );
 }
 
+interface AppErrorBoundaryState {
+  hasError: boolean;
+  message: string;
+}
+
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  AppErrorBoundaryState
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+
+  static getDerivedStateFromError(error: any): AppErrorBoundaryState {
+    return {
+      hasError: true,
+      message: String(error?.message || 'Terjadi kesalahan antarmuka CRM.'),
+    };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-[#F5F6FA] p-4">
+          <div className="bg-white border border-gray-200 rounded-lg p-6 max-w-md w-full space-y-3 text-center">
+            <h2 className="text-sm font-semibold text-gray-900">
+              Terjadi Kesalahan Tampilan CRM
+            </h2>
+            <p className="text-xs text-gray-600 break-words">
+              {this.state.message}
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium"
+            >
+              Muat Ulang Halaman
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export function App() {
   const isCsatRoute =
     typeof window !== 'undefined' && isCsatPathname(window.location.pathname);
@@ -683,9 +730,11 @@ export function App() {
   }
 
   return (
-    <ToastProvider>
-      <AppShell />
-    </ToastProvider>
+    <AppErrorBoundary>
+      <ToastProvider>
+        <AppShell />
+      </ToastProvider>
+    </AppErrorBoundary>
   );
 }
 

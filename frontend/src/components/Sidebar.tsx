@@ -59,9 +59,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpen = false,
   onClose,
 }) => {
-  const isLiveChatUnlocked = Boolean(
-    licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
-  );
+  const isLiveChatUnlocked =
+    !licenseInfo ||
+    Boolean(!licenseInfo.isExpired && licenseInfo.features?.liveChatCrm);
   const isAdmin = !user || user.role === 'ADMIN';
   const canManageAgents = isAdmin || hasPerm(user, 'settings.agents');
 
