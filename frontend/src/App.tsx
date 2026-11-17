@@ -28,9 +28,11 @@ import { hasAnyPerm, hasPerm } from './lib/permissions';
 import { subscribeLiveEvent } from './services/liveEvents';
 import {
   getAppRootPath,
+  getLandingPath,
   getLoginPath,
   isConnectChannelPathname,
   isCsatPathname,
+  isLandingPathname,
   isLoginPathname,
 } from './services/paths';
 import {
@@ -119,10 +121,14 @@ function AppShell() {
     if (typeof window === 'undefined') return '/';
     return window.location.pathname;
   });
-  const [showLandingPage, setShowLandingPage] = useState(false);
+  const [showLandingPage, setShowLandingPage] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return isLandingPathname(window.location.pathname) || window.location.hash === '#landing';
+  });
 
   const rootPath = getAppRootPath(currentPathname);
   const loginPath = getLoginPath(currentPathname);
+  const landingPath = getLandingPath(currentPathname);
   const isLoginRoute = isLoginPathname(currentPathname);
 
   const navigatePath = (targetPathname: string, hash = '', replace = false) => {
@@ -146,10 +152,19 @@ function AppShell() {
       navigatePath(getLoginPath(window.location.pathname), '', true);
     } else if (/\/login\/+$/i.test(window.location.pathname)) {
       navigatePath(getLoginPath(window.location.pathname), window.location.hash, true);
+    } else if (
+      window.location.hash === '#landing' ||
+      searchParams.get('landing') === '1' ||
+      /\/landing\/+$/i.test(window.location.pathname)
+    ) {
+      setShowLandingPage(true);
+      navigatePath(getLandingPath(window.location.pathname), '', true);
     }
 
     const onPopState = () => {
-      setCurrentPathname(window.location.pathname);
+      const nextPath = window.location.pathname;
+      setCurrentPathname(nextPath);
+      setShowLandingPage(isLandingPathname(nextPath) || window.location.hash === '#landing');
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -395,7 +410,7 @@ function AppShell() {
 
   const openLandingPage = () => {
     setShowLandingPage(true);
-    navigatePath(rootPath, '', true);
+    navigatePath(landingPath, '');
   };
 
   if (!authChecked) {
@@ -432,7 +447,7 @@ function AppShell() {
           navigatePath(rootPath, '', true);
         }}
         onBackToLanding={() => {
-          navigatePath(rootPath);
+          navigatePath(landingPath);
         }}
       />
     );
@@ -445,6 +460,9 @@ function AppShell() {
         authenticated={true}
         onEnterLogin={() => {
           setShowLandingPage(false);
+          const targetHash =
+            currentTab === 'settings' ? `#settings/${settingsSection}` : `#${currentTab}`;
+          navigatePath(rootPath, targetHash);
         }}
       />
     );
