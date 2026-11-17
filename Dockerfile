@@ -18,6 +18,7 @@ COPY backend/package*.json ./
 RUN npm install
 
 COPY backend/tsconfig.json backend/drizzle.config.ts ./
+COPY backend/drizzle ./drizzle/
 COPY backend/src ./src/
 RUN npm run build
 
@@ -34,6 +35,7 @@ COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 COPY --from=backend-builder /app/backend/package*.json ./backend/
 RUN cd backend && npm install --omit=dev
 COPY --from=backend-builder /app/backend/dist ./backend/dist
+COPY --from=backend-builder /app/backend/drizzle ./backend/drizzle
 
 # Nginx config & Entrypoint script
 COPY deploy/nginx-unified.conf /etc/nginx/http.d/default.conf

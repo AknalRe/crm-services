@@ -6,6 +6,7 @@ COPY package*.json ./
 RUN npm install
 
 COPY tsconfig.json drizzle.config.ts ./
+COPY drizzle ./drizzle/
 COPY src ./src/
 RUN npm run build
 
@@ -18,6 +19,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/drizzle ./drizzle
 
 EXPOSE 5000
 

@@ -14,6 +14,29 @@ export const db = drizzle(queryClient, { schema });
  */
 export async function initDb() {
   const sql = queryClient;
+
+  // Run official Drizzle migrations if migration folder is found
+  try {
+    const { migrate } = await import('drizzle-orm/postgres-js/migrator');
+    const fs = await import('fs');
+    const path = await import('path');
+    const candidates = [
+      path.resolve(__dirname, '../../drizzle'),
+      path.resolve(__dirname, '../drizzle'),
+      path.resolve(__dirname, './drizzle'),
+      path.resolve(process.cwd(), 'drizzle'),
+      path.resolve(process.cwd(), 'backend/drizzle'),
+    ];
+    const found = candidates.find((p) => fs.existsSync(p));
+    if (found) {
+      console.log(`[Drizzle ORM] Applying migrations from ${found}...`);
+      await migrate(db, { migrationsFolder: found });
+      console.log('[Drizzle ORM] Migrations applied successfully.');
+    }
+  } catch (migErr: any) {
+    console.warn('[Drizzle ORM] Migrator note (falling back to idempotent init):', migErr.message);
+  }
+
   try {
     await sql`
       CREATE TABLE IF NOT EXISTS companies (
@@ -105,8 +128,6 @@ export async function initDb() {
 
     await sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
     await sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
-    await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
-    await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS campaign_recipients (
@@ -267,15 +288,20 @@ export async function initDb() {
     await sql`
       CREATE TABLE IF NOT EXISTS birthday_settings (
         id TEXT PRIMARY KEY DEFAULT 'default',
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
         send_time TEXT NOT NULL DEFAULT '08:00',
         message_template TEXT NOT NULL DEFAULT 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!',
         delay_seconds INTEGER NOT NULL DEFAULT 5,
+        channel TEXT NOT NULL DEFAULT 'WHATSAPP',
+        channel_account_id TEXT,
         waha_session TEXT,
         last_run_date TEXT,
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
+    await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
     await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
 
     await sql`
@@ -575,13 +601,6 @@ export async function initDb() {
       );
     `;
 
-    // Ensure default birthday row exists
-    await sql`
-      INSERT INTO birthday_settings (id, company_id, is_enabled, send_time, message_template, delay_seconds, updated_at)
-      VALUES ('default', 'company_default', TRUE, '08:00', 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!', 5, NOW())
-      ON CONFLICT (id) DO NOTHING;
-    `;
-
     // Add company_id across all tenant-scoped tables and migrate global unique constraints to per-company indexes
     const tenantTables = [
       'contacts',
@@ -613,30 +632,67 @@ export async function initDb() {
       'ai_mcp_servers',
     ];
     for (const tbl of tenantTables) {
-      await sql.unsafe(
-        `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`
-      );
+      try {
+        await sql.unsafe(
+          `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`
+        );
+      } catch (err: any) {
+        console.warn(`[Drizzle ORM] Warn adding company_id to ${tbl}:`, err.message);
+      }
     }
-    await sql`ALTER TABLE crm_agents ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE;`;
+    try {
+      await sql`ALTER TABLE crm_agents ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE;`;
+    } catch (err: any) {
+      console.warn('[Drizzle ORM] Warn adding is_platform_admin to crm_agents:', err.message);
+    }
+
+    // Ensure default birthday row exists after company_id column is guaranteed
+    try {
+      await sql`
+        INSERT INTO birthday_settings (id, company_id, is_enabled, send_time, message_template, delay_seconds, updated_at)
+        VALUES ('default', 'company_default', TRUE, '08:00', 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!', 5, NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `;
+    } catch (err: any) {
+      console.warn('[Drizzle ORM] Warn inserting default birthday row:', err.message);
+    }
 
     // Drop legacy global single-column unique constraints in favor of per-company compound uniqueness
-    await sql`ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_nomor_whatsapp_key;`;
-    await sql`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_key;`;
-    await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_key;`;
-    await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_key;`;
-    await sql`ALTER TABLE canned_responses DROP CONSTRAINT IF EXISTS canned_responses_short_code_key;`;
-    await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_key;`;
-    await sql`ALTER TABLE contact_identities DROP CONSTRAINT IF EXISTS contact_identities_channel_external_id_key;`;
-    await sql`ALTER TABLE ai_skills DROP CONSTRAINT IF EXISTS ai_skills_slug_key;`;
+    try {
+      await sql`ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_nomor_whatsapp_key;`;
+      await sql`ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_nomor_whatsapp_unique;`;
+      await sql`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_key;`;
+      await sql`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_unique;`;
+      await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_key;`;
+      await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_unique;`;
+      await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_key;`;
+      await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_unique;`;
+      await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_key;`;
+      await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_unique;`;
+      await sql`ALTER TABLE canned_responses DROP CONSTRAINT IF EXISTS canned_responses_short_code_key;`;
+      await sql`ALTER TABLE canned_responses DROP CONSTRAINT IF EXISTS canned_responses_short_code_unique;`;
+      await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_key;`;
+      await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_unique;`;
+      await sql`ALTER TABLE contact_identities DROP CONSTRAINT IF EXISTS contact_identities_channel_external_id_key;`;
+      await sql`ALTER TABLE contact_identities DROP CONSTRAINT IF EXISTS contact_identities_channel_external_id_unique;`;
+      await sql`ALTER TABLE ai_skills DROP CONSTRAINT IF EXISTS ai_skills_slug_key;`;
+      await sql`ALTER TABLE ai_skills DROP CONSTRAINT IF EXISTS ai_skills_slug_unique;`;
+    } catch (err: any) {
+      console.warn('[Drizzle ORM] Warn dropping legacy constraints:', err.message);
+    }
 
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_company_phone ON contacts (company_id, nomor_whatsapp) WHERE nomor_whatsapp IS NOT NULL;`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_rec_company_waha_msg ON campaign_recipients (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_msg_company_waha_msg ON chat_messages (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_roles_company_name ON crm_roles (company_id, LOWER(name));`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_canned_company_code ON canned_responses (company_id, LOWER(short_code));`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_sku ON products (company_id, LOWER(sku));`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_id_company_ch_ext ON contact_identities (company_id, channel, external_id);`;
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_skills_company_slug ON ai_skills (company_id, slug);`;
+    try {
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_company_phone ON contacts (company_id, nomor_whatsapp) WHERE nomor_whatsapp IS NOT NULL;`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_rec_company_waha_msg ON campaign_recipients (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_msg_company_waha_msg ON chat_messages (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_roles_company_name ON crm_roles (company_id, LOWER(name));`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_canned_company_code ON canned_responses (company_id, LOWER(short_code));`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_sku ON products (company_id, LOWER(sku));`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_id_company_ch_ext ON contact_identities (company_id, channel, external_id);`;
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_skills_company_slug ON ai_skills (company_id, slug);`;
+    } catch (err: any) {
+      console.warn('[Drizzle ORM] Warn creating compound indexes:', err.message);
+    }
 
     // Migrate legacy single-tenant settings and license into company_default once
     const migratedRows = await sql`
