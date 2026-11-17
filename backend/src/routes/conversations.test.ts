@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selectWhatsAppConversationForSession } from './conversations';
+import {
+  collectMentionTokens,
+  selectWhatsAppConversationForSession,
+} from './conversations';
 
 test('selectWhatsAppConversationForSession matches requested session case-insensitively', () => {
   const rows = [
@@ -35,4 +38,13 @@ test('selectWhatsAppConversationForSession ignores group conversations when dire
   ];
   assert.equal(selectWhatsAppConversationForSession(rows, 'sales')?.id, 'c1');
   assert.equal(selectWhatsAppConversationForSession(rows, null)?.id, 'c1');
+});
+
+test('collectMentionTokens extracts phone and @lid mentions from text and metadataJson', () => {
+  const tokens = collectMentionTokens(
+    'Halo @6281234567890 dan @99887766554433 tolong cek',
+    JSON.stringify({ mentions: ['6281234567890@c.us', '99887766554433@lid'] })
+  );
+  assert.equal(tokens.get('6281234567890'), '6281234567890@c.us');
+  assert.equal(tokens.get('99887766554433'), '99887766554433@lid');
 });

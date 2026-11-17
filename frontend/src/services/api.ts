@@ -114,6 +114,13 @@ export const api = {
     });
     return res.data.data;
   },
+  syncContactProfile: async (
+    id: string,
+    session?: string
+  ): Promise<{ updated: boolean; contact: Contact }> => {
+    const res = await client.post(`/contacts/${id}/sync-profile`, session ? { session } : {});
+    return res.data.data;
+  },
 
   // Campaigns & Broadcasts
   getCampaigns: async (params?: {
@@ -207,6 +214,18 @@ export const api = {
   ): Promise<{ seenSent: boolean; skippedByPrivacy?: boolean; error?: string }> => {
     const res = await client.post(`/conversations/${id}/read`);
     return res.data.data || { seenSent: false };
+  },
+  syncConversationProfile: async (
+    id: string,
+    session?: string
+  ): Promise<{
+    updated: boolean;
+    name?: string | null;
+    profile_picture_url?: string | null;
+    profile_about?: string | null;
+  }> => {
+    const res = await client.post(`/conversations/${id}/sync-profile`, session ? { session } : {});
+    return res.data.data;
   },
   sendConversationTyping: async (
     id: string,

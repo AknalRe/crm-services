@@ -73,6 +73,7 @@ import {
   LicenseInfo,
   OmnichannelType,
   ProductItem,
+  ResolvedMentionItem,
   SavedStickerItem,
   SharedContactMetadataItem,
   WahaPrivacyConfig,
@@ -177,12 +178,62 @@ function parseChatMessageMeta(msg: ChatMessage): ChatMessageMetadata | null {
   }
 }
 
+interface ParticipantLookupEntry {
+  name: string;
+  phone?: string | null;
+  contactId?: string | null;
+}
+
+interface ClickableMentionTarget {
+  contactId?: string | null;
+  phone?: string | null;
+  name?: string | null;
+}
+
+const ContactAvatar: React.FC<{
+  url?: string | null;
+  label: string;
+  className?: string;
+}> = ({ url, label, className = '' }) => {
+  const [failed, setFailed] = useState(false);
+  const resolved = url ? resolveMediaUrl(url) : '';
+  useEffect(() => {
+    setFailed(false);
+  }, [resolved]);
+
+  if (resolved && !failed) {
+    return (
+      <img
+        src={resolved}
+        alt={label}
+        onError={() => setFailed(true)}
+        className={`object-cover shrink-0 ${className}`}
+      />
+    );
+  }
+  return (
+    <div className={`flex items-center justify-center shrink-0 ${className}`}>
+      {(label || 'WA').slice(0, 2).toUpperCase()}
+    </div>
+  );
+};
+
 function renderTextWithClickableLinks(
   text: string,
-  participantsLookup?: Map<string, string>
+  participantsLookup?: Map<string, ParticipantLookupEntry>,
+  mentionedContacts?: ResolvedMentionItem[],
+  onMentionClick?: (target: ClickableMentionTarget) => void
 ): React.ReactNode {
   if (!text) return null;
-  const parts = text.split(/(https?:\/\/[^\s<>]+|@\d{8,16}|@[a-zA-Z0-9_.-]+)/gi);
+  const mentionByToken = new Map<string, ResolvedMentionItem>();
+  if (Array.isArray(mentionedContacts)) {
+    for (const mc of mentionedContacts) {
+      if (mc?.token) mentionByToken.set(mc.token.toLowerCase(), mc);
+      if (mc?.phone) mentionByToken.set(mc.phone.replace(/\D/g, ''), mc);
+      if (mc?.jid) mentionByToken.set(mc.jid.replace(/@.*$/, '').toLowerCase(), mc);
+    }
+  }
+  const parts = text.split(/(https?:\/\/[^\s<>]+|@\d{6,20}|@[a-zA-Z0-9_.-]+)/gi);
   return parts.map((part, idx) => {
     if (/^https?:\/\/[^\s<>]+$/i.test(part)) {
       const clean = part.replace(/[.,);!?]+$/, '');
@@ -202,18 +253,57 @@ function renderTextWithClickableLinks(
       );
     }
 
-    if (/^@(\d{8,16}|[a-zA-Z0-9_.-]+)$/.test(part)) {
+    if (/^@(\d{6,20}|[a-zA-Z0-9_.-]+)$/.test(part)) {
       const rawTarget = part.slice(1);
       const cleanPhone = rawTarget.replace(/\D/g, '');
+      const fromMsg =
+        mentionByToken.get(rawTarget.toLowerCase()) ||
+        (cleanPhone ? mentionByToken.get(cleanPhone) : undefined);
+      const fromPart =
+        (cleanPhone ? participantsLookup?.get(cleanPhone) : undefined) ||
+        participantsLookup?.get(rawTarget.toLowerCase());
+
       const matchedName =
-        (cleanPhone && participantsLookup?.get(cleanPhone)) ||
-        participantsLookup?.get(rawTarget.toLowerCase()) ||
+        fromMsg?.name ||
+        fromPart?.name ||
+        (fromMsg?.phone ? `+${fromMsg.phone}` : '') ||
         (cleanPhone ? `+${cleanPhone}` : rawTarget);
+      const resolvedPhone =
+        fromMsg?.phone ||
+        fromPart?.phone ||
+        (cleanPhone && cleanPhone.length <= 15 ? cleanPhone : null);
+      const resolvedContactId = fromMsg?.contactId || fromPart?.contactId || null;
+      const canOpen = Boolean(onMentionClick && (resolvedContactId || resolvedPhone));
+
+      const pillCls =
+        'inline-flex items-center gap-0.5 font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 rounded px-1.5 py-0.2 text-[11px] mx-0.5 align-baseline hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shadow-2xs';
+
+      if (canOpen) {
+        return (
+          <button
+            key={idx}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onMentionClick?.({
+                contactId: resolvedContactId,
+                phone: resolvedPhone,
+                name: matchedName,
+              });
+            }}
+            className={`${pillCls} cursor-pointer`}
+            title={`Klik untuk membuka kontak: ${matchedName}${resolvedPhone ? ` (+${resolvedPhone})` : ''}`}
+          >
+            <AtSign className="w-2.5 h-2.5 inline text-indigo-500 shrink-0" />
+            <span>{matchedName}</span>
+          </button>
+        );
+      }
 
       return (
         <span
           key={idx}
-          className="inline-flex items-center gap-0.5 font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 rounded px-1.5 py-0.2 text-[11px] mx-0.5 align-baseline font-mono select-all hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shadow-2xs"
+          className={pillCls}
           title={`Mention: @${rawTarget}${matchedName !== rawTarget ? ` (${matchedName})` : ''}`}
         >
           <AtSign className="w-2.5 h-2.5 inline text-indigo-500 shrink-0" />
@@ -351,6 +441,7 @@ interface ConversationsProps {
   currentUser?: AuthStatus['user'] | null;
   targetConversation?: ConversationNavigationTarget | null;
   onTargetHandled?: () => void;
+  onOpenContact?: (target: ClickableMentionTarget) => void;
   onOpenPlans?: () => void;
   onOpenSettings?: (section: 'quick_replies' | 'products' | 'labels') => void;
 }
@@ -380,6 +471,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   currentUser,
   targetConversation,
   onTargetHandled,
+  onOpenContact,
   onOpenPlans,
   onOpenSettings,
 }) => {
@@ -520,6 +612,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [savingMeta, setSavingMeta] = useState(false);
   const [savingChannelName, setSavingChannelName] = useState(false);
   const [savingExclude, setSavingExclude] = useState(false);
+  const [syncingProfile, setSyncingProfile] = useState(false);
   const [participantsData, setParticipantsData] = useState<ConversationParticipantsResponse | null>(null);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
@@ -978,32 +1071,102 @@ export const Conversations: React.FC<ConversationsProps> = ({
   };
 
   const participantsLookup = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, ParticipantLookupEntry>();
     if (selectedConversation?.contact?.nomor_whatsapp) {
       const p = selectedConversation.contact.nomor_whatsapp.replace(/\D/g, '');
-      if (p) map.set(p, selectedConversation.contact.nama_lengkap || `+${p}`);
+      if (p) {
+        map.set(p, {
+          name: selectedConversation.contact.nama_lengkap || `+${p}`,
+          phone: p,
+          contactId: selectedConversation.contact.id,
+        });
+      }
     }
     if (participantsData?.participants) {
       for (const part of participantsData.participants) {
         const p = part.phone ? part.phone.replace(/\D/g, '') : '';
+        const entry: ParticipantLookupEntry = {
+          name: part.contactName || part.name || (p ? `+${p}` : part.jid),
+          phone: p || null,
+          contactId: part.contactId || null,
+        };
         if (p) {
-          map.set(p, part.contactName || part.name || `+${p}`);
+          map.set(p, entry);
+        }
+        const jidToken = part.jid ? part.jid.replace(/@.*$/, '').toLowerCase() : '';
+        if (jidToken && !map.has(jidToken)) {
+          map.set(jidToken, entry);
         }
         if (part.name) {
-          map.set(part.name.toLowerCase(), part.contactName || part.name);
+          map.set(part.name.toLowerCase(), entry);
         }
       }
     }
     for (const m of messages) {
-      if (m.senderPhone) {
-        const p = m.senderPhone.replace(/\D/g, '');
-        if (p && !map.has(p)) {
-          map.set(p, m.senderName || `+${p}`);
-        }
+      const p = m.senderPhone ? m.senderPhone.replace(/\D/g, '') : '';
+      const jidToken = m.senderJid ? m.senderJid.replace(/@.*$/, '').toLowerCase() : '';
+      const fallbackEntry: ParticipantLookupEntry = {
+        name: m.senderName || (p ? `+${p}` : jidToken),
+        phone: p || null,
+      };
+      if (p && !map.has(p)) {
+        map.set(p, fallbackEntry);
+      }
+      if (jidToken && !map.has(jidToken)) {
+        map.set(jidToken, fallbackEntry);
       }
     }
     return map;
   }, [selectedConversation, participantsData, messages]);
+
+  const handleOpenMentionContact = useCallback(
+    (target: ClickableMentionTarget) => {
+      if (onOpenContact) {
+        onOpenContact(target);
+      }
+    },
+    [onOpenContact]
+  );
+
+  const handleSyncConversationProfile = async () => {
+    if (!selectedConversation || syncingProfile) return;
+    setSyncingProfile(true);
+    try {
+      const res = await api.syncConversationProfile(
+        selectedConversation.id,
+        selectedSession || undefined
+      );
+      const updatedList = await api.getConversations().catch(() => []);
+      if (updatedList.length > 0) {
+        setConversations(updatedList);
+        const refreshed = updatedList.find((c) => c.id === selectedConversation.id);
+        if (refreshed) setSelectedConversation(refreshed);
+      } else {
+        setSelectedConversation((prev) =>
+          prev
+            ? {
+                ...prev,
+                contact: {
+                  ...prev.contact,
+                  nama_lengkap: res.name || prev.contact.nama_lengkap,
+                  profile_picture_url: res.profile_picture_url ?? prev.contact.profile_picture_url,
+                  profile_about: res.profile_about ?? prev.contact.profile_about,
+                },
+              }
+            : null
+        );
+      }
+      toast.success(
+        res.updated
+          ? 'Profil WhatsApp berhasil diperbarui'
+          : 'Profil WhatsApp sudah sesuai dengan data terbaru'
+      );
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menyinkronkan profil WhatsApp');
+    } finally {
+      setSyncingProfile(false);
+    }
+  };
 
   const resolveMessageSenderName = useCallback(
     (msg?: ChatMessage | null): string => {
@@ -1017,7 +1180,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
           ? msg.senderJid.replace(/@.*$/, '').replace(/\D/g, '')
           : '';
       const lookupPhone = cleanPhone || jidPhone;
-      const fromLookup = lookupPhone ? participantsLookup.get(lookupPhone) : undefined;
+      const fromLookup = lookupPhone ? participantsLookup.get(lookupPhone)?.name : undefined;
 
       if (selectedConversation?.isGroup) {
         return (
@@ -1054,8 +1217,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
       // If replyToSender is numeric or phone, try resolving against participantsLookup (contactName/pushName)
       if (msg.replyToSender) {
         const digits = msg.replyToSender.replace(/\D/g, '');
-        if (digits && participantsLookup.has(digits)) {
-          return participantsLookup.get(digits)!;
+        const matchedPart = digits ? participantsLookup.get(digits) : undefined;
+        if (matchedPart?.name) {
+          return matchedPart.name;
         }
       }
       if (!selectedConversation?.isGroup) {
@@ -1193,7 +1357,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
   const handleSelectMention = (candidate: { phone?: string; name?: string; jid?: string }) => {
     const cleanPhone = candidate.phone ? candidate.phone.replace(/\D/g, '') : '';
-    const token = cleanPhone ? `@${cleanPhone} ` : candidate.name ? `@${candidate.name.replace(/\s+/g, '_')} ` : '';
+    const lidDigits =
+      !cleanPhone && candidate.jid && candidate.jid.toLowerCase().endsWith('@lid')
+        ? candidate.jid.replace(/@.*$/, '').replace(/\D/g, '')
+        : '';
+    const token = cleanPhone
+      ? `@${cleanPhone} `
+      : lidDigits
+      ? `@${lidDigits} `
+      : candidate.name
+      ? `@${candidate.name.replace(/\s+/g, '_')} `
+      : '';
     if (!token) return;
 
     const cursorPos = replyInputRef.current?.selectionStart ?? inputText.length;
@@ -2742,9 +2916,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       : 'hover:bg-gray-100/70 bg-white'
                   }`}
                 >
-                  <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0 mt-0.5">
-                    {getConversationDisplayTitle(conv).slice(0, 2).toUpperCase()}
-                  </div>
+                  <ContactAvatar
+                    url={conv.contact?.profile_picture_url}
+                    label={getConversationDisplayTitle(conv)}
+                    className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs mt-0.5"
+                  />
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
@@ -2885,9 +3061,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     title="Klik untuk membuka Detail Kontak & Opsi Percakapan"
                     className="flex items-center gap-2 min-w-0 flex-1 text-left rounded-md hover:bg-gray-50/80 p-0.5 -m-0.5 transition-colors"
                   >
-                    <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0">
-                      {getConversationDisplayTitle(selectedConversation).slice(0, 2).toUpperCase()}
-                    </div>
+                    <ContactAvatar
+                      url={selectedConversation.contact?.profile_picture_url}
+                      label={getConversationDisplayTitle(selectedConversation)}
+                      className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs"
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <h4 className="font-semibold text-gray-900 text-xs sm:text-[13px] truncate">
@@ -3946,7 +4124,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               <div className="space-y-1.5">
                                 {meta.linkPreview.caption && (
                                   <div className="whitespace-pre-wrap break-words">
-                                    {renderTextWithClickableLinks(meta.linkPreview.caption, participantsLookup)}
+                                    {renderTextWithClickableLinks(
+                                      meta.linkPreview.caption,
+                                      participantsLookup,
+                                      msg.mentionedContacts,
+                                      handleOpenMentionContact
+                                    )}
                                   </div>
                                 )}
                                 <a
@@ -3995,7 +4178,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   </div>
                                 )}
                                 <div className="whitespace-pre-wrap break-words">
-                                  {renderTextWithClickableLinks(meta.interactiveButtons.body, participantsLookup)}
+                                  {renderTextWithClickableLinks(
+                                    meta.interactiveButtons.body,
+                                    participantsLookup,
+                                    msg.mentionedContacts,
+                                    handleOpenMentionContact
+                                  )}
                                 </div>
                                 {meta.interactiveButtons.footer && (
                                   <div className="text-[10px] text-gray-500">
@@ -4343,7 +4531,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           }
                           return (
                             <div className="whitespace-pre-wrap break-words">
-                              {renderTextWithClickableLinks(msg.body, participantsLookup)}
+                              {renderTextWithClickableLinks(
+                                msg.body,
+                                participantsLookup,
+                                msg.mentionedContacts,
+                                handleOpenMentionContact
+                              )}
                             </div>
                           );
                         })()}
@@ -6095,9 +6288,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
           </div>
 
           <div className="text-center pb-4 border-b border-gray-200">
-            <div className="w-12 h-12 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-base flex items-center justify-center mx-auto mb-2 border border-indigo-200">
-              {getConversationDisplayTitle(selectedConversation).slice(0, 2).toUpperCase()}
-            </div>
+            <ContactAvatar
+              url={selectedConversation.contact?.profile_picture_url}
+              label={getConversationDisplayTitle(selectedConversation)}
+              className="w-12 h-12 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-base mx-auto mb-2 border border-indigo-200"
+            />
             <h4 className="font-semibold text-gray-900 text-sm break-words">
               {getConversationDisplayTitle(selectedConversation)}
             </h4>
@@ -6111,6 +6306,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
               <span className="text-xs text-gray-500 block">
                 Panggilan: {selectedConversation.contact.nama_panggilan}
               </span>
+            )}
+            {selectedConversation.contact?.profile_about && (
+              <p className="text-[11px] text-gray-500 mt-1 px-2 line-clamp-2 break-words">
+                {selectedConversation.contact.profile_about}
+              </p>
             )}
             <div className="mt-1.5 flex items-center justify-center flex-wrap gap-1">
               {selectedConversation.wahaSession && (
@@ -6130,6 +6330,35 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </span>
               )}
             </div>
+            {(selectedConversation.channel || 'WHATSAPP').toUpperCase() === 'WHATSAPP' && (
+              <div className="mt-2 flex items-center justify-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={syncingProfile}
+                  onClick={() => void handleSyncConversationProfile()}
+                  className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50 text-[10px] font-medium text-gray-700 inline-flex items-center gap-1 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${syncingProfile ? 'animate-spin' : ''}`} />
+                  <span>{syncingProfile ? 'Menyinkronkan...' : 'Sync Profil WA'}</span>
+                </button>
+                {onOpenContact && !selectedConversation.isGroup && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenContact({
+                        contactId: selectedConversation.contact?.id,
+                        phone: selectedConversation.contact?.nomor_whatsapp,
+                        name: selectedConversation.contact?.nama_lengkap,
+                      })
+                    }
+                    className="px-2 py-1 rounded border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-[10px] font-medium text-indigo-700 inline-flex items-center gap-1"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Buka Kontak</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="py-3 space-y-2 flex-1 text-xs text-gray-700">
@@ -6374,7 +6603,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         {participantsData.participants.slice(0, 8).map((part) => (
                           <div
                             key={part.jid}
-                            className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-teal-100 text-[11px]"
+                            onClick={() => {
+                              if (onOpenContact && (part.contactId || part.phone)) {
+                                onOpenContact({
+                                  contactId: part.contactId,
+                                  phone: part.phone,
+                                  name: part.contactName || part.name,
+                                });
+                              }
+                            }}
+                            className={`flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-teal-100 text-[11px] ${
+                              onOpenContact && (part.contactId || part.phone)
+                                ? 'cursor-pointer hover:bg-teal-50/70'
+                                : ''
+                            }`}
                           >
                             <div className="min-w-0">
                               <div className="font-medium text-gray-900 truncate flex items-center gap-1">
@@ -7189,7 +7431,21 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     {participantsData.participants.map((part) => (
                       <div
                         key={part.jid}
-                        className="px-3 py-2 flex items-center justify-between gap-2 text-xs"
+                        onClick={() => {
+                          if (onOpenContact && (part.contactId || part.phone)) {
+                            setShowParticipantsModal(false);
+                            onOpenContact({
+                              contactId: part.contactId,
+                              phone: part.phone,
+                              name: part.contactName || part.name,
+                            });
+                          }
+                        }}
+                        className={`px-3 py-2 flex items-center justify-between gap-2 text-xs ${
+                          onOpenContact && (part.contactId || part.phone)
+                            ? 'cursor-pointer hover:bg-gray-50'
+                            : ''
+                        }`}
                       >
                         <div className="min-w-0">
                           <div className="font-semibold text-gray-900 truncate flex items-center gap-1.5">

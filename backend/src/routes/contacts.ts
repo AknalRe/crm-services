@@ -13,6 +13,7 @@ import { normalizePhoneNumber } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { wahaService } from '../services/waha.service';
+import { syncWhatsAppProfile } from '../services/profile.service';
 import { getRequestCompanyId, requirePermission } from './auth';
 import crypto from 'crypto';
 
@@ -30,6 +31,9 @@ export function formatContact(c: any) {
     notes: c.notes,
     exclude_from_metrics: Boolean(c.excludeFromMetrics),
     exclude_reason: c.excludeReason || null,
+    profile_picture_url: c.profilePictureUrl || null,
+    profile_about: c.profileAbout || null,
+    profile_synced_at: c.profileSyncedAt || null,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
   };
@@ -941,4 +945,70 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       });
     }
   });
+
+  // POST refresh WhatsApp profile (name, about, photo) for a contact or group
+  fastify.post<{ Params: { id: string }; Body: { session?: string } | undefined }>(
+    '/:id/sync-profile',
+    async (req, reply) => {
+      try {
+        const companyId = getRequestCompanyId(req);
+        const rows = await db
+          .select()
+          .from(contacts)
+          .where(and(eq(contacts.id, req.params.id), eq(contacts.companyId, companyId)))
+          .limit(1);
+        const contact = rows[0];
+        if (!contact) {
+          return reply.status(404).send({ success: false, error: 'Kontak tidak ditemukan' });
+        }
+
+        const idRows = await db
+          .select({ externalId: contactIdentities.externalId })
+          .from(contactIdentities)
+          .where(
+            and(
+              eq(contactIdentities.companyId, companyId),
+              eq(contactIdentities.contactId, contact.id),
+              eq(contactIdentities.channel, 'WHATSAPP')
+            )
+          );
+        const groupId = idRows.find((r) => r.externalId.toLowerCase().endsWith('@g.us'))?.externalId;
+        const cleanPhone = contact.nomorWhatsapp
+          ? normalizePhoneNumber(contact.nomorWhatsapp) || contact.nomorWhatsapp.replace(/\D/g, '')
+          : '';
+        const targetJid =
+          groupId ||
+          (cleanPhone ? `${cleanPhone}@c.us` : idRows[0]?.externalId || null);
+        if (!targetJid) {
+          return reply.status(422).send({
+            success: false,
+            error: 'Kontak ini belum memiliki nomor WhatsApp atau ID grup',
+          });
+        }
+
+        const synced = await syncWhatsAppProfile({
+          companyId,
+          contactId: contact.id,
+          jid: targetJid,
+          session: req.body?.session?.trim() || undefined,
+          isGroup: Boolean(groupId),
+          force: true,
+        });
+        const refreshed = await db
+          .select()
+          .from(contacts)
+          .where(eq(contacts.id, contact.id))
+          .limit(1);
+        return reply.send({
+          success: true,
+          data: {
+            updated: synced.updated,
+            contact: formatContact(refreshed[0] || contact),
+          },
+        });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
 }

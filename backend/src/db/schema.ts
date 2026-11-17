@@ -52,6 +52,9 @@ export const contacts = pgTable('contacts', {
   notes: text('notes'),
   excludeFromMetrics: boolean('exclude_from_metrics').default(false).notNull(),
   excludeReason: text('exclude_reason'),
+  profilePictureUrl: text('profile_picture_url'),
+  profileAbout: text('profile_about'),
+  profileSyncedAt: timestamp('profile_synced_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

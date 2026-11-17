@@ -29,6 +29,7 @@ import {
 import { handleInboundAutomation } from '../services/automation.service';
 import { getRequestCompanyId, requirePermission } from './auth';
 import { saveBase64MediaFile, saveMediaBufferFile } from './media';
+import { syncWhatsAppProfile } from '../services/profile.service';
 import crypto from 'crypto';
 
 export function resolveRequestPublicBase(req: FastifyRequest): string | null {
@@ -168,16 +169,78 @@ export function isGenericDisplayName(name?: string | null): boolean {
   const trimmed = name.trim();
   if (!trimmed) return true;
   if (
-    /^(pelanggan|anggota grup|tim cs|whatsapp langsung|kontak baru|peserta|pesan sebelumnya)$/i.test(
+    /^(pelanggan|anggota grup|tim cs|whatsapp langsung|whatsapp user|kontak baru|peserta|pesan sebelumnya|tanpa nama|unknown)$/i.test(
       trimmed
     )
   ) {
     return true;
   }
-  if (/^kontak\s+\d{3,6}$/i.test(trimmed)) return true;
+  if (/^kontak\s+\+?\d{3,16}$/i.test(trimmed)) return true;
   if (/@(lid|c\.us|s\.whatsapp\.net|g\.us)$/i.test(trimmed)) return true;
   if (/^\+?\d{6,16}$/.test(trimmed.replace(/[\s-]/g, ''))) return true;
   return false;
+}
+
+// Bind a WhatsApp group JID to exactly one CRM contact even when several sessions receive the same group message at once
+async function claimGroupIdentity(params: {
+  companyId: string;
+  groupJid: string;
+  contact: typeof contacts.$inferSelect;
+  name: string;
+  now: Date;
+}): Promise<typeof contacts.$inferSelect> {
+  const { companyId, groupJid, contact, name, now } = params;
+  await db
+    .insert(contactIdentities)
+    .values({
+      id: crypto.randomUUID(),
+      companyId,
+      contactId: contact.id,
+      channel: 'WHATSAPP',
+      externalId: groupJid,
+      handle: name,
+      createdAt: now,
+    })
+    .onConflictDoNothing()
+    .catch(() => {});
+
+  const owner = await db
+    .select()
+    .from(contactIdentities)
+    .where(
+      and(
+        eq(contactIdentities.companyId, companyId),
+        eq(contactIdentities.channel, 'WHATSAPP'),
+        eq(contactIdentities.externalId, groupJid)
+      )
+    )
+    .limit(1);
+  if (!owner[0] || owner[0].contactId === contact.id) return contact;
+
+  const winner = await db
+    .select()
+    .from(contacts)
+    .where(and(eq(contacts.id, owner[0].contactId), eq(contacts.companyId, companyId)))
+    .limit(1);
+  if (!winner[0]) return contact;
+  await db
+    .delete(contacts)
+    .where(and(eq(contacts.id, contact.id), eq(contacts.companyId, companyId)))
+    .catch(() => {});
+  return winner[0];
+}
+
+export function pickSessionScopedMessage<T extends { wahaSession?: string | null }>(
+  rows: T[],
+  session?: string | null
+): T | undefined {
+  if (!rows.length) return undefined;
+  const clean = String(session || '').trim().toLowerCase();
+  if (clean) {
+    const match = rows.find((r) => String(r.wahaSession || '').trim().toLowerCase() === clean);
+    if (match) return match;
+  }
+  return rows[0];
 }
 
 export function pickBestContactDisplayName(
@@ -1513,9 +1576,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
               )
             )
-            .limit(1);
-          if (targetMsgs[0]) {
-            const targetMsg = targetMsgs[0];
+            .limit(10);
+          const scopedTarget = pickSessionScopedMessage(targetMsgs, webhookSession);
+          if (scopedTarget) {
+            const targetMsg = scopedTarget;
             let prevMeta: Record<string, any> = {};
             if (targetMsg.metadataJson) {
               try {
@@ -1664,19 +1728,13 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 })
                 .returning();
               contact = insertedGrp;
-              await db
-                .insert(contactIdentities)
-                .values({
-                  id: crypto.randomUUID(),
-                  companyId,
-                  contactId: contact.id,
-                  channel: 'WHATSAPP',
-                  externalId: fallbackChatJid,
-                  handle: grpName,
-                  createdAt: now,
-                })
-                .onConflictDoNothing()
-                .catch(() => {});
+              contact = await claimGroupIdentity({
+                companyId,
+                groupJid: fallbackChatJid,
+                contact,
+                name: grpName,
+                now,
+              });
             }
           } else {
             const isLidChat = lowerChatJid.endsWith('@lid');
@@ -1957,7 +2015,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               ackStatus: voteInfo.fromMe ? 1 : 2,
               sentAt: voteInfo.fromMe ? now : null,
               createdAt: now,
-            });
+            }).onConflictDoNothing();
             shouldTouchConversation = true;
           }
 
@@ -2060,14 +2118,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         const { exactIds } = extractWahaMessageIds(payload);
         const msgId = exactIds[0] || null;
 
-        // Dedup: for group chats, scope by session so each session inbox is populated independently.
-        // For personal chats, global dedup by wahaMessageId is sufficient.
+        // Dedup scoped by wahaSession so multiple sessions in the same group or thread never shadow each other
         if (msgId) {
-          const isGroupForDedup =
-            !rawFrom ||
-            rawFrom.toLowerCase().endsWith('@g.us') ||
-            String(payload?.chatId || '').toLowerCase().endsWith('@g.us');
-          const dedupConditions = isGroupForDedup && inboundSession
+          const dedupConditions = inboundSession
             ? and(
                 eq(chatMessages.companyId, companyId),
                 eq(chatMessages.wahaMessageId, msgId),
@@ -2114,9 +2167,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
               )
             )
-            .limit(1);
-          if (targetMsgs[0]) {
-            const targetMsg = targetMsgs[0];
+            .limit(10);
+          const scopedTarget = pickSessionScopedMessage(targetMsgs, webhookSession);
+          if (scopedTarget) {
+            const targetMsg = scopedTarget;
             let prevMeta: Record<string, any> = {};
             if (targetMsg.metadataJson) {
               try {
@@ -2167,9 +2221,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
               )
             )
-            .limit(1);
-          if (targetMsgs[0]) {
-            const targetMsg = targetMsgs[0];
+            .limit(10);
+          const scopedTarget = pickSessionScopedMessage(targetMsgs, webhookSession);
+          if (scopedTarget) {
+            const targetMsg = scopedTarget;
             let prevMeta: Record<string, any> = {};
             if (targetMsg.metadataJson) {
               try {
@@ -2368,19 +2423,13 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               })
               .returning();
             contact = insertedGrp;
-            await db
-              .insert(contactIdentities)
-              .values({
-                id: crypto.randomUUID(),
-                companyId,
-                contactId: contact.id,
-                channel: 'WHATSAPP',
-                externalId: groupJid,
-                handle: effectiveGroupName,
-                createdAt: now,
-              })
-              .onConflictDoNothing()
-              .catch(() => {});
+            contact = await claimGroupIdentity({
+              companyId,
+              groupJid,
+              contact,
+              name: effectiveGroupName,
+              now,
+            });
           } else if (
             resolvedGroupSubject &&
             resolvedGroupSubject !== contact.namaLengkap &&
@@ -2469,7 +2518,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
           if (!contact) {
             const fallbackSuffix = fromPhone ? fromPhone.slice(-4) : rawFrom.split('@')[0].slice(-4);
-            const contactName = notifyName || `Kontak ${fallbackSuffix}`;
+            const contactName = (!isFromMe && notifyName) || `Kontak ${fallbackSuffix}`;
             try {
               const insertedContacts = await db
                 .insert(contacts)
@@ -2553,8 +2602,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           .orderBy(desc(conversations.updatedAt));
 
         const existingConv = normalizedInboundSession
-          ? convList.find((c) => c.wahaSession === normalizedInboundSession) ||
-            convList.find((c) => !c.wahaSession)
+          ? convList.find(
+              (c) =>
+                (c.wahaSession || '').trim().toLowerCase() ===
+                normalizedInboundSession.toLowerCase()
+            ) || convList.find((c) => !(c.wahaSession || '').trim())
           : convList[0];
         let convId: string;
 
@@ -2791,7 +2843,25 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           ackStatus: isFromMe ? 1 : 2,
           sentAt: isFromMe ? now : null,
           createdAt: now,
-        });
+        }).onConflictDoNothing();
+
+        // Capture WhatsApp profile (name & photo) of the contact or group without delaying the webhook response
+        const profileJid = isGroupChat
+          ? groupJid
+          : fromPhone
+          ? `${fromPhone}@c.us`
+          : rawFrom;
+        if (profileJid) {
+          void runWithCompany(companyId, () =>
+            syncWhatsAppProfile({
+              companyId,
+              contactId: contact.id,
+              jid: profileJid,
+              session: inboundSession,
+              isGroup: isGroupChat,
+            })
+          ).catch(() => {});
+        }
 
         wahaService.recordWebhookEvent({
           receivedAt: now.toISOString(),

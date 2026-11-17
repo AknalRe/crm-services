@@ -661,6 +661,15 @@ export interface WahaWebhookTelemetry {
   note?: string;
 }
 
+export interface WahaProfileInfo {
+  jid: string;
+  isGroup: boolean;
+  name?: string;
+  pushName?: string;
+  about?: string;
+  pictureUrl?: string;
+}
+
 export interface WahaConfig {
   baseUrl: string;
   apiKey?: string;
@@ -1503,7 +1512,7 @@ export class WahaService {
     }
 
     const requiredEvents = [
-      'message',
+      'message.any',
       'message.ack',
       'session.status',
       'presence.update',
@@ -1527,10 +1536,9 @@ export class WahaService {
       if (!wh || typeof wh.url !== 'string') return false;
       if (wh.url.trim().replace(/\/+$/, '') !== normTarget) return false;
       const evs: string[] = Array.isArray(wh.events) ? wh.events : [];
-      const hasInbound = evs.includes('message') || evs.includes('message.any');
       return (
         evs.includes('*') ||
-        (hasInbound &&
+        (evs.includes('message.any') &&
           evs.includes('message.ack') &&
           evs.includes('session.status') &&
           evs.includes('presence.update') &&
@@ -1635,7 +1643,7 @@ export class WahaService {
           {
             url: resolvedWebhook.url,
             events: [
-              'message',
+              'message.any',
               'message.ack',
               'session.status',
               'presence.update',
@@ -2883,6 +2891,146 @@ export class WahaService {
       if (liveSession) targetSession = liveSession;
     }
     return { client, targetSession };
+  }
+
+  /**
+   * Capture WhatsApp profile (display name, about & photo URL) of a personal contact or group via WAHA
+   */
+  public async getWhatsAppProfile(
+    jid: string,
+    sessionName?: string
+  ): Promise<WahaProfileInfo | null> {
+    const rawJid = String(jid || '').trim();
+    if (!rawJid) return null;
+    const isGroup = rawJid.toLowerCase().endsWith('@g.us');
+    const digits = rawJid.replace(/\D/g, '');
+    const cleanJid = rawJid.includes('@') ? rawJid : digits ? `${digits}@c.us` : '';
+    if (!cleanJid) return null;
+
+    const pickString = (...candidates: unknown[]): string | undefined => {
+      for (const c of candidates) {
+        if (typeof c === 'string' && c.trim()) return c.trim();
+      }
+      return undefined;
+    };
+    const pickUrl = (data: any): string | undefined => {
+      const found = pickString(
+        data?.profilePictureURL,
+        data?.profilePictureUrl,
+        data?.profilePicture,
+        data?.url,
+        data?.imgUrl,
+        data?.eurl,
+        typeof data === 'string' ? data : undefined
+      );
+      return found && /^(https?:\/\/|\/)/i.test(found) ? found : undefined;
+    };
+
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const encSession = encodeURIComponent(targetSession);
+      const encJid = encodeURIComponent(cleanJid);
+      const result: WahaProfileInfo = { jid: cleanJid, isGroup };
+
+      if (isGroup) {
+        const info = await this.getGroupInfo(cleanJid, targetSession).catch(() => null);
+        if (info?.subject) result.name = info.subject;
+        if (info?.description) result.about = info.description;
+        for (const endpoint of [
+          `/api/${encSession}/groups/${encJid}/picture`,
+          `/api/${encSession}/chats/${encJid}/picture`,
+        ]) {
+          const res = await client.get(endpoint, { timeout: 8000 }).catch(() => null);
+          const url = pickUrl(res?.data);
+          if (url) {
+            result.pictureUrl = url;
+            break;
+          }
+        }
+      } else {
+        const params = { session: targetSession, contactId: cleanJid };
+        const contactRes = await client
+          .get('/api/contacts', { params, timeout: 8000 })
+          .catch(() => null);
+        const contactData = contactRes?.data;
+        result.name = pickString(
+          contactData?.name,
+          contactData?.Name,
+          contactData?.fullName,
+          contactData?.FullName,
+          contactData?.shortName,
+          contactData?.BusinessName
+        );
+        result.pushName = pickString(
+          contactData?.pushname,
+          contactData?.pushName,
+          contactData?.PushName,
+          contactData?.notifyName
+        );
+
+        const picRes = await client
+          .get('/api/contacts/profile-picture', { params, timeout: 8000 })
+          .catch(() => null);
+        let url = pickUrl(picRes?.data);
+        if (!url) {
+          const chatPicRes = await client
+            .get(`/api/${encSession}/chats/${encJid}/picture`, { timeout: 8000 })
+            .catch(() => null);
+          url = pickUrl(chatPicRes?.data);
+        }
+        if (url) result.pictureUrl = url;
+
+        const aboutRes = await client
+          .get('/api/contacts/about', { params, timeout: 8000 })
+          .catch(() => null);
+        result.about = pickString(aboutRes?.data?.about, aboutRes?.data?.status);
+      }
+
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Download a WhatsApp profile photo from WhatsApp CDN or the configured WAHA server only
+   */
+  public async downloadProfilePicture(
+    rawUrl: string
+  ): Promise<{ buffer: Buffer; contentType: string } | null> {
+    const clean = String(rawUrl || '').trim();
+    if (!clean) return null;
+    try {
+      let parsed: URL | null = null;
+      try {
+        parsed = new URL(clean);
+      } catch {
+        parsed = null;
+      }
+      if (parsed) {
+        const host = parsed.hostname.toLowerCase();
+        const isWhatsappCdn =
+          parsed.protocol === 'https:' &&
+          (/(^|\.)whatsapp\.net$/.test(host) ||
+            /(^|\.)whatsapp\.com$/.test(host) ||
+            /(^|\.)fbcdn\.net$/.test(host));
+        if (isWhatsappCdn) {
+          const res = await axios.get(parsed.toString(), {
+            responseType: 'arraybuffer',
+            timeout: 12000,
+            maxContentLength: 3 * 1024 * 1024,
+          });
+          const contentType = String(res.headers?.['content-type'] || 'image/jpeg').trim();
+          if (!contentType.toLowerCase().startsWith('image/')) return null;
+          return { buffer: Buffer.from(res.data), contentType };
+        }
+      }
+      const downloaded = await this.downloadMedia(clean);
+      if (!downloaded.contentType.toLowerCase().startsWith('image/')) return null;
+      return { buffer: downloaded.buffer, contentType: downloaded.contentType };
+    } catch {
+      return null;
+    }
   }
 
   private extractWahaArrayPayload(payload: any): any[] | null {

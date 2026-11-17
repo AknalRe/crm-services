@@ -213,6 +213,11 @@ function AppShell() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [preselectedContactIds, setPreselectedContactIds] = useState<string[]>([]);
   const [targetConversation, setTargetConversation] = useState<ConversationNavigationTarget | null>(null);
+  const [targetContact, setTargetContact] = useState<{
+    contactId?: string | null;
+    phone?: string | null;
+    name?: string | null;
+  } | null>(null);
   const [prefillPost, setPrefillPost] = useState<{
     channel?: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
     caption?: string;
@@ -566,6 +571,8 @@ function AppShell() {
                 currentUser={authStatus?.user}
                 onStartBroadcastWithContacts={handleStartBroadcastWithContacts}
                 licenseInfo={licenseInfo}
+                targetContact={targetContact}
+                onTargetContactHandled={() => setTargetContact(null)}
               />
             )}
             {currentTab === 'broadcasts' && (
@@ -612,6 +619,10 @@ function AppShell() {
                 currentUser={authStatus?.user}
                 targetConversation={targetConversation}
                 onTargetHandled={() => setTargetConversation(null)}
+                onOpenContact={(target) => {
+                  setTargetContact(target);
+                  setCurrentTab('contacts');
+                }}
                 onOpenPlans={() => openPlansModal('plans')}
                 onOpenSettings={(sec) => {
                   setSettingsSection(sec);

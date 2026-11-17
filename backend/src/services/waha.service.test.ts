@@ -2084,8 +2084,98 @@ test('extractWahaPollVoteEvent and upsertPollVoteInMetadata handle direct, group
   const syncRes = await wahaService.syncSessionWebhooks('https://crm.example.com');
   assert.deepEqual(syncRes.synced, ['sales']);
   const syncedEvents: string[] = putBody?.config?.webhooks?.[0]?.events || [];
+  assert.ok(syncedEvents.includes('message.any'));
   assert.ok(syncedEvents.includes('poll.vote'));
   assert.ok(syncedEvents.includes('poll.vote.failed'));
+});
+
+test('multi-session helpers, profile display name resolution, and getWhatsAppProfile work accurately', async (t) => {
+  const { pickSessionScopedMessage, isGenericDisplayName } =
+    require('../routes/waha') as typeof import('../routes/waha');
+  const { resolveProfileDisplayName } =
+    require('./profile.service') as typeof import('./profile.service');
+
+  // Session-scoped selection preserves separate group message copies per session
+  const scoped = pickSessionScopedMessage(
+    [
+      { id: 'm1', wahaSession: 'sesi_a' },
+      { id: 'm2', wahaSession: 'sesi_b' },
+    ],
+    'SESI_B'
+  );
+  assert.equal(scoped?.id, 'm2');
+
+  assert.equal(isGenericDisplayName('Kontak +628123456789'), true);
+  assert.equal(isGenericDisplayName('Budi Santoso'), false);
+
+  // Generic personal contact placeholder upgrades to WhatsApp profile/push name, custom CRM name stays preserved
+  assert.equal(
+    resolveProfileDisplayName({
+      isGroup: false,
+      currentName: 'Kontak +628123456789',
+      profileName: null,
+      profilePushName: 'Dewi Lestari',
+    }),
+    'Dewi Lestari'
+  );
+  assert.equal(
+    resolveProfileDisplayName({
+      isGroup: false,
+      currentName: 'Pelanggan VIP Jakarta',
+      profileName: 'Dewi WA',
+      profilePushName: 'Dewi',
+    }),
+    null
+  );
+  assert.equal(
+    resolveProfileDisplayName({
+      isGroup: true,
+      currentName: 'Grup WhatsApp 112233',
+      profileName: 'Tim Operasional Pusat',
+    }),
+    'Tim Operasional Pusat'
+  );
+
+  // Verify getWhatsAppProfile captures both personal & group metadata + avatar URLs
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha-gows.example.com',
+    apiKey: 'test-key',
+    session: 'sales',
+  });
+  const origCreate = axios.create;
+  (axios as any).create = () => ({
+    get: async (url: string) => {
+      if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      if (url === '/api/sessions') return { data: [{ name: 'sales', status: 'WORKING' }] };
+      if (url === '/api/contacts') return { data: { name: 'Rina Wijaya', pushname: 'Rina' } };
+      if (url === '/api/contacts/profile-picture') return { data: { profilePictureURL: 'https://pps.whatsapp.net/rina.jpg' } };
+      if (url === '/api/contacts/about') return { data: { about: 'Open 08:00 - 17:00' } };
+      if (url.endsWith('/groups/12036300112233%40g.us')) {
+        return { data: { subject: 'Grup Distributor', desc: 'Koordinasi stok harian' } };
+      }
+      if (url.endsWith('/groups/12036300112233%40g.us/picture')) {
+        return { data: { url: 'https://pps.whatsapp.net/grup.jpg' } };
+      }
+      throw { response: { status: 404 } };
+    },
+    post: async () => ({ data: {} }),
+    put: async () => ({ data: {} }),
+  });
+  t.after(() => {
+    (axios as any).create = origCreate;
+  });
+
+  const personalProf = await wahaService.getWhatsAppProfile('628123456789@c.us', 'sales');
+  assert.equal(personalProf?.name, 'Rina Wijaya');
+  assert.equal(personalProf?.pushName, 'Rina');
+  assert.equal(personalProf?.about, 'Open 08:00 - 17:00');
+  assert.equal(personalProf?.pictureUrl, 'https://pps.whatsapp.net/rina.jpg');
+
+  const groupProf = await wahaService.getWhatsAppProfile('12036300112233@g.us', 'sales');
+  assert.equal(groupProf?.name, 'Grup Distributor');
+  assert.equal(groupProf?.about, 'Koordinasi stok harian');
+  assert.equal(groupProf?.pictureUrl, 'https://pps.whatsapp.net/grup.jpg');
 });
 
 

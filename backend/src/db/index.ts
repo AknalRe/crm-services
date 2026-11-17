@@ -538,8 +538,12 @@ export async function initDb() {
   await safeExec('idx_campaign_rec_company_waha_msg', () => _queryClient`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_rec_company_waha_msg ON campaign_recipients (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;
   `);
-  await safeExec('idx_chat_msg_company_waha_msg', () => _queryClient`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_msg_company_waha_msg ON chat_messages (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;
+  // Same WhatsApp message id may legitimately arrive on several sessions (e.g. one group joined by sessions A and B)
+  await safeExec('drop legacy idx_chat_msg_company_waha_msg', () => _queryClient`
+    DROP INDEX IF EXISTS idx_chat_msg_company_waha_msg;
+  `);
+  await safeExec('idx_chat_msg_company_session_waha_msg', () => _queryClient`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_msg_company_session_waha_msg ON chat_messages (company_id, COALESCE(waha_session, ''), waha_message_id) WHERE waha_message_id IS NOT NULL;
   `);
   await safeExec('idx_crm_roles_company_name', () => _queryClient`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_roles_company_name ON crm_roles (company_id, LOWER(name));

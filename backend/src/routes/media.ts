@@ -77,6 +77,38 @@ function ensureUploadsDir() {
   }
 }
 
+// Profile photos live in a separate folder so they never appear in the media library listing
+const PROFILES_DIR = path.join(UPLOADS_DIR, 'profiles');
+const PROFILE_EXT_MIME: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+};
+
+export async function saveProfilePictureFile(params: {
+  buffer: Buffer;
+  mimeType?: string;
+}): Promise<{ filename: string; relativeUrl: string }> {
+  if (!params.buffer || params.buffer.length === 0) {
+    throw new Error('Foto profil kosong');
+  }
+  if (params.buffer.length > 3 * 1024 * 1024) {
+    throw new Error('Ukuran foto profil melebihi 3 MB');
+  }
+  const mime = normalizeMimeBase(params.mimeType);
+  const ext = mime === 'image/png' ? '.png' : mime === 'image/webp' ? '.webp' : '.jpg';
+  const filename = `${Date.now()}_${crypto.randomUUID().slice(0, 8)}${ext}`;
+  await fs.promises.mkdir(PROFILES_DIR, { recursive: true });
+  await fs.promises.writeFile(path.join(PROFILES_DIR, filename), params.buffer);
+  return { filename, relativeUrl: `/api/media/profiles/${filename}` };
+}
+
+export async function deleteProfilePictureFile(relativeUrl?: string | null): Promise<void> {
+  const match = String(relativeUrl || '').match(/\/api\/media\/profiles\/([a-zA-Z0-9._-]+)$/);
+  if (!match) return;
+  await fs.promises.unlink(path.join(PROFILES_DIR, match[1])).catch(() => {});
+}
+
 export async function saveMediaBufferFile(params: {
   buffer: Buffer;
   mimeType?: string;
@@ -277,6 +309,29 @@ export default async function mediaRouter(fastify: FastifyInstance) {
         }
 
         reply.header('Content-Length', String(totalSize));
+        return reply.send(fs.createReadStream(filePath));
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // Serve locally cached WhatsApp profile photos
+  fastify.get<{ Params: { filename: string } }>(
+    '/profiles/:filename',
+    async (req: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
+      try {
+        const filename = String(req.params.filename || '').trim();
+        if (!/^[a-zA-Z0-9._-]+$/.test(filename) || filename === '.' || filename === '..') {
+          return reply.status(400).send({ success: false, error: 'Invalid filename' });
+        }
+        const filePath = path.join(PROFILES_DIR, filename);
+        if (!fs.existsSync(filePath)) {
+          return reply.status(404).send({ success: false, error: 'File not found' });
+        }
+        const ext = path.extname(filename).toLowerCase();
+        reply.header('Content-Type', PROFILE_EXT_MIME[ext] || 'image/jpeg');
+        reply.header('Cache-Control', 'private, max-age=3600');
         return reply.send(fs.createReadStream(filePath));
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });

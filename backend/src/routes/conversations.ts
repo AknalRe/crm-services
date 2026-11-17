@@ -44,10 +44,168 @@ import {
   requirePermission,
 } from './auth';
 import { readUploadedMediaAsDataUri, saveBase64MediaFile } from './media';
-import { pickBestContactDisplayName } from './waha';
+import { pickBestContactDisplayName, isGenericDisplayName } from './waha';
+import { syncWhatsAppProfile } from '../services/profile.service';
 import crypto from 'crypto';
 
 const VALID_STATUSES = new Set(['OPEN', 'PENDING', 'RESOLVED']);
+
+export interface ResolvedMention {
+  token: string;
+  jid: string | null;
+  phone: string | null;
+  name: string | null;
+  contactId: string | null;
+}
+
+// Extract @mention tokens (phone or @lid digits) from message text and stored WAHA mention JIDs
+export function collectMentionTokens(body?: string | null, metadataJson?: string | null): Map<string, string | null> {
+  const tokens = new Map<string, string | null>();
+  for (const m of String(body || '').matchAll(/@(\d{6,20})\b/g)) {
+    if (!tokens.has(m[1])) tokens.set(m[1], null);
+  }
+  if (metadataJson) {
+    try {
+      const meta = JSON.parse(metadataJson);
+      if (Array.isArray(meta?.mentions)) {
+        for (const raw of meta.mentions) {
+          const jid = String(raw || '').trim();
+          const digits = jid.replace(/@.*$/, '').replace(/\D/g, '');
+          if (digits.length >= 6) tokens.set(digits, jid.includes('@') ? jid : null);
+        }
+      }
+    } catch {
+      // ignore invalid metadata
+    }
+  }
+  return tokens;
+}
+
+function phoneLookupVariants(phone: string): string[] {
+  return Array.from(
+    new Set([phone, `+${phone}`, phone.startsWith('62') ? `0${phone.slice(2)}` : ''].filter(Boolean))
+  );
+}
+
+// Resolve mentioned numbers to CRM contact names so chat text can show "@Nama" and link to the contact
+export async function resolveMessageMentions(params: {
+  companyId: string;
+  messages: Array<typeof chatMessages.$inferSelect>;
+}): Promise<Map<string, ResolvedMention[]>> {
+  const result = new Map<string, ResolvedMention[]>();
+  const sessionForLookup = params.messages.find((m) => m.wahaSession)?.wahaSession || undefined;
+  const perMessage = new Map<string, Map<string, string | null>>();
+  const allTokens = new Map<string, string | null>();
+  for (const msg of params.messages) {
+    const tokens = collectMentionTokens(msg.body, msg.metadataJson);
+    if (tokens.size === 0) continue;
+    perMessage.set(msg.id, tokens);
+    for (const [t, jid] of tokens) {
+      if (!allTokens.has(t) || (!allTokens.get(t) && jid)) allTokens.set(t, jid);
+    }
+  }
+  if (allTokens.size === 0) return result;
+
+  const senderNames = new Map<string, string>();
+  for (const msg of params.messages) {
+    if (msg.direction !== 'INBOUND' || !msg.senderName) continue;
+    const keys = [
+      msg.senderPhone ? msg.senderPhone.replace(/\D/g, '') : '',
+      msg.senderJid ? msg.senderJid.replace(/@.*$/, '').replace(/\D/g, '') : '',
+    ].filter(Boolean);
+    for (const k of keys) {
+      if (!senderNames.has(k) && !isGenericDisplayName(msg.senderName)) senderNames.set(k, msg.senderName);
+    }
+  }
+
+  const lidJids = Array.from(allTokens.entries())
+    .filter(([, jid]) => jid && jid.toLowerCase().endsWith('@lid'))
+    .map(([, jid]) => jid as string);
+  const identityByLid = new Map<string, string>();
+  if (lidJids.length > 0) {
+    const idRows = await db
+      .select({ externalId: contactIdentities.externalId, contactId: contactIdentities.contactId })
+      .from(contactIdentities)
+      .where(
+        and(
+          eq(contactIdentities.companyId, params.companyId),
+          eq(contactIdentities.channel, 'WHATSAPP'),
+          inArray(contactIdentities.externalId, lidJids)
+        )
+      );
+    for (const r of idRows) identityByLid.set(r.externalId.toLowerCase(), r.contactId);
+  }
+
+  const phoneByToken = new Map<string, string | null>();
+  let lidResolveBudget = 8;
+  for (const [token, jid] of allTokens) {
+    if (jid && jid.toLowerCase().endsWith('@lid')) {
+      let phone: string | null = null;
+      if (!identityByLid.has(jid.toLowerCase()) && lidResolveBudget > 0) {
+        lidResolveBudget -= 1;
+        phone = await wahaService.resolveLidToPhone(sessionForLookup, jid).catch(() => null);
+      }
+      phoneByToken.set(token, phone);
+    } else {
+      phoneByToken.set(token, normalizePhoneNumber(token) || token);
+    }
+  }
+
+  const phones = Array.from(new Set(Array.from(phoneByToken.values()).filter(Boolean) as string[]));
+  const contactByPhone = new Map<string, { id: string; namaLengkap: string }>();
+  const contactById = new Map<string, { id: string; namaLengkap: string; nomorWhatsapp: string | null }>();
+  if (phones.length > 0) {
+    const variants = Array.from(new Set(phones.flatMap(phoneLookupVariants)));
+    const rows = await db
+      .select({ id: contacts.id, namaLengkap: contacts.namaLengkap, nomorWhatsapp: contacts.nomorWhatsapp })
+      .from(contacts)
+      .where(and(eq(contacts.companyId, params.companyId), inArray(contacts.nomorWhatsapp, variants)));
+    for (const r of rows) {
+      if (r.nomorWhatsapp) {
+        contactByPhone.set(normalizePhoneNumber(r.nomorWhatsapp) || r.nomorWhatsapp, r);
+      }
+    }
+  }
+  const lidContactIds = Array.from(new Set(identityByLid.values()));
+  if (lidContactIds.length > 0) {
+    const rows = await db
+      .select({ id: contacts.id, namaLengkap: contacts.namaLengkap, nomorWhatsapp: contacts.nomorWhatsapp })
+      .from(contacts)
+      .where(and(eq(contacts.companyId, params.companyId), inArray(contacts.id, lidContactIds)));
+    for (const r of rows) contactById.set(r.id, r);
+  }
+
+  const resolvedByToken = new Map<string, ResolvedMention>();
+  for (const [token, jid] of allTokens) {
+    let phone = phoneByToken.get(token) || null;
+    let contactRow: { id: string; namaLengkap: string; nomorWhatsapp?: string | null } | undefined;
+    if (jid && jid.toLowerCase().endsWith('@lid')) {
+      const cid = identityByLid.get(jid.toLowerCase());
+      if (cid) contactRow = contactById.get(cid);
+      if (contactRow?.nomorWhatsapp && !phone) {
+        phone = normalizePhoneNumber(contactRow.nomorWhatsapp) || contactRow.nomorWhatsapp;
+      }
+    }
+    if (!contactRow && phone) contactRow = contactByPhone.get(phone);
+    const pushName = senderNames.get(token) || (phone ? senderNames.get(phone) : undefined) || null;
+    const best = pickBestContactDisplayName(contactRow?.namaLengkap, pushName, null);
+    resolvedByToken.set(token, {
+      token,
+      jid,
+      phone,
+      name: best && !isGenericDisplayName(best) ? best : null,
+      contactId: contactRow?.id || null,
+    });
+  }
+
+  for (const [msgId, tokens] of perMessage) {
+    const list = Array.from(tokens.keys())
+      .map((t) => resolvedByToken.get(t))
+      .filter((x): x is ResolvedMention => Boolean(x));
+    if (list.length > 0) result.set(msgId, list);
+  }
+  return result;
+}
 const DEFAULT_CSAT_TEMPLATE =
   'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}';
 
@@ -898,6 +1056,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             alamat: r.contact.alamat,
             exclude_from_metrics: Boolean(r.contact.excludeFromMetrics),
             exclude_reason: r.contact.excludeReason || null,
+            profile_picture_url: r.contact.profilePictureUrl || null,
+            profile_about: r.contact.profileAbout || null,
           }
           : undefined,
       }));
@@ -962,7 +1122,16 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         }
       }
 
-      return reply.send({ success: true, data: messages });
+      const mentionMap = await resolveMessageMentions({
+        companyId,
+        messages,
+      });
+      const enriched = messages.map((m) => {
+        const mentioned = mentionMap.get(m.id);
+        return mentioned && mentioned.length > 0 ? { ...m, mentionedContacts: mentioned } : m;
+      });
+
+      return reply.send({ success: true, data: enriched });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }
@@ -1137,6 +1306,16 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         }
       }
 
+      if (isGroup && groupJid && row.contact) {
+        void syncWhatsAppProfile({
+          companyId,
+          contactId: row.contact.id,
+          jid: groupJid,
+          session: row.conv.wahaSession,
+          isGroup: true,
+        }).catch(() => {});
+      }
+
       const participants = Array.from(byKey.values()).sort((a, b) => {
         if (b.messageCount !== a.messageCount) return b.messageCount - a.messageCount;
         const roleRank = { superadmin: 3, admin: 2, member: 1 };
@@ -1152,6 +1331,62 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           groupName,
           participants,
           syncError,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST force-refresh WhatsApp profile (name, about & photo) of the contact or group in this conversation
+  fastify.post('/:id/sync-profile', async (
+    req: FastifyRequest<{ Params: { id: string }; Body: { session?: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
+        .limit(1);
+      const row = convRows[0];
+      if (!row?.conv || !row.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+      if (((row.conv.channel || 'WHATSAPP').toUpperCase()) !== 'WHATSAPP') {
+        return reply.send({ success: true, data: { updated: false, skipped: true } });
+      }
+
+      const groupJid = row.conv.externalThreadId?.toLowerCase().endsWith('@g.us')
+        ? row.conv.externalThreadId.trim()
+        : null;
+      const isGroup = Boolean(row.conv.isGroup || groupJid);
+      const targetJid = groupJid || (await resolveWhatsAppTarget(row.conv, row.contact));
+      if (!targetJid) {
+        return reply.status(422).send({
+          success: false,
+          error: 'Nomor WhatsApp kontak belum diketahui sehingga profil tidak dapat diambil',
+        });
+      }
+
+      const session = req.body?.session?.trim() || row.conv.wahaSession || undefined;
+      const synced = await syncWhatsAppProfile({
+        companyId,
+        contactId: row.contact.id,
+        jid: targetJid,
+        session,
+        isGroup,
+        force: true,
+      });
+      return reply.send({
+        success: true,
+        data: {
+          updated: synced.updated,
+          name: synced.name,
+          profile_picture_url: synced.profilePictureUrl,
+          profile_about: synced.profileAbout,
         },
       });
     } catch (error: any) {
@@ -1358,6 +1593,21 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         liveEvents.emit('conversations:update', { conversationId: convRow.id }, companyId);
       }
 
+      const profileTargetJid = convRow.externalThreadId?.toLowerCase().endsWith('@g.us')
+        ? convRow.externalThreadId.trim()
+        : contact.nomorWhatsapp
+        ? `${normalizePhoneNumber(contact.nomorWhatsapp) || contact.nomorWhatsapp.replace(/\D/g, '')}@c.us`
+        : null;
+      if (profileTargetJid) {
+        void syncWhatsAppProfile({
+          companyId,
+          contactId: contact.id,
+          jid: profileTargetJid,
+          session: convRow.wahaSession,
+          isGroup: Boolean(convRow.isGroup),
+        }).catch(() => {});
+      }
+
       const formatted = {
         ...convRow,
         contact: {
@@ -1371,6 +1621,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           alamat: contact.alamat,
           exclude_from_metrics: Boolean(contact.excludeFromMetrics),
           exclude_reason: contact.excludeReason || null,
+          profile_picture_url: contact.profilePictureUrl || null,
+          profile_about: contact.profileAbout || null,
         },
       };
 
@@ -2352,11 +2604,22 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       liveEvents.emit('conversations:update', { conversationId: conversation.conv.id }, companyId);
       liveEvents.emit('tracking:update', { conversationId: conversation.conv.id }, companyId);
 
+      const sentMentionMap = await resolveMessageMentions({
+        companyId,
+        messages: inserted,
+      });
+      const enrichedInserted = {
+        ...inserted[0],
+        ...(sentMentionMap.get(inserted[0].id)?.length
+          ? { mentionedContacts: sentMentionMap.get(inserted[0].id) }
+          : {}),
+      };
+
       return reply.status(201).send({
         success: true,
         sendFailed: !sendResult.success,
         error: sendErrorMsg || undefined,
-        data: inserted[0],
+        data: enrichedInserted,
       });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });

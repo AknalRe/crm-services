@@ -17,6 +17,9 @@ export interface Contact {
   notes?: string | null;
   exclude_from_metrics?: boolean;
   exclude_reason?: string | null;
+  profile_picture_url?: string | null;
+  profile_about?: string | null;
+  profile_synced_at?: string | null;
   identities?: ContactIdentityItem[];
   createdAt: string;
   updatedAt: string;
@@ -277,16 +280,16 @@ export interface PollVoteMetadataItem {
 
 export interface ChatMessageMetadata {
   kind?:
-    | 'LINK'
-    | 'BUTTONS'
-    | 'POLL'
-    | 'POLL_VOTE'
-    | 'CONTACT'
-    | 'LOCATION'
-    | 'STICKER'
-    | 'ORDER'
-    | 'PRODUCT'
-    | 'GROUP_INVITE';
+  | 'LINK'
+  | 'BUTTONS'
+  | 'POLL'
+  | 'POLL_VOTE'
+  | 'CONTACT'
+  | 'LOCATION'
+  | 'STICKER'
+  | 'ORDER'
+  | 'PRODUCT'
+  | 'GROUP_INVITE';
   usedFallbackText?: boolean;
   fallbackReason?: string;
   revoked?: boolean;
@@ -354,6 +357,14 @@ export interface ChatMessageMetadata {
   };
 }
 
+export interface ResolvedMentionItem {
+  token: string;
+  jid: string | null;
+  phone: string | null;
+  name: string | null;
+  contactId: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -373,6 +384,7 @@ export interface ChatMessage {
   senderJid?: string | null;
   senderPhone?: string | null;
   senderName?: string | null;
+  mentionedContacts?: ResolvedMentionItem[];
   status: string;
   ackStatus: number;
   errorMessage?: string | null;

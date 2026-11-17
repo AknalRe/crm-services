@@ -24,6 +24,7 @@ import {
   Plus,
 } from 'lucide-react';
 import api from '../services/api';
+import { getApiBaseUrl } from '../services/paths';
 import { subscribeLiveEvent } from '../services/liveEvents';
 import { AuthStatus, Contact, LicenseInfo, WahaSessionItem } from '../types';
 import { hasPerm } from '../lib/permissions';
@@ -34,10 +35,52 @@ import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
+function resolveContactAvatarUrl(url?: string | null): string {
+  if (!url) return '';
+  if (url.startsWith('/api/')) {
+    const apiBase = typeof window !== 'undefined' ? getApiBaseUrl(window.location.pathname) : './api';
+    return `${apiBase}${url.slice('/api'.length)}`;
+  }
+  return url;
+}
+
+function ContactAvatarImg({
+  url,
+  name,
+  className = '',
+}: {
+  url?: string | null;
+  name: string;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const resolved = resolveContactAvatarUrl(url);
+  useEffect(() => {
+    setFailed(false);
+  }, [resolved]);
+  if (resolved && !failed) {
+    return (
+      <img
+        src={resolved}
+        alt={name}
+        onError={() => setFailed(true)}
+        className={`object-cover shrink-0 ${className}`}
+      />
+    );
+  }
+  return (
+    <div className={`flex items-center justify-center shrink-0 ${className}`}>
+      {(name || 'KN').slice(0, 2).toUpperCase()}
+    </div>
+  );
+}
+
 interface ContactsProps {
   currentUser?: AuthStatus['user'] | null;
   onStartBroadcastWithContacts?: (contactIds: string[]) => void;
   licenseInfo?: LicenseInfo | null;
+  targetContact?: { contactId?: string | null; phone?: string | null; name?: string | null } | null;
+  onTargetContactHandled?: () => void;
 }
 
 const DEFAULT_CONTACT_CATEGORIES = ['Umum', 'VIP', 'Prospek', 'Pelanggan Tetap', 'Korporat', 'Partner'];
@@ -46,6 +89,8 @@ export const Contacts: React.FC<ContactsProps> = ({
   currentUser,
   onStartBroadcastWithContacts,
   licenseInfo,
+  targetContact,
+  onTargetContactHandled,
 }) => {
   const toast = useToast();
   const canCreateContact = hasPerm(currentUser, 'contacts.create');
@@ -99,6 +144,7 @@ export const Contacts: React.FC<ContactsProps> = ({
     maxContacts?: number;
   } | null>(null);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const [syncingProfile, setSyncingProfile] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -155,6 +201,64 @@ export const Contacts: React.FC<ContactsProps> = ({
     });
     return unsub;
   }, [fetchContacts]);
+
+  useEffect(() => {
+    if (!targetContact) return;
+    let active = true;
+    const openFromTarget = async () => {
+      try {
+        if (targetContact.contactId) {
+          const c = await api.getContact(targetContact.contactId);
+          if (!active) return;
+          if (c) {
+            setSearch(c.nomor_whatsapp || c.nama_lengkap || '');
+            setPage(1);
+            handleOpenEditModal(c);
+            return;
+          }
+        }
+        const query = (targetContact.phone || targetContact.name || '').trim();
+        if (query) {
+          setSearch(query);
+          setPage(1);
+          const res = await api.getContacts({ search: query, limit: 10 });
+          if (!active) return;
+          const list = res.data || [];
+          const cleanPhone = (targetContact.phone || '').replace(/\D/g, '');
+          const exact =
+            list.find((x) => cleanPhone && (x.nomor_whatsapp || '').replace(/\D/g, '').endsWith(cleanPhone.slice(-8))) ||
+            list[0];
+          if (exact) {
+            handleOpenEditModal(exact);
+          } else {
+            setEditingContact(null);
+            setFormData({
+              nama_lengkap: targetContact.name || (cleanPhone ? `Kontak +${cleanPhone}` : ''),
+              nama_panggilan: '',
+              tanggal_lahir: '',
+              nomor_whatsapp: cleanPhone,
+              alamat: '',
+              kategori: '',
+              tags: '',
+              notes: '',
+              exclude_from_metrics: false,
+              exclude_reason: '',
+            });
+            setIsModalOpen(true);
+            toast.info('Kontak belum terdaftar di CRM. Silakan lengkapi & simpan.');
+          }
+        }
+      } catch {
+        toast.error('Gagal membuka detail kontak');
+      } finally {
+        if (active) onTargetContactHandled?.();
+      }
+    };
+    void openFromTarget();
+    return () => {
+      active = false;
+    };
+  }, [targetContact, onTargetContactHandled, toast]);
 
   const loadMetaTags = useCallback(async () => {
     try {
@@ -911,9 +1015,11 @@ export const Contacts: React.FC<ContactsProps> = ({
                             onChange={() => toggleSelectContact(contact.id)}
                             className="mt-1 w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
                           />
-                          <div className="w-8 h-8 rounded-md bg-indigo-50 text-indigo-700 font-semibold text-xs flex items-center justify-center border border-indigo-200/70 shrink-0">
-                            {contact.nama_lengkap.slice(0, 2).toUpperCase()}
-                          </div>
+                          <ContactAvatarImg
+                            url={contact.profile_picture_url}
+                            name={contact.nama_lengkap}
+                            className="w-8 h-8 rounded-md bg-indigo-50 text-indigo-700 font-semibold text-xs border border-indigo-200/70"
+                          />
                           <div className="min-w-0 flex-1">
                             <div className="font-semibold text-gray-900 text-[13px] leading-snug break-words flex flex-wrap items-center gap-1.5">
                               <span>{contact.nama_lengkap}</span>
@@ -1119,23 +1225,37 @@ export const Contacts: React.FC<ContactsProps> = ({
                         </td>
 
                         <td className="py-3 px-4">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="font-semibold text-gray-900">{contact.nama_lengkap}</span>
-                            {contact.exclude_from_metrics && (
-                              <span
-                                title={contact.exclude_reason || 'Dikecualikan dari penilaian SLA/CSAT'}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-medium"
-                              >
-                                <EyeOff className="w-2.5 h-2.5" />
-                                <span>Non-Penilaian</span>
-                              </span>
-                            )}
-                          </div>
-                          {contact.nama_panggilan && (
-                            <div className="text-[11px] text-gray-500">
-                              Panggilan: <span className="text-gray-700">{contact.nama_panggilan}</span>
+                          <div className="flex items-start gap-2.5">
+                            <ContactAvatarImg
+                              url={contact.profile_picture_url}
+                              name={contact.nama_lengkap}
+                              className="w-8 h-8 rounded-md bg-indigo-50 text-indigo-700 font-semibold text-xs border border-indigo-200/70 mt-0.5"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-semibold text-gray-900">{contact.nama_lengkap}</span>
+                                {contact.exclude_from_metrics && (
+                                  <span
+                                    title={contact.exclude_reason || 'Dikecualikan dari penilaian SLA/CSAT'}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-medium"
+                                  >
+                                    <EyeOff className="w-2.5 h-2.5" />
+                                    <span>Non-Penilaian</span>
+                                  </span>
+                                )}
+                              </div>
+                              {contact.nama_panggilan && (
+                                <div className="text-[11px] text-gray-500">
+                                  Panggilan: <span className="text-gray-700">{contact.nama_panggilan}</span>
+                                </div>
+                              )}
+                              {contact.profile_about && (
+                                <div className="text-[11px] text-gray-500 truncate max-w-[260px]" title={contact.profile_about}>
+                                  {contact.profile_about}
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </td>
 
                         <td className="py-3 px-4">
@@ -1351,6 +1471,56 @@ export const Contacts: React.FC<ContactsProps> = ({
         }
       >
         <form id="contact-form" onSubmit={handleSaveContact} className="space-y-3.5">
+          {editingContact && (
+            <div className="flex items-center justify-between gap-3 p-2.5 rounded-md bg-gray-50 border border-gray-200">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 rounded-md bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center shrink-0 overflow-hidden border border-indigo-200">
+                  {editingContact.profile_picture_url ? (
+                    <img
+                      src={resolveContactAvatarUrl(editingContact.profile_picture_url)}
+                      alt={editingContact.nama_lengkap}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    editingContact.nama_lengkap.slice(0, 2).toUpperCase()
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-gray-900 truncate">
+                    {editingContact.nama_lengkap}
+                  </div>
+                  <div className="text-[11px] text-gray-500 truncate">
+                    {editingContact.profile_about || 'Belum ada bio/deskripsi WhatsApp'}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={syncingProfile}
+                onClick={async () => {
+                  setSyncingProfile(true);
+                  try {
+                    const res = await api.syncContactProfile(editingContact.id);
+                    setEditingContact(res.contact);
+                    setFormData((prev) => ({
+                      ...prev,
+                      nama_lengkap: res.contact.nama_lengkap || prev.nama_lengkap,
+                    }));
+                    toast.success('Profil WhatsApp berhasil diperbarui');
+                    fetchContacts();
+                  } catch (err: any) {
+                    toast.error(err?.response?.data?.error || 'Gagal mengambil profil WhatsApp');
+                  } finally {
+                    setSyncingProfile(false);
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-md border border-gray-200 bg-white hover:bg-gray-100 text-[11px] font-medium text-gray-700 inline-flex items-center gap-1 shrink-0 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${syncingProfile ? 'animate-spin' : ''}`} />
+                <span>{syncingProfile ? 'Menyinkronkan...' : 'Sync Profil WA'}</span>
+              </button>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
