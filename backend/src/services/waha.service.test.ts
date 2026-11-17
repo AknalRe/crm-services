@@ -1263,6 +1263,66 @@ test('WAHA contact synchronization and group metadata normalization support GOWS
   assert.equal(grp.participants[0]?.role, 'admin');
 });
 
+test('deleteMessage revokes WhatsApp message via WAHA DELETE endpoint with POST fallback', async (t) => {
+  stubWahaEnvSession(t, 'sales');
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha.example.com',
+    apiKey: 'secret-token',
+    session: 'sales',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  const deletedUrls: string[] = [];
+  const postedFallback: Array<{ url: string; body: any }> = [];
+  let simulate404 = false;
+
+  axios.create = (() =>
+    ({
+      get: async () => ({ data: [{ name: 'sales', status: 'WORKING' }] }),
+      delete: async (url: string) => {
+        if (simulate404) {
+          const err: any = new Error('Not found');
+          err.response = { status: 404, data: { message: 'Not Found' } };
+          throw err;
+        }
+        deletedUrls.push(url);
+        return { data: { ok: true } };
+      },
+      post: async (url: string, body: any) => {
+        postedFallback.push({ url, body });
+        return { data: { ok: true } };
+      },
+      put: async () => ({ data: {} }),
+    }) as any) as any;
+
+  const emptyIdRes = await wahaService.deleteMessage('08123456789', '', 'sales');
+  assert.equal(emptyIdRes.success, false);
+
+  const okRes = await wahaService.deleteMessage('08123456789', 'true_628123456789@c.us_ABC123', 'sales');
+  assert.equal(okRes.success, true);
+  assert.equal(
+    deletedUrls[0],
+    '/api/sales/chats/628123456789%40c.us/messages/true_628123456789%40c.us_ABC123'
+  );
+
+  simulate404 = true;
+  const fallbackRes = await wahaService.deleteMessage('12036300112233@g.us', 'true_12036300112233@g.us_XYZ', 'sales');
+  assert.equal(fallbackRes.success, true);
+  assert.equal(postedFallback[0]?.url, '/api/messages/delete');
+  assert.deepEqual(postedFallback[0]?.body, {
+    session: 'sales',
+    chatId: '12036300112233@g.us',
+    messageId: 'true_12036300112233@g.us_XYZ',
+  });
+});
+
 
 
 

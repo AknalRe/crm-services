@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, desc, asc, gt, inArray } from 'drizzle-orm';
+import { and, eq, ne, desc, asc, gt, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { conversations, chatMessages, contacts, contactIdentities, crmAgents, cannedResponses, csatResponses, channelAccounts } from '../db/schema';
 import { wahaService, WahaInteractiveButtonInput, WahaSendResult, formatInteractiveButtonsFallbackText, formatLinkPreviewFallbackText } from '../services/waha.service';
@@ -294,6 +294,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
 
     const routePath = (req.routeOptions?.url || req.url || '').toLowerCase();
+    if (req.method === 'DELETE' && routePath.includes('/messages/')) {
+      return requirePermission('conversations.reply', 'conversations.manage')(req, reply);
+    }
     if (req.method === 'POST' && routePath.endsWith('/csat-cta')) {
       return requirePermission('conversations.csat')(req, reply);
     }
@@ -1004,6 +1007,20 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
       }
 
+      const alreadyExcluded = Boolean(existing.excludeFromMetrics || existing.isGroup);
+      const stayingExcluded = alreadyExcluded && req.body?.excludeFromMetrics !== false;
+      if (
+        stayingExcluded &&
+        (req.body?.status !== undefined ||
+          req.body?.assignedAgentId !== undefined ||
+          req.body?.sendCsat === true)
+      ) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Obrolan Non-Penilaian/Grup tidak menggunakan Status, Penugasan CS, atau survei CSAT.',
+        });
+      }
+
       const now = new Date();
       const convUpdate: any = { updatedAt: now };
 
@@ -1042,6 +1059,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           convUpdate.excludeReason = req.body.excludeReason !== undefined
             ? (req.body.excludeReason ? String(req.body.excludeReason).trim() || 'Bukan Customer' : 'Bukan Customer')
             : (existing.excludeReason || (existing.isGroup ? 'Grup WhatsApp' : 'Bukan Customer'));
+          convUpdate.assignedAgentId = null;
+          convUpdate.assignedAgentName = null;
         } else if (req.body.excludeReason === undefined) {
           convUpdate.excludeReason = null;
         }
@@ -1108,6 +1127,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             .set({
               excludeFromMetrics: nextExcl,
               excludeReason: nextReason,
+              ...(nextExcl ? { assignedAgentId: null, assignedAgentName: null } : {}),
               updatedAt: now,
             })
             .where(and(eq(conversations.contactId, existing.contactId), eq(conversations.isGroup, false)));
@@ -1230,6 +1250,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const row = convList[0];
       if (!row || !row.contact) {
         return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+      if (row.conv.excludeFromMetrics || row.conv.isGroup) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Obrolan bertanda Non-Penilaian / Grup WhatsApp tidak dapat dikirimi survei CSAT.',
+        });
       }
 
       const result = await sendCsatCtaForConversation(row.conv, row.contact, {
@@ -1813,6 +1839,140 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         success: sendResult.success,
         error: sendErrorMsg || undefined,
         data: updated,
+      });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+    }
+  });
+
+  // DELETE a single message (scope=ME local CRM only | scope=EVERYONE revoke on WhatsApp + delete from CRM)
+  fastify.delete('/:id/messages/:messageId', async (req: FastifyRequest<{
+    Params: { id: string; messageId: string };
+    Querystring: { scope?: string; session?: string };
+    Body?: { scope?: string; session?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(eq(conversations.id, req.params.id))
+        .limit(1);
+
+      const convRow = convRows[0];
+      if (!convRow?.conv || !convRow.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
+      const msgRows = await db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.id, req.params.messageId),
+            eq(chatMessages.conversationId, convRow.conv.id)
+          )
+        )
+        .limit(1);
+
+      const msg = msgRows[0];
+      if (!msg) {
+        return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
+      }
+
+      const rawScope = String(req.query?.scope || (req.body as any)?.scope || 'ME').toUpperCase().trim();
+      const scope: 'ME' | 'EVERYONE' = rawScope === 'EVERYONE' ? 'EVERYONE' : 'ME';
+      const isGroup = Boolean(
+        convRow.conv.isGroup || convRow.conv.externalThreadId?.toLowerCase().endsWith('@g.us')
+      );
+
+      if (scope === 'EVERYONE') {
+        if (msg.messageType === 'NOTE') {
+          return reply.status(400).send({
+            success: false,
+            error: 'Catatan internal tidak dikirim ke pelanggan; gunakan Hapus Pribadi.',
+          });
+        }
+        const convChannel = (msg.channel || convRow.conv.channel || 'WHATSAPP').toUpperCase();
+        if (convChannel !== 'WHATSAPP') {
+          return reply.status(400).send({
+            success: false,
+            error: `Tarik pesan untuk semua saat ini hanya didukung untuk WhatsApp (kanal ini: ${convChannel}). Gunakan Hapus Pribadi.`,
+          });
+        }
+        if (!msg.wahaMessageId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Pesan ini belum memiliki ID pesan WhatsApp yang terkirim. Gunakan Hapus Pribadi untuk menghapus dari CRM.',
+          });
+        }
+        if (msg.direction !== 'OUTBOUND' && !isGroup) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Pada chat pribadi, hanya pesan keluar Anda yang bisa ditarik untuk semua orang. Gunakan Hapus Pribadi.',
+          });
+        }
+
+        const targetWa = await resolveWhatsAppTarget(convRow.conv, convRow.contact);
+        if (!targetWa) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Target nomor/ID WhatsApp tidak ditemukan untuk menarik pesan.',
+          });
+        }
+
+        const targetSession =
+          msg.wahaSession ||
+          req.query?.session?.trim() ||
+          (req.body as any)?.session?.trim() ||
+          convRow.conv.wahaSession ||
+          undefined;
+
+        const revokeResult = await wahaService.deleteMessage(
+          targetWa,
+          msg.wahaMessageId,
+          targetSession
+        );
+        if (!revokeResult.success) {
+          return reply.status(400).send({
+            success: false,
+            error: revokeResult.error || 'Gagal menarik pesan dari WhatsApp (WAHA).',
+          });
+        }
+      }
+
+      await db.delete(chatMessages).where(eq(chatMessages.id, msg.id));
+
+      const remainingLatest = await db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.conversationId, convRow.conv.id),
+            ne(chatMessages.messageType, 'NOTE')
+          )
+        )
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(1);
+
+      const nextLast = remainingLatest[0];
+      await db
+        .update(conversations)
+        .set({
+          lastMessage: nextLast ? nextLast.body : null,
+          lastMessageAt: nextLast ? nextLast.createdAt : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(conversations.id, convRow.conv.id));
+
+      liveEvents.emit('conversations:update', { conversationId: convRow.conv.id });
+
+      return reply.send({
+        success: true,
+        data: {
+          deletedId: msg.id,
+          scope,
+        },
       });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });

@@ -979,6 +979,38 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   };
 
+  const [deleteMessageTarget, setDeleteMessageTarget] = useState<ChatMessage | null>(null);
+  const [deletingMessageScope, setDeletingMessageScope] = useState<'ME' | 'EVERYONE' | null>(null);
+
+  const handleDeleteConversationMessage = async (scope: 'ME' | 'EVERYONE') => {
+    if (!selectedConversation || !deleteMessageTarget || deletingMessageScope) return;
+    setDeletingMessageScope(scope);
+    try {
+      await api.deleteConversationMessage(
+        selectedConversation.id,
+        deleteMessageTarget.id,
+        scope,
+        selectedSession || undefined
+      );
+      const deletedId = deleteMessageTarget.id;
+      setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+      if (replyingToMessage?.id === deletedId) {
+        setReplyingToMessage(null);
+      }
+      setDeleteMessageTarget(null);
+      toast.success(
+        scope === 'EVERYONE'
+          ? 'Pesan berhasil ditarik dari WhatsApp dan dihapus dari CRM'
+          : 'Pesan dihapus dari riwayat CRM'
+      );
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menghapus pesan');
+    } finally {
+      setDeletingMessageScope(null);
+    }
+  };
+
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [contactsList, setContactsList] = useState<Contact[]>([]);
   const [contactSearch, setContactSearch] = useState('');
@@ -1299,7 +1331,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setExcludeReasonDraft(cleanedReason || 'Bukan Customer');
       setSelectedConversation((prev) =>
         prev && prev.id === selectedConversation.id
-          ? { ...prev, excludeFromMetrics: nextExclude, excludeReason: cleanedReason }
+          ? {
+              ...prev,
+              excludeFromMetrics: nextExclude,
+              excludeReason: cleanedReason,
+              ...(nextExclude ? { assignedAgentId: null, assignedAgentName: null } : {}),
+            }
           : prev
       );
       toast.success(
@@ -1642,7 +1679,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           {conv.channelAccountName}
                         </span>
                       )}
-                      {conv.assignedAgentName && (
+                      {conv.assignedAgentName && !conv.excludeFromMetrics && !conv.isGroup && (
                         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-sky-50 text-sky-700 border border-sky-200">
                           <UserCheck className="w-2.5 h-2.5" />
                           {conv.assignedAgentName}
@@ -1843,143 +1880,155 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </select>
               )}
 
-              {assignableAgents.length > 0 && (
-                <select
-                  value={selectedConversation.assignedAgentId || ''}
-                  disabled={!canManageConversation}
-                  onChange={(e) => void handleAssignAgent(e.target.value || null)}
-                  title={
-                    canManageConversation
-                      ? 'Tugaskan ke Agent'
-                      : 'Role Anda tidak memiliki izin menugaskan CS'
-                  }
-                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 flex-1 sm:flex-none min-w-[100px] sm:max-w-[140px] disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <option value="">Belum Ditugaskan</option>
-                  {assignableAgents.map((ag) => (
-                    <option key={ag.id} value={ag.id}>
-                      {ag.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              <select
-                value={selectedConversation.status || 'OPEN'}
-                disabled={!canManageConversation}
-                onChange={(e) =>
-                  handleStatusChange(e.target.value as 'OPEN' | 'PENDING' | 'RESOLVED')
-                }
-                title={
-                  canManageConversation
-                    ? 'Status Percakapan'
-                    : 'Role Anda tidak memiliki izin mengubah status percakapan'
-                }
-                className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none shrink-0 disabled:opacity-70 disabled:cursor-not-allowed ${
-                  selectedConversation.status === 'RESOLVED'
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : selectedConversation.status === 'PENDING'
-                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                    : 'bg-blue-50 text-blue-700 border-blue-200'
-                }`}
-              >
-                <option value="OPEN">Open</option>
-                <option value="PENDING">Pending</option>
-                <option value="RESOLVED">Resolved</option>
-              </select>
-
-              <div className="flex items-center gap-1.5 shrink-0">
-                {canManageConversation &&
-                  (selectedConversation.status === 'RESOLVED' ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleStatusChange('OPEN')}
-                      title="Buka kembali percakapan ini"
-                      className="h-7 px-2 sm:px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
-                    >
-                      <RotateCcw className="w-3 h-3 shrink-0" />
-                      <span>Buka Kembali</span>
-                    </button>
-                  ) : (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowResolveMenu((prev) => !prev)}
-                        title="Akhiri percakapan (pilih dengan atau tanpa CSAT)"
-                        className="h-7 px-2 sm:px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
+              {(() => {
+                const isExcludedConv = Boolean(
+                  selectedConversation.excludeFromMetrics || selectedConversation.isGroup
+                );
+                return (
+                  <>
+                    {!isExcludedConv && assignableAgents.length > 0 && (
+                      <select
+                        value={selectedConversation.assignedAgentId || ''}
+                        disabled={!canManageConversation}
+                        onChange={(e) => void handleAssignAgent(e.target.value || null)}
+                        title={
+                          canManageConversation
+                            ? 'Tugaskan ke Agent'
+                            : 'Role Anda tidak memiliki izin menugaskan CS'
+                        }
+                        className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 flex-1 sm:flex-none min-w-[100px] sm:max-w-[140px] disabled:opacity-60 disabled:cursor-not-allowed"
                       >
-                        <CheckCircle2 className="w-3 h-3 shrink-0" />
-                        <span>Akhiri</span>
-                        <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
-                      </button>
-                      {showResolveMenu && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-10"
-                            onClick={() => setShowResolveMenu(false)}
-                          />
-                          <div className="absolute right-0 mt-1 w-48 rounded-md bg-white border border-gray-200 shadow-lg py-1 z-20">
-                            {canSendCsat && (
-                              <button
-                                type="button"
-                                onClick={() => void handleStatusChange('RESOLVED', true)}
-                                className="w-full text-left px-3 py-1.5 text-[11px] text-gray-800 hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-1.5 whitespace-nowrap"
-                              >
-                                <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                <span>Akhiri &amp; Kirim CSAT</span>
-                              </button>
-                            )}
+                        <option value="">Belum Ditugaskan</option>
+                        {assignableAgents.map((ag) => (
+                          <option key={ag.id} value={ag.id}>
+                            {ag.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {!isExcludedConv && (
+                      <select
+                        value={selectedConversation.status || 'OPEN'}
+                        disabled={!canManageConversation}
+                        onChange={(e) =>
+                          handleStatusChange(e.target.value as 'OPEN' | 'PENDING' | 'RESOLVED')
+                        }
+                        title={
+                          canManageConversation
+                            ? 'Status Percakapan'
+                            : 'Role Anda tidak memiliki izin mengubah status percakapan'
+                        }
+                        className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none shrink-0 disabled:opacity-70 disabled:cursor-not-allowed ${
+                          selectedConversation.status === 'RESOLVED'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : selectedConversation.status === 'PENDING'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-blue-50 text-blue-700 border-blue-200'
+                        }`}
+                      >
+                        <option value="OPEN">Open</option>
+                        <option value="PENDING">Pending</option>
+                        <option value="RESOLVED">Resolved</option>
+                      </select>
+                    )}
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!isExcludedConv &&
+                        canManageConversation &&
+                        (selectedConversation.status === 'RESOLVED' ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleStatusChange('OPEN')}
+                            title="Buka kembali percakapan ini"
+                            className="h-7 px-2 sm:px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
+                          >
+                            <RotateCcw className="w-3 h-3 shrink-0" />
+                            <span>Buka Kembali</span>
+                          </button>
+                        ) : (
+                          <div className="relative">
                             <button
                               type="button"
-                              onClick={() => void handleStatusChange('RESOLVED', false)}
-                              className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 whitespace-nowrap"
+                              onClick={() => setShowResolveMenu((prev) => !prev)}
+                              title="Akhiri percakapan (pilih dengan atau tanpa CSAT)"
+                              className="h-7 px-2 sm:px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span>Akhiri Tanpa CSAT</span>
+                              <CheckCircle2 className="w-3 h-3 shrink-0" />
+                              <span>Akhiri</span>
+                              <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
                             </button>
+                            {showResolveMenu && (
+                              <>
+                                <div
+                                  className="fixed inset-0 z-10"
+                                  onClick={() => setShowResolveMenu(false)}
+                                />
+                                <div className="absolute right-0 mt-1 w-48 rounded-md bg-white border border-gray-200 shadow-lg py-1 z-20">
+                                  {canSendCsat && (
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleStatusChange('RESOLVED', true)}
+                                      className="w-full text-left px-3 py-1.5 text-[11px] text-gray-800 hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-1.5 whitespace-nowrap"
+                                    >
+                                      <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                      <span>Akhiri &amp; Kirim CSAT</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleStatusChange('RESOLVED', false)}
+                                    className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 whitespace-nowrap"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>Akhiri Tanpa CSAT</span>
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
-                        </>
+                        ))}
+
+                      <button
+                        type="button"
+                        onClick={handleMarkRead}
+                        disabled={markingRead}
+                        title="Tandai Dibaca & Kirim Centang Biru (Seen) ke WhatsApp"
+                        className="h-7 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 hover:text-indigo-700 text-[11px] font-medium inline-flex items-center gap-1 shrink-0 transition-colors disabled:opacity-50"
+                      >
+                        <CheckCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                        <span className="hidden lg:inline">Dibaca</span>
+                      </button>
+
+                      {!isExcludedConv && canSendCsat && (
+                        <button
+                          type="button"
+                          onClick={handleSendCsatCta}
+                          disabled={sendingCsat}
+                          title="Kirim Tautan Rating CSAT ke Pelanggan"
+                          className="h-7 px-2.5 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-50"
+                        >
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-500 shrink-0" />
+                          <span className="hidden sm:inline">Kirim CSAT</span>
+                        </button>
                       )}
+
+                      <button
+                        type="button"
+                        onClick={() => toggleContactPanel()}
+                        title={showContactPanel ? 'Tutup Detail Kontak' : 'Buka Detail Kontak'}
+                        className="h-7 w-7 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 inline-flex items-center justify-center shrink-0"
+                      >
+                        {showContactPanel ? (
+                          <PanelRightClose className="w-3.5 h-3.5" />
+                        ) : (
+                          <PanelRightOpen className="w-3.5 h-3.5" />
+                        )}
+                      </button>
                     </div>
-                  ))}
-
-                <button
-                  type="button"
-                  onClick={handleMarkRead}
-                  disabled={markingRead}
-                  title="Tandai Dibaca & Kirim Centang Biru (Seen) ke WhatsApp"
-                  className="h-7 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 hover:text-indigo-700 text-[11px] font-medium inline-flex items-center gap-1 shrink-0 transition-colors disabled:opacity-50"
-                >
-                  <CheckCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                  <span className="hidden lg:inline">Dibaca</span>
-                </button>
-
-                {canSendCsat && (
-                  <button
-                    type="button"
-                    onClick={handleSendCsatCta}
-                    disabled={sendingCsat}
-                    title="Kirim Tautan Rating CSAT ke Pelanggan"
-                    className="h-7 px-2.5 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-50"
-                  >
-                    <Star className="w-3 h-3 fill-amber-400 text-amber-500 shrink-0" />
-                    <span className="hidden sm:inline">Kirim CSAT</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => toggleContactPanel()}
-                  title={showContactPanel ? 'Tutup Detail Kontak' : 'Buka Detail Kontak'}
-                  className="h-7 w-7 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 inline-flex items-center justify-center shrink-0"
-                >
-                  {showContactPanel ? (
-                    <PanelRightClose className="w-3.5 h-3.5" />
-                  ) : (
-                    <PanelRightOpen className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -2539,21 +2588,34 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         )}
 
                         <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-gray-500 font-mono tabular-nums">
-                          {canReplyConversation && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setReplyingToMessage(msg);
-                                setComposerMode('REPLY');
-                                replyInputRef.current?.focus();
-                              }}
-                              title="Balas pesan ini"
-                              className="mr-auto opacity-80 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center gap-0.5 text-[10px] font-sans text-indigo-600 hover:text-indigo-800 transition-opacity"
-                            >
-                              <Reply className="w-3 h-3" />
-                              <span>Balas</span>
-                            </button>
-                          )}
+                          <div className="mr-auto flex items-center gap-2">
+                            {canReplyConversation && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingToMessage(msg);
+                                  setComposerMode('REPLY');
+                                  replyInputRef.current?.focus();
+                                }}
+                                title="Balas pesan ini"
+                                className="opacity-80 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center gap-0.5 text-[10px] font-sans text-indigo-600 hover:text-indigo-800 transition-opacity"
+                              >
+                                <Reply className="w-3 h-3" />
+                                <span>Balas</span>
+                              </button>
+                            )}
+                            {(canReplyConversation || canManageConversation) && (
+                              <button
+                                type="button"
+                                onClick={() => setDeleteMessageTarget(msg)}
+                                title="Hapus Pesan (Tarik / Hapus Pribadi)"
+                                className="opacity-80 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center gap-0.5 text-[10px] font-sans text-gray-500 hover:text-red-600 transition-opacity"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Hapus</span>
+                              </button>
+                            )}
+                          </div>
                           {msg.wahaSession && (
                             <span className="text-[9px] text-gray-400">{msg.wahaSession}</span>
                           )}
@@ -4085,7 +4147,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               ) : (
                 <p className="text-[11px] text-gray-400">
-                  Belum ada penilaian. Gunakan tombol &ldquo;Kirim CSAT&rdquo; atau pilih &ldquo;Akhiri &amp; Kirim CSAT&rdquo;.
+                  {selectedConversation.excludeFromMetrics || selectedConversation.isGroup
+                    ? 'Obrolan ini bertanda Non-Penilaian (tidak menggunakan Status, Penugasan CS, atau survei CSAT).'
+                    : 'Belum ada penilaian. Gunakan tombol "Kirim CSAT" atau pilih "Akhiri & Kirim CSAT".'}
                 </p>
               )}
             </div>
@@ -4361,6 +4425,131 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteMessageTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4"
+          onClick={() => !deletingMessageScope && setDeleteMessageTarget(null)}
+        >
+          <div
+            className="bg-white rounded-lg border border-gray-200 shadow-xl w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-md bg-red-50 border border-red-200 text-red-600 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Hapus Pesan</h3>
+                  <p className="text-[11px] text-gray-500">
+                    Pilih tarik dari WhatsApp pelanggan atau hapus di sisi CRM saja.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={deletingMessageScope !== null}
+                onClick={() => setDeleteMessageTarget(null)}
+                className="p-1 text-gray-400 hover:text-gray-700 rounded disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 text-xs">
+              <div className="p-2.5 rounded-md bg-gray-50 border border-gray-200 text-gray-700 line-clamp-3 break-words">
+                {deleteMessageTarget.body || `[${deleteMessageTarget.messageType || 'Media'}]`}
+              </div>
+
+              {(() => {
+                const convChannel = (
+                  selectedConversation?.channel ||
+                  'WHATSAPP'
+                ).toUpperCase();
+                const isGroupChat = Boolean(
+                  selectedConversation?.isGroup ||
+                    selectedConversation?.externalThreadId?.toLowerCase().endsWith('@g.us')
+                );
+                const canPullEverywhere =
+                  deleteMessageTarget.messageType !== 'NOTE' &&
+                  convChannel === 'WHATSAPP' &&
+                  Boolean(deleteMessageTarget.wahaMessageId) &&
+                  (deleteMessageTarget.direction === 'OUTBOUND' || isGroupChat);
+                const pullDisabledReason =
+                  deleteMessageTarget.messageType === 'NOTE'
+                    ? 'Catatan internal hanya tersimpan di CRM.'
+                    : convChannel !== 'WHATSAPP'
+                    ? `Tarik pesan untuk semua saat ini hanya didukung di WhatsApp.`
+                    : !deleteMessageTarget.wahaMessageId
+                    ? 'Pesan ini belum terkirim ke WhatsApp (tidak ada ID pesan WAHA).'
+                    : deleteMessageTarget.direction !== 'OUTBOUND' && !isGroupChat
+                    ? 'Di obrolan pribadi, hanya pesan keluar Anda yang dapat ditarik untuk semua.'
+                    : null;
+
+                return (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      disabled={!canPullEverywhere || deletingMessageScope !== null}
+                      onClick={() => void handleDeleteConversationMessage('EVERYONE')}
+                      className="w-full text-left p-3 rounded-md border border-red-200 bg-red-50/70 hover:bg-red-100/70 disabled:opacity-50 disabled:cursor-not-allowed transition-colors space-y-0.5"
+                    >
+                      <div className="font-semibold text-red-800 flex items-center justify-between gap-2">
+                        <span>
+                          {deletingMessageScope === 'EVERYONE'
+                            ? 'Menarik pesan dari WhatsApp...'
+                            : 'Tarik Pesan (Untuk Semua Orang)'}
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/80 border border-red-200 text-red-700">
+                          WA + CRM
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-red-700/90 leading-snug">
+                        {pullDisabledReason ||
+                          'Menarik pesan agar terhapus di WhatsApp pelanggan/grup sekaligus menghapusnya dari riwayat CRM.'}
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={deletingMessageScope !== null}
+                      onClick={() => void handleDeleteConversationMessage('ME')}
+                      className="w-full text-left p-3 rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 transition-colors space-y-0.5"
+                    >
+                      <div className="font-semibold text-gray-900 flex items-center justify-between gap-2">
+                        <span>
+                          {deletingMessageScope === 'ME'
+                            ? 'Menghapus dari CRM...'
+                            : 'Hapus Pribadi (Hanya di CRM)'}
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-600">
+                          CRM Saja
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-600 leading-snug">
+                        Menghapus pesan dari kotak masuk CRM di sisi kita saja, tanpa menarik pesan di WhatsApp pelanggan.
+                      </p>
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-200 flex justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={deletingMessageScope !== null}
+                onClick={() => setDeleteMessageTarget(null)}
+              >
+                Batal
+              </Button>
             </div>
           </div>
         </div>

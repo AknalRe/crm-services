@@ -215,6 +215,20 @@ export const api = {
     });
     return res.data;
   },
+  deleteConversationMessage: async (
+    conversationId: string,
+    messageId: string,
+    scope: 'ME' | 'EVERYONE',
+    session?: string
+  ): Promise<{ deletedId: string; scope: 'ME' | 'EVERYONE' }> => {
+    const res = await client.delete(`/conversations/${conversationId}/messages/${messageId}`, {
+      params: {
+        scope,
+        ...(session ? { session } : {}),
+      },
+    });
+    return res.data.data;
+  },
   updateConversation: async (
     id: string,
     payload: {

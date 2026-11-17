@@ -1638,6 +1638,43 @@ export class WahaService {
   }
 
   /**
+   * Delete (revoke for everyone) a sent WhatsApp message via WAHA
+   */
+  public async deleteMessage(
+    phone: string,
+    wahaMessageId: string,
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanMsgId = String(wahaMessageId || '').trim();
+    if (!cleanMsgId) {
+      return {
+        success: false,
+        error: 'ID pesan WAHA tidak ditemukan sehingga pesan tidak dapat ditarik di WhatsApp.',
+      };
+    }
+    return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.delete(
+          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(cleanMsgId)}`,
+          { timeout: 12000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501) {
+          const fallbackRes = await client.post(
+            '/api/messages/delete',
+            { session: targetSession, chatId, messageId: cleanMsgId },
+            { timeout: 12000 }
+          );
+          return fallbackRes.data;
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
    * Send startTyping or stopTyping indicator to customer WhatsApp via WAHA
    */
   public async setTyping(
