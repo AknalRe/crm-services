@@ -3,7 +3,9 @@ import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
 import { config } from './config';
 import { initDb } from './db';
+import { DEFAULT_COMPANY_ID } from './db/schema';
 import { licenseService } from './services/license.service';
+import { runWithCompany } from './services/tenantContext';
 import contactsRouter from './routes/contacts';
 import broadcastsRouter from './routes/broadcasts';
 import conversationsRouter from './routes/conversations';
@@ -11,7 +13,8 @@ import settingsRouter from './routes/settings';
 import wahaRouter from './routes/waha';
 import dashboardRouter from './routes/dashboard';
 import licenseRouter from './routes/license';
-import authRouter from './routes/auth';
+import authRouter, { getCurrentAuthUser, getRequestCompanyId } from './routes/auth';
+import tenantsRouter from './routes/tenants';
 import eventsRouter from './routes/events';
 import publicCsatRouter from './routes/publicCsat';
 import agentsRouter from './routes/agents';
@@ -90,7 +93,7 @@ async function main() {
 
     if (Date.now() - cachedPublicHostsAt > 60_000) {
       try {
-        const lic = await licenseService.getLicense();
+        const lic = await licenseService.getLicense(DEFAULT_COMPANY_ID);
         cachedPublicHosts = (lic.publicUrls || [])
           .map((u: string) => {
             try {
@@ -118,6 +121,21 @@ async function main() {
     });
   });
 
+  // Bind AsyncLocalStorage tenant workspace context for authenticated requests
+  fastify.addHook('onRequest', (req, _reply, done) => {
+    getCurrentAuthUser(req)
+      .then((user) => {
+        const cid = user?.companyId || getRequestCompanyId(req);
+        runWithCompany(cid, () => done(), {
+          userId: user?.id,
+          isPlatformAdmin: Boolean(user?.isPlatformAdmin),
+        });
+      })
+      .catch(() => {
+        runWithCompany(DEFAULT_COMPANY_ID, () => done());
+      });
+  });
+
   // Health check
   fastify.get('/health', async () => {
     return {
@@ -130,6 +148,7 @@ async function main() {
 
   // Mount Routes
   await fastify.register(authRouter, { prefix: '/api/auth' });
+  await fastify.register(tenantsRouter, { prefix: '/api/tenants' });
   await fastify.register(dashboardRouter, { prefix: '/api/dashboard' });
   await fastify.register(contactsRouter, { prefix: '/api/contacts' });
   await fastify.register(broadcastsRouter, { prefix: '/api/broadcasts' });

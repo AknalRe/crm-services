@@ -1,9 +1,9 @@
 import crypto from 'crypto';
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { asc, eq } from 'drizzle-orm';
+import { FastifyInstance } from 'fastify';
+import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { products } from '../db/schema';
-import { requirePermission } from './auth';
+import { getRequestCompanyId, requirePermission } from './auth';
 
 export default async function productsRouter(fastify: FastifyInstance) {
   // List products (accessible by conversations & settings)
@@ -12,10 +12,19 @@ export default async function productsRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('conversations', 'settings', 'broadcasts') },
     async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const activeOnly = req.query?.activeOnly === 'true';
         const rows = activeOnly
-          ? await db.select().from(products).where(eq(products.isActive, true)).orderBy(asc(products.name))
-          : await db.select().from(products).orderBy(asc(products.name));
+          ? await db
+              .select()
+              .from(products)
+              .where(and(eq(products.companyId, companyId), eq(products.isActive, true)))
+              .orderBy(asc(products.name))
+          : await db
+              .select()
+              .from(products)
+              .where(eq(products.companyId, companyId))
+              .orderBy(asc(products.name));
         return reply.send({ success: true, data: rows });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });
@@ -35,6 +44,7 @@ export default async function productsRouter(fastify: FastifyInstance) {
     };
   }>('/', { preHandler: requirePermission('conversations', 'settings') }, async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const name = (req.body?.name || '').trim();
       const rawSku = (req.body?.sku || '').trim();
       if (!name) {
@@ -51,6 +61,7 @@ export default async function productsRouter(fastify: FastifyInstance) {
         .insert(products)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           sku,
           name,
           category,
@@ -86,8 +97,12 @@ export default async function productsRouter(fastify: FastifyInstance) {
     };
   }>('/:id', { preHandler: requirePermission('settings', 'conversations') }, async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const { id } = req.params;
-      const existing = await db.select().from(products).where(eq(products.id, id));
+      const existing = await db
+        .select()
+        .from(products)
+        .where(and(eq(products.id, id), eq(products.companyId, companyId)));
       if (!existing[0]) {
         return reply.status(404).send({ success: false, error: 'Produk tidak ditemukan' });
       }
@@ -116,7 +131,7 @@ export default async function productsRouter(fastify: FastifyInstance) {
       const [updated] = await db
         .update(products)
         .set(patch)
-        .where(eq(products.id, id))
+        .where(and(eq(products.id, id), eq(products.companyId, companyId)))
         .returning();
 
       return reply.send({ success: true, data: updated });
@@ -134,9 +149,10 @@ export default async function productsRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings', 'conversations') },
     async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const deleted = await db
           .delete(products)
-          .where(eq(products.id, req.params.id))
+          .where(and(eq(products.id, req.params.id), eq(products.companyId, companyId)))
           .returning();
         if (!deleted[0]) {
           return reply.status(404).send({ success: false, error: 'Produk tidak ditemukan' });

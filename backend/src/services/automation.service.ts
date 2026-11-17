@@ -7,7 +7,6 @@ import {
   chatMessages,
   conversations,
   crmAgents,
-  systemSettings,
   webhookDeliveries,
 } from '../db/schema';
 import { getSettingMap } from '../routes/auth';
@@ -19,6 +18,7 @@ import {
 import { wahaService } from './waha.service';
 import { OmnichannelType, sendOutboundChannelMessage } from './channel.service';
 import { liveEvents } from './events.service';
+import { getActiveCompanyId, listActiveCompanyIds, runWithCompany, upsertCompanySetting } from './tenantContext';
 
 const offHoursCooldown = new Map<string, number>();
 const slaAlertedAt = new Map<string, number>();
@@ -114,6 +114,7 @@ async function sendAutoReplyMessage(params: {
 
   await db.insert(chatMessages).values({
     id: crypto.randomUUID(),
+    companyId: getActiveCompanyId(),
     conversationId,
     contactId,
     direction: 'OUTBOUND',
@@ -148,9 +149,10 @@ async function sendAutoReplyMessage(params: {
 
 export async function notifyAlertWebhook(
   event: 'sla_breach' | 'low_csat' | 'test_ping',
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  companyIdArg?: string
 ): Promise<{ delivered: boolean; httpStatus?: number; error?: string }> {
-  const settings = await getSettingMap();
+  const settings = await getSettingMap(getActiveCompanyId(companyIdArg));
   const webhookUrl = (settings.sla_alert_webhook_url || '').trim();
   if (!webhookUrl) {
     return { delivered: false, error: 'URL Webhook Alert belum dikonfigurasi' };
@@ -168,6 +170,7 @@ export async function notifyAlertWebhook(
     );
     await db.insert(webhookDeliveries).values({
       id: crypto.randomUUID(),
+      companyId: getActiveCompanyId(companyIdArg),
       event,
       targetUrl: webhookUrl,
       status: 'SUCCESS',
@@ -184,6 +187,7 @@ export async function notifyAlertWebhook(
       .insert(webhookDeliveries)
       .values({
         id: crypto.randomUUID(),
+        companyId: getActiveCompanyId(companyIdArg),
         event,
         targetUrl: webhookUrl,
         status: 'FAILED',
@@ -213,6 +217,7 @@ export async function handleInboundAutomation(params: {
   externalThreadId?: string | null;
   sessionName?: string | null;
   isNewConversation: boolean;
+  companyId?: string;
 }): Promise<void> {
   const {
     conversationId,
@@ -224,10 +229,13 @@ export async function handleInboundAutomation(params: {
     externalThreadId = null,
     sessionName,
     isNewConversation,
+    companyId: companyIdParam,
   } = params;
 
+  const resolvedCompanyId = getActiveCompanyId(companyIdParam);
+  return runWithCompany(resolvedCompanyId, async () => {
   try {
-    const settings = await getSettingMap();
+    const settings = await getSettingMap(resolvedCompanyId);
 
     // 1. Auto-Assign Agent if unassigned
     const assignMode = settings.auto_assign_mode || 'NONE';
@@ -235,7 +243,7 @@ export async function handleInboundAutomation(params: {
       const activeAgents = await db
         .select()
         .from(crmAgents)
-        .where(eq(crmAgents.isActive, true))
+        .where(and(eq(crmAgents.companyId, getActiveCompanyId()), eq(crmAgents.isActive, true)))
         .orderBy(asc(crmAgents.createdAt));
 
       if (activeAgents.length > 0) {
@@ -245,25 +253,12 @@ export async function handleInboundAutomation(params: {
           const cursorRaw = Number.parseInt(settings.auto_assign_cursor || '0', 10);
           const nextIdx = Number.isFinite(cursorRaw) ? cursorRaw % activeAgents.length : 0;
           chosen = activeAgents[nextIdx];
-          await db
-            .insert(systemSettings)
-            .values({
-              key: 'auto_assign_cursor',
-              value: String((nextIdx + 1) % activeAgents.length),
-              updatedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: systemSettings.key,
-              set: {
-                value: String((nextIdx + 1) % activeAgents.length),
-                updatedAt: new Date(),
-              },
-            });
+          await upsertCompanySetting('auto_assign_cursor', String((nextIdx + 1) % activeAgents.length));
         } else if (assignMode === 'LEAST_BUSY') {
           const openConvs = await db
             .select({ assignedAgentId: conversations.assignedAgentId })
             .from(conversations)
-            .where(eq(conversations.status, 'OPEN'));
+            .where(and(eq(conversations.companyId, getActiveCompanyId()), eq(conversations.status, 'OPEN')));
           const counts = new Map<string, number>();
           for (const c of openConvs) {
             if (c.assignedAgentId) {
@@ -307,7 +302,7 @@ export async function handleInboundAutomation(params: {
       const rules = await db
         .select()
         .from(autoReplyRules)
-        .where(eq(autoReplyRules.isActive, true))
+        .where(and(eq(autoReplyRules.companyId, getActiveCompanyId()), eq(autoReplyRules.isActive, true)))
         .orderBy(asc(autoReplyRules.priority), asc(autoReplyRules.createdAt));
 
       for (const rule of rules) {
@@ -411,6 +406,7 @@ export async function handleInboundAutomation(params: {
   } catch (err: any) {
     console.warn('[AutomationService] Inbound automation error:', err.message);
   }
+  }); // end runWithCompany
 }
 
 let slaTimer: NodeJS.Timeout | null = null;
@@ -419,50 +415,62 @@ export function startSlaMonitor(): void {
   if (slaTimer) return;
   slaTimer = setInterval(async () => {
     try {
-      const settings = await getSettingMap();
-      if (settings.sla_escalation_enabled === 'false') return;
-      const slaRaw = Number.parseInt(settings.sla_target_minutes || '15', 10);
-      const slaMinutes = Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : 15;
-      const cutoff = Date.now() - slaMinutes * 60 * 1000;
-
-      const openUnanswered = await db
-        .select()
-        .from(conversations)
-        .where(
-          and(
-            eq(conversations.status, 'OPEN'),
-            eq(conversations.excludeFromMetrics, false),
-            eq(conversations.isGroup, false),
-            isNotNull(conversations.firstInboundAt),
-            isNull(conversations.firstResponseAt)
-          )
-        );
-
-      for (const conv of openUnanswered) {
-        if (!conv.firstInboundAt) continue;
-        const inboundMs = new Date(conv.firstInboundAt).getTime();
-        if (inboundMs > cutoff) continue;
-
-        const lastAlert = slaAlertedAt.get(conv.id) || 0;
-        if (Date.now() - lastAlert < SLA_ALERT_COOLDOWN_MS) continue;
-        slaAlertedAt.set(conv.id, Date.now());
-
-        const waitingMinutes = Math.round((Date.now() - inboundMs) / 60000);
-        liveEvents.emit('sla:breach', {
-          conversationId: conv.id,
-          waitingMinutes,
-          slaTargetMinutes: slaMinutes,
-        });
-        await notifyAlertWebhook('sla_breach', {
-          conversationId: conv.id,
-          contactId: conv.contactId,
-          assignedAgentName: conv.assignedAgentName,
-          waitingMinutes,
-          slaTargetMinutes: slaMinutes,
-        });
+      const companyIds = await listActiveCompanyIds();
+      for (const cid of companyIds) {
+        await runWithCompany(cid, () => runSlaCheckForCompany(cid));
       }
     } catch (err: any) {
       console.warn('[SlaMonitor] Check failed:', err.message);
     }
   }, 60_000);
+}
+
+async function runSlaCheckForCompany(companyId: string): Promise<void> {
+  try {
+    const settings = await getSettingMap(companyId);
+    if (settings.sla_escalation_enabled === 'false') return;
+    const slaRaw = Number.parseInt(settings.sla_target_minutes || '15', 10);
+    const slaMinutes = Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : 15;
+    const cutoff = Date.now() - slaMinutes * 60 * 1000;
+
+    const openUnanswered = await db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.companyId, companyId),
+          eq(conversations.status, 'OPEN'),
+          eq(conversations.excludeFromMetrics, false),
+          eq(conversations.isGroup, false),
+          isNotNull(conversations.firstInboundAt),
+          isNull(conversations.firstResponseAt)
+        )
+      );
+
+    for (const conv of openUnanswered) {
+      if (!conv.firstInboundAt) continue;
+      const inboundMs = new Date(conv.firstInboundAt).getTime();
+      if (inboundMs > cutoff) continue;
+
+      const lastAlert = slaAlertedAt.get(conv.id) || 0;
+      if (Date.now() - lastAlert < SLA_ALERT_COOLDOWN_MS) continue;
+      slaAlertedAt.set(conv.id, Date.now());
+
+      const waitingMinutes = Math.round((Date.now() - inboundMs) / 60000);
+      liveEvents.emit('sla:breach', {
+        conversationId: conv.id,
+        waitingMinutes,
+        slaTargetMinutes: slaMinutes,
+      }, companyId);
+      await notifyAlertWebhook('sla_breach', {
+        conversationId: conv.id,
+        contactId: conv.contactId,
+        assignedAgentName: conv.assignedAgentName,
+        waitingMinutes,
+        slaTargetMinutes: slaMinutes,
+      }, companyId);
+    }
+  } catch (err: any) {
+    console.warn('[SlaMonitor] Check failed:', err.message);
+  }
 }

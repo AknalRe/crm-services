@@ -1,10 +1,16 @@
 import crypto from 'crypto';
 import axios, { AxiosInstance } from 'axios';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { config } from '../config';
 import { db } from '../db';
-import { systemSettings } from '../db/schema';
+import { companySettings, DEFAULT_COMPANY_ID } from '../db/schema';
 import { licenseService } from './license.service';
+import {
+  getActiveCompanyId,
+  getCompanySettingMap,
+  listActiveCompanyIds,
+  upsertCompanySetting,
+} from './tenantContext';
 import { fromWahaChatId, isPhoneWahaJid, normalizePhoneNumber, toWahaChatId } from './phone.utils';
 
 export function resolveWahaMediaTargetUrl(
@@ -587,8 +593,8 @@ export class WahaService {
     { engine: string | null; version: string | null; tier: string | null; checkedAt: number }
   >();
   private readonly EXTERNAL_ENGINE_CACHE_MS = 60_000;
-  private lastWebhookEvent: WahaWebhookTelemetry | null = null;
-  private lastDetectedPublicBaseUrl = '';
+  private lastWebhookEventByCompany = new Map<string, WahaWebhookTelemetry>();
+  private detectedPublicUrlByCompany = new Map<string, string>();
 
   private constructor() { }
 
@@ -596,12 +602,14 @@ export class WahaService {
     this.externalEngineCache.clear();
   }
 
-  public recordWebhookEvent(entry: WahaWebhookTelemetry): void {
-    this.lastWebhookEvent = entry;
+  public recordWebhookEvent(entry: WahaWebhookTelemetry, companyId?: string): void {
+    const cid = getActiveCompanyId(companyId);
+    this.lastWebhookEventByCompany.set(cid, entry);
   }
 
-  public getLastWebhookEvent(): WahaWebhookTelemetry | null {
-    return this.lastWebhookEvent;
+  public getLastWebhookEvent(companyId?: string): WahaWebhookTelemetry | null {
+    const cid = getActiveCompanyId(companyId);
+    return this.lastWebhookEventByCompany.get(cid) || null;
   }
 
   public static getInstance(): WahaService {
@@ -616,15 +624,45 @@ export class WahaService {
   }
 
   /**
-   * In shared internal WAHA mode, scope all sessions to this CRM instance's owner prefix
-   * (e.g. "nivertari" -> allows "nivertari" and "nivertari-*") so tenants never see or touch
-   * another user's WhatsApp sessions.
+   * In shared internal WAHA mode, scope all sessions per tenant company
+   * so tenants never see or touch another company's WhatsApp sessions.
    */
-  private getOwnerPrefix(mode?: 'INTERNAL' | 'EXTERNAL'): string | null {
+  private getOwnerPrefix(mode?: 'INTERNAL' | 'EXTERNAL', companyId?: string): string | null {
     if (mode !== 'INTERNAL') return null;
+    const cid = getActiveCompanyId(companyId);
     const base = (config.waha.session || '').trim();
-    if (!base || base === 'default') return null;
-    return base;
+    if (cid === DEFAULT_COMPANY_ID) {
+      if (!base || base === 'default') return null;
+      return base;
+    }
+    const shortId = cid.replace(/^cmp_/, '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 12) || cid.slice(0, 12);
+    return base && base !== 'default' ? `${base}-${shortId}` : `t_${shortId}`;
+  }
+
+  public async resolveCompanyIdForWebhookSession(sessionName?: string | null): Promise<string> {
+    const clean = String(sessionName || '').trim();
+    if (!clean) return DEFAULT_COMPANY_ID;
+    try {
+      const matched = await db
+        .select({ companyId: companySettings.companyId })
+        .from(companySettings)
+        .where(and(eq(companySettings.key, 'waha_session'), eq(companySettings.value, clean)))
+        .limit(1);
+      if (matched[0]?.companyId) {
+        return matched[0].companyId;
+      }
+      const companyIds = await listActiveCompanyIds();
+      for (const cid of companyIds) {
+        if (cid === DEFAULT_COMPANY_ID) continue;
+        const prefix = this.getOwnerPrefix('INTERNAL', cid);
+        if (prefix && this.isOwnedSession(clean, prefix)) {
+          return cid;
+        }
+      }
+    } catch {
+      // ignore lookup errors cleanly
+    }
+    return DEFAULT_COMPANY_ID;
   }
 
   private isOwnedSession(sessionName: string, ownerPrefix: string | null): boolean {
@@ -886,27 +924,23 @@ export class WahaService {
   /**
    * Get active WAHA configuration (internal mode locks URL & API key to env when configured)
    */
-  public async getConfig(maskSecret = false): Promise<WahaConfig> {
-    const internalEnv = this.hasInternalEnv();
+  public async getConfig(maskSecret = false, companyId?: string): Promise<WahaConfig> {
+    const cid = getActiveCompanyId(companyId);
+    const defaultInternalSession =
+      this.getOwnerPrefix('INTERNAL', cid) || config.waha.session || 'default';
     try {
-      const settings = await db.select().from(systemSettings);
-      const modeSetting = settings.find((s) => s.key === 'waha_mode');
-      const urlSetting = settings.find((s) => s.key === 'waha_base_url');
-      const keySetting = settings.find((s) => s.key === 'waha_api_key');
-      const sessionSetting = settings.find((s) => s.key === 'waha_session');
-      const webhookSetting = settings.find((s) => s.key === 'waha_webhook_url');
-      const detectedPublicSetting = settings.find((s) => s.key === 'waha_detected_public_url');
-      const customWebhookUrl = (webhookSetting?.value || '').trim();
-      const detectedPublicUrl = (detectedPublicSetting?.value || '').trim();
+      const settings = await getCompanySettingMap(cid);
+      const customWebhookUrl = (settings['waha_webhook_url'] || '').trim();
+      const detectedPublicUrl = (settings['waha_detected_public_url'] || '').trim();
       if (detectedPublicUrl && !isPrivateOrInternalUrl(detectedPublicUrl)) {
-        this.lastDetectedPublicBaseUrl = detectedPublicUrl;
+        this.detectedPublicUrlByCompany.set(cid, detectedPublicUrl);
       }
 
       const mode: 'INTERNAL' | 'EXTERNAL' =
-        modeSetting?.value === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
+        settings['waha_mode'] === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL';
 
-      const savedExternalUrl = (urlSetting?.value || '').trim();
-      const savedExternalKey = keySetting?.value || '';
+      const savedExternalUrl = (settings['waha_base_url'] || '').trim();
+      const savedExternalKey = settings['waha_api_key'] || '';
       const externalConfig = {
         baseUrl: savedExternalUrl,
         apiKey: maskSecret ? (savedExternalKey ? '••••••••' : '') : savedExternalKey,
@@ -920,8 +954,11 @@ export class WahaService {
         hasApiKey: Boolean(internalRawKey && internalRawKey.trim() !== ''),
       };
 
+      const savedSession = (settings['waha_session'] || '').trim();
+      const cachedDetected = this.detectedPublicUrlByCompany.get(cid);
+
       if (mode === 'INTERNAL') {
-        const session = sessionSetting?.value || config.waha.session || 'default';
+        const session = savedSession || defaultInternalSession;
         return {
           baseUrl: internalUrl,
           apiKey: maskSecret ? (internalRawKey ? '••••••••' : '') : internalRawKey,
@@ -930,7 +967,7 @@ export class WahaService {
           internalLocked: true,
           hasApiKey: internalConfig.hasApiKey,
           customWebhookUrl,
-          detectedPublicUrl: detectedPublicUrl || this.lastDetectedPublicBaseUrl || undefined,
+          detectedPublicUrl: detectedPublicUrl || cachedDetected || undefined,
           externalConfig,
           internalConfig,
         };
@@ -939,12 +976,12 @@ export class WahaService {
       return {
         baseUrl: savedExternalUrl,
         apiKey: maskSecret ? (savedExternalKey ? '••••••••' : '') : savedExternalKey,
-        session: (sessionSetting?.value || '').trim() || 'default',
+        session: savedSession || 'default',
         mode: 'EXTERNAL',
         internalLocked: false,
         hasApiKey: externalConfig.hasApiKey,
         customWebhookUrl,
-        detectedPublicUrl: detectedPublicUrl || this.lastDetectedPublicBaseUrl || undefined,
+        detectedPublicUrl: detectedPublicUrl || cachedDetected || undefined,
         externalConfig,
         internalConfig,
       };
@@ -952,7 +989,7 @@ export class WahaService {
       return {
         baseUrl: config.waha.baseUrl,
         apiKey: maskSecret ? (config.waha.apiKey ? '••••••••' : '') : config.waha.apiKey,
-        session: config.waha.session || 'default',
+        session: defaultInternalSession,
         mode: 'INTERNAL',
         internalLocked: true,
         hasApiKey: Boolean(config.waha.apiKey && config.waha.apiKey.trim() !== ''),
@@ -1074,21 +1111,30 @@ export class WahaService {
   /**
    * Persist observed public CRM base URL so background jobs / external WAHA webhook sync can use it
    */
-  public async rememberPublicBaseUrl(rawBaseUrl?: string | null): Promise<void> {
+  public async rememberPublicBaseUrl(rawBaseUrl?: string | null, companyId?: string): Promise<void> {
     const clean = String(rawBaseUrl || '').trim().replace(/\/+$/, '');
     if (!clean || !/^https?:\/\//i.test(clean) || isPrivateOrInternalUrl(clean)) return;
-    this.lastDetectedPublicBaseUrl = clean;
+    const cid = getActiveCompanyId(companyId);
+    this.detectedPublicUrlByCompany.set(cid, clean);
     try {
-      const now = new Date();
-      await db
-        .insert(systemSettings)
-        .values({ key: 'waha_detected_public_url', value: clean, updatedAt: now })
-        .onConflictDoUpdate({
-          target: systemSettings.key,
-          set: { value: clean, updatedAt: now },
-        });
+      await upsertCompanySetting('waha_detected_public_url', clean, cid);
     } catch {
       // Ignore DB persistence failures in unit tests / readonly scenarios
+    }
+  }
+
+  private appendCompanyQuery(rawUrl: string, companyId: string): string {
+    if (!rawUrl || companyId === DEFAULT_COMPANY_ID) return rawUrl;
+    try {
+      const parsed = new URL(rawUrl);
+      if (!parsed.searchParams.get('companyId')) {
+        parsed.searchParams.set('companyId', companyId);
+      }
+      return parsed.toString();
+    } catch {
+      return rawUrl.includes('companyId=')
+        ? rawUrl
+        : `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}companyId=${encodeURIComponent(companyId)}`;
     }
   }
 
@@ -1097,16 +1143,22 @@ export class WahaService {
    */
   public async resolveEffectiveWebhookUrl(
     currentConfig?: WahaConfig,
-    requestBaseUrl?: string | null
+    requestBaseUrl?: string | null,
+    companyId?: string
   ): Promise<{ url: string; isPublic: boolean; source: string }> {
-    const conf = currentConfig || (await this.getConfig(true));
+    const cid = getActiveCompanyId(companyId);
+    const conf = currentConfig || (await this.getConfig(true, cid));
     const custom = (conf.customWebhookUrl || '').trim();
     if (custom && /^https?:\/\//i.test(custom)) {
-      return { url: custom, isPublic: !isPrivateOrInternalUrl(custom), source: 'custom' };
+      return {
+        url: this.appendCompanyQuery(custom, cid),
+        isPublic: !isPrivateOrInternalUrl(custom),
+        source: 'custom',
+      };
     }
 
     if (conf.mode !== 'EXTERNAL') {
-      const url = (config.webhookUrl || '').trim();
+      const url = this.appendCompanyQuery((config.webhookUrl || '').trim(), cid);
       return { url, isPublic: !isPrivateOrInternalUrl(url), source: 'internal' };
     }
 
@@ -1124,10 +1176,11 @@ export class WahaService {
     if (requestBaseUrl) {
       candidates.push({ base: requestBaseUrl, source: 'request_origin' });
     }
+    const cachedDetected = this.detectedPublicUrlByCompany.get(cid);
     if (conf.detectedPublicUrl) {
       candidates.push({ base: conf.detectedPublicUrl, source: 'detected_origin' });
-    } else if (this.lastDetectedPublicBaseUrl) {
-      candidates.push({ base: this.lastDetectedPublicBaseUrl, source: 'detected_origin' });
+    } else if (cachedDetected) {
+      candidates.push({ base: cachedDetected, source: 'detected_origin' });
     }
 
     for (const item of candidates) {
@@ -1136,11 +1189,11 @@ export class WahaService {
         const fullUrl = cleanBase.endsWith('/api/waha/webhook')
           ? cleanBase
           : `${cleanBase}/api/waha/webhook`;
-        return { url: fullUrl, isPublic: true, source: item.source };
+        return { url: this.appendCompanyQuery(fullUrl, cid), isPublic: true, source: item.source };
       }
     }
 
-    const fallback = (config.webhookUrl || '').trim();
+    const fallback = this.appendCompanyQuery((config.webhookUrl || '').trim(), cid);
     return { url: fallback, isPublic: !isPrivateOrInternalUrl(fallback), source: 'internal_fallback' };
   }
 
@@ -1151,7 +1204,9 @@ export class WahaService {
     const cleanLid = String(lidJid || '').trim();
     if (!cleanLid || !cleanLid.toLowerCase().endsWith('@lid')) return null;
 
-    const cached = this.lidPhoneCache.get(cleanLid);
+    const cid = getActiveCompanyId();
+    const cacheKey = `${cid}::${cleanLid}`;
+    const cached = this.lidPhoneCache.get(cacheKey);
     if (cached) return cached;
 
     try {
@@ -1183,7 +1238,7 @@ export class WahaService {
         const phone = tryExtractPhone(c);
         if (phone) {
           if (this.lidPhoneCache.size > 2000) this.lidPhoneCache.clear();
-          this.lidPhoneCache.set(cleanLid, phone);
+          this.lidPhoneCache.set(cacheKey, phone);
           return phone;
         }
       }
@@ -1204,7 +1259,7 @@ export class WahaService {
         const phone = tryExtractPhone(c);
         if (phone) {
           if (this.lidPhoneCache.size > 2000) this.lidPhoneCache.clear();
-          this.lidPhoneCache.set(cleanLid, phone);
+          this.lidPhoneCache.set(cacheKey, phone);
           return phone;
         }
       }
@@ -1302,7 +1357,7 @@ export class WahaService {
         details: sessionData,
         webhookUrl: resolvedWebhook.url,
         webhookReachableForExternal,
-        lastWebhook: this.lastWebhookEvent,
+        lastWebhook: this.getLastWebhookEvent(),
         config: currentConfig,
       };
     } catch (err: any) {
@@ -1319,7 +1374,7 @@ export class WahaService {
         error: this.extractWahaError(err),
         webhookUrl: resolvedWebhook.url,
         webhookReachableForExternal,
-        lastWebhook: this.lastWebhookEvent,
+        lastWebhook: this.getLastWebhookEvent(),
         config: currentConfig,
       };
     }
@@ -1371,14 +1426,16 @@ export class WahaService {
 
     if (hasValidWebhook) return true;
 
+    const cid = getActiveCompanyId();
+    const syncCacheKey = `${cid}::${sessionName}`;
     if (!opts?.force) {
-      const lastAttempt = this.webhookSyncAt.get(sessionName) || 0;
+      const lastAttempt = this.webhookSyncAt.get(syncCacheKey) || 0;
       if (Date.now() - lastAttempt < 30_000) return false;
     }
-    this.webhookSyncAt.set(sessionName, Date.now());
+    this.webhookSyncAt.set(syncCacheKey, Date.now());
 
     const preservedWebhooks = existingWebhooks.filter(
-      (wh) => wh && typeof wh.url === 'string' && !wh.url.replace(/\/+$/, '').endsWith('/api/waha/webhook')
+      (wh) => wh && typeof wh.url === 'string' && !wh.url.includes('/api/waha/webhook')
     );
     const nextWebhooks = [
       ...preservedWebhooks,
@@ -1615,14 +1672,7 @@ export class WahaService {
     const conf = await this.getConfig();
     const ownerPrefix = this.getOwnerPrefix(conf.mode);
     this.assertOwnedSession(clean, ownerPrefix);
-    const now = new Date();
-    await db
-      .insert(systemSettings)
-      .values({ key: 'waha_session', value: clean, updatedAt: now })
-      .onConflictDoUpdate({
-        target: systemSettings.key,
-        set: { value: clean, updatedAt: now },
-      });
+    await upsertCompanySetting('waha_session', clean);
     return clean;
   }
 
@@ -1637,6 +1687,11 @@ export class WahaService {
     const conf = await this.getConfig();
     const ownerPrefix = this.getOwnerPrefix(conf.mode);
     const scopedName = this.resolveOwnedSessionName(clean, ownerPrefix);
+    const existing = await this.listSessions().catch(() => ({ sessions: [] as WahaSessionInfo[] }));
+    const alreadyExists = existing.sessions.some((s) => s.name === scopedName);
+    if (!alreadyExists) {
+      await licenseService.assertQuota('sessions', existing.sessions.length + 1);
+    }
     const result = await this.startSession(scopedName);
     if (setActive) {
       await this.setActiveSession(scopedName);

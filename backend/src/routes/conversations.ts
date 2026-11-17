@@ -10,7 +10,6 @@ import {
   cannedResponses,
   csatResponses,
   channelAccounts,
-  systemSettings,
 } from '../db/schema';
 import {
   wahaService,
@@ -24,6 +23,11 @@ import {
 import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
+import {
+  getActiveCompanyId,
+  getCompanySettingValue,
+  upsertCompanySetting,
+} from '../services/tenantContext';
 import { OmnichannelType, sendOutboundChannelMessage } from '../services/channel.service';
 import {
   buildCsatSnapshot,
@@ -34,6 +38,7 @@ import {
 } from '../services/csat.service';
 import {
   getCurrentAuthUser,
+  getRequestCompanyId,
   getSettingMap,
   hasUserPermission,
   requirePermission,
@@ -166,8 +171,10 @@ async function sendCsatCtaForConversation(
   const cycleStartedAt = conv.sessionStartedAt || conv.firstInboundAt || conv.createdAt || now;
   const cycleResolvedAt =
     conv.resolvedAt || (opts.triggerType === 'AUTO_RESOLVE' ? now : null);
+  const companyId = conv.companyId || getActiveCompanyId();
   await db.insert(csatResponses).values({
     id: crypto.randomUUID(),
+    companyId,
     conversationId: conv.id,
     contactId: conv.contactId,
     wahaSession: effectiveSession,
@@ -187,6 +194,7 @@ async function sendCsatCtaForConversation(
     .insert(chatMessages)
     .values({
       id: crypto.randomUUID(),
+      companyId,
       conversationId: conv.id,
       contactId: conv.contactId,
       direction: 'OUTBOUND',
@@ -214,8 +222,8 @@ async function sendCsatCtaForConversation(
     })
     .where(eq(conversations.id, conv.id));
 
-  liveEvents.emit('conversations:update', { conversationId: conv.id });
-  liveEvents.emit('tracking:update', { conversationId: conv.id });
+  liveEvents.emit('conversations:update', { conversationId: conv.id }, companyId);
+  liveEvents.emit('tracking:update', { conversationId: conv.id }, companyId);
 
   return {
     message: inserted[0],
@@ -245,15 +253,11 @@ interface SavedStickerItem {
   createdAt: string;
 }
 
-async function readSavedStickers(): Promise<SavedStickerItem[]> {
-  const rows = await db
-    .select({ value: systemSettings.value })
-    .from(systemSettings)
-    .where(eq(systemSettings.key, STICKER_PACK_SETTINGS_KEY))
-    .limit(1);
-  if (!rows[0]?.value) return [];
+async function readSavedStickers(companyId?: string): Promise<SavedStickerItem[]> {
+  const raw = await getCompanySettingValue(STICKER_PACK_SETTINGS_KEY, companyId);
+  if (!raw) return [];
   try {
-    const parsed = JSON.parse(rows[0].value);
+    const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
       ? parsed.filter((x) => x && typeof x.id === 'string' && typeof x.mediaUrl === 'string')
       : [];
@@ -262,22 +266,12 @@ async function readSavedStickers(): Promise<SavedStickerItem[]> {
   }
 }
 
-async function writeSavedStickers(items: SavedStickerItem[]): Promise<void> {
-  const now = new Date();
-  await db
-    .insert(systemSettings)
-    .values({
-      key: STICKER_PACK_SETTINGS_KEY,
-      value: JSON.stringify(items.slice(0, 120)),
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: systemSettings.key,
-      set: {
-        value: JSON.stringify(items.slice(0, 120)),
-        updatedAt: now,
-      },
-    });
+async function writeSavedStickers(items: SavedStickerItem[], companyId?: string): Promise<void> {
+  await upsertCompanySetting(
+    STICKER_PACK_SETTINGS_KEY,
+    JSON.stringify(items.slice(0, 120)),
+    companyId
+  );
 }
 
 interface OutboundLinkPreviewPayload {
@@ -353,7 +347,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     await checkConvPerm(req, reply);
     if (reply.sent) return;
     try {
-      await licenseService.assertFeature('liveChatCrm');
+      await licenseService.assertFeature('liveChatCrm', undefined, getRequestCompanyId(req));
     } catch (err: any) {
       return reply.status(err.statusCode || 403).send({
         success: false,
@@ -390,9 +384,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   });
 
   // GET / POST / DELETE Saved Sticker Pack for Live Chat CRM
-  fastify.get('/stickers', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/stickers', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const items = await readSavedStickers();
+      const items = await readSavedStickers(getRequestCompanyId(req));
       return reply.send({ success: true, data: items });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -403,6 +397,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body: { name?: string; mediaBase64?: string; mimetype?: string; mediaUrl?: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const name = String(req.body?.name || '').trim() || `Stiker ${new Date().toLocaleDateString('id-ID')}`;
       let storedUrl = String(req.body?.mediaUrl || '').trim();
       if (!storedUrl && req.body?.mediaBase64) {
@@ -417,7 +412,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       if (!storedUrl) {
         return reply.status(400).send({ success: false, error: 'File stiker atau URL media stiker wajib disediakan.' });
       }
-      const prev = await readSavedStickers();
+      const prev = await readSavedStickers(companyId);
       const existing = prev.find((s) => s.mediaUrl === storedUrl);
       if (existing) {
         return reply.send({ success: true, data: existing, alreadyExists: true });
@@ -428,7 +423,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         mediaUrl: storedUrl,
         createdAt: new Date().toISOString(),
       };
-      await writeSavedStickers([nextItem, ...prev]);
+      await writeSavedStickers([nextItem, ...prev], companyId);
       return reply.status(201).send({ success: true, data: nextItem });
     } catch (error: any) {
       return reply.status(400).send({ success: false, error: error.message || 'Gagal menyimpan stiker' });
@@ -439,9 +434,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Params: { stickerId: string };
   }>, reply: FastifyReply) => {
     try {
-      const prev = await readSavedStickers();
+      const companyId = getRequestCompanyId(req);
+      const prev = await readSavedStickers(companyId);
       const next = prev.filter((s) => s.id !== req.params.stickerId);
-      await writeSavedStickers(next);
+      await writeSavedStickers(next, companyId);
       return reply.send({ success: true });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -459,6 +455,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const rawPhone = String(req.body?.phoneNumber || '').trim();
       const normPhone = normalizePhoneNumber(rawPhone);
       if (!normPhone) {
@@ -480,7 +477,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const existingRows = await db
         .select()
         .from(contacts)
-        .where(inArray(contacts.nomorWhatsapp, phoneVariants))
+        .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phoneVariants)))
         .limit(1);
 
       let contactRow = existingRows[0];
@@ -494,21 +491,21 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             error: 'Role Anda tidak memiliki izin menambah kontak baru (contacts.create).',
           });
         }
-        const lic = await licenseService.assertLicenseActive().catch(() => null);
-        if (lic && lic.features?.maxContacts > 0) {
-          const allCountRes = await db.select().from(contacts);
-          if (allCountRes.length >= lic.features.maxContacts) {
-            return reply.status(403).send({
-              success: false,
-              error: `Kuota maksimal ${lic.features.maxContacts} kontak pada paket "${lic.plan}" sudah penuh.`,
-            });
-          }
+        try {
+          await licenseService.assertQuota('contacts', 1, companyId);
+        } catch (qErr: any) {
+          return reply.status(qErr?.statusCode || 403).send({
+            success: false,
+            code: qErr?.code,
+            error: qErr.message,
+          });
         }
         const now = new Date();
         const inserted = await db
           .insert(contacts)
           .values({
             id: crypto.randomUUID(),
+            companyId,
             namaLengkap: cleanName,
             nomorWhatsapp: normPhone,
             tags: 'Kontak Dibagikan',
@@ -519,7 +516,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           .returning();
         contactRow = inserted[0];
         createdNew = true;
-        liveEvents.emit('contacts:update', { action: 'create', contactId: contactRow.id });
+        liveEvents.emit('contacts:update', { action: 'create', contactId: contactRow.id }, companyId);
       }
 
       let conversationRow: typeof conversations.$inferSelect | null = null;
@@ -527,7 +524,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         const convList = await db
           .select()
           .from(conversations)
-          .where(and(eq(conversations.contactId, contactRow.id), eq(conversations.channel, 'WHATSAPP')))
+          .where(
+            and(
+              eq(conversations.companyId, companyId),
+              eq(conversations.contactId, contactRow.id),
+              eq(conversations.channel, 'WHATSAPP')
+            )
+          )
           .orderBy(desc(conversations.updatedAt));
         const requestedSession = req.body?.session?.trim() || null;
         const matched = requestedSession
@@ -546,6 +549,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             .insert(conversations)
             .values({
               id: crypto.randomUUID(),
+              companyId,
               contactId: contactRow.id,
               channel: 'WHATSAPP',
               wahaSession: requestedSession,
@@ -558,7 +562,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             .returning();
           conversationRow = insConv;
         }
-        liveEvents.emit('conversations:update', { conversationId: conversationRow.id });
+        liveEvents.emit('conversations:update', { conversationId: conversationRow.id }, companyId);
       }
 
       return reply.status(createdNew ? 201 : 200).send({
@@ -575,8 +579,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   });
 
   // GET active agents for conversation assignment
-  fastify.get('/agents', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/agents', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const list = await db
         .select({
           id: crmAgents.id,
@@ -586,7 +591,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           isActive: crmAgents.isActive,
         })
         .from(crmAgents)
-        .where(eq(crmAgents.isActive, true))
+        .where(and(eq(crmAgents.companyId, companyId), eq(crmAgents.isActive, true)))
         .orderBy(asc(crmAgents.name));
       return reply.send({ success: true, data: list });
     } catch (error: any) {
@@ -599,14 +604,19 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     '/canned',
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const activeOnly = req.query?.activeOnly === 'true';
         const list = activeOnly
           ? await db
               .select()
               .from(cannedResponses)
-              .where(eq(cannedResponses.isActive, true))
+              .where(and(eq(cannedResponses.companyId, companyId), eq(cannedResponses.isActive, true)))
               .orderBy(asc(cannedResponses.shortCode))
-          : await db.select().from(cannedResponses).orderBy(asc(cannedResponses.shortCode));
+          : await db
+              .select()
+              .from(cannedResponses)
+              .where(eq(cannedResponses.companyId, companyId))
+              .orderBy(asc(cannedResponses.shortCode));
         return reply.send({ success: true, data: list });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });
@@ -618,6 +628,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body: { shortCode?: string; title?: string; category?: string; content?: string; isActive?: boolean };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const shortCode = String(req.body?.shortCode || '')
         .trim()
         .toLowerCase()
@@ -634,6 +645,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .insert(cannedResponses)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           shortCode,
           title,
           category,
@@ -657,6 +669,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body: { shortCode?: string; title?: string; category?: string; content?: string; isActive?: boolean };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const patch: Record<string, any> = { updatedAt: new Date() };
       if (req.body?.shortCode !== undefined) {
         const cleanCode = String(req.body.shortCode)
@@ -693,7 +706,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const [updated] = await db
         .update(cannedResponses)
         .set(patch)
-        .where(eq(cannedResponses.id, req.params.cannedId))
+        .where(and(eq(cannedResponses.id, req.params.cannedId), eq(cannedResponses.companyId, companyId)))
         .returning();
       if (!updated) {
         return reply.status(404).send({ success: false, error: 'Template balasan cepat tidak ditemukan' });
@@ -711,9 +724,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Params: { cannedId: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const deleted = await db
         .delete(cannedResponses)
-        .where(eq(cannedResponses.id, req.params.cannedId))
+        .where(and(eq(cannedResponses.id, req.params.cannedId), eq(cannedResponses.companyId, companyId)))
         .returning();
       if (!deleted[0]) {
         return reply.status(404).send({ success: false, error: 'Template balasan cepat tidak ditemukan' });
@@ -746,6 +760,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   // GET all conversations
   fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const authUser = await getCurrentAuthUser(req);
       const canViewAll = hasUserPermission(authUser, 'conversations.view_all');
 
@@ -756,6 +771,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(eq(conversations.companyId, companyId))
         .orderBy(desc(conversations.updatedAt));
 
       const rows = canViewAll
@@ -767,6 +783,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const csatRows = await db
         .select()
         .from(csatResponses)
+        .where(eq(csatResponses.companyId, companyId))
         .orderBy(desc(csatResponses.sentAt));
       const csatByConv = new Map<string, Array<any>>();
       for (const cr of csatRows) {
@@ -794,7 +811,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const accountRows = await db
         .select({ id: channelAccounts.id, name: channelAccounts.name })
-        .from(channelAccounts);
+        .from(channelAccounts)
+        .where(eq(channelAccounts.companyId, companyId));
       const accountNameMap = new Map<string, string>();
       for (const acc of accountRows) {
         accountNameMap.set(acc.id, acc.name);
@@ -866,10 +884,11 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     reply: FastifyReply
   ) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const messages = await db
         .select()
         .from(chatMessages)
-        .where(eq(chatMessages.conversationId, req.params.id))
+        .where(and(eq(chatMessages.conversationId, req.params.id), eq(chatMessages.companyId, companyId)))
         .orderBy(asc(chatMessages.createdAt));
 
       const shouldMarkRead =
@@ -879,7 +898,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           .select({ conv: conversations, contact: contacts })
           .from(conversations)
           .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-          .where(eq(conversations.id, req.params.id))
+          .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
           .limit(1);
         const row = convRows[0];
         if (row?.conv) {
@@ -887,11 +906,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             await db
               .update(conversations)
               .set({ unreadCount: 0 })
-              .where(and(eq(conversations.id, req.params.id), gt(conversations.unreadCount, 0)));
+              .where(
+                and(
+                  eq(conversations.id, req.params.id),
+                  eq(conversations.companyId, companyId),
+                  gt(conversations.unreadCount, 0)
+                )
+              );
             liveEvents.emit('conversations:update', {
               conversationId: req.params.id,
               unreadReset: true,
-            });
+            }, companyId);
           }
           if (row.contact) {
             void markWhatsAppConversationSeen(
@@ -919,11 +944,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     reply: FastifyReply
   ) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const convRows = await db
         .select({ conv: conversations, contact: contacts })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(eq(conversations.id, req.params.id))
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
         .limit(1);
       const row = convRows[0];
       if (!row?.conv) {
@@ -1055,7 +1081,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         const matchedContacts = await db
           .select({ id: contacts.id, namaLengkap: contacts.namaLengkap, nomorWhatsapp: contacts.nomorWhatsapp })
           .from(contacts)
-          .where(inArray(contacts.nomorWhatsapp, phones));
+          .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phones)));
         const contactByPhone = new Map(
           matchedContacts
             .filter((c) => Boolean(c.nomorWhatsapp))
@@ -1098,11 +1124,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   // POST mark conversation as read & send WhatsApp seen receipt
   fastify.post('/:id/read', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const convRows = await db
         .select({ conv: conversations, contact: contacts })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(eq(conversations.id, req.params.id))
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
         .limit(1);
       const row = convRows[0];
       if (!row?.conv || !row.contact) {
@@ -1117,14 +1144,14 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const messages = await db
         .select()
         .from(chatMessages)
-        .where(eq(chatMessages.conversationId, row.conv.id))
+        .where(and(eq(chatMessages.conversationId, row.conv.id), eq(chatMessages.companyId, companyId)))
         .orderBy(asc(chatMessages.createdAt));
       const seenRes = await markWhatsAppConversationSeen(row.conv, row.contact, messages, true);
 
       liveEvents.emit('conversations:update', {
         conversationId: row.conv.id,
         unreadReset: true,
-      });
+      }, companyId);
 
       return reply.send({ success: true, data: seenRes });
     } catch (error: any) {
@@ -1141,11 +1168,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     reply: FastifyReply
   ) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const convRows = await db
         .select({ conv: conversations, contact: contacts })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(eq(conversations.id, req.params.id))
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
         .limit(1);
       const row = convRows[0];
       if (!row?.conv || !row.contact) {
@@ -1171,12 +1199,16 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body: { contactId?: string; session?: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const contactId = String(req.body?.contactId || '').trim();
       if (!contactId) {
         return reply.status(400).send({ success: false, error: 'contactId wajib diisi' });
       }
 
-      const contactRows = await db.select().from(contacts).where(eq(contacts.id, contactId));
+      const contactRows = await db
+        .select()
+        .from(contacts)
+        .where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId)));
       const contact = contactRows[0];
       if (!contact) {
         return reply.status(404).send({ success: false, error: 'Kontak tidak ditemukan' });
@@ -1185,7 +1217,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const existingRows = await db
         .select()
         .from(conversations)
-        .where(and(eq(conversations.contactId, contact.id), eq(conversations.channel, 'WHATSAPP')))
+        .where(
+          and(
+            eq(conversations.companyId, companyId),
+            eq(conversations.contactId, contact.id),
+            eq(conversations.channel, 'WHATSAPP')
+          )
+        )
         .orderBy(desc(conversations.updatedAt));
 
       const now = new Date();
@@ -1211,7 +1249,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           })
           .where(eq(conversations.id, matchedExisting.id))
           .returning();
-        liveEvents.emit('conversations:update', { conversationId: matchedExisting.id });
+        liveEvents.emit('conversations:update', { conversationId: matchedExisting.id }, companyId);
         return reply.send({ success: true, data: updated[0] });
       }
 
@@ -1219,6 +1257,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .insert(conversations)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           contactId: contact.id,
           channel: 'WHATSAPP',
           status: 'OPEN',
@@ -1232,7 +1271,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         })
         .returning();
 
-      liveEvents.emit('conversations:update', { conversationId: created[0].id });
+      liveEvents.emit('conversations:update', { conversationId: created[0].id }, companyId);
       return reply.status(201).send({ success: true, data: created[0] });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -1258,10 +1297,11 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const convRows = await db
         .select()
         .from(conversations)
-        .where(eq(conversations.id, req.params.id));
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)));
       const existing = convRows[0];
       if (!existing) {
         return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
@@ -1340,7 +1380,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           convUpdate.assignedAgentId = null;
           convUpdate.assignedAgentName = null;
         } else {
-          const agentRows = await db.select().from(crmAgents).where(eq(crmAgents.id, nextAgentId));
+          const agentRows = await db
+            .select()
+            .from(crmAgents)
+            .where(and(eq(crmAgents.id, nextAgentId), eq(crmAgents.companyId, companyId)));
           if (!agentRows[0]) {
             return reply.status(404).send({ success: false, error: 'Agent tidak ditemukan' });
           }
@@ -1390,23 +1433,29 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               ...(nextExcl ? { assignedAgentId: null, assignedAgentName: null } : {}),
               updatedAt: now,
             })
-            .where(and(eq(conversations.contactId, existing.contactId), eq(conversations.isGroup, false)));
+            .where(
+              and(
+                eq(conversations.companyId, companyId),
+                eq(conversations.contactId, existing.contactId),
+                eq(conversations.isGroup, false)
+              )
+            );
         }
         await db
           .update(contacts)
           .set(contactUpdate)
-          .where(eq(contacts.id, existing.contactId));
+          .where(and(eq(contacts.id, existing.contactId), eq(contacts.companyId, companyId)));
       }
 
-      liveEvents.emit('conversations:update', { conversationId: existing.id });
-      liveEvents.emit('tracking:update', { conversationId: existing.id });
+      liveEvents.emit('conversations:update', { conversationId: existing.id }, companyId);
+      liveEvents.emit('tracking:update', { conversationId: existing.id }, companyId);
 
       let csatSent = false;
       let csatError: string | undefined;
       const transitioningToResolved =
         convUpdate.status === 'RESOLVED' && existing.status !== 'RESOLVED';
       if (transitioningToResolved) {
-        const settings = await getSettingMap();
+        const settings = await getSettingMap(companyId);
         const isExcluded = Boolean(
           convUpdate.excludeFromMetrics !== undefined
             ? convUpdate.excludeFromMetrics
@@ -1419,7 +1468,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           const contactRows = await db
             .select()
             .from(contacts)
-            .where(eq(contacts.id, existing.contactId));
+            .where(and(eq(contacts.id, existing.contactId), eq(contacts.companyId, companyId)));
           if (contactRows[0]) {
             try {
               const refreshedConv = { ...existing, ...convUpdate };
@@ -1448,6 +1497,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body: { body: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const body = (req.body?.body || '').trim();
       if (!body) {
         return reply.status(400).send({ success: false, error: 'Catatan tidak boleh kosong' });
@@ -1456,7 +1506,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const convRows = await db
         .select()
         .from(conversations)
-        .where(eq(conversations.id, req.params.id));
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)));
       const existing = convRows[0];
       if (!existing) {
         return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
@@ -1467,6 +1517,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .insert(chatMessages)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           conversationId: existing.id,
           contactId: existing.contactId,
           direction: 'OUTBOUND',
@@ -1484,7 +1535,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .set({ updatedAt: now })
         .where(eq(conversations.id, existing.id));
 
-      liveEvents.emit('conversations:update', { conversationId: existing.id });
+      liveEvents.emit('conversations:update', { conversationId: existing.id }, companyId);
 
       return reply.status(201).send({ success: true, data: inserted[0] });
     } catch (error: any) {
@@ -1498,6 +1549,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body: { session?: string; baseUrl?: string; customMessage?: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const convList = await db
         .select({
           conv: conversations,
@@ -1505,7 +1557,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(eq(conversations.id, req.params.id));
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)));
 
       const row = convList[0];
       if (!row || !row.contact) {
@@ -1667,6 +1719,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         return reply.status(400).send({ success: false, error: 'Pesan atau lampiran tidak boleh kosong' });
       }
 
+      const companyId = getRequestCompanyId(req);
       const convList = await db
         .select({
           conv: conversations,
@@ -1674,7 +1727,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(eq(conversations.id, req.params.id));
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)));
 
       const conversation = convList[0];
       if (!conversation || !conversation.contact) {
@@ -2051,6 +2104,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .insert(chatMessages)
         .values({
           id: messageId,
+          companyId,
           conversationId: conversation.conv.id,
           contactId: conversation.conv.contactId,
           direction: 'OUTBOUND',
@@ -2091,8 +2145,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           .where(eq(conversations.id, conversation.conv.id));
       }
 
-      liveEvents.emit('conversations:update', { conversationId: conversation.conv.id });
-      liveEvents.emit('tracking:update', { conversationId: conversation.conv.id });
+      liveEvents.emit('conversations:update', { conversationId: conversation.conv.id }, companyId);
+      liveEvents.emit('tracking:update', { conversationId: conversation.conv.id }, companyId);
 
       return reply.status(201).send({
         success: true,
@@ -2111,10 +2165,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body: { session?: string } | undefined;
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const msgRows = await db
         .select()
         .from(chatMessages)
-        .where(and(eq(chatMessages.id, req.params.messageId), eq(chatMessages.conversationId, req.params.id)));
+        .where(
+          and(
+            eq(chatMessages.id, req.params.messageId),
+            eq(chatMessages.conversationId, req.params.id),
+            eq(chatMessages.companyId, companyId)
+          )
+        );
       const msg = msgRows[0];
       if (!msg) {
         return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
@@ -2127,7 +2188,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .select({ conv: conversations, contact: contacts })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(eq(conversations.id, req.params.id));
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)));
       const conversation = convList[0];
       if (!conversation || !conversation.contact) {
         return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
@@ -2306,8 +2367,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           .where(eq(conversations.id, conversation.conv.id));
       }
 
-      liveEvents.emit('conversations:update', { conversationId: conversation.conv.id });
-      liveEvents.emit('tracking:update', { conversationId: conversation.conv.id });
+      liveEvents.emit('conversations:update', { conversationId: conversation.conv.id }, companyId);
+      liveEvents.emit('tracking:update', { conversationId: conversation.conv.id }, companyId);
 
       return reply.send({
         success: sendResult.success,
@@ -2326,11 +2387,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body?: { scope?: string; session?: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const convRows = await db
         .select({ conv: conversations, contact: contacts })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(eq(conversations.id, req.params.id))
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
         .limit(1);
 
       const convRow = convRows[0];
@@ -2344,7 +2406,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .where(
           and(
             eq(chatMessages.id, req.params.messageId),
-            eq(chatMessages.conversationId, convRow.conv.id)
+            eq(chatMessages.conversationId, convRow.conv.id),
+            eq(chatMessages.companyId, companyId)
           )
         )
         .limit(1);
@@ -2439,7 +2502,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         })
         .where(eq(conversations.id, convRow.conv.id));
 
-      liveEvents.emit('conversations:update', { conversationId: convRow.conv.id });
+      liveEvents.emit('conversations:update', { conversationId: convRow.conv.id }, companyId);
 
       return reply.send({
         success: true,
@@ -2459,11 +2522,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     Body: { emoji?: string; session?: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const convRows = await db
         .select({ conv: conversations, contact: contacts })
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(eq(conversations.id, req.params.id))
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
         .limit(1);
       const convRow = convRows[0];
       if (!convRow?.conv || !convRow.contact) {
@@ -2473,7 +2537,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const msgRows = await db
         .select()
         .from(chatMessages)
-        .where(and(eq(chatMessages.id, req.params.messageId), eq(chatMessages.conversationId, convRow.conv.id)))
+        .where(
+          and(
+            eq(chatMessages.id, req.params.messageId),
+            eq(chatMessages.conversationId, convRow.conv.id),
+            eq(chatMessages.companyId, companyId)
+          )
+        )
         .limit(1);
       const msg = msgRows[0];
       if (!msg) {
@@ -2533,7 +2603,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .where(eq(chatMessages.id, msg.id))
         .returning();
 
-      liveEvents.emit('conversations:update', { conversationId: convRow.conv.id });
+      liveEvents.emit('conversations:update', { conversationId: convRow.conv.id }, companyId);
       return reply.send({ success: true, data: updatedMsg });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });

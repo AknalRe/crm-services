@@ -1,8 +1,17 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import crypto from 'crypto';
 import { db } from '../db';
-import { crmAgents, crmRoles, systemSettings } from '../db/schema';
+import { companies, crmAgents, crmRoles, systemSettings } from '../db/schema';
+import {
+  DEFAULT_COMPANY_ID,
+  generateUniqueCompanySlug,
+  getActiveCompanyId,
+  getCompanySettingMap,
+  getSystemSettingMap,
+  seedCompanyDefaults,
+  upsertSystemSetting,
+} from '../services/tenantContext';
 
 const SESSION_COOKIE = 'crm_session';
 export const ALL_PERMISSIONS = [
@@ -250,19 +259,31 @@ export const DEFAULT_STARTER_ROLES: Array<{
   },
 ];
 
-let rolesSeedPromise: Promise<void> | null = null;
-export async function ensureDefaultRolesSeeded(): Promise<void> {
-  if (!rolesSeedPromise) {
-    rolesSeedPromise = (async () => {
-      const existing = await db.select({ id: crmRoles.id }).from(crmRoles);
+const roleSeedPromises = new Map<string, Promise<void>>();
+export function getCompanyAdminRoleId(companyId: string): string {
+  const cid = getActiveCompanyId(companyId);
+  return cid === DEFAULT_COMPANY_ID ? 'role_admin' : `role_admin_${cid}`;
+}
+
+export async function ensureDefaultRolesSeeded(companyId?: string | null): Promise<void> {
+  const cid = getActiveCompanyId(companyId);
+  let p = roleSeedPromises.get(cid);
+  if (!p) {
+    p = (async () => {
+      const existing = await db
+        .select({ id: crmRoles.id })
+        .from(crmRoles)
+        .where(eq(crmRoles.companyId, cid));
       const existingIds = new Set(existing.map((r) => r.id));
       const now = new Date();
       for (const starter of DEFAULT_STARTER_ROLES) {
-        if (existingIds.has(starter.id)) continue;
+        const targetId = cid === DEFAULT_COMPANY_ID ? starter.id : `${starter.id}_${cid}`;
+        if (existingIds.has(targetId)) continue;
         await db
           .insert(crmRoles)
           .values({
-            id: starter.id,
+            id: targetId,
+            companyId: cid,
             name: starter.name,
             description: starter.description,
             permissions: JSON.stringify(starter.permissions),
@@ -274,30 +295,19 @@ export async function ensureDefaultRolesSeeded(): Promise<void> {
           .catch(() => {});
       }
     })().catch(() => {
-      rolesSeedPromise = null;
+      roleSeedPromises.delete(cid);
     });
+    roleSeedPromises.set(cid, p);
   }
-  await rolesSeedPromise;
+  await p;
 }
 
-export async function getSettingMap(): Promise<Record<string, string>> {
-  const rows = await db.select().from(systemSettings);
-  const map: Record<string, string> = {};
-  for (const r of rows) {
-    map[r.key] = r.value;
-  }
-  return map;
+export async function getSettingMap(companyId?: string | null): Promise<Record<string, string>> {
+  return getCompanySettingMap(companyId);
 }
 
 async function upsertSetting(key: string, value: string): Promise<void> {
-  const now = new Date();
-  await db
-    .insert(systemSettings)
-    .values({ key, value, updatedAt: now })
-    .onConflictDoUpdate({
-      target: systemSettings.key,
-      set: { value, updatedAt: now },
-    });
+  await upsertSystemSetting(key, value);
 }
 
 export function hashPassword(password: string): string {
@@ -316,15 +326,36 @@ export function verifyPassword(password: string, stored: string): boolean {
   return crypto.timingSafeEqual(expected, actual);
 }
 
-function signToken(email: string, secret: string): string {
-  const payload = Buffer.from(JSON.stringify({ email, iat: Date.now() })).toString('base64url');
+export function signSessionToken(
+  email: string,
+  secret: string,
+  activeCompanyId?: string | null
+): string {
+  const payload = Buffer.from(
+    JSON.stringify({
+      email,
+      ...(activeCompanyId ? { activeCompanyId } : {}),
+      iat: Date.now(),
+    })
+  ).toString('base64url');
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 
+export async function getAuthSigningSecret(): Promise<string> {
+  const sys = await getSystemSettingMap();
+  if (sys['crm_auth_secret']) return sys['crm_auth_secret'];
+  const secret = crypto.randomBytes(32).toString('hex');
+  await upsertSetting('crm_auth_secret', secret);
+  return secret;
+}
+
 const TOKEN_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
-function verifyToken(token: string, secret: string): { email: string } | null {
+function verifyToken(
+  token: string,
+  secret: string
+): { email: string; activeCompanyId?: string } | null {
   const parts = token.split('.');
   if (parts.length !== 2) return null;
   const [payload, sig] = parts;
@@ -338,7 +369,10 @@ function verifyToken(token: string, secret: string): { email: string } | null {
     if (iat > 0 && Date.now() - iat > TOKEN_MAX_AGE_MS) {
       return null;
     }
-    return { email: String(parsed.email) };
+    return {
+      email: String(parsed.email),
+      activeCompanyId: parsed.activeCompanyId ? String(parsed.activeCompanyId) : undefined,
+    };
   } catch {
     return null;
   }
@@ -433,10 +467,12 @@ async function ensurePrimaryAdminSeeded(map: Record<string, string>): Promise<vo
     .insert(crmAgents)
     .values({
       id: crypto.randomUUID(),
+      companyId: DEFAULT_COMPANY_ID,
       name,
       email: email.toLowerCase(),
       passwordHash: passHash,
       role: 'ADMIN',
+      isPlatformAdmin: true,
       roleId: 'role_admin',
       permissions: JSON.stringify([...ALL_PERMISSIONS]),
       isActive: true,
@@ -454,6 +490,17 @@ export interface AuthUserSession {
   roleId?: string | null;
   roleName?: string | null;
   permissions: PermissionKey[];
+  companyId?: string;
+  homeCompanyId?: string;
+  companyName?: string;
+  companySlug?: string;
+  companyStatus?: string;
+  isPlatformAdmin?: boolean;
+}
+
+export function getRequestCompanyId(req: FastifyRequest): string {
+  const fromReq = String((req as any)?.companyId || (req as any)?.authUser?.companyId || '').trim();
+  return fromReq || getActiveCompanyId();
 }
 
 export function hasUserPermission(user: AuthUserSession | null | undefined, perm: PermissionKey): boolean {
@@ -462,48 +509,125 @@ export function hasUserPermission(user: AuthUserSession | null | undefined, perm
   return Array.isArray(user.permissions) && user.permissions.includes(perm);
 }
 
+export function isAdminRoleId(roleId: string | null | undefined, companyId?: string): boolean {
+  if (!roleId) return false;
+  if (roleId === 'role_admin') return true;
+  if (companyId && roleId === `role_admin_${companyId}`) return true;
+  return roleId.startsWith('role_admin_');
+}
+
 export async function resolveAgentRoleSession(
-  agent: typeof crmAgents.$inferSelect
+  agent: typeof crmAgents.$inferSelect,
+  overrideCompanyId?: string | null
 ): Promise<AuthUserSession> {
-  await ensureDefaultRolesSeeded();
+  const homeCompanyId = agent.companyId || DEFAULT_COMPANY_ID;
+  const isPlatformAdmin = Boolean(agent.isPlatformAdmin);
+  let effectiveCompanyId = homeCompanyId;
+
+  if (isPlatformAdmin && overrideCompanyId && overrideCompanyId.trim()) {
+    const cand = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.id, overrideCompanyId.trim()))
+      .limit(1);
+    if (cand[0]) {
+      effectiveCompanyId = cand[0].id;
+    }
+  }
+
+  await ensureDefaultRolesSeeded(homeCompanyId);
   let matchedRole: typeof crmRoles.$inferSelect | undefined;
   if (agent.roleId) {
     const roleRows = await db.select().from(crmRoles).where(eq(crmRoles.id, agent.roleId)).limit(1);
     matchedRole = roleRows[0];
   }
   const role: 'ADMIN' | 'AGENT' =
-    agent.role === 'ADMIN' || matchedRole?.id === 'role_admin' ? 'ADMIN' : 'AGENT';
+    agent.role === 'ADMIN' || isAdminRoleId(matchedRole?.id, homeCompanyId) ? 'ADMIN' : 'AGENT';
   const strictGranular = Boolean(matchedRole);
   const rawPermSource = matchedRole ? matchedRole.permissions : agent.permissions;
+
+  const companyRows = await db
+    .select()
+    .from(companies)
+    .where(eq(companies.id, effectiveCompanyId))
+    .limit(1);
+  const companyRow = companyRows[0];
+
+  // When a Platform Superadmin switches into a tenant workspace, grant full ADMIN capabilities in that workspace
+  const isSwitchedTenant = isPlatformAdmin && effectiveCompanyId !== homeCompanyId;
+
   return {
     id: agent.id,
     name: agent.name,
     email: agent.email,
-    role,
-    roleId: matchedRole?.id || agent.roleId || (role === 'ADMIN' ? 'role_admin' : null),
-    roleName: matchedRole?.name || (role === 'ADMIN' ? 'Administrator' : 'Agent Kustom'),
-    permissions: parseAgentPermissions(rawPermSource, role, strictGranular),
+    role: isSwitchedTenant ? 'ADMIN' : role,
+    roleId: isSwitchedTenant
+      ? getCompanyAdminRoleId(effectiveCompanyId)
+      : matchedRole?.id || agent.roleId || (role === 'ADMIN' ? getCompanyAdminRoleId(homeCompanyId) : null),
+    roleName: isSwitchedTenant
+      ? 'Platform Superadmin (Mode Tenant)'
+      : matchedRole?.name || (role === 'ADMIN' ? 'Administrator' : 'Agent Kustom'),
+    permissions: isSwitchedTenant
+      ? [...ALL_PERMISSIONS]
+      : parseAgentPermissions(rawPermSource, role, strictGranular),
+    companyId: effectiveCompanyId,
+    homeCompanyId,
+    companyName: companyRow?.name || 'Perusahaan Utama',
+    companySlug: companyRow?.slug || 'default',
+    companyStatus: companyRow?.status || 'ACTIVE',
+    isPlatformAdmin,
   };
 }
 
 export async function getCurrentAuthUser(req: FastifyRequest): Promise<AuthUserSession | null> {
-  const map = await getSettingMap();
-  await ensurePrimaryAdminSeeded(map);
+  if ((req as any)._authResolved) {
+    return (req as any)._authUser || null;
+  }
 
-  const secret = map['crm_auth_secret'] || '';
+  const sysMap = await getSystemSettingMap();
+  await ensurePrimaryAdminSeeded(sysMap);
+
+  const secret = sysMap['crm_auth_secret'] || '';
   const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
   const verified = token && secret ? verifyToken(token, secret) : null;
-  if (!verified?.email) return null;
+  if (!verified?.email) {
+    (req as any)._authResolved = true;
+    (req as any)._authUser = null;
+    return null;
+  }
 
   const rows = await db
     .select()
     .from(crmAgents)
     .where(eq(crmAgents.email, verified.email.toLowerCase()));
   const agent = rows[0];
-  if (!agent || !agent.isActive) return null;
+  if (!agent || !agent.isActive) {
+    (req as any)._authResolved = true;
+    (req as any)._authUser = null;
+    return null;
+  }
 
-  return resolveAgentRoleSession(agent);
+  const headerOverride = String(req.headers['x-company-id'] || '').trim() || undefined;
+  const session = await resolveAgentRoleSession(
+    agent,
+    headerOverride || verified.activeCompanyId || undefined
+  );
+
+  // Block suspended tenant logins/sessions for non-platform admins
+  if (!session.isPlatformAdmin && session.companyStatus === 'SUSPENDED') {
+    (req as any)._authResolved = true;
+    (req as any)._authUser = null;
+    return null;
+  }
+
+  (req as any)._authResolved = true;
+  (req as any)._authUser = session;
+  (req as any).authUser = session;
+  (req as any).companyId = session.companyId;
+  return session;
 }
+
+export { SESSION_COOKIE };
 
 export function requirePermission(...allowed: PermissionKey[]) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
@@ -524,14 +648,18 @@ export function requirePermission(...allowed: PermissionKey[]) {
 export default async function authRouter(fastify: FastifyInstance) {
   fastify.get('/status', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const map = await getSettingMap();
+      const map = await getSystemSettingMap();
       await ensurePrimaryAdminSeeded(map);
 
       const agents = await db.select().from(crmAgents);
       const initialized = agents.length > 0 || Boolean(map['crm_admin_email'] && map['crm_admin_password_hash']);
+      const saasRegistrationEnabled = map['saas_registration_enabled'] !== 'false';
 
       if (!initialized) {
-        return reply.send({ success: true, data: { initialized: false, authenticated: false, user: null } });
+        return reply.send({
+          success: true,
+          data: { initialized: false, authenticated: false, saasRegistrationEnabled, user: null },
+        });
       }
 
       const user = await getCurrentAuthUser(req);
@@ -540,6 +668,7 @@ export default async function authRouter(fastify: FastifyInstance) {
         data: {
           initialized: true,
           authenticated: Boolean(user),
+          saasRegistrationEnabled,
           user,
         },
       });
@@ -549,16 +678,17 @@ export default async function authRouter(fastify: FastifyInstance) {
   });
 
   fastify.post('/setup', async (req: FastifyRequest<{
-    Body: { name: string; email: string; password: string };
+    Body: { name: string; email: string; password: string; companyName?: string };
   }>, reply: FastifyReply) => {
     try {
-      const map = await getSettingMap();
+      const map = await getSystemSettingMap();
       await ensurePrimaryAdminSeeded(map);
       const agents = await db.select().from(crmAgents);
       if (agents.length > 0 || (map['crm_admin_email'] && map['crm_admin_password_hash'])) {
         return reply.status(409).send({ success: false, error: 'Akun admin sudah terdaftar. Silakan login.' });
       }
       const name = String(req.body?.name || '').trim();
+      const companyName = String(req.body?.companyName || name || 'Perusahaan Utama').trim();
       const email = String(req.body?.email || '').trim().toLowerCase();
       const password = String(req.body?.password || '');
       if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 6) {
@@ -566,34 +696,154 @@ export default async function authRouter(fastify: FastifyInstance) {
       }
 
       const passHash = hashPassword(password);
-      const secret = map['crm_auth_secret'] || crypto.randomBytes(32).toString('hex');
+      const secret = await getAuthSigningSecret();
       await upsertSetting('crm_admin_name', name);
       await upsertSetting('crm_admin_email', email);
       await upsertSetting('crm_admin_password_hash', passHash);
-      await upsertSetting('crm_auth_secret', secret);
 
       const now = new Date();
+      await db
+        .update(companies)
+        .set({
+          name: companyName,
+          ownerName: name,
+          ownerEmail: email,
+          updatedAt: now,
+        })
+        .where(eq(companies.id, DEFAULT_COMPANY_ID));
+
+      await ensureDefaultRolesSeeded(DEFAULT_COMPANY_ID);
+      await seedCompanyDefaults(DEFAULT_COMPANY_ID);
+
       const agentId = crypto.randomUUID();
-      await db.insert(crmAgents).values({
-        id: agentId,
-        name,
-        email,
-        passwordHash: passHash,
-        role: 'ADMIN',
-        roleId: 'role_admin',
-        permissions: JSON.stringify([...ALL_PERMISSIONS]),
-        isActive: true,
+      const [created] = await db
+        .insert(crmAgents)
+        .values({
+          id: agentId,
+          companyId: DEFAULT_COMPANY_ID,
+          name,
+          email,
+          passwordHash: passHash,
+          role: 'ADMIN',
+          isPlatformAdmin: true,
+          roleId: 'role_admin',
+          permissions: JSON.stringify([...ALL_PERMISSIONS]),
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+
+      const token = signSessionToken(email, secret, DEFAULT_COMPANY_ID);
+      reply.header('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+      const userSession = await resolveAgentRoleSession(created);
+      return reply.send({
+        success: true,
+        data: {
+          user: userSession,
+        },
+      });
+    } catch (err: any) {
+      return reply.status(500).send({ success: false, error: err.message });
+    }
+  });
+
+  // Self-service SaaS Company registration
+  fastify.post('/register-company', async (req: FastifyRequest<{
+    Body: { companyName?: string; name?: string; email?: string; password?: string; phone?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const sysMap = await getSystemSettingMap();
+      if (sysMap['saas_registration_enabled'] === 'false') {
+        return reply.status(403).send({
+          success: false,
+          error: 'Pendaftaran perusahaan baru secara mandiri dinonaktifkan oleh pengelola platform.',
+        });
+      }
+
+      const companyName = String(req.body?.companyName || '').trim();
+      const name = String(req.body?.name || '').trim();
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const password = String(req.body?.password || '');
+      const phone = req.body?.phone ? String(req.body.phone).trim() : null;
+
+      if (!companyName || companyName.length < 2) {
+        return reply.status(400).send({ success: false, error: 'Nama perusahaan wajib diisi (minimal 2 karakter).' });
+      }
+      if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 6) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Nama penanggung jawab, email valid, dan kata sandi (min. 6 karakter) wajib diisi.',
+        });
+      }
+
+      const dupEmail = await db
+        .select({ id: crmAgents.id })
+        .from(crmAgents)
+        .where(eq(crmAgents.email, email))
+        .limit(1);
+      if (dupEmail[0]) {
+        return reply.status(409).send({
+          success: false,
+          error: 'Email sudah terdaftar. Gunakan email lain atau masuk ke akun Anda.',
+        });
+      }
+
+      const now = new Date();
+      const companyId = `cmp_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+      const slug = await generateUniqueCompanySlug(companyName);
+      const passHash = hashPassword(password);
+      const secret = await getAuthSigningSecret();
+
+      await db.insert(companies).values({
+        id: companyId,
+        name: companyName,
+        slug,
+        ownerName: name,
+        ownerEmail: email,
+        ownerPhone: phone,
+        status: 'ACTIVE',
+        isDefault: false,
+        licenseStatus: 'UNLICENSED',
+        licensePlan: 'Belum Diaktivasi',
+        licensePeriod: 'monthly',
+        licensePriceAmount: 0,
+        trialUsed: false,
         createdAt: now,
         updatedAt: now,
       });
 
-      const token = signToken(email, secret);
-      reply.header('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
-      return reply.send({
+      await ensureDefaultRolesSeeded(companyId);
+      await seedCompanyDefaults(companyId);
+
+      const adminRoleId = getCompanyAdminRoleId(companyId);
+      const [agent] = await db
+        .insert(crmAgents)
+        .values({
+          id: crypto.randomUUID(),
+          companyId,
+          name,
+          email,
+          passwordHash: passHash,
+          role: 'ADMIN',
+          isPlatformAdmin: false,
+          roleId: adminRoleId,
+          permissions: JSON.stringify([...ALL_PERMISSIONS]),
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+
+      const token = signSessionToken(email, secret, companyId);
+      reply.header(
+        'Set-Cookie',
+        `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`
+      );
+      const userSession = await resolveAgentRoleSession(agent);
+      return reply.status(201).send({
         success: true,
-        data: {
-          user: { id: agentId, name, email, role: 'ADMIN', permissions: [...ALL_PERMISSIONS] },
-        },
+        data: { user: userSession },
       });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
@@ -604,12 +854,9 @@ export default async function authRouter(fastify: FastifyInstance) {
     Body: { email: string; password: string };
   }>, reply: FastifyReply) => {
     try {
-      const map = await getSettingMap();
-      await ensurePrimaryAdminSeeded(map);
-      const secret = map['crm_auth_secret'] || crypto.randomBytes(32).toString('hex');
-      if (!map['crm_auth_secret']) {
-        await upsertSetting('crm_auth_secret', secret);
-      }
+      const sysMap = await getSystemSettingMap();
+      await ensurePrimaryAdminSeeded(sysMap);
+      const secret = await getAuthSigningSecret();
 
       const email = String(req.body?.email || '').trim().toLowerCase();
       const password = String(req.body?.password || '');
@@ -623,7 +870,19 @@ export default async function authRouter(fastify: FastifyInstance) {
         return reply.status(403).send({ success: false, error: 'Akun agent ini sedang dinonaktifkan oleh admin.' });
       }
 
-      const token = signToken(agent.email, secret);
+      const compRows = await db
+        .select()
+        .from(companies)
+        .where(eq(companies.id, agent.companyId || DEFAULT_COMPANY_ID))
+        .limit(1);
+      if (compRows[0]?.status === 'SUSPENDED' && !agent.isPlatformAdmin) {
+        return reply.status(403).send({
+          success: false,
+          error: 'Workspace perusahaan Anda sedang disuspend. Hubungi administrator platform.',
+        });
+      }
+
+      const token = signSessionToken(agent.email, secret, agent.companyId || DEFAULT_COMPANY_ID);
       reply.header('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
       const userSession = await resolveAgentRoleSession(agent);
       return reply.send({

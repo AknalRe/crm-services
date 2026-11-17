@@ -1,17 +1,22 @@
 import cron from 'node-cron';
-import { eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { db } from '../db';
 import {
   birthdaySettings,
   channelAccounts,
   contactIdentities,
   contacts,
-  systemSettings,
 } from '../db/schema';
 import { BroadcastService } from './broadcast.service';
 import { licenseService } from './license.service';
 import { OmnichannelType } from './channel.service';
 import { formatContact } from '../routes/contacts';
+import {
+  getActiveCompanyId,
+  getCompanySettingValue,
+  listActiveCompanyIds,
+  runWithCompany,
+} from './tenantContext';
 
 export interface BirthdayMultiSenders {
   mode: 'AUTO_MULTI' | 'SINGLE';
@@ -75,10 +80,23 @@ export class BirthdayService {
    * Check if today's birthday messages should be triggered
    */
   public static async checkAndTriggerDailyBirthday() {
+    const companyIds = await listActiveCompanyIds();
+    for (const cid of companyIds) {
+      await runWithCompany(cid, async () => {
+        try {
+          await BirthdayService.checkCompanyBirthday(cid);
+        } catch (err) {
+          console.error(`[BirthdayService] Error for company ${cid}:`, err);
+        }
+      });
+    }
+  }
+
+  private static async checkCompanyBirthday(companyId: string) {
     const list = await db
       .select()
       .from(birthdaySettings)
-      .where(eq(birthdaySettings.id, 'default'));
+      .where(eq(birthdaySettings.companyId, companyId));
 
     const setting = list[0];
     if (!setting || !setting.isEnabled) return;
@@ -88,23 +106,24 @@ export class BirthdayService {
     const todayDateStr = jakarta.dateStr;
 
     if (currentTimeStr === setting.sendTime && setting.lastRunDate !== todayDateStr) {
-      const lic = await licenseService.getLicense();
+      const lic = await licenseService.getLicense(companyId);
       if (lic.isExpired || !lic.features.birthdayAutomation) {
         return;
       }
-      console.log(`[BirthdayService] Triggering scheduled birthday greetings for ${todayDateStr} at ${currentTimeStr}`);
-      await this.runBirthdayBroadcast(todayDateStr);
+      console.log(`[BirthdayService][${companyId}] Triggering birthday greetings for ${todayDateStr} at ${currentTimeStr}`);
+      await this.runBirthdayBroadcast(companyId, todayDateStr);
     }
   }
 
   /**
    * Run the Birthday broadcast for today's celebrants
    */
-  public static async runBirthdayBroadcast(targetDateStr?: string) {
+  public static async runBirthdayBroadcast(companyIdArg?: string, targetDateStr?: string) {
+    const companyId = getActiveCompanyId(companyIdArg);
     const list = await db
       .select()
       .from(birthdaySettings)
-      .where(eq(birthdaySettings.id, 'default'));
+      .where(eq(birthdaySettings.companyId, companyId));
 
     const setting = list[0];
     if (!setting) throw new Error('Pengaturan ulang tahun belum dikonfigurasi.');
@@ -124,11 +143,11 @@ export class BirthdayService {
       dateLabel = jakarta.dateStr;
     }
 
-    // Fetch all contacts with tanggal_lahir
+    // Fetch all contacts with tanggal_lahir inside this company
     const allContacts = await db
       .select()
       .from(contacts)
-      .where(isNotNull(contacts.tanggalLahir));
+      .where(and(eq(contacts.companyId, companyId), isNotNull(contacts.tanggalLahir)));
 
     const birthdayContacts = allContacts.filter((contact) => {
       if (!contact.tanggalLahir) return false;
@@ -141,25 +160,22 @@ export class BirthdayService {
       await db
         .update(birthdaySettings)
         .set({ lastRunDate: dateLabel, updatedAt: new Date() })
-        .where(eq(birthdaySettings.id, 'default'));
+        .where(eq(birthdaySettings.id, setting.id));
       return { count: 0, message: 'Tidak ada pelanggan yang berulang tahun hari ini.' };
     }
 
     console.log(`[BirthdayService] Ditemukan ${birthdayContacts.length} pelanggan berulang tahun pada ${dateLabel}`);
 
-    const [multiRow] = await db
-      .select()
-      .from(systemSettings)
-      .where(eq(systemSettings.key, 'birthday_multi_senders'));
+    const multiRaw = await getCompanySettingValue('birthday_multi_senders', companyId);
 
     let multiSenders: BirthdayMultiSenders = {
       mode: 'AUTO_MULTI',
       wahaSessions: setting.wahaSession ? [setting.wahaSession] : [],
       channelAccountIds: setting.channelAccountId ? [setting.channelAccountId] : [],
     };
-    if (multiRow?.value) {
+    if (multiRaw) {
       try {
-        const parsed = JSON.parse(multiRow.value);
+        const parsed = JSON.parse(multiRaw);
         multiSenders = {
           mode: parsed.mode === 'SINGLE' ? 'SINGLE' : 'AUTO_MULTI',
           wahaSessions: Array.isArray(parsed.wahaSessions) ? parsed.wahaSessions : [],
@@ -172,6 +188,7 @@ export class BirthdayService {
 
     if (multiSenders.mode === 'SINGLE') {
       const campaignResult = await BroadcastService.createCampaign({
+        companyId,
         title: `Ucapan Ulang Tahun (${dateLabel})`,
         messageTemplate: setting.messageTemplate,
         type: 'BIRTHDAY',
@@ -187,7 +204,7 @@ export class BirthdayService {
       await db
         .update(birthdaySettings)
         .set({ lastRunDate: dateLabel, updatedAt: new Date() })
-        .where(eq(birthdaySettings.id, 'default'));
+        .where(eq(birthdaySettings.id, setting.id));
 
       return {
         count: birthdayContacts.length,
@@ -201,7 +218,7 @@ export class BirthdayService {
     const idRows = await db
       .select()
       .from(contactIdentities)
-      .where(inArray(contactIdentities.contactId, contactIds));
+      .where(and(eq(contactIdentities.companyId, companyId), inArray(contactIdentities.contactId, contactIds)));
     const identitiesByContact = new Map<string, typeof idRows>();
     for (const r of idRows) {
       const arr = identitiesByContact.get(r.contactId) || [];
@@ -212,7 +229,7 @@ export class BirthdayService {
     const activeAccounts = await db
       .select()
       .from(channelAccounts)
-      .where(eq(channelAccounts.isActive, true));
+      .where(and(eq(channelAccounts.companyId, companyId), eq(channelAccounts.isActive, true)));
     const selectedAccounts =
       multiSenders.channelAccountIds.length > 0
         ? activeAccounts.filter((a) => multiSenders.channelAccountIds.includes(a.id))
@@ -272,6 +289,7 @@ export class BirthdayService {
     let firstCampaign: any = null;
     for (const grp of groups.values()) {
       const res = await BroadcastService.createCampaign({
+        companyId,
         title: `Ucapan Ulang Tahun ${grp.channel} (${dateLabel})`,
         messageTemplate: setting.messageTemplate,
         type: 'BIRTHDAY',
@@ -289,7 +307,7 @@ export class BirthdayService {
     await db
       .update(birthdaySettings)
       .set({ lastRunDate: dateLabel, updatedAt: new Date() })
-      .where(eq(birthdaySettings.id, 'default'));
+      .where(eq(birthdaySettings.id, setting.id));
 
     return {
       count: birthdayContacts.length,
@@ -301,7 +319,8 @@ export class BirthdayService {
   /**
    * Get contacts celebrating birthday today or registered
    */
-  public static async getBirthdayContacts() {
+  public static async getBirthdayContacts(companyIdArg?: string) {
+    const companyId = getActiveCompanyId(companyIdArg);
     const now = new Date();
     const currentMonth = now.getMonth() + 1;
     const currentDay = now.getDate();
@@ -309,7 +328,7 @@ export class BirthdayService {
     const allContacts = await db
       .select()
       .from(contacts)
-      .where(isNotNull(contacts.tanggalLahir));
+      .where(and(eq(contacts.companyId, companyId), isNotNull(contacts.tanggalLahir)));
 
     const todayList = allContacts.filter((c) => {
       if (!c.tanggalLahir) return false;
@@ -323,7 +342,7 @@ export class BirthdayService {
       const idRows = await db
         .select()
         .from(contactIdentities)
-        .where(inArray(contactIdentities.contactId, todayIds));
+        .where(and(eq(contactIdentities.companyId, companyId), inArray(contactIdentities.contactId, todayIds)));
       for (const r of idRows) {
         const arr = idMap.get(r.contactId) || [];
         arr.push(r);

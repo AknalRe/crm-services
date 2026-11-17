@@ -11,9 +11,11 @@ import {
 import { wahaService } from './waha.service';
 import { sendOutboundChannelMessage, OmnichannelType } from './channel.service';
 import { liveEvents } from './events.service';
+import { getActiveCompanyId, runWithCompany } from './tenantContext';
 import crypto from 'crypto';
 
 export interface SendMessageJobData {
+  companyId?: string;
   recipientId: string;
   campaignId: string;
   contactId: string;
@@ -46,6 +48,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
   BROADCAST_QUEUE_NAME,
   async (job: Job<SendMessageJobData>) => {
     const {
+      companyId: rawCompanyId,
       recipientId,
       campaignId,
       contactId,
@@ -55,8 +58,20 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
       channel = 'WHATSAPP',
       channelAccountId = null,
     } = job.data;
+
+    let resolvedCompanyId = getActiveCompanyId(rawCompanyId);
+    if (!rawCompanyId) {
+      const [campRow] = await db
+        .select({ companyId: campaigns.companyId })
+        .from(campaigns)
+        .where(eq(campaigns.id, campaignId))
+        .limit(1);
+      if (campRow?.companyId) resolvedCompanyId = campRow.companyId;
+    }
+
+    return await runWithCompany(resolvedCompanyId, async () => {
     const targetChannel = (channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
-    console.log(`[Queue Worker] Processing ${targetChannel} message for ${phone} (Campaign: ${campaignId}, Recipient: ${recipientId})`);
+    console.log(`[Queue Worker][${resolvedCompanyId}] Processing ${targetChannel} message for ${phone} (Campaign: ${campaignId}, Recipient: ${recipientId})`);
 
     // Ensure campaign isn't cancelled
     const campaignList = await db
@@ -152,6 +167,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           .from(conversations)
           .where(
             and(
+              eq(conversations.companyId, resolvedCompanyId),
               eq(conversations.contactId, contactId),
               eq(conversations.channel, targetChannel)
             )
@@ -163,6 +179,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           convId = crypto.randomUUID();
           await db.insert(conversations).values({
             id: convId,
+            companyId: resolvedCompanyId,
             contactId,
             channel: targetChannel,
             channelAccountId: targetChannel === 'WHATSAPP' ? null : channelAccountId,
@@ -188,6 +205,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
 
         await db.insert(chatMessages).values({
           id: crypto.randomUUID(),
+          companyId: resolvedCompanyId,
           conversationId: convId,
           contactId,
           direction: 'OUTBOUND',
@@ -260,10 +278,11 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
       console.log(`[Queue Worker] Campaign ${campaignId} finished with status ${finalStatus}.`);
     }
 
-    liveEvents.emit('tracking:update', { campaignId, recipientId });
+    liveEvents.emit('tracking:update', { campaignId, recipientId }, resolvedCompanyId);
     if (sendResult.success) {
-      liveEvents.emit('conversations:update', { campaignId, contactId });
+      liveEvents.emit('conversations:update', { campaignId, contactId }, resolvedCompanyId);
     }
+    });
   },
   {
     connection: redisConnection,

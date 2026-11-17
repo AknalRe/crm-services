@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { liveEvents, LiveEventPayload } from '../services/events.service';
-import { getCurrentAuthUser } from './auth';
+import { getCurrentAuthUser, getRequestCompanyId } from './auth';
 
 export default async function eventsRouter(fastify: FastifyInstance) {
   fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
@@ -9,6 +9,7 @@ export default async function eventsRouter(fastify: FastifyInstance) {
       return reply.status(401).send({ success: false, error: 'Sesi login diperlukan' });
     }
 
+    const activeCompanyId = getRequestCompanyId(req);
     reply.hijack();
 
     const raw = reply.raw;
@@ -24,9 +25,20 @@ export default async function eventsRouter(fastify: FastifyInstance) {
       raw.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    send('connected', { ok: true, timestamp: new Date().toISOString() });
+    send('connected', {
+      ok: true,
+      companyId: activeCompanyId,
+      timestamp: new Date().toISOString(),
+    });
 
     const unsubscribe = liveEvents.subscribe((payload: LiveEventPayload) => {
+      if (payload.type === 'tenants:update') {
+        if (authUser.isPlatformAdmin) {
+          send(payload.type, payload);
+        }
+        return;
+      }
+      if (payload.companyId !== activeCompanyId) return;
       send(payload.type, payload);
     });
 

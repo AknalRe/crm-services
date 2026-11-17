@@ -19,6 +19,7 @@ import {
 } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
+import { runWithCompany } from '../services/tenantContext';
 import {
   fromWahaChatId,
   isPersonalWahaJid,
@@ -26,7 +27,7 @@ import {
   normalizePhoneNumber,
 } from '../services/phone.utils';
 import { handleInboundAutomation } from '../services/automation.service';
-import { requirePermission } from './auth';
+import { getRequestCompanyId, requirePermission } from './auth';
 import { saveBase64MediaFile, saveMediaBufferFile } from './media';
 import crypto from 'crypto';
 
@@ -744,7 +745,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           error: 'Nama sesi hanya boleh huruf, angka, tanda hubung (-), atau underscore (_)',
         });
       }
-      const lic = await licenseService.assertLicenseActive();
+      const companyId = getRequestCompanyId(req);
+      const lic = await licenseService.assertLicenseActive(companyId);
       const resolvedTarget = await wahaService.resolveSessionName(clean);
 
       let existingCount = 0;
@@ -881,11 +883,21 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
   // WAHA Webhook Receiver
   fastify.post('/webhook', async (req: FastifyRequest<{
+    Querystring: { companyId?: string };
     Body: { event: string; session?: string; payload: any };
   }>, reply: FastifyReply) => {
+    const { event, session: webhookSession, payload } = req.body || {};
+    const queryCompanyId = String(req.query?.companyId || '').trim();
+    const sessionHint = webhookSession
+      ? String(webhookSession).trim()
+      : payload?.name
+      ? String(payload.name).trim()
+      : null;
+    const companyId = queryCompanyId || (await wahaService.resolveCompanyIdForWebhookSession(sessionHint));
+
+    return await runWithCompany(companyId, async () => {
     try {
-      const { event, session: webhookSession, payload } = req.body || {};
-      console.log(`[WAHA Webhook] Received event: ${event}`);
+      console.log(`[WAHA Webhook][${companyId}] Received event: ${event}`);
 
       try {
         await wahaService.verifyActiveExternalGowsIfNeeded();
@@ -898,7 +910,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             from: null,
             outcome: 'IGNORED',
             note: engineErr.message,
-          });
+          }, companyId);
           return reply.status(422).send({ success: false, error: engineErr.message });
         }
       }
@@ -911,12 +923,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           from: null,
           outcome: 'PROCESSED',
           note: `Status sesi: ${payload?.status || '-'}`,
-        });
+        }, companyId);
         liveEvents.emit('waha:status', {
           action: 'webhook',
           session: webhookSession || payload?.name,
           status: payload?.status,
-        });
+        }, companyId);
       }
 
       // 1. Delivery & Read Receipts (message.ack)
@@ -935,7 +947,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           const recList = await db
             .select()
             .from(campaignRecipients)
-            .where(or(...recipientConditions));
+            .where(and(eq(campaignRecipients.companyId, companyId), or(...recipientConditions)));
 
           for (const recipient of recList) {
             const currentAck = recipient.ackStatus ?? 0;
@@ -950,7 +962,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                     deliveredCount: sql`${campaigns.deliveredCount} + 1`,
                     updatedAt: now,
                   })
-                  .where(eq(campaigns.id, recipient.campaignId));
+                  .where(and(eq(campaigns.id, recipient.campaignId), eq(campaigns.companyId, companyId)));
               }
 
               if (ackValue === 2) {
@@ -965,7 +977,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                       readCount: sql`${campaigns.readCount} + 1`,
                       updatedAt: now,
                     })
-                    .where(eq(campaigns.id, recipient.campaignId));
+                    .where(and(eq(campaigns.id, recipient.campaignId), eq(campaigns.companyId, companyId)));
                 }
               }
 
@@ -989,7 +1001,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               deliveredAt: ackValue >= 2 ? now : undefined,
               readAt: ackValue >= 3 ? now : undefined,
             })
-            .where(and(or(...chatConditions), lt(chatMessages.ackStatus, ackValue)));
+            .where(and(eq(chatMessages.companyId, companyId), or(...chatConditions), lt(chatMessages.ackStatus, ackValue)));
 
           // Record real-time WhatsApp Status/Story viewer receipts
           const ackFrom = String(
@@ -1009,7 +1021,13 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               const matchedStatusPosts = await db
                 .select({ id: scheduledPosts.id, wahaSession: scheduledPosts.wahaSession })
                 .from(scheduledPosts)
-                .where(and(eq(scheduledPosts.channel, 'WHATSAPP_STATUS'), or(...statusPostConditions)));
+                .where(
+                  and(
+                    eq(scheduledPosts.companyId, companyId),
+                    eq(scheduledPosts.channel, 'WHATSAPP_STATUS'),
+                    or(...statusPostConditions)
+                  )
+                );
 
               let viewerPhone: string | null = null;
               const lowerViewer = viewerJid.toLowerCase();
@@ -1036,7 +1054,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 liveEvents.emit('posts:update', {
                   statusPostIds: matchedStatusPosts.map((p) => p.id),
                   ack: ackValue,
-                });
+                }, companyId);
               }
             }
           }
@@ -1052,9 +1070,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           from: exactIds[0] || null,
           outcome: 'PROCESSED',
           note: `Ack=${ackValue ?? '-'}`,
-        });
-        liveEvents.emit('tracking:update', { ack: ackValue, msgId: exactIds[0] });
-        liveEvents.emit('conversations:update', { ack: ackValue, msgId: exactIds[0] });
+        }, companyId);
+        liveEvents.emit('tracking:update', { ack: ackValue, msgId: exactIds[0] }, companyId);
+        liveEvents.emit('conversations:update', { ack: ackValue, msgId: exactIds[0] }, companyId);
       }
 
       // 1b. Typing & Presence Updates (presence.update)
@@ -1078,7 +1096,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             const found = await db
               .select({ id: contacts.id })
               .from(contacts)
-              .where(inArray(contacts.nomorWhatsapp, variants))
+              .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
               .limit(1);
             matchedContactId = found[0]?.id || null;
           }
@@ -1089,6 +1107,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               .from(contactIdentities)
               .where(
                 and(
+                  eq(contactIdentities.companyId, companyId),
                   eq(contactIdentities.channel, 'WHATSAPP'),
                   eq(contactIdentities.externalId, parsedPresence.chatId)
                 )
@@ -1101,7 +1120,13 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             const convCandidates = await db
               .select({ id: conversations.id, wahaSession: conversations.wahaSession })
               .from(conversations)
-              .where(and(eq(conversations.contactId, matchedContactId), eq(conversations.channel, 'WHATSAPP')))
+              .where(
+                and(
+                  eq(conversations.companyId, companyId),
+                  eq(conversations.contactId, matchedContactId),
+                  eq(conversations.channel, 'WHATSAPP')
+                )
+              )
               .orderBy(desc(conversations.updatedAt));
             const matchedConv =
               (webhookSession
@@ -1113,7 +1138,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 presence: parsedPresence.status,
                 session: webhookSession || null,
                 updatedAt: new Date().toISOString(),
-              });
+              }, companyId);
             }
           }
         }
@@ -1143,7 +1168,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           const targetMsgs = await db
             .select()
             .from(chatMessages)
-            .where(or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`)))
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
+              )
+            )
             .limit(1);
           if (targetMsgs[0]) {
             const targetMsg = targetMsgs[0];
@@ -1176,7 +1206,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 .where(eq(chatMessages.id, targetMsg.id));
             }
 
-            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId });
+            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId }, companyId);
             wahaService.recordWebhookEvent({
               receivedAt: now.toISOString(),
               event,
@@ -1184,7 +1214,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               from: payload?.from || null,
               outcome: 'PROCESSED',
               note: event === 'message.reaction' ? 'Reaksi pesan diperbarui' : 'Pesan ditandai ditarik',
-            });
+            }, companyId);
             return reply.send({ success: true, message: `${event} processed` });
           }
         }
@@ -1230,7 +1260,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             from: rawFrom || null,
             outcome: 'IGNORED',
             note: 'Bukan chat personal atau grup WA',
-          });
+          }, companyId);
           return reply.send({ success: true, message: 'Webhook ignored (unsupported JID)' });
         }
 
@@ -1242,7 +1272,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           const dupMsg = await db
             .select({ id: chatMessages.id, conversationId: chatMessages.conversationId })
             .from(chatMessages)
-            .where(eq(chatMessages.wahaMessageId, msgId))
+            .where(and(eq(chatMessages.companyId, companyId), eq(chatMessages.wahaMessageId, msgId)))
             .limit(1);
           if (dupMsg[0]) {
             wahaService.recordWebhookEvent({
@@ -1252,7 +1282,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               from: rawFrom,
               outcome: 'DEDUP',
               note: 'Pesan duplikat diabaikan',
-            });
+            }, companyId);
             return reply.send({ success: true, deduplicated: true, message: 'Duplicate webhook ignored' });
           }
         }
@@ -1272,7 +1302,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           const targetMsgs = await db
             .select()
             .from(chatMessages)
-            .where(or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`)))
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
+              )
+            )
             .limit(1);
           if (targetMsgs[0]) {
             const targetMsg = targetMsgs[0];
@@ -1300,7 +1335,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               .update(chatMessages)
               .set({ metadataJson: JSON.stringify({ ...prevMeta, reactions: filtered }) })
               .where(eq(chatMessages.id, targetMsg.id));
-            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId });
+            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId }, companyId);
           }
           wahaService.recordWebhookEvent({
             receivedAt: now.toISOString(),
@@ -1309,7 +1344,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             from: rawFrom,
             outcome: 'PROCESSED',
             note: 'Reaksi pesan diperbarui',
-          });
+          }, companyId);
           return reply.send({ success: true, message: 'Inline reaction processed' });
         }
 
@@ -1320,7 +1355,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           const targetMsgs = await db
             .select()
             .from(chatMessages)
-            .where(or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`)))
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
+              )
+            )
             .limit(1);
           if (targetMsgs[0]) {
             const targetMsg = targetMsgs[0];
@@ -1336,7 +1376,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               .update(chatMessages)
               .set({ metadataJson: JSON.stringify({ ...prevMeta, revoked: true }) })
               .where(eq(chatMessages.id, targetMsg.id));
-            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId });
+            liveEvents.emit('conversations:update', { conversationId: targetMsg.conversationId }, companyId);
           }
           return reply.send({ success: true, message: 'Message revocation processed' });
         }
@@ -1410,7 +1450,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             from: rawFrom,
             outcome: 'IGNORED',
             note: 'Event tanpa isi pesan atau media',
-          });
+          }, companyId);
           return reply.send({ success: true, message: 'Webhook ignored (empty message body)' });
         }
 
@@ -1447,6 +1487,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             .from(contactIdentities)
             .where(
               and(
+                eq(contactIdentities.companyId, companyId),
                 eq(contactIdentities.channel, 'WHATSAPP'),
                 eq(contactIdentities.externalId, groupJid)
               )
@@ -1457,7 +1498,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             const byId = await db
               .select()
               .from(contacts)
-              .where(eq(contacts.id, groupIdRows[0].contactId))
+              .where(and(eq(contacts.id, groupIdRows[0].contactId), eq(contacts.companyId, companyId)))
               .limit(1);
             contact = byId[0];
           }
@@ -1482,6 +1523,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               .insert(contacts)
               .values({
                 id: crypto.randomUUID(),
+                companyId,
                 namaLengkap: effectiveGroupName,
                 nomorWhatsapp: null,
                 kategori: 'Grup WhatsApp',
@@ -1497,6 +1539,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               .insert(contactIdentities)
               .values({
                 id: crypto.randomUUID(),
+                companyId,
                 contactId: contact.id,
                 channel: 'WHATSAPP',
                 externalId: groupJid,
@@ -1540,7 +1583,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             const matchedMember = await db
               .select({ namaLengkap: contacts.namaLengkap })
               .from(contacts)
-              .where(inArray(contacts.nomorWhatsapp, pVariants))
+              .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, pVariants)))
               .limit(1);
             matchedMemberName = matchedMember[0]?.namaLengkap || null;
           }
@@ -1555,7 +1598,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             fromPhone = await wahaService.resolveLidToPhone(inboundSession, rawFrom);
           }
 
-          // Find contact by normalized phone OR WAHA @lid contact identity
+          // Find contact by normalized phone OR WAHA @lid contact identity within tenant company
           if (fromPhone) {
             const phoneVariants = Array.from(
               new Set([
@@ -1567,7 +1610,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             const contactList = await db
               .select()
               .from(contacts)
-              .where(inArray(contacts.nomorWhatsapp, phoneVariants));
+              .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phoneVariants)));
             contact = contactList[0];
           }
 
@@ -1577,6 +1620,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               .from(contactIdentities)
               .where(
                 and(
+                  eq(contactIdentities.companyId, companyId),
                   eq(contactIdentities.channel, 'WHATSAPP'),
                   eq(contactIdentities.externalId, rawFrom)
                 )
@@ -1585,7 +1629,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               const byId = await db
                 .select()
                 .from(contacts)
-                .where(eq(contacts.id, identityRows[0].contactId));
+                .where(and(eq(contacts.id, identityRows[0].contactId), eq(contacts.companyId, companyId)));
               contact = byId[0];
             }
           }
@@ -1598,6 +1642,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 .insert(contacts)
                 .values({
                   id: crypto.randomUUID(),
+                  companyId,
                   namaLengkap: contactName,
                   nomorWhatsapp: fromPhone || null,
                   tags: 'Inbound Lead',
@@ -1611,7 +1656,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 const retryList = await db
                   .select()
                   .from(contacts)
-                  .where(eq(contacts.nomorWhatsapp, fromPhone));
+                  .where(and(eq(contacts.companyId, companyId), eq(contacts.nomorWhatsapp, fromPhone)));
                 contact = retryList[0];
               }
               if (!contact) throw insertErr;
@@ -1629,6 +1674,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               .insert(contactIdentities)
               .values({
                 id: crypto.randomUUID(),
+                companyId,
                 contactId: contact.id,
                 channel: 'WHATSAPP',
                 externalId: rawFrom,
@@ -1648,7 +1694,13 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         const convList = await db
           .select()
           .from(conversations)
-          .where(and(eq(conversations.contactId, contact.id), eq(conversations.channel, 'WHATSAPP')))
+          .where(
+            and(
+              eq(conversations.companyId, companyId),
+              eq(conversations.contactId, contact.id),
+              eq(conversations.channel, 'WHATSAPP')
+            )
+          )
           .orderBy(desc(conversations.updatedAt));
 
         const existingConv = normalizedInboundSession
@@ -1668,6 +1720,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           convId = crypto.randomUUID();
           await db.insert(conversations).values({
             id: convId,
+            companyId,
             contactId: contact.id,
             channel: 'WHATSAPP',
             externalThreadId: isGroupChat ? groupJid : isLidSource ? rawFrom : null,
@@ -1740,7 +1793,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               senderName: chatMessages.senderName,
             })
             .from(chatMessages)
-            .where(eq(chatMessages.wahaMessageId, String(quotedWahaId)))
+            .where(and(eq(chatMessages.companyId, companyId), eq(chatMessages.wahaMessageId, String(quotedWahaId))))
             .limit(1);
           if (quotedRows[0]) {
             replyToMessageId = quotedRows[0].id;
@@ -1755,6 +1808,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         // Create ChatMessage
         await db.insert(chatMessages).values({
           id: crypto.randomUUID(),
+          companyId,
           conversationId: convId,
           contactId: contact.id,
           direction: 'INBOUND',
@@ -1791,27 +1845,29 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             : isGroupChat
             ? 'Percakapan grup WA baru dibuat (otomatis Non-Penilaian)'
             : 'Percakapan baru dibuat di inbox',
-        });
+        }, companyId);
 
         liveEvents.emit('conversations:presence', {
           conversationId: convId,
           presence: 'paused',
           session: inboundSession || null,
           updatedAt: now.toISOString(),
-        });
-        liveEvents.emit('conversations:update', { conversationId: convId });
-        liveEvents.emit('tracking:update', { conversationId: convId });
+        }, companyId);
+        liveEvents.emit('conversations:update', { conversationId: convId }, companyId);
+        liveEvents.emit('tracking:update', { conversationId: convId }, companyId);
 
         if (body && !isGroupChat && !contact.excludeFromMetrics && !existingConv?.excludeFromMetrics) {
-          void handleInboundAutomation({
-            conversationId: convId,
-            contact,
-            assignedAgentId: existingConv?.assignedAgentId || null,
-            inboundBody: body,
-            externalThreadId: isLidSource ? rawFrom : existingConv?.externalThreadId || null,
-            sessionName: inboundSession || existingConv?.wahaSession || null,
-            isNewConversation: !existingConv,
-          });
+          void runWithCompany(companyId, () =>
+            handleInboundAutomation({
+              conversationId: convId,
+              contact,
+              assignedAgentId: existingConv?.assignedAgentId || null,
+              inboundBody: body,
+              externalThreadId: isLidSource ? rawFrom : existingConv?.externalThreadId || null,
+              sessionName: inboundSession || existingConv?.wahaSession || null,
+              isNewConversation: !existingConv,
+            })
+          );
         }
       } else if (
         event &&
@@ -1828,7 +1884,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           from: rawFrom || null,
           outcome: 'IGNORED',
           note: `Event "${event}" diterima`,
-        });
+        }, companyId);
       }
 
       return reply.send({ success: true, message: 'Webhook processed' });
@@ -1840,9 +1896,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         from: req.body?.payload?.from || null,
         outcome: 'ERROR',
         note: error.message,
-      });
+      }, companyId);
       console.error('[WAHA Webhook] Error:', error.message);
       return reply.status(500).send({ success: false, error: error.message });
     }
+    });
   });
 }

@@ -5,9 +5,11 @@ import { broadcastQueue } from './queue.service';
 import { licenseService } from './license.service';
 import { OmnichannelType } from './channel.service';
 import { wahaService } from './waha.service';
+import { getActiveCompanyId } from './tenantContext';
 import crypto from 'crypto';
 
 export interface CreateCampaignDTO {
+  companyId?: string;
   title: string;
   messageTemplate: string;
   type?: 'IMMEDIATE' | 'SCHEDULED' | 'BIRTHDAY';
@@ -62,6 +64,7 @@ export class BroadcastService {
       sessionName,
     } = dto;
 
+    const companyId = getActiveCompanyId(dto.companyId);
     const normalizedChannel = (channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
     if (normalizedChannel !== 'WHATSAPP' && !channelAccountId) {
       throw new Error(`Pilih akun kanal ${normalizedChannel} terlebih dahulu untuk mengirim siaran.`);
@@ -71,25 +74,34 @@ export class BroadcastService {
     const safeIntervalSeconds = Math.max(0, Number.isFinite(Number(intervalSeconds)) ? Number(intervalSeconds) : 30);
     const safeBatchSize = Math.max(1, Math.floor(Number(batchSize) || 10));
 
-    // Enforce active Reneo license
-    const lic = await licenseService.assertLicenseActive();
+    // Enforce active license & omnichannel gate per tenant company
+    const lic =
+      normalizedChannel !== 'WHATSAPP'
+        ? await licenseService.assertFeature('omnichannel', undefined, companyId)
+        : await licenseService.assertLicenseActive(companyId);
 
-    // 1. Find target contacts
+    // 1. Find target contacts strictly inside companyId
     let targetContacts: any[] = [];
 
     if (contactIds && contactIds.length > 0) {
       targetContacts = await db
         .select()
         .from(contacts)
-        .where(inArray(contacts.id, contactIds));
+        .where(and(eq(contacts.companyId, companyId), inArray(contacts.id, contactIds)));
     } else if (filterTags && filterTags.length > 0 && !filterTags.includes('ALL')) {
-      const allContacts = await db.select().from(contacts);
+      const allContacts = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.companyId, companyId));
       targetContacts = allContacts.filter((c) => {
         if (!c.tags) return false;
         return filterTags.some((tag) => c.tags?.toLowerCase().includes(tag.toLowerCase()));
       });
     } else {
-      targetContacts = await db.select().from(contacts);
+      targetContacts = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.companyId, companyId));
     }
 
     if (targetContacts.length === 0) {
@@ -102,7 +114,12 @@ export class BroadcastService {
       const idRows = await db
         .select()
         .from(contactIdentities)
-        .where(eq(contactIdentities.channel, normalizedChannel));
+        .where(
+          and(
+            eq(contactIdentities.companyId, companyId),
+            eq(contactIdentities.channel, normalizedChannel)
+          )
+        );
       for (const row of idRows) {
         if (!identityByContact.has(row.contactId)) {
           identityByContact.set(row.contactId, row.handle || row.externalId);
@@ -133,6 +150,7 @@ export class BroadcastService {
         .innerJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
         .where(
           and(
+            eq(campaignRecipients.companyId, companyId),
             gte(campaignRecipients.createdAt, monthStart),
             ne(campaigns.status, 'CANCELLED')
           )
@@ -141,9 +159,10 @@ export class BroadcastService {
 
       if (sentThisMonth + targetContacts.length > lic.features.maxBroadcastPerMonth) {
         const err = new Error(
-          `Kuota kirim broadcast bulan ini (${sentThisMonth.toLocaleString('id-ID')}/${lic.features.maxBroadcastPerMonth.toLocaleString('id-ID')}) tidak mencukupi untuk ${targetContacts.length.toLocaleString('id-ID')} penerima. Silakan upgrade paket lisensi Anda.`
-        ) as Error & { statusCode?: number };
+          `Kuota kirim broadcast bulan ini (${sentThisMonth.toLocaleString('id-ID')}/${lic.features.maxBroadcastPerMonth.toLocaleString('id-ID')}) tidak mencukupi untuk ${targetContacts.length.toLocaleString('id-ID')} penerima. Silakan upgrade paket lisensi perusahaan.`
+        ) as Error & { statusCode?: number; code?: string };
         err.statusCode = 403;
+        err.code = 'QUOTA_EXCEEDED';
         throw err;
       }
     }
@@ -180,6 +199,7 @@ export class BroadcastService {
       .insert(campaigns)
       .values({
         id: campaignId,
+        companyId,
         title,
         messageTemplate,
         type,
@@ -207,6 +227,7 @@ export class BroadcastService {
     // 4. Create Campaign Recipients
     const recipientData = targetContacts.map((c) => ({
       id: crypto.randomUUID(),
+      companyId,
       campaignId: createdCampaign.id,
       contactId: c.id,
       phone:
@@ -290,6 +311,7 @@ export class BroadcastService {
       await broadcastQueue.add(
         'send-message',
         {
+          companyId,
           recipientId: recipient.id,
           campaignId: createdCampaign.id,
           contactId: recipient.contactId,
@@ -319,18 +341,19 @@ export class BroadcastService {
   /**
    * Cancel an ongoing or scheduled campaign
    */
-  public static async cancelCampaign(campaignId: string) {
+  public static async cancelCampaign(campaignId: string, companyIdOverride?: string) {
+    const companyId = getActiveCompanyId(companyIdOverride);
     const campList = await db
       .select()
       .from(campaigns)
-      .where(eq(campaigns.id, campaignId));
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.companyId, companyId)));
 
     if (campList.length === 0) throw new Error('Kampanye tidak ditemukan');
 
     await db
       .update(campaigns)
       .set({ status: 'CANCELLED', updatedAt: new Date() })
-      .where(eq(campaigns.id, campaignId));
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.companyId, companyId)));
 
     await db
       .update(campaignRecipients)
@@ -341,6 +364,7 @@ export class BroadcastService {
       })
       .where(
         and(
+          eq(campaignRecipients.companyId, companyId),
           eq(campaignRecipients.campaignId, campaignId),
           eq(campaignRecipients.status, 'PENDING')
         )
@@ -352,11 +376,12 @@ export class BroadcastService {
   /**
    * Retry all FAILED recipients in a campaign
    */
-  public static async retryFailedRecipients(campaignId: string) {
+  public static async retryFailedRecipients(campaignId: string, companyIdOverride?: string) {
+    const companyId = getActiveCompanyId(companyIdOverride);
     const campList = await db
       .select()
       .from(campaigns)
-      .where(eq(campaigns.id, campaignId));
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.companyId, companyId)));
 
     if (campList.length === 0) throw new Error('Kampanye tidak ditemukan');
     const campaign = campList[0];
@@ -366,6 +391,7 @@ export class BroadcastService {
       .from(campaignRecipients)
       .where(
         and(
+          eq(campaignRecipients.companyId, companyId),
           eq(campaignRecipients.campaignId, campaignId),
           eq(campaignRecipients.status, 'FAILED')
         )
@@ -375,10 +401,14 @@ export class BroadcastService {
       throw new Error('Tidak ada penerima berstatus gagal pada kampanye ini.');
     }
 
-    await licenseService.assertLicenseActive();
+    const targetChannel = ((campaign.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+    if (targetChannel !== 'WHATSAPP') {
+      await licenseService.assertFeature('omnichannel', undefined, companyId);
+    } else {
+      await licenseService.assertLicenseActive(companyId);
+    }
 
     const now = new Date();
-    const targetChannel = ((campaign.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
     const delaySeconds = Math.max(0, Number(campaign.delaySeconds ?? 5) || 0);
     const intervalSeconds = Math.max(0, Number(campaign.intervalSeconds ?? 30) || 0);
     const batchSize = Math.max(1, Number(campaign.batchSize ?? 10) || 10);
@@ -393,6 +423,7 @@ export class BroadcastService {
       })
       .where(
         and(
+          eq(campaignRecipients.companyId, companyId),
           eq(campaignRecipients.campaignId, campaignId),
           eq(campaignRecipients.status, 'FAILED')
         )
@@ -406,7 +437,7 @@ export class BroadcastService {
         completedAt: null,
         updatedAt: now,
       })
-      .where(eq(campaigns.id, campaignId));
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.companyId, companyId)));
 
     let retryPool: string[] = [];
     if (targetChannel === 'WHATSAPP') {
@@ -432,6 +463,7 @@ export class BroadcastService {
       await broadcastQueue.add(
         'send-message',
         {
+          companyId,
           recipientId: recipient.id,
           campaignId: campaign.id,
           contactId: recipient.contactId,

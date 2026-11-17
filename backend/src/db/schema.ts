@@ -1,12 +1,51 @@
 import { pgTable, text, timestamp, integer, boolean, doublePrecision } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
+export const DEFAULT_COMPANY_ID = 'company_default';
+
+export const companies = pgTable('companies', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  ownerName: text('owner_name'),
+  ownerEmail: text('owner_email'),
+  ownerPhone: text('owner_phone'),
+  status: text('status').default('ACTIVE').notNull(), // ACTIVE | SUSPENDED
+  isDefault: boolean('is_default').default(false).notNull(),
+  licenseKey: text('license_key'),
+  licenseStatus: text('license_status').default('UNLICENSED').notNull(), // UNLICENSED | ACTIVE | TRIAL | EXPIRED | SUSPENDED
+  licensePlan: text('license_plan').default('Belum Diaktivasi').notNull(),
+  licensePlanSlug: text('license_plan_slug'),
+  licensePeriod: text('license_period').default('monthly').notNull(),
+  licensePriceAmount: integer('license_price_amount').default(0).notNull(),
+  licenseStartedAt: timestamp('license_started_at'),
+  licenseExpiresAt: timestamp('license_expires_at'),
+  licenseFeaturesJson: text('license_features_json'),
+  trialUsed: boolean('trial_used').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const companySettings = pgTable('company_settings', {
+  id: text('id').primaryKey(), // `${companyId}::${key}`
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .notNull(),
+  key: text('key').notNull(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export const contacts = pgTable('contacts', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   namaLengkap: text('nama_lengkap').notNull(),
   namaPanggilan: text('nama_panggilan'),
   tanggalLahir: timestamp('tanggal_lahir'),
-  nomorWhatsapp: text('nomor_whatsapp').unique(),
+  nomorWhatsapp: text('nomor_whatsapp'),
   alamat: text('alamat'),
   kategori: text('kategori'),
   tags: text('tags'), // JSON string or comma-separated
@@ -19,6 +58,10 @@ export const contacts = pgTable('contacts', {
 
 export const campaigns = pgTable('campaigns', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   title: text('title').notNull(),
   messageTemplate: text('message_template').notNull(),
   type: text('type').default('IMMEDIATE').notNull(), // IMMEDIATE, SCHEDULED, BIRTHDAY
@@ -43,6 +86,10 @@ export const campaigns = pgTable('campaigns', {
 
 export const campaignRecipients = pgTable('campaign_recipients', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   campaignId: text('campaign_id')
     .references(() => campaigns.id, { onDelete: 'cascade' })
     .notNull(),
@@ -51,7 +98,7 @@ export const campaignRecipients = pgTable('campaign_recipients', {
     .notNull(),
   phone: text('phone').notNull(),
   personalizedMessage: text('personalized_message').notNull(),
-  wahaMessageId: text('waha_message_id').unique(),
+  wahaMessageId: text('waha_message_id'),
   status: text('status').default('PENDING').notNull(), // PENDING, SENT, DELIVERED, READ, FAILED
   ackStatus: integer('ack_status').default(0).notNull(), // 0=PENDING, 1=SENT, 2=DELIVERED, 3=READ, -1=FAILED
   sentAt: timestamp('sent_at'),
@@ -64,6 +111,10 @@ export const campaignRecipients = pgTable('campaign_recipients', {
 
 export const conversations = pgTable('conversations', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   contactId: text('contact_id')
     .references(() => contacts.id, { onDelete: 'cascade' })
     .notNull(),
@@ -100,6 +151,10 @@ export const conversations = pgTable('conversations', {
 
 export const chatMessages = pgTable('chat_messages', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   conversationId: text('conversation_id')
     .references(() => conversations.id, { onDelete: 'cascade' })
     .notNull(),
@@ -122,7 +177,7 @@ export const chatMessages = pgTable('chat_messages', {
   replyToBody: text('reply_to_body'),
   replyToSender: text('reply_to_sender'),
   metadataJson: text('metadata_json'),
-  wahaMessageId: text('waha_message_id').unique(),
+  wahaMessageId: text('waha_message_id'),
   status: text('status').default('PENDING').notNull(),
   ackStatus: integer('ack_status').default(0).notNull(),
   errorMessage: text('error_message'),
@@ -134,6 +189,10 @@ export const chatMessages = pgTable('chat_messages', {
 
 export const birthdaySettings = pgTable('birthday_settings', {
   id: text('id').primaryKey().default('default'),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   isEnabled: boolean('is_enabled').default(true).notNull(),
   sendTime: text('send_time').default('08:00').notNull(),
   messageTemplate: text('message_template')
@@ -157,7 +216,11 @@ export const systemSettings = pgTable('system_settings', {
 
 export const crmRoles = pgTable('crm_roles', {
   id: text('id').primaryKey(),
-  name: text('name').notNull().unique(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
+  name: text('name').notNull(),
   description: text('description'),
   permissions: text('permissions').notNull(), // JSON array of PermissionKey
   isSystem: boolean('is_system').default(false).notNull(),
@@ -167,10 +230,15 @@ export const crmRoles = pgTable('crm_roles', {
 
 export const crmAgents = pgTable('crm_agents', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   role: text('role').default('AGENT').notNull(), // ADMIN | AGENT
+  isPlatformAdmin: boolean('is_platform_admin').default(false).notNull(),
   roleId: text('role_id'),
   permissions: text('permissions').default('["dashboard","conversations","contacts"]').notNull(), // JSON array of tab/action keys
   isActive: boolean('is_active').default(true).notNull(),
@@ -180,7 +248,11 @@ export const crmAgents = pgTable('crm_agents', {
 
 export const cannedResponses = pgTable('canned_responses', {
   id: text('id').primaryKey(),
-  shortCode: text('short_code').notNull().unique(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
+  shortCode: text('short_code').notNull(),
   title: text('title').notNull(),
   category: text('category').default('Umum').notNull(),
   content: text('content').notNull(),
@@ -191,6 +263,10 @@ export const cannedResponses = pgTable('canned_responses', {
 
 export const csatResponses = pgTable('csat_responses', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   conversationId: text('conversation_id')
     .references(() => conversations.id, { onDelete: 'cascade' })
     .notNull(),
@@ -217,6 +293,10 @@ export const csatResponses = pgTable('csat_responses', {
 
 export const autoReplyRules = pgTable('auto_reply_rules', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   keyword: text('keyword').notNull(),
   matchType: text('match_type').default('CONTAINS').notNull(), // CONTAINS | EXACT | STARTS_WITH
   replyText: text('reply_text').notNull(),
@@ -228,7 +308,11 @@ export const autoReplyRules = pgTable('auto_reply_rules', {
 
 export const products = pgTable('products', {
   id: text('id').primaryKey(),
-  sku: text('sku').notNull().unique(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
+  sku: text('sku').notNull(),
   name: text('name').notNull(),
   category: text('category'),
   price: integer('price').default(0).notNull(),
@@ -241,6 +325,10 @@ export const products = pgTable('products', {
 
 export const channelAccounts = pgTable('channel_accounts', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM | WHATSAPP
   name: text('name').notNull(),
   accountId: text('account_id').notNull(), // Page ID, IG User ID, Threads User ID, Bot Username
@@ -255,6 +343,10 @@ export const channelAccounts = pgTable('channel_accounts', {
 
 export const contactIdentities = pgTable('contact_identities', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   contactId: text('contact_id')
     .references(() => contacts.id, { onDelete: 'cascade' })
     .notNull(),
@@ -266,6 +358,10 @@ export const contactIdentities = pgTable('contact_identities', {
 
 export const channelConnectLinks = pgTable('channel_connect_links', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   token: text('token').notNull().unique(),
   channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM
   label: text('label'),
@@ -277,6 +373,10 @@ export const channelConnectLinks = pgTable('channel_connect_links', {
 
 export const webhookDeliveries = pgTable('webhook_deliveries', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   event: text('event').notNull(),
   targetUrl: text('target_url').notNull(),
   status: text('status').notNull(), // SUCCESS | FAILED
@@ -321,6 +421,10 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
 
 export const scheduledPosts = pgTable('scheduled_posts', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM | WHATSAPP | WHATSAPP_STATUS
   channelAccountId: text('channel_account_id')
     .references(() => channelAccounts.id, { onDelete: 'cascade' }),
@@ -343,6 +447,10 @@ export const scheduledPosts = pgTable('scheduled_posts', {
 
 export const whatsappStatusViews = pgTable('whatsapp_status_views', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   postId: text('post_id')
     .references(() => scheduledPosts.id, { onDelete: 'cascade' })
     .notNull(),
@@ -357,6 +465,10 @@ export const whatsappStatusViews = pgTable('whatsapp_status_views', {
 
 export const contentIdeas = pgTable('content_ideas', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   title: text('title').notNull(),
   notes: text('notes'),
   channel: text('channel').default('INSTAGRAM').notNull(),
@@ -367,6 +479,10 @@ export const contentIdeas = pgTable('content_ideas', {
 
 export const socialComments = pgTable('social_comments', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS
   channelAccountId: text('channel_account_id')
     .references(() => channelAccounts.id, { onDelete: 'cascade' })
@@ -385,6 +501,10 @@ export const socialComments = pgTable('social_comments', {
 
 export const commentAutomations = pgTable('comment_automations', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   name: text('name').notNull(),
   channel: text('channel').default('ALL').notNull(), // ALL | INSTAGRAM | FACEBOOK | THREADS
   keyword: text('keyword').notNull(),
@@ -400,6 +520,10 @@ export const commentAutomations = pgTable('comment_automations', {
 
 export const aiKnowledgeBooks = pgTable('ai_knowledge_books', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   title: text('title').notNull(),
   description: text('description'),
   category: text('category').default('GENERAL').notNull(), // GENERAL | FAQ | CATALOG | POLICY | SOP | WEB
@@ -412,6 +536,10 @@ export const aiKnowledgeBooks = pgTable('ai_knowledge_books', {
 
 export const aiKnowledgeItems = pgTable('ai_knowledge_items', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   bookId: text('book_id').references(() => aiKnowledgeBooks.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   category: text('category').default('FAQ').notNull(), // FAQ | CATALOG | POLICY | WEB
@@ -424,7 +552,11 @@ export const aiKnowledgeItems = pgTable('ai_knowledge_items', {
 
 export const aiSkills = pgTable('ai_skills', {
   id: text('id').primaryKey(),
-  slug: text('slug').notNull().unique(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
+  slug: text('slug').notNull(),
   name: text('name').notNull(),
   description: text('description'),
   category: text('category').default('CUSTOM').notNull(), // CRM | SALES | SUPPORT | OPERATIONS | CUSTOM
@@ -440,6 +572,10 @@ export const aiSkills = pgTable('ai_skills', {
 
 export const aiMcpServers = pgTable('ai_mcp_servers', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   name: text('name').notNull(),
   description: text('description'),
   transport: text('transport').default('HTTP').notNull(),
@@ -458,6 +594,10 @@ export const aiMcpServers = pgTable('ai_mcp_servers', {
 
 export const crmLabels = pgTable('crm_labels', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   scope: text('scope').default('CONVERSATION_LABEL').notNull(), // CONVERSATION_LABEL | CONTACT_CATEGORY
   name: text('name').notNull(),
   color: text('color').default('slate').notNull(),
@@ -470,6 +610,10 @@ export const crmLabels = pgTable('crm_labels', {
 
 export const messageTemplates = pgTable('message_templates', {
   id: text('id').primaryKey(),
+  companyId: text('company_id')
+    .references(() => companies.id, { onDelete: 'cascade' })
+    .default(DEFAULT_COMPANY_ID)
+    .notNull(),
   name: text('name').notNull(),
   category: text('category').default('Umum').notNull(),
   channel: text('channel').default('ALL').notNull(),

@@ -1,11 +1,13 @@
 import crypto from 'crypto';
 import axios from 'axios';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { channelAccounts, commentAutomations, socialComments } from '../db/schema';
 import { generateAiAgentReply, getAiAgentConfig } from '../services/ai.service';
-import { requirePermission } from './auth';
+import { licenseService } from '../services/license.service';
+import { getActiveCompanyId, runWithCompany } from '../services/tenantContext';
+import { getRequestCompanyId, requirePermission } from './auth';
 
 async function sendCommentReplyApi(
   acc: typeof channelAccounts.$inferSelect,
@@ -53,97 +55,103 @@ export async function applyCommentAutomations(
   acc: typeof channelAccounts.$inferSelect,
   comment: typeof socialComments.$inferSelect
 ): Promise<void> {
-  try {
-    const rules = await db
-      .select()
-      .from(commentAutomations)
-      .where(eq(commentAutomations.isActive, true));
+  const companyId = getActiveCompanyId(comment.companyId || acc.companyId);
+  return await runWithCompany(companyId, async () => {
+    try {
+      const lic = await licenseService.getLicense(companyId);
+      if (lic.isExpired || !lic.features.omnichannel || !lic.features.autoReply) return;
 
-    const contentLower = String(comment.content || '').trim().toLowerCase();
-    if (!contentLower) return;
+      const rules = await db
+        .select()
+        .from(commentAutomations)
+        .where(and(eq(commentAutomations.companyId, companyId), eq(commentAutomations.isActive, true)));
 
-    const matched = rules.find((rule) => {
-      if (rule.channel !== 'ALL' && rule.channel !== comment.channel) return false;
-      const kw = String(rule.keyword || '').trim().toLowerCase();
-      if (!kw) return false;
-      return rule.matchType === 'EXACT' ? contentLower === kw : contentLower.includes(kw);
-    });
-    if (!matched) {
-      if (!comment.replyText) {
-        const aiCfg = await getAiAgentConfig();
-        const ageMs = Date.now() - new Date(comment.createdAt).getTime();
-        if (aiCfg.enabled && aiCfg.autoReplyComment && ageMs <= 24 * 60 * 60 * 1000) {
-          try {
-            const aiRes = await generateAiAgentReply(comment.content, {
-              configOverride: aiCfg,
-              contactName: comment.authorName,
-              channel: comment.channel,
-              isComment: true,
-            });
-            if (aiRes.reply) {
-              await sendCommentReplyApi(acc, comment, aiRes.reply);
-              await db
-                .update(socialComments)
-                .set({ replyText: aiRes.reply, repliedAt: new Date(), status: 'DONE' })
-                .where(eq(socialComments.id, comment.id));
+      const contentLower = String(comment.content || '').trim().toLowerCase();
+      if (!contentLower) return;
+
+      const matched = rules.find((rule) => {
+        if (rule.channel !== 'ALL' && rule.channel !== comment.channel) return false;
+        const kw = String(rule.keyword || '').trim().toLowerCase();
+        if (!kw) return false;
+        return rule.matchType === 'EXACT' ? contentLower === kw : contentLower.includes(kw);
+      });
+      if (!matched) {
+        if (!comment.replyText && lic.features.aiAgent) {
+          const aiCfg = await getAiAgentConfig();
+          const ageMs = Date.now() - new Date(comment.createdAt).getTime();
+          if (aiCfg.enabled && aiCfg.autoReplyComment && ageMs <= 24 * 60 * 60 * 1000) {
+            try {
+              const aiRes = await generateAiAgentReply(comment.content, {
+                configOverride: aiCfg,
+                contactName: comment.authorName,
+                channel: comment.channel,
+                isComment: true,
+              });
+              if (aiRes.reply) {
+                await sendCommentReplyApi(acc, comment, aiRes.reply);
+                await db
+                  .update(socialComments)
+                  .set({ replyText: aiRes.reply, repliedAt: new Date(), status: 'DONE' })
+                  .where(eq(socialComments.id, comment.id));
+              }
+            } catch (aiErr: any) {
+              console.warn('[CommentAutomation] AI reply failed:', aiErr?.message);
             }
-          } catch (aiErr: any) {
-            console.warn('[CommentAutomation] AI reply failed:', aiErr?.message);
           }
         }
+        return;
       }
-      return;
-    }
 
-    let executed = false;
+      let executed = false;
 
-    if (matched.replyComment) {
-      try {
-        await sendCommentReplyApi(acc, comment, matched.replyComment);
+      if (matched.replyComment) {
+        try {
+          await sendCommentReplyApi(acc, comment, matched.replyComment);
+          await db
+            .update(socialComments)
+            .set({ replyText: matched.replyComment, repliedAt: new Date(), status: 'DONE' })
+            .where(eq(socialComments.id, comment.id));
+          executed = true;
+        } catch (err: any) {
+          console.warn('[CommentAutomation] Public reply failed:', err?.response?.data || err?.message);
+        }
+      }
+
+      if (
+        matched.sendDm &&
+        matched.dmText &&
+        acc.accessToken &&
+        comment.externalCommentId &&
+        (comment.channel === 'INSTAGRAM' || comment.channel === 'FACEBOOK')
+      ) {
+        try {
+          await axios.post(
+            `https://graph.facebook.com/v20.0/${acc.accountId}/messages`,
+            {
+              recipient: { comment_id: comment.externalCommentId },
+              message: { text: matched.dmText },
+            },
+            { headers: { Authorization: `Bearer ${acc.accessToken}` }, timeout: 10000 }
+          );
+          executed = true;
+        } catch (err: any) {
+          console.warn('[CommentAutomation] Private reply DM failed:', err?.response?.data || err?.message);
+        }
+      }
+
+      if (executed) {
         await db
-          .update(socialComments)
-          .set({ replyText: matched.replyComment, repliedAt: new Date(), status: 'DONE' })
-          .where(eq(socialComments.id, comment.id));
-        executed = true;
-      } catch (err: any) {
-        console.warn('[CommentAutomation] Public reply failed:', err?.response?.data || err?.message);
+          .update(commentAutomations)
+          .set({
+            triggerCount: sql`${commentAutomations.triggerCount} + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(commentAutomations.id, matched.id));
       }
+    } catch (err: any) {
+      console.warn('[CommentAutomation] Unexpected error:', err?.message);
     }
-
-    if (
-      matched.sendDm &&
-      matched.dmText &&
-      acc.accessToken &&
-      comment.externalCommentId &&
-      (comment.channel === 'INSTAGRAM' || comment.channel === 'FACEBOOK')
-    ) {
-      try {
-        await axios.post(
-          `https://graph.facebook.com/v20.0/${acc.accountId}/messages`,
-          {
-            recipient: { comment_id: comment.externalCommentId },
-            message: { text: matched.dmText },
-          },
-          { headers: { Authorization: `Bearer ${acc.accessToken}` }, timeout: 10000 }
-        );
-        executed = true;
-      } catch (err: any) {
-        console.warn('[CommentAutomation] Private reply DM failed:', err?.response?.data || err?.message);
-      }
-    }
-
-    if (executed) {
-      await db
-        .update(commentAutomations)
-        .set({
-          triggerCount: sql`${commentAutomations.triggerCount} + 1`,
-          updatedAt: new Date(),
-        })
-        .where(eq(commentAutomations.id, matched.id));
-    }
-  } catch (err: any) {
-    console.warn('[CommentAutomation] Unexpected error:', err?.message);
-  }
+  });
 }
 
 export default async function commentsRouter(fastify: FastifyInstance) {
@@ -153,6 +161,7 @@ export default async function commentsRouter(fastify: FastifyInstance) {
     Querystring: { status?: string; channel?: string };
   }>('/', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const statusFilter = String(req.query?.status || 'ALL').toUpperCase();
       const channelFilter = String(req.query?.channel || 'ALL').toUpperCase();
 
@@ -163,6 +172,7 @@ export default async function commentsRouter(fastify: FastifyInstance) {
         })
         .from(socialComments)
         .leftJoin(channelAccounts, eq(socialComments.channelAccountId, channelAccounts.id))
+        .where(eq(socialComments.companyId, companyId))
         .orderBy(desc(socialComments.createdAt));
 
       const filtered = rows
@@ -179,12 +189,14 @@ export default async function commentsRouter(fastify: FastifyInstance) {
     }
   });
 
-  fastify.post('/sync', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/sync', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('omnichannel', undefined, companyId);
       const accounts = await db
         .select()
         .from(channelAccounts)
-        .where(eq(channelAccounts.isActive, true));
+        .where(and(eq(channelAccounts.companyId, companyId), eq(channelAccounts.isActive, true)));
 
       const socialAccounts = accounts.filter((a) =>
         ['INSTAGRAM', 'FACEBOOK', 'THREADS'].includes(a.channel)
@@ -219,12 +231,18 @@ export default async function commentsRouter(fastify: FastifyInstance) {
                 const existing = await db
                   .select({ id: socialComments.id })
                   .from(socialComments)
-                  .where(eq(socialComments.externalCommentId, String(c.id)));
+                  .where(
+                    and(
+                      eq(socialComments.companyId, companyId),
+                      eq(socialComments.externalCommentId, String(c.id))
+                    )
+                  );
                 if (existing.length === 0) {
                   const [insertedComment] = await db
                     .insert(socialComments)
                     .values({
                       id: crypto.randomUUID(),
+                      companyId,
                       channel: 'INSTAGRAM',
                       channelAccountId: acc.id,
                       postId: String(m.id),
@@ -260,12 +278,18 @@ export default async function commentsRouter(fastify: FastifyInstance) {
                 const existing = await db
                   .select({ id: socialComments.id })
                   .from(socialComments)
-                  .where(eq(socialComments.externalCommentId, String(c.id)));
+                  .where(
+                    and(
+                      eq(socialComments.companyId, companyId),
+                      eq(socialComments.externalCommentId, String(c.id))
+                    )
+                  );
                 if (existing.length === 0) {
                   const [insertedComment] = await db
                     .insert(socialComments)
                     .values({
                       id: crypto.randomUUID(),
+                      companyId,
                       channel: 'FACEBOOK',
                       channelAccountId: acc.id,
                       postId: String(p.id),
@@ -307,12 +331,18 @@ export default async function commentsRouter(fastify: FastifyInstance) {
                 const existing = await db
                   .select({ id: socialComments.id })
                   .from(socialComments)
-                  .where(eq(socialComments.externalCommentId, String(r.id)));
+                  .where(
+                    and(
+                      eq(socialComments.companyId, companyId),
+                      eq(socialComments.externalCommentId, String(r.id))
+                    )
+                  );
                 if (existing.length === 0) {
                   const [insertedComment] = await db
                     .insert(socialComments)
                     .values({
                       id: crypto.randomUUID(),
+                      companyId,
                       channel: 'THREADS',
                       channelAccountId: acc.id,
                       postId: String(p.id),
@@ -347,7 +377,12 @@ export default async function commentsRouter(fastify: FastifyInstance) {
         },
       });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -356,6 +391,8 @@ export default async function commentsRouter(fastify: FastifyInstance) {
     Body: { replyText?: string };
   }>('/:id/reply', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('omnichannel', undefined, companyId);
       const replyText = String(req.body?.replyText || '').trim();
       if (!replyText) {
         return reply.status(400).send({ success: false, error: 'Teks balasan wajib diisi' });
@@ -364,7 +401,7 @@ export default async function commentsRouter(fastify: FastifyInstance) {
       const [comment] = await db
         .select()
         .from(socialComments)
-        .where(eq(socialComments.id, req.params.id));
+        .where(and(eq(socialComments.id, req.params.id), eq(socialComments.companyId, companyId)));
       if (!comment) {
         return reply.status(404).send({ success: false, error: 'Komentar tidak ditemukan' });
       }
@@ -372,7 +409,7 @@ export default async function commentsRouter(fastify: FastifyInstance) {
       const [acc] = await db
         .select()
         .from(channelAccounts)
-        .where(eq(channelAccounts.id, comment.channelAccountId));
+        .where(and(eq(channelAccounts.id, comment.channelAccountId), eq(channelAccounts.companyId, companyId)));
 
       if (acc) {
         await sendCommentReplyApi(acc, comment, replyText);
@@ -386,8 +423,10 @@ export default async function commentsRouter(fastify: FastifyInstance) {
 
       return reply.send({ success: true, data: updated });
     } catch (error: any) {
-      return reply.status(400).send({
+      return reply.status(error?.statusCode || 400).send({
         success: false,
+        code: error?.code,
+        feature: error?.feature,
         error: error.response?.data?.error?.message || error.message,
       });
     }
@@ -398,11 +437,12 @@ export default async function commentsRouter(fastify: FastifyInstance) {
     Body: { status?: string };
   }>('/:id/status', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const status = String(req.body?.status || 'DONE').toUpperCase();
       const [updated] = await db
         .update(socialComments)
         .set({ status: status === 'PENDING' ? 'PENDING' : 'DONE' })
-        .where(eq(socialComments.id, req.params.id))
+        .where(and(eq(socialComments.id, req.params.id), eq(socialComments.companyId, companyId)))
         .returning();
       if (!updated) {
         return reply.status(404).send({ success: false, error: 'Komentar tidak ditemukan' });
@@ -415,7 +455,10 @@ export default async function commentsRouter(fastify: FastifyInstance) {
 
   fastify.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     try {
-      await db.delete(socialComments).where(eq(socialComments.id, req.params.id));
+      const companyId = getRequestCompanyId(req);
+      await db
+        .delete(socialComments)
+        .where(and(eq(socialComments.id, req.params.id), eq(socialComments.companyId, companyId)));
       return reply.send({ success: true });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

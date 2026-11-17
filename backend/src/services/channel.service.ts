@@ -49,6 +49,14 @@ export async function upsertInboundChannelMessage(params: {
 
   const now = new Date();
 
+  // Resolve companyId from channelAccounts row
+  const [accountRow] = await db
+    .select({ companyId: channelAccounts.companyId })
+    .from(channelAccounts)
+    .where(eq(channelAccounts.id, channelAccountId))
+    .limit(1);
+  const companyId: string = accountRow?.companyId ?? 'default';
+
   // Deduplicate by externalMessageId if present
   if (externalMessageId) {
     const dup = await db
@@ -60,12 +68,13 @@ export async function upsertInboundChannelMessage(params: {
     }
   }
 
-  // 1. Find or create contact via contact_identities
+  // 1. Find or create contact via contact_identities (scoped to companyId)
   const identityRows = await db
     .select()
     .from(contactIdentities)
     .where(
       and(
+        eq(contactIdentities.companyId, companyId),
         eq(contactIdentities.channel, channel),
         eq(contactIdentities.externalId, externalSenderId)
       )
@@ -79,11 +88,12 @@ export async function upsertInboundChannelMessage(params: {
       const byPhone = await db
         .select()
         .from(contacts)
-        .where(eq(contacts.nomorWhatsapp, cleanPhone));
+        .where(and(eq(contacts.companyId, companyId), eq(contacts.nomorWhatsapp, cleanPhone)));
       if (byPhone[0]) {
         contactId = byPhone[0].id;
         await db.insert(contactIdentities).values({
           id: crypto.randomUUID(),
+          companyId,
           contactId,
           channel,
           externalId: externalSenderId,
@@ -106,6 +116,7 @@ export async function upsertInboundChannelMessage(params: {
     contactId = crypto.randomUUID();
     await db.insert(contacts).values({
       id: contactId,
+      companyId,
       namaLengkap: displayName,
       namaPanggilan: senderHandle || senderName || null,
       nomorWhatsapp: cleanWaCloud,
@@ -116,6 +127,7 @@ export async function upsertInboundChannelMessage(params: {
 
     await db.insert(contactIdentities).values({
       id: crypto.randomUUID(),
+      companyId,
       contactId,
       channel,
       externalId: externalSenderId,
@@ -124,12 +136,13 @@ export async function upsertInboundChannelMessage(params: {
     });
   }
 
-  // 2. Find or create conversation for (contactId, channel, channelAccountId)
+  // 2. Find or create conversation for (companyId, contactId, channel, channelAccountId)
   const convRows = await db
     .select()
     .from(conversations)
     .where(
       and(
+        eq(conversations.companyId, companyId),
         eq(conversations.contactId, contactId),
         eq(conversations.channel, channel),
         eq(conversations.channelAccountId, channelAccountId)
@@ -157,6 +170,7 @@ export async function upsertInboundChannelMessage(params: {
     conversationId = crypto.randomUUID();
     await db.insert(conversations).values({
       id: conversationId,
+      companyId,
       contactId,
       channel,
       channelAccountId,
@@ -205,6 +219,7 @@ export async function upsertInboundChannelMessage(params: {
   // 3. Insert chatMessage
   await db.insert(chatMessages).values({
     id: crypto.randomUUID(),
+    companyId,
     conversationId,
     contactId,
     direction: 'INBOUND',
@@ -219,10 +234,10 @@ export async function upsertInboundChannelMessage(params: {
     createdAt: now,
   });
 
-  liveEvents.emit('conversations:update', { conversationId, channel });
+  liveEvents.emit('conversations:update', { conversationId, channel, companyId });
 
   if (body) {
-    const contactRows = await db.select().from(contacts).where(eq(contacts.id, contactId));
+    const contactRows = await db.select().from(contacts).where(and(eq(contacts.companyId, companyId), eq(contacts.id, contactId)));
     const contactRecord = contactRows[0] || { id: contactId, namaLengkap: senderName || 'Pelanggan' };
     void handleInboundAutomation({
       conversationId,
@@ -233,6 +248,7 @@ export async function upsertInboundChannelMessage(params: {
       channelAccountId,
       externalThreadId: externalThreadId || existing?.externalThreadId || null,
       isNewConversation: !existing,
+      companyId,
     });
   }
 

@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eq, asc } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import crypto from 'crypto';
 import { db } from '../db';
 import { crmAgents, crmRoles } from '../db/schema';
@@ -7,18 +7,25 @@ import { licenseService } from '../services/license.service';
 import {
   ALL_PERMISSIONS,
   ensureDefaultRolesSeeded,
+  getCompanyAdminRoleId,
   getCurrentAuthUser,
+  getRequestCompanyId,
   hashPassword,
+  isAdminRoleId,
   parseAgentPermissions,
   PERMISSION_CATALOG,
 } from './auth';
 
-function formatRoleRow(r: typeof crmRoles.$inferSelect, agentCount = 0) {
+function formatRoleRow(r: typeof crmRoles.$inferSelect, agentCount = 0, companyId?: string) {
   return {
     id: r.id,
     name: r.name,
     description: r.description || '',
-    permissions: parseAgentPermissions(r.permissions, r.id === 'role_admin' ? 'ADMIN' : 'AGENT', true),
+    permissions: parseAgentPermissions(
+      r.permissions,
+      isAdminRoleId(r.id, companyId) ? 'ADMIN' : 'AGENT',
+      true
+    ),
     isSystem: Boolean(r.isSystem),
     agentCount,
     createdAt: r.createdAt,
@@ -41,27 +48,30 @@ export default async function agentsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET all agents + roles + permission catalog + license quota
-  fastify.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
+  // GET all agents + roles + permission catalog + license quota (scoped to companyId)
+  fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      await ensureDefaultRolesSeeded();
+      const companyId = getRequestCompanyId(req);
+      await ensureDefaultRolesSeeded(companyId);
+      const adminRoleId = getCompanyAdminRoleId(companyId);
+
       const [rows, roleRows, lic] = await Promise.all([
-        db.select().from(crmAgents).orderBy(asc(crmAgents.createdAt)),
-        db.select().from(crmRoles).orderBy(asc(crmRoles.createdAt)),
-        licenseService.getLicense(),
+        db.select().from(crmAgents).where(eq(crmAgents.companyId, companyId)).orderBy(asc(crmAgents.createdAt)),
+        db.select().from(crmRoles).where(eq(crmRoles.companyId, companyId)).orderBy(asc(crmRoles.createdAt)),
+        licenseService.getLicense(companyId),
       ]);
 
       const roleMap = new Map(roleRows.map((r) => [r.id, r]));
       const roleUsageCount = new Map<string, number>();
 
       const agents = rows.map((a) => {
-        const effectiveRoleId = a.roleId || (a.role === 'ADMIN' ? 'role_admin' : null);
+        const effectiveRoleId = a.roleId || (a.role === 'ADMIN' ? adminRoleId : null);
         if (effectiveRoleId) {
           roleUsageCount.set(effectiveRoleId, (roleUsageCount.get(effectiveRoleId) || 0) + 1);
         }
         const matchedRole = effectiveRoleId ? roleMap.get(effectiveRoleId) : undefined;
         const role: 'ADMIN' | 'AGENT' =
-          a.role === 'ADMIN' || matchedRole?.id === 'role_admin' ? 'ADMIN' : 'AGENT';
+          a.role === 'ADMIN' || isAdminRoleId(matchedRole?.id, companyId) ? 'ADMIN' : 'AGENT';
         return {
           id: a.id,
           name: a.name,
@@ -80,7 +90,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         };
       });
 
-      const roles = roleRows.map((r) => formatRoleRow(r, roleUsageCount.get(r.id) || 0));
+      const roles = roleRows.map((r) => formatRoleRow(r, roleUsageCount.get(r.id) || 0, companyId));
 
       return reply.send({
         success: true,
@@ -90,6 +100,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
           permissionCatalog: PERMISSION_CATALOG,
           quota: {
             multiAgent: Boolean(lic.features.multiAgent) && !lic.isExpired,
+            customRoles: Boolean(lic.features.customRoles) && !lic.isExpired,
             maxAgents: lic.isExpired ? 0 : lic.features.maxAgents || 1,
             currentCount: agents.length,
             plan: lic.plan,
@@ -102,22 +113,27 @@ export default async function agentsRouter(fastify: FastifyInstance) {
   });
 
   // Roles CRUD endpoints
-  fastify.get('/roles', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/roles', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      await ensureDefaultRolesSeeded();
+      const companyId = getRequestCompanyId(req);
+      await ensureDefaultRolesSeeded(companyId);
+      const adminRoleId = getCompanyAdminRoleId(companyId);
       const [roleRows, agentRows] = await Promise.all([
-        db.select().from(crmRoles).orderBy(asc(crmRoles.createdAt)),
-        db.select({ roleId: crmAgents.roleId, role: crmAgents.role }).from(crmAgents),
+        db.select().from(crmRoles).where(eq(crmRoles.companyId, companyId)).orderBy(asc(crmRoles.createdAt)),
+        db
+          .select({ roleId: crmAgents.roleId, role: crmAgents.role })
+          .from(crmAgents)
+          .where(eq(crmAgents.companyId, companyId)),
       ]);
       const counts = new Map<string, number>();
       for (const a of agentRows) {
-        const key = a.roleId || (a.role === 'ADMIN' ? 'role_admin' : '');
+        const key = a.roleId || (a.role === 'ADMIN' ? adminRoleId : '');
         if (key) counts.set(key, (counts.get(key) || 0) + 1);
       }
       return reply.send({
         success: true,
         data: {
-          roles: roleRows.map((r) => formatRoleRow(r, counts.get(r.id) || 0)),
+          roles: roleRows.map((r) => formatRoleRow(r, counts.get(r.id) || 0, companyId)),
           permissionCatalog: PERMISSION_CATALOG,
         },
       });
@@ -130,14 +146,16 @@ export default async function agentsRouter(fastify: FastifyInstance) {
     Body: { name?: string; description?: string; permissions?: string[] };
   }>, reply: FastifyReply) => {
     try {
-      await ensureDefaultRolesSeeded();
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('customRoles', undefined, companyId);
+      await ensureDefaultRolesSeeded(companyId);
       const currentUser = await getCurrentAuthUser(req);
       const name = String(req.body?.name || '').trim();
       const description = req.body?.description ? String(req.body.description).trim() : null;
       if (!name) {
         return reply.status(400).send({ success: false, error: 'Nama role wajib diisi.' });
       }
-      const existing = await db.select().from(crmRoles);
+      const existing = await db.select().from(crmRoles).where(eq(crmRoles.companyId, companyId));
       if (existing.some((r) => r.name.toLowerCase() === name.toLowerCase())) {
         return reply.status(409).send({ success: false, error: 'Nama role sudah digunakan.' });
       }
@@ -162,6 +180,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         .insert(crmRoles)
         .values({
           id: `role_${crypto.randomUUID().slice(0, 8)}`,
+          companyId,
           name,
           description,
           permissions: JSON.stringify(cleanPerms),
@@ -171,9 +190,14 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         })
         .returning();
 
-      return reply.status(201).send({ success: true, data: formatRoleRow(inserted, 0) });
+      return reply.status(201).send({ success: true, data: formatRoleRow(inserted, 0, companyId) });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -182,17 +206,19 @@ export default async function agentsRouter(fastify: FastifyInstance) {
     Body: { name?: string; description?: string | null; permissions?: string[] };
   }>('/roles/:roleId', async (req, reply) => {
     try {
-      await ensureDefaultRolesSeeded();
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('customRoles', undefined, companyId);
+      await ensureDefaultRolesSeeded(companyId);
       const currentUser = await getCurrentAuthUser(req);
       const [target] = await db
         .select()
         .from(crmRoles)
-        .where(eq(crmRoles.id, req.params.roleId))
+        .where(and(eq(crmRoles.id, req.params.roleId), eq(crmRoles.companyId, companyId)))
         .limit(1);
       if (!target) {
         return reply.status(404).send({ success: false, error: 'Role tidak ditemukan' });
       }
-      if (target.id === 'role_admin') {
+      if (isAdminRoleId(target.id, companyId)) {
         return reply.status(400).send({
           success: false,
           error: 'Role bawaan Administrator selalu memiliki akses penuh dan tidak dapat dibatasi.',
@@ -205,7 +231,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         if (!cleanName) {
           return reply.status(400).send({ success: false, error: 'Nama role tidak boleh kosong.' });
         }
-        const allRoles = await db.select().from(crmRoles);
+        const allRoles = await db.select().from(crmRoles).where(eq(crmRoles.companyId, companyId));
         if (allRoles.some((r) => r.id !== target.id && r.name.toLowerCase() === cleanName.toLowerCase())) {
           return reply.status(409).send({ success: false, error: 'Nama role sudah digunakan.' });
         }
@@ -234,33 +260,40 @@ export default async function agentsRouter(fastify: FastifyInstance) {
       const [updated] = await db
         .update(crmRoles)
         .set(updateData)
-        .where(eq(crmRoles.id, target.id))
+        .where(and(eq(crmRoles.id, target.id), eq(crmRoles.companyId, companyId)))
         .returning();
 
       if (updateData.permissions) {
         await db
           .update(crmAgents)
           .set({ permissions: updateData.permissions, updatedAt: new Date() })
-          .where(eq(crmAgents.roleId, target.id));
+          .where(and(eq(crmAgents.roleId, target.id), eq(crmAgents.companyId, companyId)));
       }
 
       const assigned = await db
         .select({ id: crmAgents.id })
         .from(crmAgents)
-        .where(eq(crmAgents.roleId, target.id));
-      return reply.send({ success: true, data: formatRoleRow(updated, assigned.length) });
+        .where(and(eq(crmAgents.roleId, target.id), eq(crmAgents.companyId, companyId)));
+      return reply.send({ success: true, data: formatRoleRow(updated, assigned.length, companyId) });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   fastify.delete<{ Params: { roleId: string } }>('/roles/:roleId', async (req, reply) => {
     try {
-      await ensureDefaultRolesSeeded();
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('customRoles', undefined, companyId);
+      await ensureDefaultRolesSeeded(companyId);
       const [target] = await db
         .select()
         .from(crmRoles)
-        .where(eq(crmRoles.id, req.params.roleId))
+        .where(and(eq(crmRoles.id, req.params.roleId), eq(crmRoles.companyId, companyId)))
         .limit(1);
       if (!target) {
         return reply.status(404).send({ success: false, error: 'Role tidak ditemukan' });
@@ -274,21 +307,26 @@ export default async function agentsRouter(fastify: FastifyInstance) {
       const inUse = await db
         .select({ id: crmAgents.id })
         .from(crmAgents)
-        .where(eq(crmAgents.roleId, target.id));
+        .where(and(eq(crmAgents.roleId, target.id), eq(crmAgents.companyId, companyId)));
       if (inUse.length > 0) {
         return reply.status(400).send({
           success: false,
           error: `Role "${target.name}" masih digunakan oleh ${inUse.length} akun CS. Pindahkan akun tersebut ke role lain terlebih dahulu.`,
         });
       }
-      await db.delete(crmRoles).where(eq(crmRoles.id, target.id));
+      await db.delete(crmRoles).where(and(eq(crmRoles.id, target.id), eq(crmRoles.companyId, companyId)));
       return reply.send({ success: true });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
-  // POST create new agent (enforces multiAgent & maxAgents license quota)
+  // POST create new agent (enforces multiAgent & maxAgents license quota per company)
   fastify.post('/', async (req: FastifyRequest<{
     Body: {
       name: string;
@@ -300,17 +338,19 @@ export default async function agentsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
-      await ensureDefaultRolesSeeded();
+      const companyId = getRequestCompanyId(req);
+      await ensureDefaultRolesSeeded(companyId);
+      const adminRoleId = getCompanyAdminRoleId(companyId);
       const currentUser = await getCurrentAuthUser(req);
-      const lic = await licenseService.assertLicenseActive();
-      const existing = await db.select().from(crmAgents);
+      const lic = await licenseService.assertLicenseActive(companyId);
+      const existing = await db.select().from(crmAgents).where(eq(crmAgents.companyId, companyId));
 
       if (!lic.features.multiAgent) {
         return reply.status(403).send({
           success: false,
           code: 'FEATURE_LOCKED',
           feature: 'multiAgent',
-          error: `Fitur Multi-Agent terkunci pada paket "${lic.plan}". Upgrade ke Pro Bulanan atau Enterprise untuk menambah akun agent.`,
+          error: `Fitur Multi-Agent terkunci pada paket "${lic.plan}". Upgrade ke Growth Pro atau lebih tinggi untuk menambah akun agent.`,
         });
       }
 
@@ -331,7 +371,11 @@ export default async function agentsRouter(fastify: FastifyInstance) {
       let resolvedRoleId: string | null = req.body?.roleId ? String(req.body.roleId).trim() || null : null;
       let matchedRole: typeof crmRoles.$inferSelect | undefined;
       if (resolvedRoleId) {
-        const rRows = await db.select().from(crmRoles).where(eq(crmRoles.id, resolvedRoleId)).limit(1);
+        const rRows = await db
+          .select()
+          .from(crmRoles)
+          .where(and(eq(crmRoles.id, resolvedRoleId), eq(crmRoles.companyId, companyId)))
+          .limit(1);
         matchedRole = rRows[0];
         if (!matchedRole) {
           return reply.status(400).send({ success: false, error: 'Role yang dipilih tidak ditemukan.' });
@@ -339,7 +383,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
       }
 
       const role: 'ADMIN' | 'AGENT' =
-        req.body?.role === 'ADMIN' || matchedRole?.id === 'role_admin' ? 'ADMIN' : 'AGENT';
+        req.body?.role === 'ADMIN' || isAdminRoleId(matchedRole?.id, companyId) ? 'ADMIN' : 'AGENT';
 
       if (role === 'ADMIN' && currentUser?.role !== 'ADMIN') {
         return reply.status(403).send({
@@ -348,7 +392,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         });
       }
       if (role === 'ADMIN' && !resolvedRoleId) {
-        resolvedRoleId = 'role_admin';
+        resolvedRoleId = adminRoleId;
       }
 
       if (!name || !email || password.length < 6) {
@@ -358,8 +402,13 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         });
       }
 
-      const dup = existing.find((a) => a.email.toLowerCase() === email);
-      if (dup) {
+      // Global email uniqueness across all companies because authentication resolves by email
+      const [globalDup] = await db
+        .select({ id: crmAgents.id })
+        .from(crmAgents)
+        .where(eq(crmAgents.email, email))
+        .limit(1);
+      if (globalDup) {
         return reply.status(409).send({ success: false, error: 'Email sudah terdaftar.' });
       }
 
@@ -369,11 +418,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
           : matchedRole
           ? parseAgentPermissions(matchedRole.permissions, 'AGENT', true)
           : Array.isArray(req.body?.permissions)
-          ? parseAgentPermissions(
-              JSON.stringify(req.body.permissions),
-              'AGENT',
-              true
-            )
+          ? parseAgentPermissions(JSON.stringify(req.body.permissions), 'AGENT', true)
           : ['dashboard', 'conversations', 'conversations.reply', 'conversations.manage', 'contacts'];
 
       const now = new Date();
@@ -381,10 +426,12 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         .insert(crmAgents)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           name,
           email,
           passwordHash: hashPassword(password),
           role,
+          isPlatformAdmin: false,
           roleId: resolvedRoleId,
           permissions: JSON.stringify(cleanPerms),
           isActive: true,
@@ -409,11 +456,16 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         },
       });
     } catch (error: any) {
-      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
-  // PATCH update agent (role, roleId, permissions, isActive, name, email, password)
+  // PATCH update agent (scoped to companyId)
   fastify.patch<{
     Params: { id: string };
     Body: {
@@ -427,8 +479,13 @@ export default async function agentsRouter(fastify: FastifyInstance) {
     };
   }>('/:id', async (req, reply) => {
     try {
-      await ensureDefaultRolesSeeded();
-      const rows = await db.select().from(crmAgents).where(eq(crmAgents.id, req.params.id));
+      const companyId = getRequestCompanyId(req);
+      await ensureDefaultRolesSeeded(companyId);
+      const adminRoleId = getCompanyAdminRoleId(companyId);
+      const rows = await db
+        .select()
+        .from(crmAgents)
+        .where(and(eq(crmAgents.id, req.params.id), eq(crmAgents.companyId, companyId)));
       const target = rows[0];
       if (!target) {
         return reply.status(404).send({ success: false, error: 'Agent tidak ditemukan' });
@@ -451,7 +508,11 @@ export default async function agentsRouter(fastify: FastifyInstance) {
           : undefined;
       let matchedRole: typeof crmRoles.$inferSelect | undefined;
       if (resolvedRoleId) {
-        const rRows = await db.select().from(crmRoles).where(eq(crmRoles.id, resolvedRoleId)).limit(1);
+        const rRows = await db
+          .select()
+          .from(crmRoles)
+          .where(and(eq(crmRoles.id, resolvedRoleId), eq(crmRoles.companyId, companyId)))
+          .limit(1);
         matchedRole = rRows[0];
         if (!matchedRole) {
           return reply.status(400).send({ success: false, error: 'Role yang dipilih tidak ditemukan.' });
@@ -459,9 +520,9 @@ export default async function agentsRouter(fastify: FastifyInstance) {
       }
 
       const nextRole: 'ADMIN' | 'AGENT' =
-        req.body?.role === 'ADMIN' || matchedRole?.id === 'role_admin'
+        req.body?.role === 'ADMIN' || isAdminRoleId(matchedRole?.id, companyId)
           ? 'ADMIN'
-          : req.body?.role === 'AGENT' || (resolvedRoleId !== undefined && resolvedRoleId !== 'role_admin')
+          : req.body?.role === 'AGENT' || (resolvedRoleId !== undefined && !isAdminRoleId(resolvedRoleId, companyId))
           ? 'AGENT'
           : target.role === 'ADMIN'
           ? 'ADMIN'
@@ -484,12 +545,12 @@ export default async function agentsRouter(fastify: FastifyInstance) {
       const willRemainActiveAdmin =
         nextRole === 'ADMIN' && (req.body?.isActive !== undefined ? Boolean(req.body.isActive) : target.isActive);
       if (target.role === 'ADMIN' && !willRemainActiveAdmin) {
-        const all = await db.select().from(crmAgents);
+        const all = await db.select().from(crmAgents).where(eq(crmAgents.companyId, companyId));
         const otherAdmins = all.filter((a) => a.id !== target.id && a.role === 'ADMIN' && a.isActive);
         if (otherAdmins.length === 0) {
           return reply.status(400).send({
             success: false,
-            error: 'Minimal harus ada 1 akun Admin aktif.',
+            error: 'Minimal harus ada 1 akun Admin aktif di perusahaan ini.',
           });
         }
       }
@@ -506,7 +567,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         updatedAt: new Date(),
       };
       if (nextRole === 'ADMIN') {
-        updateData.roleId = 'role_admin';
+        updateData.roleId = adminRoleId;
         updateData.permissions = JSON.stringify([...ALL_PERMISSIONS]);
       } else {
         if (resolvedRoleId !== undefined) {
@@ -542,7 +603,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         if (cleanEmail !== target.email.toLowerCase()) {
           const dupRows = await db.select().from(crmAgents).where(eq(crmAgents.email, cleanEmail));
           if (dupRows.some((r) => r.id !== target.id)) {
-            return reply.status(409).send({ success: false, error: 'Email sudah digunakan oleh agent lain.' });
+            return reply.status(409).send({ success: false, error: 'Email sudah digunakan.' });
           }
           updateData.email = cleanEmail;
         }
@@ -555,7 +616,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
       const updated = await db
         .update(crmAgents)
         .set(updateData)
-        .where(eq(crmAgents.id, target.id))
+        .where(and(eq(crmAgents.id, target.id), eq(crmAgents.companyId, companyId)))
         .returning();
 
       const u = updated[0];
@@ -577,15 +638,19 @@ export default async function agentsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // DELETE agent
+  // DELETE agent (scoped to companyId)
   fastify.delete('/:id', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const currentUser = await getCurrentAuthUser(req);
       if (currentUser?.id === req.params.id) {
         return reply.status(400).send({ success: false, error: 'Tidak dapat menghapus akun yang sedang login.' });
       }
 
-      const rows = await db.select().from(crmAgents).where(eq(crmAgents.id, req.params.id));
+      const rows = await db
+        .select()
+        .from(crmAgents)
+        .where(and(eq(crmAgents.id, req.params.id), eq(crmAgents.companyId, companyId)));
       const target = rows[0];
       if (!target) {
         return reply.status(404).send({ success: false, error: 'Agent tidak ditemukan' });
@@ -599,14 +664,14 @@ export default async function agentsRouter(fastify: FastifyInstance) {
       }
 
       if (target.role === 'ADMIN') {
-        const all = await db.select().from(crmAgents);
+        const all = await db.select().from(crmAgents).where(eq(crmAgents.companyId, companyId));
         const otherAdmins = all.filter((a) => a.id !== target.id && a.role === 'ADMIN' && a.isActive);
         if (otherAdmins.length === 0) {
-          return reply.status(400).send({ success: false, error: 'Minimal harus ada 1 akun Admin aktif.' });
+          return reply.status(400).send({ success: false, error: 'Minimal harus ada 1 akun Admin aktif di perusahaan ini.' });
         }
       }
 
-      await db.delete(crmAgents).where(eq(crmAgents.id, target.id));
+      await db.delete(crmAgents).where(and(eq(crmAgents.id, target.id), eq(crmAgents.companyId, companyId)));
       return reply.send({ success: true });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

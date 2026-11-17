@@ -13,7 +13,7 @@ import { normalizePhoneNumber } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { wahaService } from '../services/waha.service';
-import { requirePermission } from './auth';
+import { getRequestCompanyId, requirePermission } from './auth';
 import crypto from 'crypto';
 
 export function formatContact(c: any) {
@@ -49,6 +49,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     }
     return requirePermission('contacts.create')(req, reply);
   });
+
   // GET all contacts with search and filter
   fastify.get('/', async (req: FastifyRequest<{
     Querystring: {
@@ -62,6 +63,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const {
         search,
         tag,
@@ -75,7 +77,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       const limitNum = Math.max(1, Math.min(10000, parseInt(limit, 10) || 50));
       const offset = (pageNum - 1) * limitNum;
 
-      const conditions: any[] = [];
+      const conditions: any[] = [eq(contacts.companyId, companyId)];
       if (search && search.trim()) {
         const s = `%${search.trim()}%`;
         conditions.push(
@@ -109,7 +111,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         conditions.push(or(eq(contacts.excludeFromMetrics, false), isNull(contacts.excludeFromMetrics)));
       }
 
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const whereClause = and(...conditions);
 
       if (idsOnly === '1' || idsOnly === 'true') {
         const idRows = await db
@@ -137,7 +139,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           .where(whereClause),
         db
           .select({ count: sql<number>`count(*)` })
-          .from(contacts),
+          .from(contacts)
+          .where(eq(contacts.companyId, companyId)),
       ]);
 
       const total = Number(totalResult[0]?.count || 0);
@@ -149,7 +152,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         const idRows = await db
           .select()
           .from(contactIdentities)
-          .where(inArray(contactIdentities.contactId, contactIds));
+          .where(and(eq(contactIdentities.companyId, companyId), inArray(contactIdentities.contactId, contactIds)));
         for (const idRow of idRows) {
           const list = identitiesMap.get(idRow.contactId) || [];
           list.push({
@@ -184,7 +187,11 @@ export default async function contactsRouter(fastify: FastifyInstance) {
   // GET single contact
   fastify.get('/:id', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
-      const list = await db.select().from(contacts).where(eq(contacts.id, req.params.id));
+      const companyId = getRequestCompanyId(req);
+      const list = await db
+        .select()
+        .from(contacts)
+        .where(and(eq(contacts.id, req.params.id), eq(contacts.companyId, companyId)));
       if (list.length === 0) {
         return reply.status(404).send({ success: false, error: 'Kontak tidak ditemukan' });
       }
@@ -211,6 +218,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const {
         nama_lengkap,
         nama_panggilan,
@@ -252,23 +260,14 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       const normalizedPhone = rawWa ? normalizePhoneNumber(rawWa) : null;
 
       // Enforce contact quota from active license
-      const lic = await licenseService.assertLicenseActive();
-      const countRes = await db.select({ count: sql<number>`count(*)` }).from(contacts);
-      const currentTotal = Number(countRes[0]?.count || 0);
-      if (lic.features.maxContacts > 0 && currentTotal >= lic.features.maxContacts) {
-        return reply.status(403).send({
-          success: false,
-          code: 'QUOTA_EXCEEDED',
-          error: `Batas maksimal ${lic.features.maxContacts} kontak untuk paket "${lic.plan}" telah tercapai.`,
-        });
-      }
+      await licenseService.assertQuota('contacts', 1, companyId);
 
-      // Check if phone already exists
+      // Check if phone already exists within this tenant
       if (normalizedPhone) {
         const existing = await db
           .select()
           .from(contacts)
-          .where(eq(contacts.nomorWhatsapp, normalizedPhone));
+          .where(and(eq(contacts.companyId, companyId), eq(contacts.nomorWhatsapp, normalizedPhone)));
 
         if (existing.length > 0) {
           return reply.status(400).send({
@@ -284,6 +283,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         .insert(contacts)
         .values({
           id: contactId,
+          companyId,
           namaLengkap: nama_lengkap.trim(),
           namaPanggilan: nama_panggilan || null,
           tanggalLahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
@@ -304,6 +304,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       for (const idItem of validIdentities) {
         await db.insert(contactIdentities).values({
           id: crypto.randomUUID(),
+          companyId,
           contactId,
           channel: idItem.channel,
           externalId: idItem.externalId,
@@ -314,7 +315,12 @@ export default async function contactsRouter(fastify: FastifyInstance) {
 
       return reply.status(201).send({ success: true, data: formatContact(newContact[0]) });
     } catch (error: any) {
-      return reply.status(error?.statusCode || 500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -335,6 +341,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const {
         nama_lengkap,
         nama_panggilan,
@@ -357,7 +364,13 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         const dup = await db
           .select({ id: contacts.id })
           .from(contacts)
-          .where(and(eq(contacts.nomorWhatsapp, normalizedPhone), ne(contacts.id, req.params.id)));
+          .where(
+            and(
+              eq(contacts.companyId, companyId),
+              eq(contacts.nomorWhatsapp, normalizedPhone),
+              ne(contacts.id, req.params.id)
+            )
+          );
         if (dup.length > 0) {
           return reply.status(400).send({
             success: false,
@@ -386,7 +399,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       const updated = await db
         .update(contacts)
         .set(updateData)
-        .where(eq(contacts.id, req.params.id))
+        .where(and(eq(contacts.id, req.params.id), eq(contacts.companyId, companyId)))
         .returning();
 
       if (updated.length === 0) {
@@ -403,8 +416,14 @@ export default async function contactsRouter(fastify: FastifyInstance) {
             excludeReason: nextReason,
             updatedAt: new Date(),
           })
-          .where(and(eq(conversations.contactId, req.params.id), eq(conversations.isGroup, false)));
-        liveEvents.emit('conversations:update', { contactId: req.params.id });
+          .where(
+            and(
+              eq(conversations.companyId, companyId),
+              eq(conversations.contactId, req.params.id),
+              eq(conversations.isGroup, false)
+            )
+          );
+        liveEvents.emit('conversations:update', { contactId: req.params.id }, companyId);
       }
 
       return reply.send({ success: true, data: formatContact(updated[0]) });
@@ -416,7 +435,14 @@ export default async function contactsRouter(fastify: FastifyInstance) {
   // DELETE contact
   fastify.delete('/:id', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
-      await db.delete(contacts).where(eq(contacts.id, req.params.id));
+      const companyId = getRequestCompanyId(req);
+      const deleted = await db
+        .delete(contacts)
+        .where(and(eq(contacts.id, req.params.id), eq(contacts.companyId, companyId)))
+        .returning({ id: contacts.id });
+      if (!deleted[0]) {
+        return reply.status(404).send({ success: false, error: 'Kontak tidak ditemukan' });
+      }
       return reply.send({ success: true, message: 'Kontak berhasil dihapus' });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -428,13 +454,17 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     Body: { contacts: any[] };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const items = req.body?.contacts;
       if (!Array.isArray(items) || items.length === 0) {
         return reply.status(400).send({ success: false, error: 'Data kontak kosong atau tidak valid' });
       }
 
-      const lic = await licenseService.assertLicenseActive();
-      const countRes = await db.select({ count: sql<number>`count(*)` }).from(contacts);
+      const lic = await licenseService.assertLicenseActive(companyId);
+      const countRes = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(contacts)
+        .where(eq(contacts.companyId, companyId));
       let currentTotal = Number(countRes[0]?.count || 0);
 
       let inserted = 0;
@@ -453,7 +483,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           const existing = await db
             .select()
             .from(contacts)
-            .where(eq(contacts.nomorWhatsapp, phone));
+            .where(and(eq(contacts.companyId, companyId), eq(contacts.nomorWhatsapp, phone)));
 
           if (existing.length > 0) {
             await db
@@ -469,12 +499,13 @@ export default async function contactsRouter(fastify: FastifyInstance) {
               })
               .where(eq(contacts.id, existing[0].id));
           } else {
-            if (lic.features.maxContacts > 0 && currentTotal >= lic.features.maxContacts) {
+            if (!lic.features.unlimitedContacts && (lic.features.maxContacts <= 0 || currentTotal >= lic.features.maxContacts)) {
               skipped++;
               continue;
             }
             await db.insert(contacts).values({
               id: crypto.randomUUID(),
+              companyId,
               namaLengkap: item.nama_lengkap,
               namaPanggilan: item.nama_panggilan || null,
               tanggalLahir: item.tanggal_lahir ? new Date(item.tanggal_lahir) : null,
@@ -500,14 +531,23 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         skipped,
       });
     } catch (error: any) {
-      return reply.status(error?.statusCode || 500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   // GET unique tags
-  fastify.get('/meta/tags', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/meta/tags', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const allContacts = await db.select({ tags: contacts.tags }).from(contacts);
+      const companyId = getRequestCompanyId(req);
+      const allContacts = await db
+        .select({ tags: contacts.tags })
+        .from(contacts)
+        .where(eq(contacts.companyId, companyId));
       const tagSet = new Set<string>();
 
       allContacts.forEach((c) => {
@@ -525,12 +565,13 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // POST merge another contact into targetId (cross-channel contact merge)
+  // POST merge another contact into targetId (cross-channel contact merge within tenant)
   fastify.post<{
     Params: { targetId: string };
     Body: { sourceContactId?: string };
   }>('/:targetId/merge', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const { targetId } = req.params;
       const sourceContactId = String(req.body?.sourceContactId || '').trim();
       if (!sourceContactId) {
@@ -540,17 +581,38 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         return reply.status(400).send({ success: false, error: 'Tidak bisa menggabungkan kontak dengan dirinya sendiri' });
       }
 
-      const [target] = await db.select().from(contacts).where(eq(contacts.id, targetId));
-      const [source] = await db.select().from(contacts).where(eq(contacts.id, sourceContactId));
+      const [target] = await db
+        .select()
+        .from(contacts)
+        .where(and(eq(contacts.id, targetId), eq(contacts.companyId, companyId)));
+      const [source] = await db
+        .select()
+        .from(contacts)
+        .where(and(eq(contacts.id, sourceContactId), eq(contacts.companyId, companyId)));
       if (!target || !source) {
         return reply.status(404).send({ success: false, error: 'Kontak target atau sumber tidak ditemukan' });
       }
 
-      await db.update(contactIdentities).set({ contactId: targetId }).where(eq(contactIdentities.contactId, sourceContactId));
-      await db.update(conversations).set({ contactId: targetId, updatedAt: new Date() }).where(eq(conversations.contactId, sourceContactId));
-      await db.update(chatMessages).set({ contactId: targetId }).where(eq(chatMessages.contactId, sourceContactId));
-      await db.update(csatResponses).set({ contactId: targetId }).where(eq(csatResponses.contactId, sourceContactId));
-      await db.update(campaignRecipients).set({ contactId: targetId }).where(eq(campaignRecipients.contactId, sourceContactId));
+      await db
+        .update(contactIdentities)
+        .set({ contactId: targetId })
+        .where(and(eq(contactIdentities.contactId, sourceContactId), eq(contactIdentities.companyId, companyId)));
+      await db
+        .update(conversations)
+        .set({ contactId: targetId, updatedAt: new Date() })
+        .where(and(eq(conversations.contactId, sourceContactId), eq(conversations.companyId, companyId)));
+      await db
+        .update(chatMessages)
+        .set({ contactId: targetId })
+        .where(and(eq(chatMessages.contactId, sourceContactId), eq(chatMessages.companyId, companyId)));
+      await db
+        .update(csatResponses)
+        .set({ contactId: targetId })
+        .where(and(eq(csatResponses.contactId, sourceContactId), eq(csatResponses.companyId, companyId)));
+      await db
+        .update(campaignRecipients)
+        .set({ contactId: targetId })
+        .where(and(eq(campaignRecipients.contactId, sourceContactId), eq(campaignRecipients.companyId, companyId)));
 
       const mergedTags = Array.from(
         new Set(
@@ -574,19 +636,23 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         patch.nomorWhatsapp = source.nomorWhatsapp;
       }
 
-      // Delete source first if moving unique nomorWhatsapp, or clear source's phone first
       if (!target.nomorWhatsapp && source.nomorWhatsapp) {
-        await db.update(contacts).set({ nomorWhatsapp: null }).where(eq(contacts.id, sourceContactId));
+        await db
+          .update(contacts)
+          .set({ nomorWhatsapp: null })
+          .where(and(eq(contacts.id, sourceContactId), eq(contacts.companyId, companyId)));
       }
       const [updatedTarget] = await db
         .update(contacts)
         .set(patch)
-        .where(eq(contacts.id, targetId))
+        .where(and(eq(contacts.id, targetId), eq(contacts.companyId, companyId)))
         .returning();
 
-      await db.delete(contacts).where(eq(contacts.id, sourceContactId));
+      await db
+        .delete(contacts)
+        .where(and(eq(contacts.id, sourceContactId), eq(contacts.companyId, companyId)));
 
-      liveEvents.emit('conversations:update', {});
+      liveEvents.emit('conversations:update', {}, companyId);
       return reply.send({
         success: true,
         message: 'Kontak berhasil digabungkan',
@@ -603,7 +669,17 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     Body: { channel?: string; externalId?: string; handle?: string };
   }>('/:id/identities', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const contactId = req.params.id;
+      const [ownerContact] = await db
+        .select({ id: contacts.id })
+        .from(contacts)
+        .where(and(eq(contacts.id, contactId), eq(contacts.companyId, companyId)))
+        .limit(1);
+      if (!ownerContact) {
+        return reply.status(404).send({ success: false, error: 'Kontak tidak ditemukan' });
+      }
+
       const channel = String(req.body?.channel || '').trim().toUpperCase();
       const externalId = String(req.body?.externalId || '').trim();
       const handle = req.body?.handle ? String(req.body.handle).trim() : null;
@@ -618,6 +694,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         .from(contactIdentities)
         .where(
           and(
+            eq(contactIdentities.companyId, companyId),
             eq(contactIdentities.contactId, contactId),
             eq(contactIdentities.channel, channel),
             eq(contactIdentities.externalId, externalId)
@@ -635,6 +712,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         .insert(contactIdentities)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           contactId,
           channel,
           externalId,
@@ -653,10 +731,12 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     '/:id/identities/:identityId',
     async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         await db
           .delete(contactIdentities)
           .where(
             and(
+              eq(contactIdentities.companyId, companyId),
               eq(contactIdentities.id, req.params.identityId),
               eq(contactIdentities.contactId, req.params.id)
             )
@@ -673,7 +753,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     Body: { session?: string; overwriteNames?: boolean };
   }>('/sync-whatsapp', async (req, reply) => {
     try {
-      const lic = await licenseService.assertLicenseActive();
+      const companyId = getRequestCompanyId(req);
+      const lic = await licenseService.assertFeature('wahaSync', undefined, companyId);
       const requestedSession = req.body?.session ? String(req.body.session).trim() : undefined;
       const overwriteNames = Boolean(req.body?.overwriteNames);
 
@@ -685,7 +766,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           namaPanggilan: contacts.namaPanggilan,
           nomorWhatsapp: contacts.nomorWhatsapp,
         })
-        .from(contacts);
+        .from(contacts)
+        .where(eq(contacts.companyId, companyId));
 
       const phoneMap = new Map<string, (typeof existingList)[number]>();
       for (const c of existingList) {
@@ -700,11 +782,11 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           externalId: contactIdentities.externalId,
         })
         .from(contactIdentities)
-        .where(eq(contactIdentities.channel, 'WHATSAPP'));
+        .where(and(eq(contactIdentities.companyId, companyId), eq(contactIdentities.channel, 'WHATSAPP')));
       const lidSet = new Set<string>(existingIds.map((x) => x.externalId));
 
       let currentTotal = existingList.length;
-      const maxContacts = lic.features?.maxContacts || 0;
+      const maxContacts = lic.features.unlimitedContacts ? 0 : lic.features.maxContacts || 0;
 
       let created = 0;
       let updated = 0;
@@ -753,6 +835,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           if (item.lid && !lidSet.has(item.lid)) {
             newIdentityRows.push({
               id: crypto.randomUUID(),
+              companyId,
               contactId: existing.id,
               channel: 'WHATSAPP',
               externalId: item.lid,
@@ -764,7 +847,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           continue;
         }
 
-        if (maxContacts > 0 && currentTotal >= maxContacts) {
+        if (!lic.features.unlimitedContacts && (maxContacts <= 0 || currentTotal >= maxContacts)) {
           quotaStopped = true;
           skipped++;
           continue;
@@ -784,6 +867,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
 
         newContactRows.push({
           id: newId,
+          companyId,
           namaLengkap: finalName,
           namaPanggilan: pendingEntry.namaPanggilan,
           nomorWhatsapp: item.phone,
@@ -795,6 +879,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         if (item.lid && !lidSet.has(item.lid)) {
           newIdentityRows.push({
             id: crypto.randomUUID(),
+            companyId,
             contactId: newId,
             channel: 'WHATSAPP',
             externalId: item.lid,
@@ -831,7 +916,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       }
 
       if (created > 0 || updated > 0) {
-        liveEvents.emit('contacts:update', { created, updated, source: 'whatsapp-sync' });
+        liveEvents.emit('contacts:update', { created, updated, source: 'whatsapp-sync' }, companyId);
       }
 
       return reply.send({
@@ -850,6 +935,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     } catch (error: any) {
       return reply.status(error?.statusCode || 500).send({
         success: false,
+        code: error?.code,
+        feature: error?.feature,
         error: error.message || 'Gagal menyinkronkan kontak dari WhatsApp',
       });
     }

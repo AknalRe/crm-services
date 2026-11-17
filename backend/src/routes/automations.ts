@@ -1,9 +1,10 @@
 import crypto from 'crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { commentAutomations } from '../db/schema';
-import { requirePermission } from './auth';
+import { licenseService } from '../services/license.service';
+import { getRequestCompanyId, requirePermission } from './auth';
 
 export default async function automationsRouter(fastify: FastifyInstance) {
   fastify.addHook('preHandler', async (req, reply) => {
@@ -13,11 +14,13 @@ export default async function automationsRouter(fastify: FastifyInstance) {
     return requirePermission('settings.edit')(req, reply);
   });
 
-  fastify.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const rows = await db
         .select()
         .from(commentAutomations)
+        .where(eq(commentAutomations.companyId, companyId))
         .orderBy(desc(commentAutomations.createdAt));
       return reply.send({ success: true, data: rows });
     } catch (error: any) {
@@ -38,6 +41,9 @@ export default async function automationsRouter(fastify: FastifyInstance) {
     };
   }>('/', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('autoReply', undefined, companyId);
+      await licenseService.assertFeature('omnichannel', undefined, companyId);
       const name = String(req.body?.name || '').trim();
       const keyword = String(req.body?.keyword || '').trim();
       if (!name || !keyword) {
@@ -48,6 +54,7 @@ export default async function automationsRouter(fastify: FastifyInstance) {
         .insert(commentAutomations)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           name,
           channel: String(req.body?.channel || 'ALL').toUpperCase(),
           keyword,
@@ -63,7 +70,12 @@ export default async function automationsRouter(fastify: FastifyInstance) {
         .returning();
       return reply.status(201).send({ success: true, data: inserted });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -81,6 +93,9 @@ export default async function automationsRouter(fastify: FastifyInstance) {
     };
   }>('/:id', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('autoReply', undefined, companyId);
+      await licenseService.assertFeature('omnichannel', undefined, companyId);
       const updateData: any = { updatedAt: new Date() };
       if (req.body?.name !== undefined) {
         const cleanName = String(req.body.name).trim();
@@ -112,22 +127,28 @@ export default async function automationsRouter(fastify: FastifyInstance) {
       const [updated] = await db
         .update(commentAutomations)
         .set(updateData)
-        .where(eq(commentAutomations.id, req.params.id))
+        .where(and(eq(commentAutomations.id, req.params.id), eq(commentAutomations.companyId, companyId)))
         .returning();
       if (!updated) {
         return reply.status(404).send({ success: false, error: 'Aturan otomasi tidak ditemukan' });
       }
       return reply.send({ success: true, data: updated });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   fastify.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const deleted = await db
         .delete(commentAutomations)
-        .where(eq(commentAutomations.id, req.params.id))
+        .where(and(eq(commentAutomations.id, req.params.id), eq(commentAutomations.companyId, companyId)))
         .returning();
       if (!deleted[0]) {
         return reply.status(404).send({ success: false, error: 'Aturan otomasi komentar tidak ditemukan' });

@@ -1,9 +1,10 @@
 import crypto from 'crypto';
-import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { FastifyInstance, FastifyReply } from 'fastify';
 import { and, asc, eq, ilike, ne, or } from 'drizzle-orm';
 import { db } from '../db';
 import { cannedResponses, crmLabels, messageTemplates } from '../db/schema';
-import { requirePermission } from './auth';
+import { licenseService } from '../services/license.service';
+import { getRequestCompanyId, requirePermission } from './auth';
 
 const VALID_SCOPES = new Set(['CONVERSATION_LABEL', 'CONTACT_CATEGORY']);
 const VALID_COLORS = new Set(['slate', 'indigo', 'emerald', 'amber', 'rose', 'sky', 'violet']);
@@ -26,16 +27,15 @@ function normalizeShortCode(raw: string): string {
 }
 
 export default async function masterDataRouter(fastify: FastifyInstance) {
-  // ---------------------------------------------------------------------------
   // Master Balasan Cepat (Quick Replies / Canned Responses)
-  // ---------------------------------------------------------------------------
   fastify.get<{ Querystring: { activeOnly?: string; category?: string; search?: string } }>(
     '/quick-replies',
     { preHandler: requirePermission('settings', 'conversations', 'contacts', 'broadcasts') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const { activeOnly, category, search } = req.query || {};
-        const conditions: any[] = [];
+        const conditions: any[] = [eq(cannedResponses.companyId, companyId)];
         if (activeOnly === 'true') conditions.push(eq(cannedResponses.isActive, true));
         if (category && category !== 'ALL') conditions.push(eq(cannedResponses.category, category));
         if (search && search.trim()) {
@@ -52,7 +52,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
         const list = await db
           .select()
           .from(cannedResponses)
-          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .where(and(...conditions))
           .orderBy(asc(cannedResponses.category), asc(cannedResponses.shortCode));
 
         return reply.send({ success: true, data: list });
@@ -75,6 +75,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit', 'conversations.manage') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const shortCode = normalizeShortCode(String(req.body?.shortCode || ''));
         const title = String(req.body?.title || '').trim();
         const category = String(req.body?.category || 'Umum').trim() || 'Umum';
@@ -91,6 +92,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
           .insert(cannedResponses)
           .values({
             id: crypto.randomUUID(),
+            companyId,
             shortCode,
             title,
             category,
@@ -125,6 +127,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit', 'conversations.manage') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const patch: Record<string, any> = { updatedAt: new Date() };
         if (req.body?.shortCode !== undefined) {
           const shortCode = normalizeShortCode(String(req.body.shortCode));
@@ -157,7 +160,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
         const [updated] = await db
           .update(cannedResponses)
           .set(patch)
-          .where(eq(cannedResponses.id, req.params.id))
+          .where(and(eq(cannedResponses.id, req.params.id), eq(cannedResponses.companyId, companyId)))
           .returning();
 
         if (!updated) {
@@ -179,9 +182,10 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit', 'conversations.manage') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const deleted = await db
           .delete(cannedResponses)
-          .where(eq(cannedResponses.id, req.params.id))
+          .where(and(eq(cannedResponses.id, req.params.id), eq(cannedResponses.companyId, companyId)))
           .returning();
         if (!deleted[0]) {
           return reply.status(404).send({ success: false, error: 'Balasan cepat tidak ditemukan' });
@@ -193,23 +197,22 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     }
   );
 
-  // ---------------------------------------------------------------------------
   // Master Label Percakapan & Kategori Kontak
-  // ---------------------------------------------------------------------------
   fastify.get<{ Querystring: { scope?: string; activeOnly?: string } }>(
     '/labels',
     { preHandler: requirePermission('settings', 'conversations', 'contacts', 'broadcasts') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const { scope, activeOnly } = req.query || {};
-        const conditions: any[] = [];
+        const conditions: any[] = [eq(crmLabels.companyId, companyId)];
         if (scope && VALID_SCOPES.has(scope)) conditions.push(eq(crmLabels.scope, scope));
         if (activeOnly === 'true') conditions.push(eq(crmLabels.isActive, true));
 
         const list = await db
           .select()
           .from(crmLabels)
-          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .where(and(...conditions))
           .orderBy(asc(crmLabels.scope), asc(crmLabels.sortOrder), asc(crmLabels.name));
 
         return reply.send({ success: true, data: list });
@@ -230,6 +233,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     };
   }>('/labels', { preHandler: requirePermission('settings.edit') }, async (req, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const scope = String(req.body?.scope || '').trim().toUpperCase();
       if (!VALID_SCOPES.has(scope)) {
         return reply.status(400).send({
@@ -244,7 +248,13 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
       const duplicate = await db
         .select({ id: crmLabels.id })
         .from(crmLabels)
-        .where(and(eq(crmLabels.scope, scope), ilike(crmLabels.name, name)))
+        .where(
+          and(
+            eq(crmLabels.companyId, companyId),
+            eq(crmLabels.scope, scope),
+            ilike(crmLabels.name, name)
+          )
+        )
         .limit(1);
       if (duplicate[0]) {
         return reply.status(400).send({ success: false, error: `"${name}" sudah terdaftar di kelompok ini` });
@@ -262,6 +272,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
         .insert(crmLabels)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           scope,
           name,
           color,
@@ -290,10 +301,11 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     };
   }>('/labels/:id', { preHandler: requirePermission('settings.edit') }, async (req, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const [existing] = await db
         .select()
         .from(crmLabels)
-        .where(eq(crmLabels.id, req.params.id))
+        .where(and(eq(crmLabels.id, req.params.id), eq(crmLabels.companyId, companyId)))
         .limit(1);
       if (!existing) {
         return reply.status(404).send({ success: false, error: 'Label/kategori tidak ditemukan' });
@@ -310,6 +322,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
           .from(crmLabels)
           .where(
             and(
+              eq(crmLabels.companyId, companyId),
               eq(crmLabels.scope, existing.scope),
               ilike(crmLabels.name, cleanName),
               ne(crmLabels.id, existing.id)
@@ -338,7 +351,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
       const [updated] = await db
         .update(crmLabels)
         .set(patch)
-        .where(eq(crmLabels.id, existing.id))
+        .where(and(eq(crmLabels.id, existing.id), eq(crmLabels.companyId, companyId)))
         .returning();
 
       return reply.send({ success: true, data: updated });
@@ -352,9 +365,10 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const deleted = await db
           .delete(crmLabels)
-          .where(eq(crmLabels.id, req.params.id))
+          .where(and(eq(crmLabels.id, req.params.id), eq(crmLabels.companyId, companyId)))
           .returning();
         if (!deleted[0]) {
           return reply.status(404).send({ success: false, error: 'Label/kategori tidak ditemukan' });
@@ -366,16 +380,15 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     }
   );
 
-  // ---------------------------------------------------------------------------
   // Master Template Pesan / Siaran
-  // ---------------------------------------------------------------------------
   fastify.get<{ Querystring: { activeOnly?: string; channel?: string; category?: string } }>(
     '/templates',
     { preHandler: requirePermission('settings', 'broadcasts', 'conversations', 'birthday') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const { activeOnly, channel, category } = req.query || {};
-        const conditions: any[] = [];
+        const conditions: any[] = [eq(messageTemplates.companyId, companyId)];
         if (activeOnly === 'true') conditions.push(eq(messageTemplates.isActive, true));
         if (channel && channel !== 'ALL') conditions.push(eq(messageTemplates.channel, channel));
         if (category && category !== 'ALL') conditions.push(eq(messageTemplates.category, category));
@@ -383,7 +396,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
         const list = await db
           .select()
           .from(messageTemplates)
-          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .where(and(...conditions))
           .orderBy(asc(messageTemplates.category), asc(messageTemplates.name));
 
         return reply.send({ success: true, data: list });
@@ -406,6 +419,9 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit', 'broadcasts.send') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
+        await licenseService.assertQuota('templates', 1, companyId);
+
         const name = String(req.body?.name || '').trim();
         const content = String(req.body?.content || '').trim();
         const category = String(req.body?.category || 'Umum').trim() || 'Umum';
@@ -424,6 +440,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
           .insert(messageTemplates)
           .values({
             id: crypto.randomUUID(),
+            companyId,
             name,
             category,
             channel,
@@ -436,7 +453,12 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
 
         return reply.status(201).send({ success: true, data: created });
       } catch (error: any) {
-        return reply.status(500).send({ success: false, error: error.message });
+        return reply.status(error?.statusCode || 500).send({
+          success: false,
+          code: error?.code,
+          feature: error?.feature,
+          error: error.message,
+        });
       }
     }
   );
@@ -455,6 +477,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit', 'broadcasts.send') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const patch: Record<string, any> = { updatedAt: new Date() };
         if (req.body?.name !== undefined) {
           const cleanName = String(req.body.name).trim();
@@ -484,7 +507,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
         const [updated] = await db
           .update(messageTemplates)
           .set(patch)
-          .where(eq(messageTemplates.id, req.params.id))
+          .where(and(eq(messageTemplates.id, req.params.id), eq(messageTemplates.companyId, companyId)))
           .returning();
 
         if (!updated) {
@@ -502,9 +525,10 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit', 'broadcasts.send') },
     async (req, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const deleted = await db
           .delete(messageTemplates)
-          .where(eq(messageTemplates.id, req.params.id))
+          .where(and(eq(messageTemplates.id, req.params.id), eq(messageTemplates.companyId, companyId)))
           .returning();
         if (!deleted[0]) {
           return reply.status(404).send({ success: false, error: 'Template pesan tidak ditemukan' });

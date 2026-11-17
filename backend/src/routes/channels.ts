@@ -4,9 +4,10 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { config } from '../config';
 import { db } from '../db';
-import { channelAccounts, channelConnectLinks, socialComments } from '../db/schema';
+import { channelAccounts, channelConnectLinks, DEFAULT_COMPANY_ID, socialComments } from '../db/schema';
 import { licenseService } from '../services/license.service';
-import { requirePermission } from './auth';
+import { runWithCompany } from '../services/tenantContext';
+import { getRequestCompanyId, requirePermission } from './auth';
 import { applyCommentAutomations } from './comments';
 import {
   OmnichannelType,
@@ -40,11 +41,13 @@ export default async function channelsRouter(fastify: FastifyInstance) {
   fastify.get(
     '/',
     { preHandler: requirePermission('settings', 'conversations') },
-    async (_req: FastifyRequest, reply: FastifyReply) => {
+    async (req: FastifyRequest, reply: FastifyReply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const rows = await db
           .select()
           .from(channelAccounts)
+          .where(eq(channelAccounts.companyId, companyId))
           .orderBy(asc(channelAccounts.channel), asc(channelAccounts.createdAt));
         return reply.send({ success: true, data: rows.map(maskChannelAccount) });
       } catch (error: any) {
@@ -64,6 +67,9 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     };
   }>('/', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertQuota('channels', 1, companyId);
+
       const channel = String(req.body?.channel || '').trim().toUpperCase() as OmnichannelType;
       if (!ALLOWED_CHANNELS.has(channel)) {
         return reply.status(400).send({
@@ -87,6 +93,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         .insert(channelAccounts)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           channel,
           name,
           accountId,
@@ -100,7 +107,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
 
       return reply.status(201).send({ success: true, data: maskChannelAccount(created) });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -110,6 +122,8 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     Body: { name?: string; accountId?: string; accessToken?: string; isActive?: boolean };
   }>('/:id', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('omnichannel', undefined, companyId);
       const patch: Record<string, any> = { updatedAt: new Date() };
       if (req.body?.name !== undefined) patch.name = String(req.body.name).trim();
       if (req.body?.accountId !== undefined) patch.accountId = String(req.body.accountId).trim();
@@ -121,14 +135,19 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       const [updated] = await db
         .update(channelAccounts)
         .set(patch)
-        .where(eq(channelAccounts.id, req.params.id))
+        .where(and(eq(channelAccounts.id, req.params.id), eq(channelAccounts.companyId, companyId)))
         .returning();
       if (!updated) {
         return reply.status(404).send({ success: false, error: 'Akun channel tidak ditemukan' });
       }
       return reply.send({ success: true, data: maskChannelAccount(updated) });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -138,9 +157,10 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit') },
     async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const deleted = await db
           .delete(channelAccounts)
-          .where(eq(channelAccounts.id, req.params.id))
+          .where(and(eq(channelAccounts.id, req.params.id), eq(channelAccounts.companyId, companyId)))
           .returning();
         if (!deleted[0]) {
           return reply.status(404).send({ success: false, error: 'Akun channel tidak ditemukan' });
@@ -213,15 +233,17 @@ export default async function channelsRouter(fastify: FastifyInstance) {
                 ).trim() || (msg.type ? `[${String(msg.type).toUpperCase()}]` : '');
               if (!msgBody) continue;
 
-              await upsertInboundChannelMessage({
-                channel: 'WHATSAPP_CLOUD',
-                channelAccountId: waAccount.id,
-                externalSenderId: senderId,
-                senderName: profileName,
-                senderHandle: `+${senderId.replace(/\D/g, '')}`,
-                externalMessageId: msg.id || null,
-                body: msgBody,
-              });
+              await runWithCompany(waAccount.companyId, () =>
+                upsertInboundChannelMessage({
+                  channel: 'WHATSAPP_CLOUD',
+                  channelAccountId: waAccount.id,
+                  externalSenderId: senderId,
+                  senderName: profileName,
+                  senderHandle: `+${senderId.replace(/\D/g, '')}`,
+                  externalMessageId: msg.id || null,
+                  body: msgBody,
+                })
+              );
             }
           }
           continue;
@@ -260,15 +282,17 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           const displayBody = text || (mediaType ? `[${mediaType.toUpperCase()}]` : '');
           if (!displayBody) continue;
 
-          await upsertInboundChannelMessage({
-            channel: channelGuess,
-            channelAccountId: account.id,
-            externalSenderId: senderId,
-            externalMessageId: ev.message?.mid || null,
-            body: displayBody,
-            mediaUrl,
-            mediaType,
-          });
+          await runWithCompany(account.companyId, () =>
+            upsertInboundChannelMessage({
+              channel: channelGuess,
+              channelAccountId: account.id,
+              externalSenderId: senderId,
+              externalMessageId: ev.message?.mid || null,
+              body: displayBody,
+              mediaUrl,
+              mediaType,
+            })
+          );
         }
 
         // 2. Instagram / Facebook / Threads Comments & Mentions (changes array)
@@ -281,17 +305,19 @@ export default async function channelsRouter(fastify: FastifyInstance) {
 
           const extCommentId = String(val.id || val.comment_id || '');
 
-          await upsertInboundChannelMessage({
-            channel: channelGuess,
-            channelAccountId: account.id,
-            externalSenderId: senderId,
-            senderName: val.from?.name || val.from?.username || null,
-            senderHandle: val.from?.username || val.username || null,
-            externalMessageId: extCommentId || null,
-            externalThreadId: val.id || val.media?.id || null,
-            contextTitle: ch.field ? `Interaksi ${ch.field}` : undefined,
-            body: text,
-          });
+          await runWithCompany(account.companyId, () =>
+            upsertInboundChannelMessage({
+              channel: channelGuess,
+              channelAccountId: account.id,
+              externalSenderId: senderId,
+              senderName: val.from?.name || val.from?.username || null,
+              senderHandle: val.from?.username || val.username || null,
+              externalMessageId: extCommentId || null,
+              externalThreadId: val.id || val.media?.id || null,
+              contextTitle: ch.field ? `Interaksi ${ch.field}` : undefined,
+              body: text,
+            })
+          );
 
           if (
             objectType !== 'whatsapp_business_account' &&
@@ -304,6 +330,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
                     .from(socialComments)
                     .where(
                       and(
+                        eq(socialComments.companyId, account.companyId),
                         eq(socialComments.channelAccountId, account.id),
                         eq(socialComments.externalCommentId, extCommentId)
                       )
@@ -321,6 +348,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
                 .insert(socialComments)
                 .values({
                   id: crypto.randomUUID(),
+                  companyId: account.companyId,
                   channel: channelGuess,
                   channelAccountId: account.id,
                   postId,
@@ -371,15 +399,17 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           const senderHandle = msg.from?.username || null;
           const text = String(msg.text || msg.caption || '').trim();
           if (text) {
-            await upsertInboundChannelMessage({
-              channel: 'TELEGRAM',
-              channelAccountId: account.id,
-              externalSenderId: chatId,
-              senderName: senderName || null,
-              senderHandle,
-              externalMessageId: msg.message_id ? `tg_${msg.message_id}` : null,
-              body: text,
-            });
+            await runWithCompany(account.companyId, () =>
+              upsertInboundChannelMessage({
+                channel: 'TELEGRAM',
+                channelAccountId: account.id,
+                externalSenderId: chatId,
+                senderName: senderName || null,
+                senderHandle,
+                externalMessageId: msg.message_id ? `tg_${msg.message_id}` : null,
+                body: text,
+              })
+            );
           }
         }
         return reply.send({ ok: true });
@@ -394,11 +424,13 @@ export default async function channelsRouter(fastify: FastifyInstance) {
   fastify.get(
     '/connect-links',
     { preHandler: requirePermission('settings') },
-    async (_req, reply) => {
+    async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const rows = await db
           .select()
           .from(channelConnectLinks)
+          .where(eq(channelConnectLinks.companyId, companyId))
           .orderBy(desc(channelConnectLinks.createdAt))
           .limit(20);
         return reply.send({ success: true, data: rows });
@@ -413,6 +445,8 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit') },
     async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
+        await licenseService.assertQuota('channels', 1, companyId);
         const channel = String(req.body?.channel || '').trim().toUpperCase() as OmnichannelType;
         if (!ALLOWED_CHANNELS.has(channel)) {
           return reply.status(400).send({
@@ -429,6 +463,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           .insert(channelConnectLinks)
           .values({
             id: crypto.randomUUID(),
+            companyId,
             token,
             channel,
             label: String(req.body?.label || '').trim() || null,
@@ -439,7 +474,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
 
         return reply.status(201).send({ success: true, data: created });
       } catch (error: any) {
-        return reply.status(500).send({ success: false, error: error.message });
+        return reply.status(error?.statusCode || 500).send({
+          success: false,
+          code: error?.code,
+          feature: error?.feature,
+          error: error.message,
+        });
       }
     }
   );
@@ -499,12 +539,16 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         });
       }
 
+      const targetCompanyId = link.companyId || DEFAULT_COMPANY_ID;
+      await licenseService.assertFeature('omnichannel', undefined, targetCompanyId);
+
       const now = new Date();
       const existingAccRows = await db
         .select()
         .from(channelAccounts)
         .where(
           and(
+            eq(channelAccounts.companyId, targetCompanyId),
             eq(channelAccounts.channel, link.channel),
             eq(channelAccounts.accountId, accountId)
           )
@@ -524,11 +568,13 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           .returning();
         savedAccount = updatedAcc;
       } else {
+        await licenseService.assertQuota('channels', 1, targetCompanyId);
         const verifyToken = `reneo_${crypto.randomBytes(8).toString('hex')}`;
         const [createdAcc] = await db
           .insert(channelAccounts)
           .values({
             id: crypto.randomUUID(),
+            companyId: targetCompanyId,
             channel: link.channel,
             name,
             accountId,
@@ -602,6 +648,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return reply.status(400).send({ success: false, error: 'Channel OAuth tidak valid' });
       }
 
+      let targetCompanyId = DEFAULT_COMPANY_ID;
       if (connectToken) {
         const [link] = await db
           .select()
@@ -610,6 +657,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         if (!link || link.usedAt || new Date(link.expiresAt).getTime() < Date.now()) {
           return reply.status(400).send({ success: false, error: 'Link koneksi tidak valid atau kedaluwarsa' });
         }
+        targetCompanyId = link.companyId || DEFAULT_COMPANY_ID;
       } else {
         const authCheck = await new Promise<boolean>((resolve) => {
           requirePermission('settings.edit')(req as any, reply as any).then(
@@ -618,7 +666,10 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           );
         });
         if (!authCheck) return;
+        targetCompanyId = getRequestCompanyId(req);
       }
+
+      await licenseService.assertQuota('channels', 1, targetCompanyId);
 
       const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost:5000').split(',')[0].trim();
@@ -633,10 +684,15 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       }
       const baseUrl = (config.meta.publicBaseUrl || `${proto}://${host}${appPrefix}`).replace(/\/+$/, '');
       const callbackUrl = `${baseUrl}/api/channels/oauth/callback`;
-      const state = signOAuthState({ channel, connectToken: connectToken || null, returnBase: baseUrl });
+      const state = signOAuthState({
+        channel,
+        connectToken: connectToken || null,
+        companyId: targetCompanyId,
+        returnBase: baseUrl,
+      });
 
       if (config.reneo.oauthUrl) {
-        const lic = await licenseService.getLicense();
+        const lic = await licenseService.getLicense(targetCompanyId);
         const brokerStart = `${config.reneo.oauthUrl.replace(/\/+$/, '')}/start`;
         const target = `${brokerStart}?channel=${encodeURIComponent(channel)}&state=${encodeURIComponent(state)}&redirect_uri=${encodeURIComponent(callbackUrl)}&license_key=${encodeURIComponent(lic.licenseKey || '')}`;
         return reply.redirect(target);
@@ -779,6 +835,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return failRedirect('Tidak ada akun kanal yang berhasil diambil dari OAuth.');
       }
 
+      const targetCompanyId = String(parsedState.companyId || '').trim() || DEFAULT_COMPANY_ID;
       const now = new Date();
       let firstCreatedId = '';
       for (const acc of accountsToSave) {
@@ -787,6 +844,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           .from(channelAccounts)
           .where(
             and(
+              eq(channelAccounts.companyId, targetCompanyId),
               eq(channelAccounts.channel, acc.channel),
               eq(channelAccounts.accountId, acc.accountId)
             )
@@ -801,6 +859,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           const newId = crypto.randomUUID();
           await db.insert(channelAccounts).values({
             id: newId,
+            companyId: targetCompanyId,
             channel: acc.channel,
             name: acc.name,
             accountId: acc.accountId,

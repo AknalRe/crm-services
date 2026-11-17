@@ -1,9 +1,10 @@
 import axios from 'axios';
 import { FastifyInstance } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { channelAccounts } from '../db/schema';
-import { requirePermission } from './auth';
+import { licenseService } from '../services/license.service';
+import { getRequestCompanyId, requirePermission } from './auth';
 
 export default async function feedRouter(fastify: FastifyInstance) {
   fastify.addHook('preHandler', requirePermission('conversations'));
@@ -12,11 +13,13 @@ export default async function feedRouter(fastify: FastifyInstance) {
     Querystring: { q?: string; channel?: string };
   }>('/search', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('omnichannel', undefined, companyId);
       const q = String(req.query?.q || '').trim();
       const accounts = await db
         .select()
         .from(channelAccounts)
-        .where(eq(channelAccounts.isActive, true));
+        .where(and(eq(channelAccounts.companyId, companyId), eq(channelAccounts.isActive, true)));
 
       const threadsAccount = accounts.find((a) => a.channel === 'THREADS' && a.accessToken);
       if (!threadsAccount) {
@@ -68,7 +71,12 @@ export default async function feedRouter(fastify: FastifyInstance) {
         });
       }
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -76,6 +84,8 @@ export default async function feedRouter(fastify: FastifyInstance) {
     Body: { postId?: string; text?: string };
   }>('/reply', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('omnichannel', undefined, companyId);
       const postId = String(req.body?.postId || '').trim();
       const text = String(req.body?.text || '').trim();
       if (!postId || !text) {
@@ -85,7 +95,7 @@ export default async function feedRouter(fastify: FastifyInstance) {
       const accounts = await db
         .select()
         .from(channelAccounts)
-        .where(eq(channelAccounts.isActive, true));
+        .where(and(eq(channelAccounts.companyId, companyId), eq(channelAccounts.isActive, true)));
       const threadsAccount = accounts.find((a) => a.channel === 'THREADS' && a.accessToken);
       if (!threadsAccount) {
         return reply.status(400).send({ success: false, error: 'Akun Threads aktif tidak ditemukan.' });
@@ -120,8 +130,10 @@ export default async function feedRouter(fastify: FastifyInstance) {
 
       return reply.send({ success: true, data: { id: publishRes.data?.id || creationId } });
     } catch (error: any) {
-      return reply.status(400).send({
+      return reply.status(error?.statusCode || 400).send({
         success: false,
+        code: error?.code,
+        feature: error?.feature,
         error: error.response?.data?.error?.message || error.message,
       });
     }

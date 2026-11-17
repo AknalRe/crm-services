@@ -3,6 +3,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { channelAccounts, contacts, scheduledPosts } from '../db/schema';
+import { licenseService } from '../services/license.service';
 import {
   listStatusViewersForPost,
   parsePostTargetContacts,
@@ -13,7 +14,7 @@ import {
 } from '../services/post.service';
 import { wahaService } from '../services/waha.service';
 import { normalizePhoneNumber } from '../services/phone.utils';
-import { requirePermission } from './auth';
+import { getRequestCompanyId, requirePermission } from './auth';
 
 function serializeScheduledPost(post: typeof scheduledPosts.$inferSelect, accountName?: string | null, accountExternalId?: string | null) {
   let statusStyle: WhatsAppStatusStyle | null = null;
@@ -34,6 +35,7 @@ function serializeScheduledPost(post: typeof scheduledPosts.$inferSelect, accoun
 }
 
 async function resolveTargetContactsFromInput(
+  companyId: string,
   rawTargets?: Array<{ contactId?: string | null; phone?: string; name?: string | null }>,
   rawContactIds?: string[]
 ): Promise<PostTargetContact[]> {
@@ -44,7 +46,7 @@ async function resolveTargetContactsFromInput(
       const dbContacts = await db
         .select({ id: contacts.id, namaLengkap: contacts.namaLengkap, nomorWhatsapp: contacts.nomorWhatsapp })
         .from(contacts)
-        .where(inArray(contacts.id, cleanIds));
+        .where(and(eq(contacts.companyId, companyId), inArray(contacts.id, cleanIds)));
       for (const c of dbContacts) {
         const phone = c.nomorWhatsapp ? normalizePhoneNumber(c.nomorWhatsapp) : '';
         if (!phone) continue;
@@ -104,12 +106,13 @@ export default async function postsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const { channel, status, search, page = '1', limit = '200' } = req.query;
       const pageNum = Math.max(1, parseInt(page, 10) || 1);
       const limitNum = Math.max(1, Math.min(500, parseInt(limit, 10) || 200));
       const offset = (pageNum - 1) * limitNum;
 
-      const conditions: any[] = [];
+      const conditions: any[] = [eq(scheduledPosts.companyId, companyId)];
       if (channel && channel !== 'ALL') {
         conditions.push(eq(scheduledPosts.channel, channel.toUpperCase().trim()));
       }
@@ -119,7 +122,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
       if (search && search.trim()) {
         conditions.push(ilike(scheduledPosts.caption, `%${search.trim()}%`));
       }
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const whereClause = and(...conditions);
 
       const [rows, countResult] = await Promise.all([
         db
@@ -174,6 +177,9 @@ export default async function postsRouter(fastify: FastifyInstance) {
     };
   }>('/', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('scheduledPosts', undefined, companyId);
+
       const channel = String(req.body?.channel || '').trim().toUpperCase();
       const channelAccountId = req.body?.channelAccountId
         ? String(req.body.channelAccountId).trim() || null
@@ -190,6 +196,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
       }
 
       if (!isWaChannel) {
+        await licenseService.assertFeature('omnichannel', undefined, companyId);
         if (!channelAccountId || !caption) {
           return reply.status(400).send({
             success: false,
@@ -212,7 +219,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
         const [account] = await db
           .select()
           .from(channelAccounts)
-          .where(eq(channelAccounts.id, channelAccountId));
+          .where(and(eq(channelAccounts.id, channelAccountId), eq(channelAccounts.companyId, companyId)));
         if (!account || !account.isActive || account.channel !== channel) {
           return reply.status(400).send({
             success: false,
@@ -229,7 +236,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
       }
 
       const resolvedTargets = isWaChannel
-        ? await resolveTargetContactsFromInput(req.body?.targetContacts, req.body?.targetContactIds)
+        ? await resolveTargetContactsFromInput(companyId, req.body?.targetContacts, req.body?.targetContactIds)
         : [];
 
       if (channel === 'WHATSAPP' && resolvedTargets.length === 0) {
@@ -274,6 +281,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
         .insert(scheduledPosts)
         .values({
           id,
+          companyId,
           channel,
           channelAccountId: isWaChannel ? null : channelAccountId,
           wahaSession: isWaChannel ? wahaSession : null,
@@ -308,7 +316,12 @@ export default async function postsRouter(fastify: FastifyInstance) {
 
       return reply.status(201).send({ success: true, data: serializeScheduledPost(inserted) });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -318,10 +331,11 @@ export default async function postsRouter(fastify: FastifyInstance) {
     Querystring: { sync?: string };
   }>('/:id/viewers', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const [post] = await db
         .select()
         .from(scheduledPosts)
-        .where(eq(scheduledPosts.id, req.params.id));
+        .where(and(eq(scheduledPosts.id, req.params.id), eq(scheduledPosts.companyId, companyId)));
       if (!post) {
         return reply.status(404).send({ success: false, error: 'Postingan tidak ditemukan' });
       }
@@ -357,7 +371,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
       const [refreshedPost] = await db
         .select()
         .from(scheduledPosts)
-        .where(eq(scheduledPosts.id, post.id));
+        .where(and(eq(scheduledPosts.id, post.id), eq(scheduledPosts.companyId, companyId)));
       const viewers = await listStatusViewersForPost(post.id);
       const targets = parsePostTargetContacts(post.targetContactsJson);
 
@@ -380,10 +394,11 @@ export default async function postsRouter(fastify: FastifyInstance) {
   // POST delete published WhatsApp Status from remote WhatsApp via WAHA
   fastify.post<{ Params: { id: string } }>('/:id/delete-remote', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const [post] = await db
         .select()
         .from(scheduledPosts)
-        .where(eq(scheduledPosts.id, req.params.id));
+        .where(and(eq(scheduledPosts.id, req.params.id), eq(scheduledPosts.companyId, companyId)));
       if (!post || post.channel !== 'WHATSAPP_STATUS' || !post.externalPostId) {
         return reply.status(400).send({
           success: false,
@@ -397,7 +412,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
       const [updated] = await db
         .update(scheduledPosts)
         .set({ status: 'CANCELLED', updatedAt: new Date() })
-        .where(eq(scheduledPosts.id, post.id))
+        .where(and(eq(scheduledPosts.id, post.id), eq(scheduledPosts.companyId, companyId)))
         .returning();
       return reply.send({ success: true, data: serializeScheduledPost(updated) });
     } catch (error: any) {
@@ -407,19 +422,34 @@ export default async function postsRouter(fastify: FastifyInstance) {
 
   fastify.post<{ Params: { id: string } }>('/:id/publish-now', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('scheduledPosts', undefined, companyId);
+      const [post] = await db
+        .select({ id: scheduledPosts.id })
+        .from(scheduledPosts)
+        .where(and(eq(scheduledPosts.id, req.params.id), eq(scheduledPosts.companyId, companyId)));
+      if (!post) {
+        return reply.status(404).send({ success: false, error: 'Postingan tidak ditemukan' });
+      }
       const published = await PostService.publishChannelPost(req.params.id);
       return reply.send({ success: true, data: serializeScheduledPost(published) });
     } catch (error: any) {
-      return reply.status(400).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 400).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   fastify.post<{ Params: { id: string } }>('/:id/cancel', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const [updated] = await db
         .update(scheduledPosts)
         .set({ status: 'CANCELLED', updatedAt: new Date() })
-        .where(eq(scheduledPosts.id, req.params.id))
+        .where(and(eq(scheduledPosts.id, req.params.id), eq(scheduledPosts.companyId, companyId)))
         .returning();
       if (!updated) {
         return reply.status(404).send({ success: false, error: 'Jadwal postingan tidak ditemukan' });
@@ -447,12 +477,18 @@ export default async function postsRouter(fastify: FastifyInstance) {
     };
   }>('/import', async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('scheduledPosts', undefined, companyId);
+
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
       if (items.length === 0) {
         return reply.status(400).send({ success: false, error: 'Tidak ada baris CSV untuk diimpor.' });
       }
 
-      const accounts = await db.select().from(channelAccounts).where(eq(channelAccounts.isActive, true));
+      const accounts = await db
+        .select()
+        .from(channelAccounts)
+        .where(and(eq(channelAccounts.companyId, companyId), eq(channelAccounts.isActive, true)));
       let imported = 0;
       const failed: Array<{ row: number; error: string }> = [];
 
@@ -488,7 +524,6 @@ export default async function postsRouter(fastify: FastifyInstance) {
           continue;
         }
 
-        // For WhatsApp rows, support comma-separated phones in targetChatId in addition to targetContactIds/targetContacts
         const csvPhoneTargets =
           isWaChannel && targetChatId
             ? targetChatId
@@ -499,6 +534,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
             : [];
         const resolvedTargets = isWaChannel
           ? await resolveTargetContactsFromInput(
+              companyId,
               [...(item.targetContacts || []), ...csvPhoneTargets],
               item.targetContactIds
             )
@@ -524,6 +560,7 @@ export default async function postsRouter(fastify: FastifyInstance) {
         const now = new Date();
         await db.insert(scheduledPosts).values({
           id: crypto.randomUUID(),
+          companyId,
           channel,
           channelAccountId: isWaChannel ? null : channelAccountId,
           wahaSession: isWaChannel ? wahaSession : null,
@@ -546,13 +583,21 @@ export default async function postsRouter(fastify: FastifyInstance) {
         data: { imported, failed },
       });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   fastify.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     try {
-      await db.delete(scheduledPosts).where(eq(scheduledPosts.id, req.params.id));
+      const companyId = getRequestCompanyId(req);
+      await db
+        .delete(scheduledPosts)
+        .where(and(eq(scheduledPosts.id, req.params.id), eq(scheduledPosts.companyId, companyId)));
       return reply.send({ success: true });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

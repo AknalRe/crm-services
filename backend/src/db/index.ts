@@ -16,12 +16,55 @@ export async function initDb() {
   const sql = queryClient;
   try {
     await sql`
+      CREATE TABLE IF NOT EXISTS companies (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        owner_name TEXT,
+        owner_email TEXT,
+        owner_phone TEXT,
+        status TEXT NOT NULL DEFAULT 'ACTIVE',
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+        license_key TEXT,
+        license_status TEXT NOT NULL DEFAULT 'UNLICENSED',
+        license_plan TEXT NOT NULL DEFAULT 'Belum Diaktivasi',
+        license_plan_slug TEXT,
+        license_period TEXT NOT NULL DEFAULT 'monthly',
+        license_price_amount INTEGER NOT NULL DEFAULT 0,
+        license_started_at TIMESTAMP,
+        license_expires_at TIMESTAMP,
+        license_features_json TEXT,
+        trial_used BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      INSERT INTO companies (id, name, slug, status, is_default, created_at, updated_at)
+      VALUES ('company_default', 'Perusahaan Utama', 'default', 'ACTIVE', TRUE, NOW(), NOW())
+      ON CONFLICT (id) DO NOTHING;
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS company_settings (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_company_settings_company_key ON company_settings (company_id, key);`;
+
+    await sql`
       CREATE TABLE IF NOT EXISTS contacts (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         nama_lengkap TEXT NOT NULL,
         nama_panggilan TEXT,
         tanggal_lahir TIMESTAMP,
-        nomor_whatsapp TEXT NOT NULL UNIQUE,
+        nomor_whatsapp TEXT,
         alamat TEXT,
         kategori TEXT,
         tags TEXT,
@@ -534,10 +577,155 @@ export async function initDb() {
 
     // Ensure default birthday row exists
     await sql`
-      INSERT INTO birthday_settings (id, is_enabled, send_time, message_template, delay_seconds, updated_at)
-      VALUES ('default', TRUE, '08:00', 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!', 5, NOW())
+      INSERT INTO birthday_settings (id, company_id, is_enabled, send_time, message_template, delay_seconds, updated_at)
+      VALUES ('default', 'company_default', TRUE, '08:00', 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!', 5, NOW())
       ON CONFLICT (id) DO NOTHING;
     `;
+
+    // Add company_id across all tenant-scoped tables and migrate global unique constraints to per-company indexes
+    const tenantTables = [
+      'contacts',
+      'campaigns',
+      'campaign_recipients',
+      'conversations',
+      'chat_messages',
+      'birthday_settings',
+      'crm_roles',
+      'crm_agents',
+      'canned_responses',
+      'crm_labels',
+      'message_templates',
+      'csat_responses',
+      'auto_reply_rules',
+      'products',
+      'channel_accounts',
+      'contact_identities',
+      'channel_connect_links',
+      'webhook_deliveries',
+      'scheduled_posts',
+      'whatsapp_status_views',
+      'content_ideas',
+      'social_comments',
+      'comment_automations',
+      'ai_knowledge_books',
+      'ai_knowledge_items',
+      'ai_skills',
+      'ai_mcp_servers',
+    ];
+    for (const tbl of tenantTables) {
+      await sql.unsafe(
+        `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`
+      );
+    }
+    await sql`ALTER TABLE crm_agents ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE;`;
+
+    // Drop legacy global single-column unique constraints in favor of per-company compound uniqueness
+    await sql`ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_nomor_whatsapp_key;`;
+    await sql`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_key;`;
+    await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_key;`;
+    await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_key;`;
+    await sql`ALTER TABLE canned_responses DROP CONSTRAINT IF EXISTS canned_responses_short_code_key;`;
+    await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_key;`;
+    await sql`ALTER TABLE contact_identities DROP CONSTRAINT IF EXISTS contact_identities_channel_external_id_key;`;
+    await sql`ALTER TABLE ai_skills DROP CONSTRAINT IF EXISTS ai_skills_slug_key;`;
+
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_company_phone ON contacts (company_id, nomor_whatsapp) WHERE nomor_whatsapp IS NOT NULL;`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_rec_company_waha_msg ON campaign_recipients (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_msg_company_waha_msg ON chat_messages (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_roles_company_name ON crm_roles (company_id, LOWER(name));`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_canned_company_code ON canned_responses (company_id, LOWER(short_code));`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_sku ON products (company_id, LOWER(sku));`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_id_company_ch_ext ON contact_identities (company_id, channel, external_id);`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_skills_company_slug ON ai_skills (company_id, slug);`;
+
+    // Migrate legacy single-tenant settings and license into company_default once
+    const migratedRows = await sql`
+      SELECT value FROM system_settings WHERE key = 'migration_multi_tenant_v1' LIMIT 1;
+    `;
+    if (!migratedRows[0]) {
+      const legacyCompanyKeys = [
+        'waha_mode',
+        'waha_base_url',
+        'waha_api_key',
+        'waha_session',
+        'waha_webhook_url',
+        'waha_detected_public_url',
+        'csat_template',
+        'csat_auto_on_resolve',
+        'sla_target_minutes',
+        'csat_base_url',
+        'csat_survey_config',
+        'ai_agent_config',
+        'birthday_multi_senders',
+        'idea_columns',
+        'crm_sticker_pack_v1',
+        'business_hours_enabled',
+        'business_hours_start',
+        'business_hours_end',
+        'business_days',
+        'off_hours_reply_text',
+        'auto_reply_enabled',
+        'sla_alert_webhook_url',
+        'auto_assign_mode',
+        'auto_assign_cursor',
+        'license_plan',
+        'license_expires_at',
+        'license_key',
+        'license_features',
+      ];
+      const sysRows = await sql`
+        SELECT key, value, updated_at FROM system_settings WHERE key = ANY(${legacyCompanyKeys});
+      `;
+      const sysMap = new Map<string, string>();
+      for (const r of sysRows) {
+        sysMap.set(r.key, r.value);
+        const settingId = `company_default::${r.key}`;
+        await sql`
+          INSERT INTO company_settings (id, company_id, key, value, updated_at)
+          VALUES (${settingId}, 'company_default', ${r.key}, ${r.value}, ${r.updated_at || new Date()})
+          ON CONFLICT (company_id, key) DO NOTHING;
+        `;
+      }
+
+      const adminName = (await sql`SELECT value FROM system_settings WHERE key = 'crm_admin_name' LIMIT 1;`)[0]?.value || null;
+      const adminEmail = (await sql`SELECT value FROM system_settings WHERE key = 'crm_admin_email' LIMIT 1;`)[0]?.value || null;
+      const licPlan = sysMap.get('license_plan');
+      const licExp = sysMap.get('license_expires_at');
+      const licKey = sysMap.get('license_key');
+      const licFeats = sysMap.get('license_features');
+      const hasLegacyLic = Boolean(licKey && licExp);
+      await sql`
+        UPDATE companies
+        SET name = COALESCE(${adminName}, name),
+            owner_name = COALESCE(${adminName}, owner_name),
+            owner_email = COALESCE(${adminEmail}, owner_email),
+            license_key = COALESCE(${licKey || null}, license_key),
+            license_plan = COALESCE(${licPlan || null}, license_plan),
+            license_expires_at = COALESCE(${licExp ? new Date(licExp) : null}, license_expires_at),
+            license_features_json = COALESCE(${licFeats || null}, license_features_json),
+            license_status = CASE WHEN ${hasLegacyLic} THEN 'ACTIVE' ELSE license_status END,
+            updated_at = NOW()
+        WHERE id = 'company_default';
+      `;
+
+      // Promote primary default admin to Platform Admin if none exists yet
+      const platCount = await sql`SELECT COUNT(*)::int AS cnt FROM crm_agents WHERE is_platform_admin = TRUE;`;
+      if ((platCount[0]?.cnt || 0) === 0) {
+        await sql`
+          UPDATE crm_agents
+          SET is_platform_admin = TRUE
+          WHERE id = (
+            SELECT id FROM crm_agents WHERE company_id = 'company_default' AND role = 'ADMIN' ORDER BY created_at ASC LIMIT 1
+          );
+        `;
+      }
+
+      await sql`
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('migration_multi_tenant_v1', 'true', NOW())
+        ON CONFLICT (key) DO NOTHING;
+      `;
+    }
 
     // One-time idempotent seed for Master Labels & Contact Categories
     const seededRows = await sql`

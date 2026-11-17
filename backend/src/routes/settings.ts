@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { db } from '../db';
-import { systemSettings, birthdaySettings, autoReplyRules, webhookDeliveries } from '../db/schema';
+import { birthdaySettings, autoReplyRules, webhookDeliveries, DEFAULT_COMPANY_ID } from '../db/schema';
 import { BirthdayService } from '../services/birthday.service';
 import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
@@ -13,55 +13,65 @@ import {
   parseCsatSurveyConfig,
   sanitizeCsatSurveyConfig,
 } from '../services/csat.service';
-import { requirePermission } from './auth';
+import {
+  deleteCompanySetting,
+  getCompanySettingMap,
+  upsertCompanySetting,
+} from '../services/tenantContext';
+import { getRequestCompanyId, requirePermission } from './auth';
 import { resolveRequestPublicBase } from './waha';
+
+function getBirthdayRowId(companyId: string): string {
+  return companyId === DEFAULT_COMPANY_ID ? 'default' : `bday_${companyId}`;
+}
 
 export default async function settingsRouter(fastify: FastifyInstance) {
   // GET all settings
-  fastify.get('/', { preHandler: requirePermission('settings', 'birthday', 'conversations') }, async (_req: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const wahaConfig = await wahaService.getConfig(true);
-      let list = await db
-        .select()
-        .from(birthdaySettings)
-        .where(eq(birthdaySettings.id, 'default'));
+  fastify.get(
+    '/',
+    { preHandler: requirePermission('settings', 'birthday', 'conversations') },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const companyId = getRequestCompanyId(req);
+        const wahaConfig = await wahaService.getConfig(true, companyId);
+        const list = await db
+          .select()
+          .from(birthdaySettings)
+          .where(eq(birthdaySettings.companyId, companyId));
 
-      const settingsRows = await db.select().from(systemSettings);
-      const settingMap: Record<string, string> = {};
-      for (const row of settingsRows) {
-        settingMap[row.key] = row.value;
-      }
-      const slaRaw = Number.parseInt(settingMap.sla_target_minutes || '15', 10);
-      const slaTargetMinutes = Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : 15;
+        const settingMap = await getCompanySettingMap(companyId);
+        const slaRaw = Number.parseInt(settingMap.sla_target_minutes || '15', 10);
+        const slaTargetMinutes = Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : 15;
 
-      return reply.send({
-        success: true,
-        data: {
-          waha: wahaConfig,
-          birthday: list[0] || null,
-          crm: {
-            csatTemplate: settingMap.csat_template || DEFAULT_CSAT_CTA_TEMPLATE,
-            csatAutoOnResolve: settingMap.csat_auto_on_resolve === 'true',
-            slaTargetMinutes,
-            csatBaseUrl: settingMap.csat_base_url || '',
-            csatSurveyConfig: parseCsatSurveyConfig(settingMap.csat_survey_config),
+        return reply.send({
+          success: true,
+          data: {
+            waha: wahaConfig,
+            birthday: list[0] || null,
+            crm: {
+              csatTemplate: settingMap.csat_template || DEFAULT_CSAT_CTA_TEMPLATE,
+              csatAutoOnResolve: settingMap.csat_auto_on_resolve === 'true',
+              slaTargetMinutes,
+              csatBaseUrl: settingMap.csat_base_url || '',
+              csatSurveyConfig: parseCsatSurveyConfig(settingMap.csat_survey_config),
+            },
           },
-        },
-      });
-    } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+        });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
     }
-  });
+  );
 
   // POST update WAHA settings
   fastify.post<{
     Body: { mode?: 'INTERNAL' | 'EXTERNAL'; baseUrl?: string; apiKey?: string; session?: string; webhookUrl?: string };
   }>('/waha', { preHandler: requirePermission('settings.edit') }, async (req, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const { mode = 'INTERNAL', baseUrl, apiKey, session, webhookUrl } = req.body || {};
-      const now = new Date();
       const publicBase = resolveRequestPublicBase(req);
-      await wahaService.rememberPublicBaseUrl(publicBase);
+      await wahaService.rememberPublicBaseUrl(publicBase, companyId);
 
       const pairs: Array<{ key: string; value: string }> = [
         { key: 'waha_mode', value: mode === 'EXTERNAL' ? 'EXTERNAL' : 'INTERNAL' },
@@ -92,7 +102,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       if (webhookUrl !== undefined) {
         const cleanWebhook = String(webhookUrl || '').trim();
         if (!cleanWebhook) {
-          await db.delete(systemSettings).where(eq(systemSettings.key, 'waha_webhook_url'));
+          await deleteCompanySetting('waha_webhook_url', companyId);
         } else {
           if (!/^https?:\/\//i.test(cleanWebhook)) {
             return reply.status(400).send({
@@ -105,18 +115,12 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       }
 
       for (const p of pairs) {
-        await db
-          .insert(systemSettings)
-          .values({ key: p.key, value: p.value, updatedAt: now })
-          .onConflictDoUpdate({
-            target: systemSettings.key,
-            set: { value: p.value, updatedAt: now },
-          });
+        await upsertCompanySetting(p.key, p.value, companyId);
       }
 
       wahaService.invalidateExternalEngineCache();
       void wahaService.syncSessionWebhooks(publicBase).catch(() => {});
-      liveEvents.emit('waha:status', { action: 'settings', mode });
+      liveEvents.emit('waha:status', { action: 'settings', mode }, companyId);
       return reply.send({ success: true, message: 'Pengaturan WAHA berhasil disimpan' });
     } catch (error: any) {
       return reply.status(error?.statusCode || 500).send({ success: false, error: error.message });
@@ -136,16 +140,19 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   });
 
   // GET birthday settings & celebrants
-  fastify.get('/birthday', { preHandler: requirePermission('birthday') }, async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/birthday', { preHandler: requirePermission('birthday') }, async (req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      const bdayId = getBirthdayRowId(companyId);
       const list = await db
         .select()
         .from(birthdaySettings)
-        .where(eq(birthdaySettings.id, 'default'));
+        .where(eq(birthdaySettings.companyId, companyId));
 
-      const celebrants = await BirthdayService.getBirthdayContacts();
+      const celebrants = await BirthdayService.getBirthdayContacts(companyId);
       const defaultSetting = {
-        id: 'default',
+        id: bdayId,
+        companyId,
         isEnabled: true,
         sendTime: '08:00',
         messageTemplate:
@@ -158,19 +165,17 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       };
 
       const baseSetting = list[0] || defaultSetting;
-      const [multiRow] = await db
-        .select()
-        .from(systemSettings)
-        .where(eq(systemSettings.key, 'birthday_multi_senders'));
+      const settingMap = await getCompanySettingMap(companyId);
+      const multiRaw = settingMap['birthday_multi_senders'];
 
       let multiSenders = {
         mode: 'AUTO_MULTI',
         wahaSessions: baseSetting.wahaSession ? [baseSetting.wahaSession] : [],
         channelAccountIds: baseSetting.channelAccountId ? [baseSetting.channelAccountId] : [],
       };
-      if (multiRow?.value) {
+      if (multiRaw) {
         try {
-          multiSenders = { ...multiSenders, ...JSON.parse(multiRow.value) };
+          multiSenders = { ...multiSenders, ...JSON.parse(multiRaw) };
         } catch {
           // fallback
         }
@@ -206,6 +211,9 @@ export default async function settingsRouter(fastify: FastifyInstance) {
     };
   }>('/birthday', { preHandler: requirePermission('birthday') }, async (req, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('birthdayAutomation', undefined, companyId);
+      const bdayId = getBirthdayRowId(companyId);
       const {
         isEnabled,
         sendTime,
@@ -229,7 +237,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
           ? Math.max(0, Math.min(300, Math.round(Number(delaySeconds))))
           : undefined;
 
-      const updateData: any = { updatedAt: now };
+      const updateData: any = { companyId, updatedAt: now };
       if (isEnabled !== undefined) updateData.isEnabled = Boolean(isEnabled);
       if (sendTime) updateData.sendTime = String(sendTime).trim();
       if (messageTemplate !== undefined) {
@@ -252,7 +260,8 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       const updated = await db
         .insert(birthdaySettings)
         .values({
-          id: 'default',
+          id: bdayId,
+          companyId,
           isEnabled: isEnabled !== undefined ? Boolean(isEnabled) : true,
           sendTime: sendTime ? String(sendTime).trim() : '08:00',
           messageTemplate:
@@ -281,13 +290,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
             ? multiSenders.channelAccountIds.map((s) => String(s).trim()).filter(Boolean)
             : [],
         };
-        await db
-          .insert(systemSettings)
-          .values({ key: 'birthday_multi_senders', value: JSON.stringify(sanitizedMulti) })
-          .onConflictDoUpdate({
-            target: systemSettings.key,
-            set: { value: JSON.stringify(sanitizedMulti), updatedAt: now },
-          });
+        await upsertCompanySetting('birthday_multi_senders', JSON.stringify(sanitizedMulti), companyId);
       }
 
       return reply.send({
@@ -296,28 +299,40 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         data: { ...updated[0], multiSenders },
       });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   // POST trigger birthday broadcast manually
-  fastify.post('/birthday/trigger', { preHandler: requirePermission('birthday') }, async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/birthday/trigger', { preHandler: requirePermission('birthday') }, async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      await licenseService.assertFeature('birthdayAutomation');
-      const result = await BirthdayService.runBirthdayBroadcast();
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('birthdayAutomation', undefined, companyId);
+      const result = await BirthdayService.runBirthdayBroadcast(companyId);
       return reply.send({
         success: true,
         message: 'Broadcast ulang tahun berhasil diproses',
         data: result,
       });
     } catch (error: any) {
-      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 400).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   // POST update CRM CSAT template & SLA settings (supports partial updates)
   fastify.post('/crm', { preHandler: requirePermission('settings.edit') }, async (req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const body = (req.body || {}) as {
         csatTemplate?: string;
         csatAutoOnResolve?: boolean;
@@ -325,7 +340,6 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         csatBaseUrl?: string;
         csatSurveyConfig?: unknown;
       };
-      const now = new Date();
       const pairs: Array<[string, string]> = [];
 
       if (body.csatTemplate !== undefined) {
@@ -365,18 +379,10 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       }
 
       for (const [key, value] of pairs) {
-        await db
-          .insert(systemSettings)
-          .values({ key, value, updatedAt: now })
-          .onConflictDoUpdate({
-            target: systemSettings.key,
-            set: { value, updatedAt: now },
-          });
+        await upsertCompanySetting(key, value, companyId);
       }
 
-      const rows = await db.select().from(systemSettings);
-      const map: Record<string, string> = {};
-      for (const r of rows) map[r.key] = r.value;
+      const map = await getCompanySettingMap(companyId);
       const slaRaw = Number.parseInt(map.sla_target_minutes || '15', 10);
       const slaTargetMinutes = Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : 15;
 
@@ -400,14 +406,14 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   fastify.get(
     '/automation',
     { preHandler: requirePermission('settings', 'conversations') },
-    async (_req: FastifyRequest, reply: FastifyReply) => {
+    async (req: FastifyRequest, reply: FastifyReply) => {
       try {
-        const rows = await db.select().from(systemSettings);
-        const map: Record<string, string> = {};
-        for (const r of rows) map[r.key] = r.value;
+        const companyId = getRequestCompanyId(req);
+        const map = await getCompanySettingMap(companyId);
         const rules = await db
           .select()
           .from(autoReplyRules)
+          .where(eq(autoReplyRules.companyId, companyId))
           .orderBy(asc(autoReplyRules.priority), asc(autoReplyRules.createdAt));
 
         return reply.send({
@@ -457,8 +463,9 @@ export default async function settingsRouter(fastify: FastifyInstance) {
     };
   }>('/automation', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('autoReply', undefined, companyId);
       const b = req.body || {};
-      const now = new Date();
       const pairs: Array<[string, string]> = [];
 
       if (b.autoAssignMode !== undefined) {
@@ -523,18 +530,17 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       }
 
       for (const [key, value] of pairs) {
-        await db
-          .insert(systemSettings)
-          .values({ key, value, updatedAt: now })
-          .onConflictDoUpdate({
-            target: systemSettings.key,
-            set: { value, updatedAt: now },
-          });
+        await upsertCompanySetting(key, value, companyId);
       }
 
       return reply.send({ success: true, message: 'Pengaturan otomatisasi & routing disimpan' });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -543,6 +549,8 @@ export default async function settingsRouter(fastify: FastifyInstance) {
     Body: { keyword?: string; matchType?: string; replyText?: string; priority?: number };
   }>('/auto-replies', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('autoReply', undefined, companyId);
       const keyword = String(req.body?.keyword || '').trim();
       const replyText = String(req.body?.replyText || '').trim();
       if (!keyword || !replyText) {
@@ -562,6 +570,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         .insert(autoReplyRules)
         .values({
           id: crypto.randomUUID(),
+          companyId,
           keyword,
           matchType,
           replyText,
@@ -574,7 +583,12 @@ export default async function settingsRouter(fastify: FastifyInstance) {
 
       return reply.status(201).send({ success: true, data: created });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -583,6 +597,8 @@ export default async function settingsRouter(fastify: FastifyInstance) {
     Body: { isActive?: boolean; keyword?: string; matchType?: string; replyText?: string; priority?: number };
   }>('/auto-replies/:id', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('autoReply', undefined, companyId);
       const patch: Record<string, any> = { updatedAt: new Date() };
       if (req.body?.isActive !== undefined) patch.isActive = Boolean(req.body.isActive);
       if (req.body?.keyword !== undefined) {
@@ -612,14 +628,19 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       const [updated] = await db
         .update(autoReplyRules)
         .set(patch)
-        .where(eq(autoReplyRules.id, req.params.id))
+        .where(and(eq(autoReplyRules.id, req.params.id), eq(autoReplyRules.companyId, companyId)))
         .returning();
       if (!updated) {
         return reply.status(404).send({ success: false, error: 'Aturan tidak ditemukan' });
       }
       return reply.send({ success: true, data: updated });
     } catch (error: any) {
-      return reply.status(500).send({ success: false, error: error.message });
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
@@ -628,9 +649,10 @@ export default async function settingsRouter(fastify: FastifyInstance) {
     { preHandler: requirePermission('settings.edit') },
     async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const deleted = await db
           .delete(autoReplyRules)
-          .where(eq(autoReplyRules.id, req.params.id))
+          .where(and(eq(autoReplyRules.id, req.params.id), eq(autoReplyRules.companyId, companyId)))
           .returning();
         if (!deleted[0]) {
           return reply.status(404).send({ success: false, error: 'Aturan auto-reply tidak ditemukan' });
@@ -646,11 +668,13 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   fastify.get(
     '/webhook-deliveries',
     { preHandler: requirePermission('settings') },
-    async (_req, reply) => {
+    async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const rows = await db
           .select()
           .from(webhookDeliveries)
+          .where(eq(webhookDeliveries.companyId, companyId))
           .orderBy(desc(webhookDeliveries.createdAt))
           .limit(30);
         return reply.send({ success: true, data: rows });
@@ -663,11 +687,12 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   fastify.post(
     '/webhook-deliveries/test',
     { preHandler: requirePermission('settings.edit') },
-    async (_req, reply) => {
+    async (req, reply) => {
       try {
+        const companyId = getRequestCompanyId(req);
         const result = await notifyAlertWebhook('test_ping', {
           message: 'Tes koneksi webhook alert CRM Reneo',
-        });
+        }, companyId);
         return reply.send({ success: true, data: result });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });

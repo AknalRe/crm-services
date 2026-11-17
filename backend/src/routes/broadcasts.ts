@@ -3,7 +3,7 @@ import { and, eq, desc, sql, or, ilike } from 'drizzle-orm';
 import { db } from '../db';
 import { campaigns, campaignRecipients, contacts } from '../db/schema';
 import { BroadcastService } from '../services/broadcast.service';
-import { requirePermission } from './auth';
+import { getRequestCompanyId, requirePermission } from './auth';
 
 export function formatCampaign(c: any) {
   if (!c) return null;
@@ -51,18 +51,18 @@ export function formatRecipient(r: any, contact?: any, campaign?: any) {
     updatedAt: r.updatedAt,
     contact: contact
       ? {
-        id: contact.id,
-        nama_lengkap: contact.namaLengkap,
-        nama_panggilan: contact.namaPanggilan,
-        nomor_whatsapp: contact.nomorWhatsapp,
-      }
+          id: contact.id,
+          nama_lengkap: contact.namaLengkap,
+          nama_panggilan: contact.namaPanggilan,
+          nomor_whatsapp: contact.nomorWhatsapp,
+        }
       : undefined,
     campaign: campaign
       ? {
-        id: campaign.id,
-        title: campaign.title,
-        type: campaign.type,
-      }
+          id: campaign.id,
+          title: campaign.title,
+          type: campaign.type,
+        }
       : undefined,
   };
 }
@@ -75,24 +75,26 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         : requirePermission('broadcasts.send');
     return allowed(req, reply);
   });
+
   // GET all campaigns (supports pagination, search & status/type filters)
   fastify.get('/', async (req: FastifyRequest<{
     Querystring: { status?: string; type?: string; search?: string; page?: string; limit?: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const { status, type, search, page = '1', limit = '25' } = req.query;
       const pageNum = Math.max(1, parseInt(page, 10) || 1);
       const limitNum = Math.max(1, Math.min(200, parseInt(limit, 10) || 25));
       const offset = (pageNum - 1) * limitNum;
 
-      const conditions: any[] = [];
+      const conditions: any[] = [eq(campaigns.companyId, companyId)];
       if (status && status !== 'ALL') conditions.push(eq(campaigns.status, status));
       if (type && type !== 'ALL') conditions.push(eq(campaigns.type, type));
       if (search && search.trim()) {
         const s = `%${search.trim()}%`;
         conditions.push(or(ilike(campaigns.title, s), ilike(campaigns.messageTemplate, s)));
       }
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const whereClause = and(...conditions);
 
       const [list, countResult] = await Promise.all([
         db
@@ -128,10 +130,11 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
   // GET single campaign with recipients
   fastify.get('/:id', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const campList = await db
         .select()
         .from(campaigns)
-        .where(eq(campaigns.id, req.params.id));
+        .where(and(eq(campaigns.id, req.params.id), eq(campaigns.companyId, companyId)));
 
       if (campList.length === 0) {
         return reply.status(404).send({ success: false, error: 'Kampanye tidak ditemukan' });
@@ -144,7 +147,12 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         })
         .from(campaignRecipients)
         .leftJoin(contacts, eq(campaignRecipients.contactId, contacts.id))
-        .where(eq(campaignRecipients.campaignId, req.params.id))
+        .where(
+          and(
+            eq(campaignRecipients.campaignId, req.params.id),
+            eq(campaignRecipients.companyId, companyId)
+          )
+        )
         .orderBy(campaignRecipients.createdAt);
 
       const recipients = rawRecipients.map((item) =>
@@ -181,6 +189,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const {
         title,
         messageTemplate,
@@ -204,6 +213,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
       }
 
       const result = await BroadcastService.createCampaign({
+        companyId,
         title,
         messageTemplate,
         type: type || 'IMMEDIATE',
@@ -230,14 +240,20 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         },
       });
     } catch (error: any) {
-      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 400).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   // POST cancel campaign
   fastify.post('/:id/cancel', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
-      const result = await BroadcastService.cancelCampaign(req.params.id);
+      const companyId = getRequestCompanyId(req);
+      const result = await BroadcastService.cancelCampaign(req.params.id, companyId);
       return reply.send({ success: true, message: 'Kampanye berhasil dibatalkan', data: result });
     } catch (error: any) {
       return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
@@ -247,21 +263,34 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
   // POST retry failed recipients
   fastify.post('/:id/retry-failed', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
-      const result = await BroadcastService.retryFailedRecipients(req.params.id);
+      const companyId = getRequestCompanyId(req);
+      const result = await BroadcastService.retryFailedRecipients(req.params.id, companyId);
       return reply.send({
         success: true,
         message: `${result.retriedCount} penerima gagal dimasukkan kembali ke antrean`,
         data: result,
       });
     } catch (error: any) {
-      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
+      return reply.status(error.statusCode || 400).send({
+        success: false,
+        code: error?.code,
+        feature: error?.feature,
+        error: error.message,
+      });
     }
   });
 
   // DELETE campaign
   fastify.delete('/:id', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
-      await db.delete(campaigns).where(eq(campaigns.id, req.params.id));
+      const companyId = getRequestCompanyId(req);
+      const deleted = await db
+        .delete(campaigns)
+        .where(and(eq(campaigns.id, req.params.id), eq(campaigns.companyId, companyId)))
+        .returning({ id: campaigns.id });
+      if (!deleted[0]) {
+        return reply.status(404).send({ success: false, error: 'Kampanye tidak ditemukan' });
+      }
       return reply.send({ success: true, message: 'Kampanye berhasil dihapus' });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -273,12 +302,13 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
     Querystring: { status?: string; search?: string; page?: string; limit?: string };
   }>, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
       const { status, search, page = '1', limit = '50' } = req.query;
       const pageNum = Math.max(1, parseInt(page, 10) || 1);
       const limitNum = Math.max(1, Math.min(500, parseInt(limit, 10) || 50));
       const offset = (pageNum - 1) * limitNum;
 
-      const conditions: any[] = [];
+      const conditions: any[] = [eq(campaignRecipients.companyId, companyId)];
       if (status && status !== 'ALL') {
         conditions.push(eq(campaignRecipients.status, status));
       }
@@ -294,7 +324,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         );
       }
 
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const whereClause = and(...conditions);
 
       const rows = await db
         .select({

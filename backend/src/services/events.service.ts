@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { getActiveCompanyId } from './tenantContext';
 
 export type LiveEventType =
   | 'waha:status'
@@ -9,10 +10,12 @@ export type LiveEventType =
   | 'sla:breach'
   | 'csat:low'
   | 'posts:update'
-  | 'contacts:update';
+  | 'contacts:update'
+  | 'tenants:update';
 
 export interface LiveEventPayload {
   type: LiveEventType;
+  companyId: string;
   data?: Record<string, unknown>;
   timestamp: string;
 }
@@ -21,16 +24,25 @@ class LiveEventsService {
   private emitter = new EventEmitter();
 
   constructor() {
-    this.emitter.setMaxListeners(200);
+    this.emitter.setMaxListeners(400);
   }
 
-  public emit(type: LiveEventType, data?: Record<string, unknown>) {
+  public emit(type: LiveEventType, data?: Record<string, unknown>, companyIdOverride?: string) {
+    const rawCid =
+      companyIdOverride ||
+      (typeof data?.companyId === 'string' && data.companyId.trim() ? data.companyId.trim() : '');
+    const companyId = getActiveCompanyId(rawCid || undefined);
     const payload: LiveEventPayload = {
       type,
+      companyId,
       data,
       timestamp: new Date().toISOString(),
     };
     this.emitter.emit('event', payload);
+  }
+
+  public emitForCompany(companyId: string, type: LiveEventType, data?: Record<string, unknown>) {
+    this.emit(type, data, companyId);
   }
 
   public subscribe(listener: (payload: LiveEventPayload) => void): () => void {
