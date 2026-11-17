@@ -15,7 +15,43 @@ export const db = drizzle(queryClient, { schema });
 export async function initDb() {
   const sql = queryClient;
 
-  // Run official Drizzle migrations if migration folder is found
+  // Always ensure companies table and default company exist first
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS companies (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        owner_name TEXT,
+        owner_email TEXT,
+        owner_phone TEXT,
+        status TEXT NOT NULL DEFAULT 'ACTIVE',
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+        license_key TEXT,
+        license_status TEXT NOT NULL DEFAULT 'UNLICENSED',
+        license_plan TEXT NOT NULL DEFAULT 'Belum Diaktivasi',
+        license_plan_slug TEXT,
+        license_period TEXT NOT NULL DEFAULT 'monthly',
+        license_price_amount INTEGER NOT NULL DEFAULT 0,
+        license_started_at TIMESTAMP,
+        license_expires_at TIMESTAMP,
+        license_features_json TEXT,
+        trial_used BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
+      INSERT INTO companies (id, name, slug, status, is_default, created_at, updated_at)
+      VALUES ('company_default', 'Perusahaan Utama', 'default', 'ACTIVE', TRUE, NOW(), NOW())
+      ON CONFLICT (id) DO NOTHING;
+    `;
+  } catch (err: any) {
+    console.warn('[DB Init] Notice creating default company:', err.message);
+  }
+
+  // Run official Drizzle migrations if migration folder is found (non-blocking fallback)
   try {
     const { migrate } = await import('drizzle-orm/postgres-js/migrator');
     const fs = await import('fs');
@@ -136,7 +172,7 @@ export async function initDb() {
         contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         phone TEXT NOT NULL,
         personalized_message TEXT NOT NULL,
-        waha_message_id TEXT UNIQUE,
+        waha_message_id TEXT,
         status TEXT NOT NULL DEFAULT 'PENDING',
         ack_status INTEGER NOT NULL DEFAULT 0,
         sent_at TIMESTAMP,
@@ -151,7 +187,7 @@ export async function initDb() {
     await sql`
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
-        contact_id TEXT NOT NULL UNIQUE REFERENCES contacts(id) ON DELETE CASCADE,
+        contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         waha_session TEXT,
         status TEXT NOT NULL DEFAULT 'OPEN',
         labels TEXT,
@@ -194,6 +230,7 @@ export async function initDb() {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS exclude_reason TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS session_started_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_key;`;
+    await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_unique;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS chat_messages (
@@ -207,7 +244,7 @@ export async function initDb() {
         media_url TEXT,
         media_type TEXT,
         media_name TEXT,
-        waha_message_id TEXT UNIQUE,
+        waha_message_id TEXT,
         status TEXT NOT NULL DEFAULT 'PENDING',
         ack_status INTEGER NOT NULL DEFAULT 0,
         sent_at TIMESTAMP,
@@ -666,6 +703,7 @@ export async function initDb() {
       await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_key;`;
       await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_unique;`;
       await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_key;`;
+    await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_unique;`;
       await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_unique;`;
       await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_key;`;
       await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_unique;`;
@@ -747,9 +785,10 @@ export async function initDb() {
       const adminEmail = (await sql`SELECT value FROM system_settings WHERE key = 'crm_admin_email' LIMIT 1;`)[0]?.value || null;
       const licPlan = sysMap.get('license_plan');
       const licExp = sysMap.get('license_expires_at');
+      const parsedExpDate = licExp && !isNaN(Date.parse(licExp)) ? new Date(licExp) : null;
       const licKey = sysMap.get('license_key');
       const licFeats = sysMap.get('license_features');
-      const hasLegacyLic = Boolean(licKey && licExp);
+      const hasLegacyLic = Boolean(licKey && parsedExpDate);
       await sql`
         UPDATE companies
         SET name = COALESCE(${adminName}, name),
@@ -757,7 +796,7 @@ export async function initDb() {
             owner_email = COALESCE(${adminEmail}, owner_email),
             license_key = COALESCE(${licKey || null}, license_key),
             license_plan = COALESCE(${licPlan || null}, license_plan),
-            license_expires_at = COALESCE(${licExp ? new Date(licExp) : null}, license_expires_at),
+            license_expires_at = COALESCE(${parsedExpDate}, license_expires_at),
             license_features_json = COALESCE(${licFeats || null}, license_features_json),
             license_status = CASE WHEN ${hasLegacyLic} THEN 'ACTIVE' ELSE license_status END,
             updated_at = NOW()
