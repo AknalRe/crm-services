@@ -265,8 +265,28 @@ export interface SavedStickerItem {
   createdAt: string;
 }
 
+export interface PollVoteMetadataItem {
+  voterId: string;
+  voterName?: string | null;
+  voterPhone?: string | null;
+  selectedOptions: string[];
+  updatedAt: string;
+  fromMe?: boolean;
+  voteFailed?: boolean;
+}
+
 export interface ChatMessageMetadata {
-  kind?: 'LINK' | 'BUTTONS' | 'POLL' | 'CONTACT' | 'LOCATION' | 'STICKER' | 'ORDER' | 'PRODUCT' | 'GROUP_INVITE';
+  kind?:
+    | 'LINK'
+    | 'BUTTONS'
+    | 'POLL'
+    | 'POLL_VOTE'
+    | 'CONTACT'
+    | 'LOCATION'
+    | 'STICKER'
+    | 'ORDER'
+    | 'PRODUCT'
+    | 'GROUP_INVITE';
   usedFallbackText?: boolean;
   fallbackReason?: string;
   revoked?: boolean;
@@ -294,6 +314,18 @@ export interface ChatMessageMetadata {
     question: string;
     options: string[];
     multipleAnswers?: boolean;
+    votes?: PollVoteMetadataItem[];
+  };
+  pollVote?: {
+    pollMessageId?: string | null;
+    pollWahaMessageId?: string | null;
+    question?: string | null;
+    options?: string[];
+    selectedOptions: string[];
+    voterId?: string | null;
+    voterName?: string | null;
+    voterPhone?: string | null;
+    voteFailed?: boolean;
   };
   sharedContacts?: SharedContactMetadataItem[];
   location?: LocationMessageMetadata;

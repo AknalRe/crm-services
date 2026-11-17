@@ -809,6 +809,212 @@ export function extractStatusAckParticipant(payload: any, exactIds: string[]): s
   return null;
 }
 
+export interface PollVoteMetadataEntry {
+  voterId: string;
+  voterName?: string | null;
+  voterPhone?: string | null;
+  selectedOptions: string[];
+  updatedAt: string;
+  fromMe?: boolean;
+  voteFailed?: boolean;
+}
+
+export interface ExtractedWahaPollVote {
+  voteFailed: boolean;
+  voteId: string | null;
+  pollId: string | null;
+  pollStanzaId: string | null;
+  chatJid: string | null;
+  voterJid: string | null;
+  voterPhone: string | null;
+  voterName: string | null;
+  fromMe: boolean;
+  selectedOptions: string[];
+  pollQuestion: string | null;
+  pollOptions: string[];
+  multipleAnswers: boolean;
+  timestamp: Date;
+}
+
+function normalizePollOptionLabels(raw: any): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (item && typeof item === 'object') {
+        return String(item.optionName || item.name || item.text || item.title || '').trim();
+      }
+      return '';
+    })
+    .filter(Boolean);
+}
+
+function isUsableWahaJid(raw: any): raw is string {
+  if (typeof raw !== 'string') return false;
+  const s = raw.trim();
+  if (!s || s.toLowerCase() === 'me') return false;
+  return s.includes('@') || /^\d{6,16}$/.test(s);
+}
+
+function extractStanzaTail(rawId: string | null): string | null {
+  if (!rawId) return null;
+  const clean = rawId.trim();
+  if (!clean) return null;
+  const idx = clean.lastIndexOf('_');
+  if (idx !== -1 && idx < clean.length - 1) {
+    const tail = clean.slice(idx + 1).trim();
+    if (tail && !tail.includes('@')) return tail;
+  }
+  return clean;
+}
+
+export function extractWahaPollVoteEvent(event: string, payload: any): ExtractedWahaPollVote {
+  const voteFailed = event === 'poll.vote.failed';
+  const voteNode = payload?.vote && typeof payload.vote === 'object' ? payload.vote : payload || {};
+  const pollNode = payload?.poll && typeof payload.poll === 'object' ? payload.poll : {};
+
+  const voteId = String(voteNode?.id || voteNode?._serialized || payload?.id || '').trim() || null;
+  const pollId =
+    String(
+      pollNode?.id ||
+        pollNode?._serialized ||
+        voteNode?.pollCreationMessageKey?.id ||
+        voteNode?.pollCreationMessageKey?.ID ||
+        voteNode?.pollId ||
+        payload?.pollId ||
+        ''
+    ).trim() || null;
+  const pollStanzaId = extractStanzaTail(pollId);
+  const fromMe = Boolean(voteNode?.fromMe ?? (voteId ? voteId.startsWith('true_') : false));
+  const selectedOptions = voteFailed ? [] : normalizePollOptionLabels(voteNode?.selectedOptions);
+
+  const pollConfig = pollNode?.poll && typeof pollNode.poll === 'object' ? pollNode.poll : pollNode;
+  const pollQuestion = String(pollConfig?.name || pollConfig?.question || '').trim() || null;
+  const pollOptions = normalizePollOptionLabels(pollConfig?.options);
+  const multipleAnswers = Boolean(pollConfig?.multipleAnswers);
+
+  const jidCandidates = [
+    payload?.chatId,
+    pollNode?.chatId,
+    pollNode?.fromMe ? pollNode?.to : pollNode?.from,
+    pollNode?.to,
+    pollNode?.from,
+    voteNode?.chatId,
+    voteNode?.to,
+    voteNode?.from,
+  ].filter(isUsableWahaJid);
+
+  const groupCandidate = jidCandidates.find((j) => j.toLowerCase().endsWith('@g.us'));
+  const chatJid =
+    groupCandidate ||
+    (!fromMe && isUsableWahaJid(voteNode?.from) ? voteNode.from.trim() : null) ||
+    jidCandidates[0]?.trim() ||
+    null;
+
+  const voterCandidates = [
+    voteNode?.participantPn,
+    voteNode?.participant,
+    voteNode?._data?.Info?.SenderAlt,
+    voteNode?._data?.Info?.Sender,
+    voteNode?.from,
+  ].filter(isUsableWahaJid);
+  const nonGroupVoter = voterCandidates.find((j) => !j.toLowerCase().endsWith('@g.us'));
+  const voterJid =
+    nonGroupVoter?.trim() || (!fromMe && chatJid && !chatJid.toLowerCase().endsWith('@g.us') ? chatJid : null);
+
+  let voterPhone: string | null = null;
+  if (voterJid && !voterJid.toLowerCase().endsWith('@lid') && !voterJid.toLowerCase().endsWith('@g.us')) {
+    voterPhone = normalizePhoneNumber(fromWahaChatId(voterJid)) || null;
+  }
+
+  const voterName =
+    String(
+      voteNode?.pushName ||
+        voteNode?.notifyName ||
+        payload?.notifyName ||
+        voteNode?._data?.Info?.PushName ||
+        payload?._data?.Info?.PushName ||
+        ''
+    ).trim() || null;
+
+  const rawTs = Number(voteNode?.timestamp ?? payload?.timestamp);
+  const timestamp =
+    Number.isFinite(rawTs) && rawTs > 0
+      ? new Date(rawTs > 1_000_000_000_000 ? rawTs : rawTs * 1000)
+      : new Date();
+
+  return {
+    voteFailed,
+    voteId,
+    pollId,
+    pollStanzaId,
+    chatJid,
+    voterJid,
+    voterPhone,
+    voterName,
+    fromMe,
+    selectedOptions,
+    pollQuestion,
+    pollOptions,
+    multipleAnswers,
+    timestamp,
+  };
+}
+
+export function upsertPollVoteInMetadata(
+  prevMeta: Record<string, any> | null | undefined,
+  entry: PollVoteMetadataEntry,
+  fallbackPoll?: { question?: string | null; options?: string[]; multipleAnswers?: boolean }
+): Record<string, any> {
+  const safeMeta = prevMeta && typeof prevMeta === 'object' ? { ...prevMeta } : {};
+  const existingPoll = safeMeta.poll && typeof safeMeta.poll === 'object' ? { ...safeMeta.poll } : {};
+  const mergedOptions =
+    Array.isArray(existingPoll.options) && existingPoll.options.length > 0
+      ? existingPoll.options
+      : fallbackPoll?.options || [];
+
+  const prevVotes: PollVoteMetadataEntry[] = Array.isArray(existingPoll.votes)
+    ? existingPoll.votes.filter((v: any) => v && typeof v.voterId === 'string')
+    : [];
+
+  const normVoterKey = entry.voterId.trim().toLowerCase();
+  const prevMatch = prevVotes.find((v) => v.voterId.trim().toLowerCase() === normVoterKey);
+
+  const nextEntry: PollVoteMetadataEntry =
+    entry.voteFailed && prevMatch && prevMatch.selectedOptions.length > 0
+      ? {
+          ...prevMatch,
+          voterName: entry.voterName || prevMatch.voterName,
+          voterPhone: entry.voterPhone || prevMatch.voterPhone,
+          voteFailed: true,
+          updatedAt: entry.updatedAt,
+        }
+      : {
+          ...entry,
+          voterName: entry.voterName || prevMatch?.voterName || null,
+          voterPhone: entry.voterPhone || prevMatch?.voterPhone || null,
+        };
+
+  const nextVotes = [
+    ...prevVotes.filter((v) => v.voterId.trim().toLowerCase() !== normVoterKey),
+    nextEntry,
+  ];
+
+  return {
+    ...safeMeta,
+    kind: safeMeta.kind || 'POLL',
+    poll: {
+      question: existingPoll.question || fallbackPoll?.question || 'Polling WhatsApp',
+      options: mergedOptions,
+      multipleAnswers:
+        existingPoll.multipleAnswers !== undefined
+          ? Boolean(existingPoll.multipleAnswers)
+          : Boolean(fallbackPoll?.multipleAnswers),
+      votes: nextVotes,
+    },
+  };
+}
+
 function normalizeWahaAck(payload: any): number | null {
   if (typeof payload?.ack === 'number' && !Number.isNaN(payload.ack)) {
     return payload.ack;
@@ -1350,6 +1556,450 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             }, companyId);
             return reply.send({ success: true, message: `${event} processed` });
           }
+        }
+      }
+
+      // 1d. WhatsApp Poll Votes (poll.vote / poll.vote.failed)
+      if ((event === 'poll.vote' || event === 'poll.vote.failed') && payload) {
+        const now = new Date();
+        const voteInfo = extractWahaPollVoteEvent(event, payload);
+        const inboundSession = webhookSession ? String(webhookSession).trim() : null;
+
+        // 1. Try locating parent poll message stored in CRM
+        let parentPollMsg: typeof chatMessages.$inferSelect | undefined;
+        const pollMatchConds = [
+          voteInfo.pollId ? eq(chatMessages.wahaMessageId, voteInfo.pollId) : null,
+          voteInfo.pollStanzaId ? eq(chatMessages.wahaMessageId, voteInfo.pollStanzaId) : null,
+          voteInfo.pollStanzaId ? like(chatMessages.wahaMessageId, `%_${voteInfo.pollStanzaId}`) : null,
+        ].filter(Boolean) as any[];
+
+        if (pollMatchConds.length > 0) {
+          const candidates = await db
+            .select()
+            .from(chatMessages)
+            .where(and(eq(chatMessages.companyId, companyId), or(...pollMatchConds)))
+            .orderBy(desc(chatMessages.createdAt))
+            .limit(10);
+          parentPollMsg =
+            (inboundSession
+              ? candidates.find((m) => (m.wahaSession || '').trim() === inboundSession)
+              : undefined) || candidates[0];
+        }
+
+        let convRow: typeof conversations.$inferSelect | undefined;
+        let contact: typeof contacts.$inferSelect | undefined;
+
+        if (parentPollMsg) {
+          const joined = await db
+            .select({ conv: conversations, contact: contacts })
+            .from(conversations)
+            .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+            .where(and(eq(conversations.id, parentPollMsg.conversationId), eq(conversations.companyId, companyId)))
+            .limit(1);
+          convRow = joined[0]?.conv;
+          contact = joined[0]?.contact || undefined;
+        }
+
+        // 2. Fallback: locate/create contact + conversation when parent poll isn't in chat_messages (e.g. broadcast or direct phone poll)
+        if (!convRow) {
+          const fallbackChatJid = (voteInfo.chatJid || voteInfo.voterJid || '').trim();
+          const lowerChatJid = fallbackChatJid.toLowerCase();
+          const isIgnoredJid =
+            !fallbackChatJid ||
+            lowerChatJid === 'status@broadcast' ||
+            lowerChatJid.endsWith('@broadcast') ||
+            lowerChatJid.endsWith('@newsletter');
+
+          if (isIgnoredJid) {
+            wahaService.recordWebhookEvent({
+              receivedAt: now.toISOString(),
+              event,
+              session: inboundSession,
+              from: fallbackChatJid || null,
+              outcome: 'IGNORED',
+              note: 'Suara polling tanpa chat/percakapan target yang valid',
+            }, companyId);
+            return reply.send({ success: true, message: `${event} ignored (no conversation target)` });
+          }
+
+          const isGroupFallback = lowerChatJid.endsWith('@g.us');
+          if (isGroupFallback) {
+            const grpIdRows = await db
+              .select()
+              .from(contactIdentities)
+              .where(
+                and(
+                  eq(contactIdentities.companyId, companyId),
+                  eq(contactIdentities.channel, 'WHATSAPP'),
+                  eq(contactIdentities.externalId, fallbackChatJid)
+                )
+              )
+              .limit(1);
+            if (grpIdRows[0]) {
+              const byId = await db
+                .select()
+                .from(contacts)
+                .where(and(eq(contacts.id, grpIdRows[0].contactId), eq(contacts.companyId, companyId)))
+                .limit(1);
+              contact = byId[0];
+            }
+            if (!contact) {
+              const grpInfo = await wahaService
+                .getGroupInfo(fallbackChatJid, inboundSession || undefined)
+                .catch(() => null);
+              const grpName = grpInfo?.subject || `Grup WhatsApp ${fromWahaChatId(fallbackChatJid).slice(-6)}`;
+              const [insertedGrp] = await db
+                .insert(contacts)
+                .values({
+                  id: crypto.randomUUID(),
+                  companyId,
+                  namaLengkap: grpName,
+                  nomorWhatsapp: null,
+                  kategori: 'Grup WhatsApp',
+                  tags: 'Grup WhatsApp,Non-Penilaian',
+                  excludeFromMetrics: true,
+                  excludeReason: 'Grup WhatsApp',
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                .returning();
+              contact = insertedGrp;
+              await db
+                .insert(contactIdentities)
+                .values({
+                  id: crypto.randomUUID(),
+                  companyId,
+                  contactId: contact.id,
+                  channel: 'WHATSAPP',
+                  externalId: fallbackChatJid,
+                  handle: grpName,
+                  createdAt: now,
+                })
+                .onConflictDoNothing()
+                .catch(() => {});
+            }
+          } else {
+            const isLidChat = lowerChatJid.endsWith('@lid');
+            let targetPhone =
+              voteInfo.voterPhone ||
+              (!isLidChat ? normalizePhoneNumber(fromWahaChatId(fallbackChatJid)) : null) ||
+              null;
+            if (!targetPhone && isLidChat && inboundSession) {
+              targetPhone = await wahaService.resolveLidToPhone(inboundSession, fallbackChatJid).catch(() => null);
+            }
+            if (targetPhone) {
+              const variants = Array.from(
+                new Set([targetPhone, `+${targetPhone}`, targetPhone.startsWith('62') ? `0${targetPhone.slice(2)}` : ''].filter(Boolean))
+              );
+              const existingContacts = await db
+                .select()
+                .from(contacts)
+                .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
+                .limit(1);
+              contact = existingContacts[0];
+            }
+            if (!contact && isLidChat) {
+              const lidRows = await db
+                .select()
+                .from(contactIdentities)
+                .where(
+                  and(
+                    eq(contactIdentities.companyId, companyId),
+                    eq(contactIdentities.channel, 'WHATSAPP'),
+                    eq(contactIdentities.externalId, fallbackChatJid)
+                  )
+                )
+                .limit(1);
+              if (lidRows[0]) {
+                const byId = await db
+                  .select()
+                  .from(contacts)
+                  .where(and(eq(contacts.id, lidRows[0].contactId), eq(contacts.companyId, companyId)))
+                  .limit(1);
+                contact = byId[0];
+              }
+            }
+            if (!contact) {
+              const suffix = targetPhone ? targetPhone.slice(-4) : fallbackChatJid.split('@')[0].slice(-4);
+              const [inserted] = await db
+                .insert(contacts)
+                .values({
+                  id: crypto.randomUUID(),
+                  companyId,
+                  namaLengkap: voteInfo.voterName || `Kontak ${suffix}`,
+                  nomorWhatsapp: targetPhone || null,
+                  tags: 'Inbound Lead',
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                .returning();
+              contact = inserted;
+            }
+          }
+
+          if (contact) {
+            const normalizedInboundSession = inboundSession ? inboundSession.trim() : null;
+            const convList = await db
+              .select()
+              .from(conversations)
+              .where(
+                and(
+                  eq(conversations.companyId, companyId),
+                  eq(conversations.contactId, contact.id),
+                  eq(conversations.channel, 'WHATSAPP')
+                )
+              )
+              .orderBy(desc(conversations.updatedAt));
+            convRow =
+              (normalizedInboundSession
+                ? convList.find((c) => c.wahaSession === normalizedInboundSession) || convList.find((c) => !c.wahaSession)
+                : convList[0]) || undefined;
+            if (!convRow) {
+              const isLidChat = lowerChatJid.endsWith('@lid');
+              const [createdConv] = await db
+                .insert(conversations)
+                .values({
+                  id: crypto.randomUUID(),
+                  companyId,
+                  contactId: contact.id,
+                  channel: 'WHATSAPP',
+                  externalThreadId: isGroupFallback ? fallbackChatJid : isLidChat ? fallbackChatJid : null,
+                  contextTitle: isGroupFallback ? contact.namaLengkap : null,
+                  wahaSession: normalizedInboundSession,
+                  pushName: !isGroupFallback && !voteInfo.fromMe ? voteInfo.voterName : contact.namaLengkap,
+                  isGroup: isGroupFallback,
+                  excludeFromMetrics: Boolean(isGroupFallback || contact.excludeFromMetrics),
+                  excludeReason: isGroupFallback ? 'Grup WhatsApp' : contact.excludeReason || null,
+                  status: 'OPEN',
+                  sessionStartedAt: now,
+                  unreadCount: 0,
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                .returning();
+              convRow = createdConv;
+            }
+          }
+        }
+
+        if (convRow) {
+          const isGroupConv = Boolean(
+            convRow.isGroup ||
+              convRow.externalThreadId?.toLowerCase().endsWith('@g.us') ||
+              voteInfo.chatJid?.toLowerCase().endsWith('@g.us')
+          );
+
+          let resolvedVoterPhone = voteInfo.voterPhone;
+          if (!resolvedVoterPhone && voteInfo.voterJid?.toLowerCase().endsWith('@lid') && inboundSession) {
+            resolvedVoterPhone = await wahaService
+              .resolveLidToPhone(inboundSession, voteInfo.voterJid)
+              .catch(() => null);
+          }
+          if (!resolvedVoterPhone && !isGroupConv && !voteInfo.fromMe && contact?.nomorWhatsapp) {
+            resolvedVoterPhone = normalizePhoneNumber(contact.nomorWhatsapp) || contact.nomorWhatsapp;
+          }
+
+          let voterContactName: string | null = null;
+          if (isGroupConv && resolvedVoterPhone) {
+            const pVars = Array.from(
+              new Set([
+                resolvedVoterPhone,
+                `+${resolvedVoterPhone}`,
+                resolvedVoterPhone.startsWith('62') ? `0${resolvedVoterPhone.slice(2)}` : '',
+              ].filter(Boolean))
+            );
+            const matchedVoter = await db
+              .select({ namaLengkap: contacts.namaLengkap })
+              .from(contacts)
+              .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, pVars)))
+              .limit(1);
+            voterContactName = matchedVoter[0]?.namaLengkap || null;
+          } else if (!isGroupConv && !voteInfo.fromMe && contact?.namaLengkap) {
+            voterContactName = contact.namaLengkap;
+          }
+
+          const resolvedVoterName = voteInfo.fromMe
+            ? voteInfo.voterName || 'Tim CS'
+            : pickBestContactDisplayName(
+                voterContactName,
+                voteInfo.voterName || (!isGroupConv ? convRow.pushName : null),
+                resolvedVoterPhone
+              ) || 'Pelanggan';
+
+          const voterId = voteInfo.fromMe
+            ? 'me'
+            : resolvedVoterPhone || voteInfo.voterJid || contact?.id || 'customer';
+
+          let prevPollMeta: Record<string, any> = {};
+          if (parentPollMsg?.metadataJson) {
+            try {
+              prevPollMeta = JSON.parse(parentPollMsg.metadataJson);
+            } catch {
+              prevPollMeta = {};
+            }
+          }
+
+          const effectiveQuestion =
+            prevPollMeta?.poll?.question || voteInfo.pollQuestion || null;
+          const effectiveOptions: string[] =
+            Array.isArray(prevPollMeta?.poll?.options) && prevPollMeta.poll.options.length > 0
+              ? prevPollMeta.poll.options
+              : voteInfo.pollOptions;
+
+          if (parentPollMsg) {
+            const updatedParentMeta = upsertPollVoteInMetadata(
+              prevPollMeta,
+              {
+                voterId,
+                voterName: resolvedVoterName,
+                voterPhone: resolvedVoterPhone,
+                selectedOptions: voteInfo.selectedOptions,
+                updatedAt: voteInfo.timestamp.toISOString(),
+                fromMe: voteInfo.fromMe,
+                voteFailed: voteInfo.voteFailed,
+              },
+              {
+                question: effectiveQuestion,
+                options: effectiveOptions,
+                multipleAnswers: voteInfo.multipleAnswers,
+              }
+            );
+            await db
+              .update(chatMessages)
+              .set({ metadataJson: JSON.stringify(updatedParentMeta) })
+              .where(eq(chatMessages.id, parentPollMsg.id));
+          }
+
+          const voteBody = voteInfo.voteFailed
+            ? '[Respon Polling] Pelanggan memberikan suara polling (gagal didekripsi oleh WAHA)'
+            : voteInfo.selectedOptions.length > 0
+            ? `[Respon Polling] Memilih: ${voteInfo.selectedOptions.join(', ')}`
+            : '[Respon Polling] Membatalkan pilihan polling';
+
+          const voteMetadata = {
+            kind: 'POLL_VOTE',
+            pollVote: {
+              pollMessageId: parentPollMsg?.id || null,
+              pollWahaMessageId: voteInfo.pollId || parentPollMsg?.wahaMessageId || null,
+              question: effectiveQuestion,
+              options: effectiveOptions,
+              selectedOptions: voteInfo.selectedOptions,
+              voterId,
+              voterName: resolvedVoterName,
+              voterPhone: resolvedVoterPhone,
+              voteFailed: voteInfo.voteFailed,
+            },
+          };
+
+          const existingVoteRows = voteInfo.voteId
+            ? await db
+                .select()
+                .from(chatMessages)
+                .where(
+                  and(
+                    eq(chatMessages.companyId, companyId),
+                    eq(chatMessages.conversationId, convRow.id),
+                    eq(chatMessages.wahaMessageId, voteInfo.voteId)
+                  )
+                )
+                .limit(1)
+            : [];
+
+          let shouldTouchConversation = false;
+          if (existingVoteRows[0]) {
+            const ex = existingVoteRows[0];
+            if (ex.body === '[Suara polling diterima]' || !ex.metadataJson) {
+              await db
+                .update(chatMessages)
+                .set({
+                  messageType: 'POLL',
+                  body: voteBody,
+                  metadataJson: JSON.stringify(voteMetadata),
+                  replyToMessageId: ex.replyToMessageId || parentPollMsg?.id || null,
+                  replyToBody:
+                    ex.replyToBody ||
+                    (effectiveQuestion ? `[Polling] ${effectiveQuestion.slice(0, 140)}` : null),
+                  replyToSender:
+                    ex.replyToSender ||
+                    (parentPollMsg
+                      ? parentPollMsg.direction === 'OUTBOUND'
+                        ? parentPollMsg.senderName || 'Tim CS'
+                        : contact?.namaLengkap || 'Pelanggan'
+                      : null),
+                })
+                .where(eq(chatMessages.id, ex.id));
+              shouldTouchConversation = !voteInfo.fromMe;
+            }
+          } else if (!voteInfo.fromMe || !parentPollMsg) {
+            await db.insert(chatMessages).values({
+              id: crypto.randomUUID(),
+              companyId,
+              conversationId: convRow.id,
+              contactId: contact?.id || convRow.contactId,
+              direction: voteInfo.fromMe ? 'OUTBOUND' : 'INBOUND',
+              messageType: 'POLL',
+              channel: 'WHATSAPP',
+              wahaSession: inboundSession || convRow.wahaSession || null,
+              senderJid: voteInfo.voterJid,
+              senderPhone: resolvedVoterPhone,
+              senderName: resolvedVoterName,
+              body: voteBody,
+              metadataJson: JSON.stringify(voteMetadata),
+              replyToMessageId: parentPollMsg?.id || null,
+              replyToBody: effectiveQuestion ? `[Polling] ${effectiveQuestion.slice(0, 140)}` : null,
+              replyToSender: parentPollMsg
+                ? parentPollMsg.direction === 'OUTBOUND'
+                  ? parentPollMsg.senderName || 'Tim CS'
+                  : contact?.namaLengkap || 'Pelanggan'
+                : null,
+              wahaMessageId: voteInfo.voteId,
+              status: voteInfo.fromMe ? 'SENT' : 'DELIVERED',
+              ackStatus: voteInfo.fromMe ? 1 : 2,
+              sentAt: voteInfo.fromMe ? now : null,
+              createdAt: now,
+            });
+            shouldTouchConversation = true;
+          }
+
+          if (shouldTouchConversation) {
+            const previewText = isGroupConv
+              ? `${resolvedVoterName}: ${voteBody}`
+              : voteBody;
+            const isReopeningFromResolved = !voteInfo.fromMe && convRow.status === 'RESOLVED';
+            await db
+              .update(conversations)
+              .set({
+                wahaSession: inboundSession || convRow.wahaSession,
+                status: isReopeningFromResolved ? 'OPEN' : convRow.status,
+                sessionStartedAt: isReopeningFromResolved
+                  ? now
+                  : convRow.sessionStartedAt || convRow.firstInboundAt || convRow.createdAt,
+                resolvedAt: isReopeningFromResolved ? null : convRow.resolvedAt,
+                firstInboundAt: voteInfo.fromMe ? convRow.firstInboundAt : convRow.firstInboundAt || now,
+                lastInboundAt: voteInfo.fromMe ? convRow.lastInboundAt : now,
+                lastMessage: previewText,
+                lastMessageAt: now,
+                unreadCount: voteInfo.fromMe ? convRow.unreadCount : sql`${conversations.unreadCount} + 1`,
+                updatedAt: now,
+              })
+              .where(eq(conversations.id, convRow.id));
+          }
+
+          liveEvents.emit('conversations:update', { conversationId: convRow.id }, companyId);
+          liveEvents.emit('tracking:update', { conversationId: convRow.id }, companyId);
+          wahaService.recordWebhookEvent({
+            receivedAt: now.toISOString(),
+            event,
+            session: inboundSession,
+            from: resolvedVoterPhone || voteInfo.voterJid || voteInfo.chatJid || null,
+            outcome: 'PROCESSED',
+            note: voteInfo.voteFailed
+              ? 'Respon polling diterima tetapi gagal didekripsi WAHA'
+              : voteInfo.selectedOptions.length > 0
+              ? `Respon polling diterima: ${voteInfo.selectedOptions.join(', ')}`
+              : 'Pelanggan membatalkan pilihan polling',
+          }, companyId);
+          return reply.send({ success: true, message: `${event} processed` });
         }
       }
 
@@ -2187,6 +2837,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         event !== 'message.ack' &&
         event !== 'message.reaction' &&
         event !== 'message.revoked' &&
+        event !== 'poll.vote' &&
+        event !== 'poll.vote.failed' &&
         event !== 'session.status' &&
         event !== 'presence.update'
       ) {

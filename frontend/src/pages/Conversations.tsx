@@ -4203,9 +4203,48 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           if (isStickerMsg && msg.mediaUrl) {
                             return null;
                           }
-                          if (meta?.poll) {
+                          if (meta?.kind === 'POLL_VOTE' && meta?.pollVote) {
+                            const pv = meta.pollVote;
                             return (
                               <div className="space-y-1.5">
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
+                                  <BarChart2 className="w-3 h-3" />
+                                  <span>Respon Polling</span>
+                                </div>
+                                {pv.voteFailed ? (
+                                  <div className="px-2 py-1.5 rounded bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                                    Pelanggan memilih opsi polling, namun isi suara tidak dapat didekripsi oleh WAHA (sesi sempat restart).
+                                  </div>
+                                ) : pv.selectedOptions.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {pv.selectedOptions.map((opt, oIdx) => (
+                                      <span
+                                        key={oIdx}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-[11px] font-medium text-emerald-800"
+                                      >
+                                        <Check className="w-3 h-3 shrink-0" />
+                                        <span>{opt}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="text-[11px] italic text-gray-500">
+                                    Membatalkan pilihan polling
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+                          if (meta?.poll) {
+                            const votes = Array.isArray(meta.poll.votes) ? meta.poll.votes : [];
+                            const totalVoters = votes.filter((v) => Array.isArray(v.selectedOptions) && v.selectedOptions.length > 0).length;
+                            const totalSelections = votes.reduce(
+                              (sum, v) => sum + (Array.isArray(v.selectedOptions) ? v.selectedOptions.length : 0),
+                              0
+                            );
+                            const failedVotes = votes.filter((v) => v.voteFailed && (!v.selectedOptions || v.selectedOptions.length === 0));
+                            return (
+                              <div className="space-y-1.5 min-w-[210px]">
                                 <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-700">
                                   <BarChart2 className="w-3 h-3" />
                                   <span>
@@ -4216,18 +4255,76 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   {meta.poll.question}
                                 </div>
                                 <div className="space-y-1">
-                                  {meta.poll.options.map((opt, oIdx) => (
-                                    <div
-                                      key={oIdx}
-                                      className="px-2 py-1 rounded bg-white/90 border border-gray-200 text-[11px] text-gray-700 flex items-center gap-1.5"
-                                    >
-                                      <span className="w-4 h-4 rounded-full border border-indigo-300 text-[9px] font-mono flex items-center justify-center text-indigo-700 shrink-0">
-                                        {oIdx + 1}
-                                      </span>
-                                      <span className="truncate">{opt}</span>
-                                    </div>
-                                  ))}
+                                  {meta.poll.options.map((opt, oIdx) => {
+                                    const votersForOption = votes.filter(
+                                      (v) => Array.isArray(v.selectedOptions) && v.selectedOptions.some((so) => so.trim() === opt.trim())
+                                    );
+                                    const optCount = votersForOption.length;
+                                    const pct = totalSelections > 0 ? Math.round((optCount / Math.max(totalVoters, 1)) * 100) : 0;
+                                    return (
+                                      <div
+                                        key={oIdx}
+                                        className={`relative overflow-hidden px-2 py-1.5 rounded border text-[11px] ${
+                                          optCount > 0
+                                            ? 'bg-emerald-50/50 border-emerald-300 text-gray-900'
+                                            : 'bg-white/90 border-gray-200 text-gray-700'
+                                        }`}
+                                      >
+                                        {optCount > 0 && (
+                                          <div
+                                            className="absolute inset-y-0 left-0 bg-emerald-200/40 pointer-events-none"
+                                            style={{ width: `${Math.min(100, Math.max(8, pct))}%` }}
+                                          />
+                                        )}
+                                        <div className="relative flex items-center justify-between gap-2">
+                                          <div className="flex items-center gap-1.5 min-w-0">
+                                            <span
+                                              className={`w-4 h-4 rounded-full border text-[9px] font-mono flex items-center justify-center shrink-0 ${
+                                                optCount > 0
+                                                  ? 'border-emerald-500 bg-emerald-600 text-white'
+                                                  : 'border-indigo-300 text-indigo-700'
+                                              }`}
+                                            >
+                                              {optCount > 0 ? <Check className="w-2.5 h-2.5" /> : oIdx + 1}
+                                            </span>
+                                            <span className="truncate font-medium">{opt}</span>
+                                          </div>
+                                          <span className="text-[10px] font-mono font-semibold text-gray-600 shrink-0 tabular-nums">
+                                            {optCount} suara
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
+                                {votes.length > 0 && (
+                                  <details className="pt-1 border-t border-gray-200/70 text-[10px] text-gray-600">
+                                    <summary className="cursor-pointer select-none font-medium text-indigo-700 hover:underline">
+                                      {totalVoters > 0
+                                        ? `${totalVoters} pemilih merespons (${votes.length} tercatat)`
+                                        : `${failedVotes.length} suara belum terdekripsi`}
+                                    </summary>
+                                    <div className="mt-1 space-y-1">
+                                      {votes.map((v, vIdx) => (
+                                        <div
+                                          key={`${v.voterId}-${vIdx}`}
+                                          className="flex items-start justify-between gap-2 bg-white/80 rounded px-1.5 py-1 border border-gray-200/70"
+                                        >
+                                          <span className="font-semibold text-gray-800 truncate">
+                                            {v.voterName || v.voterPhone || v.voterId}
+                                          </span>
+                                          <span className="text-right text-gray-600 shrink-0">
+                                            {v.selectedOptions.length > 0
+                                              ? v.selectedOptions.join(', ')
+                                              : v.voteFailed
+                                              ? 'Gagal dekripsi'
+                                              : 'Batal pilih'}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </details>
+                                )}
                               </div>
                             );
                           }

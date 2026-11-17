@@ -1502,7 +1502,14 @@ export class WahaService {
       return false;
     }
 
-    const requiredEvents = ['message', 'message.ack', 'session.status', 'presence.update'];
+    const requiredEvents = [
+      'message',
+      'message.ack',
+      'session.status',
+      'presence.update',
+      'poll.vote',
+      'poll.vote.failed',
+    ];
     let sessionData = existingSessionData;
     if (!sessionData) {
       try {
@@ -1526,7 +1533,9 @@ export class WahaService {
         (hasInbound &&
           evs.includes('message.ack') &&
           evs.includes('session.status') &&
-          evs.includes('presence.update'))
+          evs.includes('presence.update') &&
+          evs.includes('poll.vote') &&
+          evs.includes('poll.vote.failed'))
       );
     });
 
@@ -1625,7 +1634,14 @@ export class WahaService {
       ? [
           {
             url: resolvedWebhook.url,
-            events: ['message', 'message.ack', 'session.status'],
+            events: [
+              'message',
+              'message.ack',
+              'session.status',
+              'presence.update',
+              'poll.vote',
+              'poll.vote.failed',
+            ],
           },
         ]
       : [];

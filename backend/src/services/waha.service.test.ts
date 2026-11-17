@@ -1937,6 +1937,157 @@ test('parseWahaPrivacyConfig, resolveSessionPrivacyRule, and getGroupInfo partic
   assert.ok(hitUrls.some((u) => u.endsWith('/participants')));
 });
 
+test('extractWahaPollVoteEvent and upsertPollVoteInMetadata handle direct, group, failed votes and webhook registration', async (t) => {
+  const {
+    extractWahaPollVoteEvent,
+    upsertPollVoteInMetadata,
+  } = require('../routes/waha') as typeof import('../routes/waha');
+
+  // 1. Direct personal chat poll vote
+  const directVote = extractWahaPollVoteEvent('poll.vote', {
+    vote: {
+      id: 'false_628123456789@c.us_VOTE123456',
+      to: 'me',
+      from: '628123456789@c.us',
+      fromMe: false,
+      pushName: 'Rina',
+      selectedOptions: ['Pagi', 'Siang'],
+      timestamp: 1700000100,
+    },
+    poll: {
+      id: 'true_628123456789@c.us_POLL987654',
+      to: '628123456789@c.us',
+      from: '6289999999@c.us',
+      fromMe: true,
+      poll: {
+        name: 'Jadwal ketemuan?',
+        options: ['Pagi', 'Siang', 'Sore'],
+        multipleAnswers: true,
+      },
+    },
+  });
+  assert.equal(directVote.voteFailed, false);
+  assert.equal(directVote.pollId, 'true_628123456789@c.us_POLL987654');
+  assert.equal(directVote.pollStanzaId, 'POLL987654');
+  assert.equal(directVote.chatJid, '628123456789@c.us');
+  assert.equal(directVote.voterPhone, '628123456789');
+  assert.equal(directVote.voterName, 'Rina');
+  assert.deepEqual(directVote.selectedOptions, ['Pagi', 'Siang']);
+
+  // 2. Group chat poll vote
+  const groupVote = extractWahaPollVoteEvent('poll.vote', {
+    vote: {
+      id: 'false_12036300112233@g.us_VOTEG1',
+      to: '12036300112233@g.us',
+      from: '628777888999@c.us',
+      participant: '628777888999@c.us',
+      fromMe: false,
+      selectedOptions: [{ name: 'Setuju' }],
+    },
+    poll: {
+      id: 'true_12036300112233@g.us_POLLG1',
+      to: '12036300112233@g.us',
+      fromMe: true,
+    },
+  });
+  assert.equal(groupVote.chatJid, '12036300112233@g.us');
+  assert.equal(groupVote.voterPhone, '628777888999');
+  assert.deepEqual(groupVote.selectedOptions, ['Setuju']);
+
+  // 3. Failed poll vote keeps previous valid vote when upserting metadata
+  const failedVote = extractWahaPollVoteEvent('poll.vote.failed', {
+    vote: {
+      id: 'false_628123456789@c.us_FAIL1',
+      from: '628123456789@c.us',
+      selectedOptions: ['ShouldBeIgnored'],
+    },
+    poll: { id: 'true_628123456789@c.us_POLL987654' },
+  });
+  assert.equal(failedVote.voteFailed, true);
+  assert.deepEqual(failedVote.selectedOptions, []);
+
+  let meta: Record<string, any> = {
+    kind: 'POLL',
+    poll: { question: 'Jadwal ketemuan?', options: ['Pagi', 'Siang', 'Sore'], multipleAnswers: true },
+  };
+  meta = upsertPollVoteInMetadata(meta, {
+    voterId: '628123456789',
+    voterName: 'Rina',
+    voterPhone: '628123456789',
+    selectedOptions: ['Pagi'],
+    updatedAt: '2026-11-17T09:00:00.000Z',
+  });
+  meta = upsertPollVoteInMetadata(meta, {
+    voterId: '628123456789',
+    voterName: 'Rina',
+    voterPhone: '628123456789',
+    selectedOptions: [],
+    updatedAt: '2026-11-17T09:05:00.000Z',
+    voteFailed: true,
+  });
+  assert.equal(meta.poll.votes.length, 1);
+  assert.deepEqual(meta.poll.votes[0].selectedOptions, ['Pagi']);
+  assert.equal(meta.poll.votes[0].voteFailed, true);
+
+  // Change vote cleanly replaces previous selection
+  meta = upsertPollVoteInMetadata(meta, {
+    voterId: '628123456789',
+    voterName: 'Rina',
+    voterPhone: '628123456789',
+    selectedOptions: ['Siang', 'Sore'],
+    updatedAt: '2026-11-17T09:06:00.000Z',
+  });
+  assert.deepEqual(meta.poll.votes[0].selectedOptions, ['Siang', 'Sore']);
+
+  // 4. Webhook sync subscribes to poll.vote & poll.vote.failed
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha-gows.example.com',
+    apiKey: 'test-key',
+    session: 'sales',
+    customWebhookUrl: 'https://crm.example.com/api/waha/webhook',
+  });
+  const origCreate = axios.create;
+  let putBody: any = null;
+  (axios as any).create = () => ({
+    get: async (url: string) => {
+      if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      if (url.startsWith('/api/sessions')) {
+        return {
+          data: [
+            {
+              name: 'sales',
+              status: 'WORKING',
+              config: {
+                webhooks: [
+                  {
+                    url: 'https://crm.example.com/api/waha/webhook',
+                    events: ['message', 'message.ack', 'session.status', 'presence.update'],
+                  },
+                ],
+              },
+            },
+          ],
+        };
+      }
+      return { data: {} };
+    },
+    put: async (_url: string, body: any) => {
+      putBody = body;
+      return { data: {} };
+    },
+  });
+  t.after(() => {
+    (axios as any).create = origCreate;
+  });
+
+  const syncRes = await wahaService.syncSessionWebhooks('https://crm.example.com');
+  assert.deepEqual(syncRes.synced, ['sales']);
+  const syncedEvents: string[] = putBody?.config?.webhooks?.[0]?.events || [];
+  assert.ok(syncedEvents.includes('poll.vote'));
+  assert.ok(syncedEvents.includes('poll.vote.failed'));
+});
+
 
 
 
