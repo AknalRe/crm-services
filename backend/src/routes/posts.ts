@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { channelAccounts, contacts, scheduledPosts } from '../db/schema';
 import {
@@ -94,20 +94,64 @@ export default async function postsRouter(fastify: FastifyInstance) {
     return allowed(req, reply);
   });
 
-  fastify.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/', async (req: FastifyRequest<{
+    Querystring: {
+      channel?: string;
+      status?: string;
+      search?: string;
+      page?: string;
+      limit?: string;
+    };
+  }>, reply: FastifyReply) => {
     try {
-      const rows = await db
-        .select({
-          post: scheduledPosts,
-          accountName: channelAccounts.name,
-          accountExternalId: channelAccounts.accountId,
-        })
-        .from(scheduledPosts)
-        .leftJoin(channelAccounts, eq(scheduledPosts.channelAccountId, channelAccounts.id))
-        .orderBy(desc(scheduledPosts.scheduledAt));
+      const { channel, status, search, page = '1', limit = '200' } = req.query;
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.max(1, Math.min(500, parseInt(limit, 10) || 200));
+      const offset = (pageNum - 1) * limitNum;
 
+      const conditions: any[] = [];
+      if (channel && channel !== 'ALL') {
+        conditions.push(eq(scheduledPosts.channel, channel.toUpperCase().trim()));
+      }
+      if (status && status !== 'ALL') {
+        conditions.push(eq(scheduledPosts.status, status.toUpperCase().trim()));
+      }
+      if (search && search.trim()) {
+        conditions.push(ilike(scheduledPosts.caption, `%${search.trim()}%`));
+      }
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [rows, countResult] = await Promise.all([
+        db
+          .select({
+            post: scheduledPosts,
+            accountName: channelAccounts.name,
+            accountExternalId: channelAccounts.accountId,
+          })
+          .from(scheduledPosts)
+          .leftJoin(channelAccounts, eq(scheduledPosts.channelAccountId, channelAccounts.id))
+          .where(whereClause)
+          .orderBy(desc(scheduledPosts.scheduledAt))
+          .limit(limitNum)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(scheduledPosts)
+          .where(whereClause),
+      ]);
+
+      const total = Number(countResult[0]?.count || 0);
       const data = rows.map((r) => serializeScheduledPost(r.post, r.accountName, r.accountExternalId));
-      return reply.send({ success: true, data });
+      return reply.send({
+        success: true,
+        data,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limitNum)),
+        },
+      });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }

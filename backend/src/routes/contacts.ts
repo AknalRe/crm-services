@@ -51,12 +51,28 @@ export default async function contactsRouter(fastify: FastifyInstance) {
   });
   // GET all contacts with search and filter
   fastify.get('/', async (req: FastifyRequest<{
-    Querystring: { search?: string; tag?: string; kategori?: string; page?: string; limit?: string };
+    Querystring: {
+      search?: string;
+      tag?: string;
+      kategori?: string;
+      excludeFromMetrics?: string;
+      idsOnly?: string;
+      page?: string;
+      limit?: string;
+    };
   }>, reply: FastifyReply) => {
     try {
-      const { search, tag, kategori, page = '1', limit = '100' } = req.query;
-      const pageNum = parseInt(page, 10) || 1;
-      const limitNum = parseInt(limit, 10) || 100;
+      const {
+        search,
+        tag,
+        kategori,
+        excludeFromMetrics,
+        idsOnly,
+        page = '1',
+        limit = '50',
+      } = req.query;
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.max(1, Math.min(10000, parseInt(limit, 10) || 50));
       const offset = (pageNum - 1) * limitNum;
 
       const conditions: any[] = [];
@@ -68,7 +84,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
             ilike(contacts.namaPanggilan, s),
             ilike(contacts.nomorWhatsapp, s),
             ilike(contacts.alamat, s),
-            ilike(contacts.kategori, s)
+            ilike(contacts.kategori, s),
+            ilike(contacts.tags, s)
           )
         );
       }
@@ -85,22 +102,46 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         }
       }
 
+      const metricFilter = String(excludeFromMetrics || '').toUpperCase().trim();
+      if (metricFilter === 'EXCLUDED') {
+        conditions.push(eq(contacts.excludeFromMetrics, true));
+      } else if (metricFilter === 'ASSESSED') {
+        conditions.push(or(eq(contacts.excludeFromMetrics, false), isNull(contacts.excludeFromMetrics)));
+      }
+
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-      const allContacts = await db
-        .select()
-        .from(contacts)
-        .where(whereClause)
-        .orderBy(desc(contacts.createdAt))
-        .limit(limitNum)
-        .offset(offset);
+      if (idsOnly === '1' || idsOnly === 'true') {
+        const idRows = await db
+          .select({ id: contacts.id })
+          .from(contacts)
+          .where(whereClause)
+          .orderBy(desc(contacts.createdAt));
+        return reply.send({
+          success: true,
+          data: idRows.map((r) => r.id),
+        });
+      }
 
-      const totalResult = await db
-        .select({ count: sql<number>`count(*)` })
-        .from(contacts)
-        .where(whereClause);
+      const [allContacts, totalResult, totalAllResult] = await Promise.all([
+        db
+          .select()
+          .from(contacts)
+          .where(whereClause)
+          .orderBy(desc(contacts.createdAt))
+          .limit(limitNum)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(contacts)
+          .where(whereClause),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(contacts),
+      ]);
 
       const total = Number(totalResult[0]?.count || 0);
+      const totalAll = Number(totalAllResult[0]?.count || 0);
 
       const contactIds = allContacts.map((c) => c.id);
       const identitiesMap = new Map<string, any[]>();
@@ -131,7 +172,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           page: pageNum,
           limit: limitNum,
           total,
-          totalPages: Math.ceil(total / limitNum),
+          totalPages: Math.max(1, Math.ceil(total / limitNum)),
+          totalAll,
         },
       });
     } catch (error: any) {
@@ -670,6 +712,10 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       let quotaStopped = false;
       const now = new Date();
 
+      const newContactRows: Array<typeof contacts.$inferInsert> = [];
+      const newIdentityRows: Array<typeof contactIdentities.$inferInsert> = [];
+      const existingIdsValid = new Set(existingList.map((c) => c.id));
+
       for (const item of waContacts) {
         if (!item.phone) {
           skipped++;
@@ -697,24 +743,22 @@ export default async function contactsRouter(fastify: FastifyInstance) {
                 updatedAt: now,
               })
               .where(eq(contacts.id, existing.id));
+            if (nextName) existing.namaLengkap = nextName;
+            if (nextNick) existing.namaPanggilan = nextNick;
             updated++;
           } else {
             skipped++;
           }
 
           if (item.lid && !lidSet.has(item.lid)) {
-            await db
-              .insert(contactIdentities)
-              .values({
-                id: crypto.randomUUID(),
-                contactId: existing.id,
-                channel: 'WHATSAPP',
-                externalId: item.lid,
-                handle: `+${item.phone}`,
-                createdAt: now,
-              })
-              .onConflictDoNothing()
-              .catch(() => {});
+            newIdentityRows.push({
+              id: crypto.randomUUID(),
+              contactId: existing.id,
+              channel: 'WHATSAPP',
+              externalId: item.lid,
+              handle: `+${item.phone}`,
+              createdAt: now,
+            });
             lidSet.add(item.lid);
           }
           continue;
@@ -728,44 +772,62 @@ export default async function contactsRouter(fastify: FastifyInstance) {
 
         const newId = crypto.randomUUID();
         const finalName = preferredName || `+${item.phone}`;
-        const [inserted] = await db
-          .insert(contacts)
-          .values({
-            id: newId,
-            namaLengkap: finalName,
-            namaPanggilan: item.pushName?.trim() || null,
-            nomorWhatsapp: item.phone,
-            tags: 'WhatsApp Sync',
-            createdAt: now,
-            updatedAt: now,
-          })
-          .returning({
-            id: contacts.id,
-            namaLengkap: contacts.namaLengkap,
-            namaPanggilan: contacts.namaPanggilan,
-            nomorWhatsapp: contacts.nomorWhatsapp,
-          });
+        const pendingEntry = {
+          id: newId,
+          namaLengkap: finalName,
+          namaPanggilan: item.pushName?.trim() || null,
+          nomorWhatsapp: item.phone,
+        };
+        phoneMap.set(item.phone, pendingEntry);
+        currentTotal++;
+        created++;
 
-        if (inserted) {
-          phoneMap.set(item.phone, inserted);
-          currentTotal++;
-          created++;
-          if (item.lid && !lidSet.has(item.lid)) {
-            await db
-              .insert(contactIdentities)
-              .values({
-                id: crypto.randomUUID(),
-                contactId: inserted.id,
-                channel: 'WHATSAPP',
-                externalId: item.lid,
-                handle: `+${item.phone}`,
-                createdAt: now,
-              })
-              .onConflictDoNothing()
-              .catch(() => {});
-            lidSet.add(item.lid);
-          }
+        newContactRows.push({
+          id: newId,
+          namaLengkap: finalName,
+          namaPanggilan: pendingEntry.namaPanggilan,
+          nomorWhatsapp: item.phone,
+          tags: 'WhatsApp Sync',
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        if (item.lid && !lidSet.has(item.lid)) {
+          newIdentityRows.push({
+            id: crypto.randomUUID(),
+            contactId: newId,
+            channel: 'WHATSAPP',
+            externalId: item.lid,
+            handle: `+${item.phone}`,
+            createdAt: now,
+          });
+          lidSet.add(item.lid);
         }
+      }
+
+      const INSERT_CHUNK = 200;
+      for (let i = 0; i < newContactRows.length; i += INSERT_CHUNK) {
+        const chunk = newContactRows.slice(i, i + INSERT_CHUNK);
+        const insertedChunk = await db
+          .insert(contacts)
+          .values(chunk)
+          .onConflictDoNothing()
+          .returning({ id: contacts.id });
+        for (const r of insertedChunk) {
+          existingIdsValid.add(r.id);
+        }
+      }
+
+      const validIdentities = newIdentityRows.filter((idRow) =>
+        existingIdsValid.has(idRow.contactId)
+      );
+      for (let i = 0; i < validIdentities.length; i += INSERT_CHUNK) {
+        const chunk = validIdentities.slice(i, i + INSERT_CHUNK);
+        await db
+          .insert(contactIdentities)
+          .values(chunk)
+          .onConflictDoNothing()
+          .catch(() => {});
       }
 
       if (created > 0 || updated > 0) {
@@ -781,6 +843,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           updated,
           skipped,
           quotaStopped,
+          currentTotal,
+          maxContacts,
         },
       });
     } catch (error: any) {

@@ -12,6 +12,7 @@ import { subscribeLiveEvent } from '../services/liveEvents';
 import { CampaignRecipient } from '../types';
 import { Button } from '../components/ui/Button';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
+import { TablePagination } from '../components/ui/Pagination';
 
 export const Tracking: React.FC = () => {
   const [items, setItems] = useState<CampaignRecipient[]>([]);
@@ -19,7 +20,10 @@ export const Tracking: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(50);
   const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   const fetchTracking = useCallback(async () => {
     setLoading(true);
@@ -27,17 +31,24 @@ export const Tracking: React.FC = () => {
       const res = await api.getRecipientTracking({
         status: statusFilter !== 'ALL' ? statusFilter : undefined,
         search: search || undefined,
-        limit: 100,
+        page,
+        limit,
       });
-      setItems(res.data);
-      setTotal(res.pagination.total);
+      const rows = res.data || [];
+      const meta = res.pagination;
+      setItems(rows);
+      setTotal(meta?.total ?? rows.length);
+      setTotalPages(meta?.totalPages ?? 1);
+      if (rows.length === 0 && page > 1 && meta && meta.total > 0) {
+        setPage(Math.max(1, meta.totalPages));
+      }
       setError(null);
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || 'Gagal memuat log pengiriman');
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, search]);
+  }, [statusFilter, search, page, limit]);
 
   useEffect(() => {
     fetchTracking();
@@ -49,7 +60,11 @@ export const Tracking: React.FC = () => {
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchTracking();
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      fetchTracking();
+    }
   };
 
   return (
@@ -62,7 +77,10 @@ export const Tracking: React.FC = () => {
             type="text"
             placeholder="Cari nama lead, nomor WA, atau kampanye..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="w-full h-9 pl-9 pr-3 bg-white border border-gray-200 rounded-md text-[13px] text-gray-800 placeholder-gray-400 focus:outline-none focus:border-indigo-500"
           />
         </form>
@@ -79,7 +97,10 @@ export const Tracking: React.FC = () => {
               <button
                 key={st.id}
                 type="button"
-                onClick={() => setStatusFilter(st.id)}
+                onClick={() => {
+                  setStatusFilter(st.id);
+                  setPage(1);
+                }}
                 className={`px-3 py-1 rounded transition-colors whitespace-nowrap ${
                   statusFilter === st.id
                     ? 'bg-white text-gray-900 shadow-sm font-semibold'
@@ -343,15 +364,25 @@ export const Tracking: React.FC = () => {
           </>
         )}
 
-        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-between flex-wrap gap-2">
-          <span className="tabular-nums">
-            Menampilkan <strong className="text-gray-900">{items.length}</strong> dari{' '}
-            <strong className="text-gray-900">{total}</strong> event pengiriman
-          </span>
-          <span className="text-[11px] text-gray-400">
-            Status diperbarui otomatis saat webhook WAHA menerima pembaruan
-          </span>
-        </div>
+        <TablePagination
+          page={page}
+          limit={limit}
+          total={total}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          onLimitChange={(nextLimit) => {
+            setLimit(nextLimit);
+            setPage(1);
+          }}
+          limitOptions={[25, 50, 100, 250, 500]}
+          itemLabel="event pengiriman"
+          loading={loading}
+          extraContent={
+            <span className="text-[11px] text-gray-400 hidden xl:inline">
+              Diperbarui otomatis via webhook WAHA
+            </span>
+          }
+        />
       </div>
     </div>
   );

@@ -2224,14 +2224,96 @@ export class WahaService {
     return { client, targetSession };
   }
 
+  private extractWahaArrayPayload(payload: any): any[] | null {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.contacts)) return payload.contacts;
+    if (Array.isArray(payload?.data)) return payload.data;
+    return null;
+  }
+
+  private getRawWahaContactKey(item: any): string {
+    if (!item || typeof item !== 'object') return String(item || '');
+    const primary = String(
+      item?.id?._serialized ||
+        item?.id?.id ||
+        item?.id ||
+        item?.jid ||
+        item?.JID ||
+        item?.lid ||
+        item?.number ||
+        item?.phoneNumber ||
+        item?.pn ||
+        ''
+    ).trim();
+    return primary || JSON.stringify(item);
+  }
+
+  private async fetchPaginatedWahaList(
+    client: AxiosInstance,
+    url: string,
+    baseParams: Record<string, any>,
+    pageSize = 1000,
+    timeoutMs = 25000,
+    maxPages = 50
+  ): Promise<any[] | null> {
+    const collected: any[] = [];
+    const seenKeys = new Set<string>();
+
+    for (let page = 0; page < maxPages; page++) {
+      const offset = collected.length;
+      const params: Record<string, any> = {
+        ...baseParams,
+        limit: pageSize,
+        ...(page > 0 ? { offset } : {}),
+      };
+      let resData: any;
+      try {
+        const res = await client.get(url, { params, timeout: timeoutMs });
+        resData = res.data;
+      } catch (err: any) {
+        if (page === 0) {
+          throw err;
+        }
+        break;
+      }
+
+      const batch = this.extractWahaArrayPayload(resData);
+      if (!batch) {
+        return page === 0 ? null : collected;
+      }
+      if (batch.length === 0) {
+        break;
+      }
+
+      let addedInBatch = 0;
+      for (const item of batch) {
+        const key = this.getRawWahaContactKey(item);
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        collected.push(item);
+        addedInBatch++;
+      }
+
+      // If endpoint ignored offset and returned duplicates, or batch is clearly below any WAHA page cap (<100)
+      if (addedInBatch === 0 || batch.length < 100) {
+        break;
+      }
+    }
+
+    return collected;
+  }
+
   private async fetchLidPhoneLookup(client: AxiosInstance, session: string): Promise<Map<string, string>> {
     const map = new Map<string, string>();
     try {
-      const res = await client.get(`/api/${encodeURIComponent(session)}/lids`, {
-        params: { limit: 2000 },
-        timeout: 6000,
-      });
-      const list = Array.isArray(res.data) ? res.data : [];
+      const list =
+        (await this.fetchPaginatedWahaList(
+          client,
+          `/api/${encodeURIComponent(session)}/lids`,
+          {},
+          1000,
+          10000
+        )) || [];
       for (const item of list) {
         const lid = String(item?.lid || '').trim();
         const phone = extractValidNormalizedPhone(item?.pn || item?.phoneNumber);
@@ -2248,26 +2330,24 @@ export class WahaService {
    */
   public async fetchAllContacts(
     sessionName?: string,
-    limit = 2000
+    limit = 1000
   ): Promise<{ contacts: WahaContactRecord[]; sessionUsed: string }> {
     const { client, targetSession } = await this.resolveReadableSession(sessionName);
-    const endpoints: Array<{ url: string; params?: Record<string, any> }> = [
-      { url: '/api/contacts/all', params: { session: targetSession, limit } },
-      { url: `/api/${encodeURIComponent(targetSession)}/contacts/all`, params: { limit } },
-      { url: '/api/contacts', params: { session: targetSession, limit } },
+    const endpoints: Array<{ url: string; params: Record<string, any> }> = [
+      { url: '/api/contacts/all', params: { session: targetSession } },
+      { url: `/api/${encodeURIComponent(targetSession)}/contacts/all`, params: {} },
+      { url: '/api/contacts', params: { session: targetSession } },
     ];
 
     let rawList: any[] | null = null;
+    let winningEndpointUrl = '';
     let lastError: any = null;
     for (const ep of endpoints) {
       try {
-        const res = await client.get(ep.url, { params: ep.params, timeout: 20000 });
-        if (Array.isArray(res.data)) {
-          rawList = res.data;
-          break;
-        }
-        if (Array.isArray(res.data?.contacts)) {
-          rawList = res.data.contacts;
+        const collected = await this.fetchPaginatedWahaList(client, ep.url, ep.params, limit, 25000);
+        if (collected) {
+          rawList = collected;
+          winningEndpointUrl = ep.url;
           break;
         }
       } catch (err: any) {
@@ -2279,6 +2359,36 @@ export class WahaService {
 
     if (!rawList) {
       throw new Error(this.extractWahaError(lastError) || 'Gagal mengambil daftar kontak dari WAHA');
+    }
+
+    // Some WAHA engines cap /contacts/all at 500/1000/2000 without honoring offset;
+    // when that happens, also sweep /api/contacts paginated to capture remaining contacts.
+    if (
+      winningEndpointUrl !== '/api/contacts' &&
+      rawList.length >= 100 &&
+      rawList.length % 100 === 0
+    ) {
+      try {
+        const fallbackPaged = await this.fetchPaginatedWahaList(
+          client,
+          '/api/contacts',
+          { session: targetSession },
+          limit,
+          25000
+        );
+        if (fallbackPaged && fallbackPaged.length > 0) {
+          const seenKeys = new Set(rawList.map((item) => this.getRawWahaContactKey(item)));
+          for (const item of fallbackPaged) {
+            const key = this.getRawWahaContactKey(item);
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              rawList.push(item);
+            }
+          }
+        }
+      } catch {
+        // Ignore fallback probe error when primary list succeeded
+      }
     }
 
     const needsLidMap = rawList.some((item) => {

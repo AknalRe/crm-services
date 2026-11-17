@@ -7,6 +7,8 @@ import {
   Sliders,
   Info,
   Check,
+  Search,
+  X,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -27,6 +29,7 @@ import { Modal } from '../components/ui/Modal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
+import { TablePagination } from '../components/ui/Pagination';
 
 interface BroadcastsProps {
   currentUser?: AuthStatus['user'] | null;
@@ -47,6 +50,13 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('ALL');
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyLimit, setHistoryLimit] = useState(25);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyTotalPages, setHistoryTotalPages] = useState(1);
+  const [manualContactSearch, setManualContactSearch] = useState('');
   const [allContacts, setAllContacts] = useState<Contact[]>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [wahaSessions, setWahaSessions] = useState<WahaSessionItem[]>([]);
@@ -81,11 +91,11 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
   const loadContactsAndTags = useCallback(async () => {
     try {
       const [res, tags] = await Promise.all([
-        api.getContacts({ limit: 1000 }),
+        api.getContacts({ limit: 10000 }),
         api.getContactTags(),
       ]);
-      setAllContacts(res.data);
-      setAvailableTags(tags);
+      setAllContacts(res.data || []);
+      setAvailableTags(tags || []);
     } catch (err) {
       console.error('Failed to load contacts:', err);
     }
@@ -94,15 +104,25 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
   const loadCampaigns = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.getCampaigns();
-      setCampaigns(data);
+      const res = await api.getCampaignsPaged({
+        search: historySearch || undefined,
+        status: historyStatusFilter !== 'ALL' ? historyStatusFilter : undefined,
+        page: historyPage,
+        limit: historyLimit,
+      });
+      setCampaigns(res.data);
+      setHistoryTotal(res.pagination.total);
+      setHistoryTotalPages(res.pagination.totalPages);
+      if (res.data.length === 0 && historyPage > 1 && res.pagination.total > 0) {
+        setHistoryPage(Math.max(1, res.pagination.totalPages));
+      }
       setHistoryError(null);
     } catch (err: any) {
       setHistoryError(err.response?.data?.error || err.message || 'Gagal memuat riwayat siaran');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [historySearch, historyStatusFilter, historyPage, historyLimit]);
 
   useEffect(() => {
     loadContactsAndTags();
@@ -511,51 +531,107 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
                 </div>
               )}
 
-              {recipientMode === 'MANUAL' && (
-                <div className="border border-gray-200 rounded-md p-3 max-h-48 overflow-y-auto space-y-1">
-                  <div className="flex justify-between items-center pb-2 mb-2 border-b border-gray-200 text-xs">
-                    <span className="font-semibold text-gray-700">Daftar Kontak:</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSelectedContactIds(
-                          selectedContactIds.length === allContacts.length
-                            ? []
-                            : allContacts.map((c) => c.id)
-                        )
-                      }
-                      className="text-indigo-600 hover:underline font-medium"
-                    >
-                      {selectedContactIds.length === allContacts.length
-                        ? 'Hapus Semua Pilihan'
-                        : 'Pilih Semua'}
-                    </button>
+              {recipientMode === 'MANUAL' && (() => {
+                const q = manualContactSearch.trim().toLowerCase();
+                const filteredManual = q
+                  ? allContacts.filter(
+                      (c) =>
+                        (c.nama_lengkap || '').toLowerCase().includes(q) ||
+                        (c.nama_panggilan || '').toLowerCase().includes(q) ||
+                        (c.nomor_whatsapp || '').toLowerCase().includes(q) ||
+                        (c.tags || '').toLowerCase().includes(q)
+                    )
+                  : allContacts;
+                const filteredIds = filteredManual.map((c) => c.id);
+                const allFilteredSelected =
+                  filteredIds.length > 0 && filteredIds.every((id) => selectedContactIds.includes(id));
+                const visibleManual = filteredManual.slice(0, 300);
+
+                return (
+                  <div className="border border-gray-200 rounded-md p-3 space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-200 text-xs">
+                      <span className="font-semibold text-gray-700">
+                        Daftar Kontak ({filteredManual.length.toLocaleString('id-ID')}):
+                      </span>
+                      <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
+                        <div className="relative flex-1">
+                          <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={manualContactSearch}
+                            onChange={(e) => setManualContactSearch(e.target.value)}
+                            placeholder="Cari nama / nomor WA / tag..."
+                            className="w-full h-7 pl-7 pr-6 border border-gray-200 rounded text-xs focus:outline-none focus:border-indigo-500"
+                          />
+                          {manualContactSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setManualContactSearch('')}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (allFilteredSelected) {
+                              const rmSet = new Set(filteredIds);
+                              setSelectedContactIds((prev) => prev.filter((id) => !rmSet.has(id)));
+                            } else {
+                              setSelectedContactIds((prev) =>
+                                Array.from(new Set([...prev, ...filteredIds]))
+                              );
+                            }
+                          }}
+                          className="text-indigo-600 hover:underline font-medium shrink-0"
+                        >
+                          {allFilteredSelected ? 'Hapus Pilihan' : 'Pilih Semua'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto space-y-1">
+                      {visibleManual.length === 0 ? (
+                        <p className="text-xs text-gray-400 text-center py-4">
+                          Tidak ada kontak yang cocok dengan pencarian.
+                        </p>
+                      ) : (
+                        visibleManual.map((contact) => (
+                          <label
+                            key={contact.id}
+                            className="flex items-center gap-2 p-1.5 hover:bg-gray-50 rounded text-xs cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedContactIds.includes(contact.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedContactIds((prev) =>
+                                    prev.includes(contact.id) ? prev : [...prev, contact.id]
+                                  );
+                                } else {
+                                  setSelectedContactIds((prev) => prev.filter((id) => id !== contact.id));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="font-medium text-gray-900">{contact.nama_lengkap}</span>
+                            <span className="text-gray-400 font-mono">({contact.nomor_whatsapp})</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                    {filteredManual.length > visibleManual.length && (
+                      <p className="text-[11px] text-gray-500 pt-1 border-t border-gray-100">
+                        Menampilkan 300 dari {filteredManual.length.toLocaleString('id-ID')} kontak. Gunakan
+                        kolom cari di atas untuk mempersempit daftar, atau klik &quot;Pilih Semua&quot; untuk
+                        memilih seluruh hasil.
+                      </p>
+                    )}
                   </div>
-                  {allContacts.map((contact) => (
-                    <label
-                      key={contact.id}
-                      className="flex items-center gap-2 p-1.5 hover:bg-gray-50 rounded text-xs cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedContactIds.includes(contact.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedContactIds([...selectedContactIds, contact.id]);
-                          } else {
-                            setSelectedContactIds(
-                              selectedContactIds.filter((id) => id !== contact.id)
-                            );
-                          }
-                        }}
-                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span className="font-medium text-gray-900">{contact.nama_lengkap}</span>
-                      <span className="text-gray-400 font-mono">({contact.nomor_whatsapp})</span>
-                    </label>
-                  ))}
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* 3. Message Composer */}
@@ -732,8 +808,49 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
         </form>
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900 text-sm">Semua Kampanye Siaran</h3>
+          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-1 flex-col sm:flex-row sm:items-center gap-2 min-w-0">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Cari judul kampanye atau isi pesan..."
+                  value={historySearch}
+                  onChange={(e) => {
+                    setHistorySearch(e.target.value);
+                    setHistoryPage(1);
+                  }}
+                  className="w-full h-9 pl-9 pr-8 bg-white border border-gray-200 rounded-md text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:border-indigo-500"
+                />
+                {historySearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistorySearch('');
+                      setHistoryPage(1);
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <select
+                value={historyStatusFilter}
+                onChange={(e) => {
+                  setHistoryStatusFilter(e.target.value);
+                  setHistoryPage(1);
+                }}
+                className="h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs text-gray-700 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="ALL">Semua Status</option>
+                <option value="COMPLETED">Selesai</option>
+                <option value="RUNNING">Berjalan</option>
+                <option value="SCHEDULED">Terjadwal</option>
+                <option value="CANCELLED">Dibatalkan</option>
+                <option value="FAILED">Gagal</option>
+              </select>
+            </div>
             <Button
               variant="secondary"
               size="sm"
@@ -897,6 +1014,21 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
                 })}
               </div>
             )}
+
+            <TablePagination
+              page={historyPage}
+              limit={historyLimit}
+              total={historyTotal}
+              totalPages={historyTotalPages}
+              onPageChange={setHistoryPage}
+              onLimitChange={(nextLimit) => {
+                setHistoryLimit(nextLimit);
+                setHistoryPage(1);
+              }}
+              limitOptions={[10, 25, 50, 100]}
+              itemLabel="kampanye siaran"
+              loading={loading}
+            />
           </div>
         </div>
       )}

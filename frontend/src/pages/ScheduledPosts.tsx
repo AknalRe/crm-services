@@ -36,6 +36,7 @@ import {
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState } from '../components/ui/StateBlocks';
+import { TablePagination } from '../components/ui/Pagination';
 
 type PostChannel = ScheduledPostChannel;
 
@@ -133,6 +134,10 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
   const csvFileRef = useRef<HTMLInputElement | null>(null);
   const [filterChannel, setFilterChannel] = useState<'ALL' | PostChannel>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | ScheduledPostItem['status']>('ALL');
+  const [listPage, setListPage] = useState(1);
+  const [listLimit, setListLimit] = useState(25);
+  const [listTotal, setListTotal] = useState(0);
+  const [listTotalPages, setListTotalPages] = useState(1);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -165,13 +170,43 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
 
   const loadData = useCallback(async () => {
     try {
-      const [postList, accList, sessionRes, contactRes] = await Promise.all([
-        api.getScheduledPosts(),
+      const postPromise =
+        viewMode === 'list'
+          ? api.getScheduledPostsPaged({
+              channel: filterChannel !== 'ALL' ? filterChannel : undefined,
+              status: filterStatus !== 'ALL' ? filterStatus : undefined,
+              page: listPage,
+              limit: listLimit,
+            })
+          : api
+              .getScheduledPosts({
+                channel: filterChannel !== 'ALL' ? filterChannel : undefined,
+                status: filterStatus !== 'ALL' ? filterStatus : undefined,
+                limit: 500,
+              })
+              .then((list) => ({
+                data: list,
+                pagination: { page: 1, limit: 500, total: list.length, totalPages: 1 },
+              }));
+
+      const [postRes, accList, sessionRes, contactRes] = await Promise.all([
+        postPromise,
         api.getChannels(),
         api.getWahaSessions().catch(() => ({ sessions: [], activeSession: '' })),
-        api.getContacts({ limit: 500 }).catch(() => ({ data: [] })),
+        api.getContacts({ limit: 10000 }).catch(() => ({ data: [] })),
       ]);
-      setPosts(postList || []);
+      setPosts(postRes.data || []);
+      setListTotal(postRes.pagination?.total ?? (postRes.data || []).length);
+      setListTotalPages(postRes.pagination?.totalPages ?? 1);
+      if (
+        viewMode === 'list' &&
+        (postRes.data || []).length === 0 &&
+        listPage > 1 &&
+        postRes.pagination &&
+        postRes.pagination.total > 0
+      ) {
+        setListPage(Math.max(1, postRes.pagination.totalPages));
+      }
       setAccounts(accList || []);
       const fetchedSessions = sessionRes?.sessions || [];
       setWahaSessions(fetchedSessions);
@@ -195,7 +230,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [channel]);
+  }, [channel, viewMode, filterChannel, filterStatus, listPage, listLimit]);
 
   useEffect(() => {
     loadData();
@@ -893,12 +928,15 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
           <div className="px-5 py-3.5 border-b border-gray-200 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-gray-900">
-                Antrean &amp; Riwayat Postingan ({posts.length})
+                Antrean &amp; Riwayat Postingan ({viewMode === 'list' ? listTotal : posts.length})
               </h2>
               <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
                 <button
                   type="button"
-                  onClick={() => setViewMode('list')}
+                  onClick={() => {
+                    setViewMode('list');
+                    setListPage(1);
+                  }}
                   className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium ${
                     viewMode === 'list' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600'
                   }`}
@@ -922,7 +960,10 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <select
                 value={filterChannel}
-                onChange={(e) => setFilterChannel(e.target.value as any)}
+                onChange={(e) => {
+                  setFilterChannel(e.target.value as any);
+                  setListPage(1);
+                }}
                 className="h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700"
               >
                 <option value="ALL">Semua Channel</option>
@@ -935,7 +976,10 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
               </select>
               <select
                 value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value as any)}
+                onChange={(e) => {
+                  setFilterStatus(e.target.value as any);
+                  setListPage(1);
+                }}
                 className="h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700"
               >
                 <option value="ALL">Semua Status</option>
@@ -1279,6 +1323,22 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
               </div>
             );
           })()}
+          {viewMode === 'list' && !loading && (
+            <TablePagination
+              page={listPage}
+              limit={listLimit}
+              total={listTotal}
+              totalPages={listTotalPages}
+              onPageChange={setListPage}
+              onLimitChange={(nextLimit) => {
+                setListLimit(nextLimit);
+                setListPage(1);
+              }}
+              limitOptions={[10, 25, 50, 100]}
+              itemLabel="postingan"
+              loading={loading}
+            />
+          )}
         </div>
       </div>
 

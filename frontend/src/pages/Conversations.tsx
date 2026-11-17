@@ -1013,9 +1013,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [contactsList, setContactsList] = useState<Contact[]>([]);
+  const [contactsTotal, setContactsTotal] = useState(0);
   const [contactSearch, setContactSearch] = useState('');
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [openingContactId, setOpeningContactId] = useState<string | null>(null);
+  const [convDisplayLimit, setConvDisplayLimit] = useState(100);
 
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [mergeSearch, setMergeSearch] = useState('');
@@ -1147,34 +1149,58 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setShowProductPicker(false);
   };
 
-  const handleOpenNewChatModal = async () => {
-    setShowNewChatModal(true);
-    setContactSearch('');
-    setLoadingContacts(true);
-    try {
-      const list = await api.getContacts();
-      setContactsList(list || []);
-    } catch {
-      toast.error('Gagal memuat daftar kontak');
-    } finally {
-      setLoadingContacts(false);
-    }
-  };
-
-  const handleOpenMergeModal = async () => {
-    setShowMergeModal(true);
-    setMergeSearch('');
-    if (contactsList.length === 0) {
+  const loadModalContacts = useCallback(
+    async (query?: string) => {
       setLoadingContacts(true);
       try {
-        const list = await api.getContacts();
-        setContactsList(list || []);
+        const res = await api.getContacts({
+          search: query?.trim() || undefined,
+          limit: 200,
+        });
+        const list = Array.isArray(res) ? res : res?.data || [];
+        setContactsList(list);
+        setContactsTotal(
+          Array.isArray(res) ? list.length : (res?.pagination?.total ?? list.length)
+        );
       } catch {
         toast.error('Gagal memuat daftar kontak');
       } finally {
         setLoadingContacts(false);
       }
-    }
+    },
+    [toast]
+  );
+
+  useEffect(() => {
+    if (!showNewChatModal) return;
+    const delay = contactSearch.trim() ? 250 : 0;
+    const timer = window.setTimeout(() => {
+      void loadModalContacts(contactSearch);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [showNewChatModal, contactSearch, loadModalContacts]);
+
+  useEffect(() => {
+    if (!showMergeModal) return;
+    const delay = mergeSearch.trim() ? 250 : 0;
+    const timer = window.setTimeout(() => {
+      void loadModalContacts(mergeSearch);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [showMergeModal, mergeSearch, loadModalContacts]);
+
+  useEffect(() => {
+    setConvDisplayLimit(100);
+  }, [search, statusFilter, metricFilter, channelFilter, accountFilter, assigneeFilter]);
+
+  const handleOpenNewChatModal = () => {
+    setContactSearch('');
+    setShowNewChatModal(true);
+  };
+
+  const handleOpenMergeModal = () => {
+    setMergeSearch('');
+    setShowMergeModal(true);
   };
 
   const handleMergeIntoTarget = async (targetContactId: string) => {
@@ -1569,8 +1595,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
               description="Riwayat obrolan muncul setelah Anda mengirim atau menerima pesan."
             />
           ) : (
-            filteredConversations.map((conv) => {
-              const isSelected = selectedConversation?.id === conv.id;
+            <>
+              {filteredConversations.slice(0, convDisplayLimit).map((conv) => {
+                const isSelected = selectedConversation?.id === conv.id;
               const convLabels = getLabelList(conv);
               return (
                 <button
@@ -1709,7 +1736,21 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   )}
                 </button>
               );
-            })
+              })}
+              {filteredConversations.length > convDisplayLimit && (
+                <div className="p-3 bg-white text-center">
+                  <button
+                    type="button"
+                    onClick={() => setConvDisplayLimit((prev) => prev + 100)}
+                    className="w-full py-2 px-3 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-xs font-medium text-indigo-700 transition-colors tabular-nums"
+                  >
+                    Tampilkan lebih banyak (+100) —{' '}
+                    {Math.min(convDisplayLimit, filteredConversations.length)}/
+                    {filteredConversations.length}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -4215,6 +4256,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
             <div className="flex-1 overflow-y-auto divide-y divide-gray-100 p-2">
               {loadingContacts ? (
                 <LoadingState message="Memuat daftar kontak..." />
+              ) : contactsList.filter((c) => c.id !== selectedConversation.contact.id).length === 0 ? (
+                <div className="p-6 text-center text-xs text-gray-500">
+                  Tidak ada kontak tujuan yang cocok.
+                </div>
               ) : (
                 contactsList
                   .filter((c) => {
@@ -4226,7 +4271,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       (c.nomor_whatsapp || '').includes(q)
                     );
                   })
-                  .slice(0, 30)
+                  .slice(0, 100)
                   .map((c) => (
                     <button
                       key={c.id}
@@ -4248,6 +4293,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   ))
               )}
             </div>
+            {contactsTotal > contactsList.length && (
+              <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 tabular-nums">
+                Menampilkan {contactsList.length} dari {contactsTotal.toLocaleString('id-ID')} kontak.
+                Ketik di kolom pencarian untuk mencari lebih spesifik.
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -4285,6 +4336,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
             <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
               {loadingContacts ? (
                 <div className="p-6 text-center text-xs text-gray-500">Memuat kontak...</div>
+              ) : contactsList.length === 0 ? (
+                <div className="p-6 text-center text-xs text-gray-500">
+                  Tidak ada kontak yang cocok dengan pencarian.
+                </div>
               ) : (
                 contactsList
                   .filter((c) => {
@@ -4319,6 +4374,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   ))
               )}
             </div>
+            {contactsTotal > contactsList.length && (
+              <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 tabular-nums">
+                Menampilkan {contactsList.length} dari {contactsTotal.toLocaleString('id-ID')} kontak.
+                Ketik di kolom pencarian untuk mencari lebih spesifik.
+              </div>
+            )}
           </div>
         </div>
       )}

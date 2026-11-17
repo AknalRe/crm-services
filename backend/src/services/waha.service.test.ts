@@ -1323,6 +1323,68 @@ test('deleteMessage revokes WhatsApp message via WAHA DELETE endpoint with POST 
   });
 });
 
+test('fetchAllContacts paginates beyond 500 contacts and recovers from capped /contacts/all via /api/contacts', async (t) => {
+  stubWahaEnvSession(t, 'sales');
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha.example.com',
+    apiKey: 'secret-token',
+    session: 'sales',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  const makeEntry = (idx: number) => ({
+    id: `6281100${String(idx).padStart(6, '0')}@c.us`,
+    name: `Kontak ${idx}`,
+    isMyContact: true,
+  });
+
+  // Scenario A: /api/contacts/all paginates with 500-item chunks up to 1250 total
+  const all1250 = Array.from({ length: 1250 }, (_, i) => makeEntry(i + 1));
+  axios.create = (() =>
+    ({
+      get: async (url: string, cfg?: any) => {
+        if (url === '/api/contacts/all') {
+          const off = Number(cfg?.params?.offset || 0);
+          return { data: all1250.slice(off, off + 500) };
+        }
+        if (url === '/api/contacts') {
+          const off = Number(cfg?.params?.offset || 0);
+          return { data: all1250.slice(off, off + 500) };
+        }
+        return { data: [] };
+      },
+    }) as any) as any;
+
+  const pagedRes = await wahaService.fetchAllContacts('sales');
+  assert.equal(pagedRes.contacts.length, 1250);
+
+  // Scenario B: /api/contacts/all hard-caps at 500 ignoring offset, while /api/contacts supports offset up to 1250
+  axios.create = (() =>
+    ({
+      get: async (url: string, cfg?: any) => {
+        if (url === '/api/contacts/all') {
+          return { data: all1250.slice(0, 500) };
+        }
+        if (url === '/api/contacts') {
+          const off = Number(cfg?.params?.offset || 0);
+          return { data: all1250.slice(off, off + 500) };
+        }
+        return { data: [] };
+      },
+    }) as any) as any;
+
+  const fallbackPagedRes = await wahaService.fetchAllContacts('sales');
+  assert.equal(fallbackPagedRes.contacts.length, 1250);
+  assert.equal(fallbackPagedRes.contacts[1249]?.name, 'Kontak 1250');
+});
+
 
 
 

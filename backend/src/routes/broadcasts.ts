@@ -75,24 +75,51 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         : requirePermission('broadcasts.send');
     return allowed(req, reply);
   });
-  // GET all campaigns
+  // GET all campaigns (supports pagination, search & status/type filters)
   fastify.get('/', async (req: FastifyRequest<{
-    Querystring: { status?: string; type?: string };
+    Querystring: { status?: string; type?: string; search?: string; page?: string; limit?: string };
   }>, reply: FastifyReply) => {
     try {
-      const { status, type } = req.query;
+      const { status, type, search, page = '1', limit = '25' } = req.query;
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.max(1, Math.min(200, parseInt(limit, 10) || 25));
+      const offset = (pageNum - 1) * limitNum;
 
       const conditions: any[] = [];
       if (status && status !== 'ALL') conditions.push(eq(campaigns.status, status));
       if (type && type !== 'ALL') conditions.push(eq(campaigns.type, type));
+      if (search && search.trim()) {
+        const s = `%${search.trim()}%`;
+        conditions.push(or(ilike(campaigns.title, s), ilike(campaigns.messageTemplate, s)));
+      }
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-      const list = await db
-        .select()
-        .from(campaigns)
-        .where(conditions.length > 0 ? and(...conditions) : undefined)
-        .orderBy(desc(campaigns.createdAt));
+      const [list, countResult] = await Promise.all([
+        db
+          .select()
+          .from(campaigns)
+          .where(whereClause)
+          .orderBy(desc(campaigns.createdAt))
+          .limit(limitNum)
+          .offset(offset),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(campaigns)
+          .where(whereClause),
+      ]);
 
-      return reply.send({ success: true, data: list.map(formatCampaign) });
+      const total = Number(countResult[0]?.count || 0);
+
+      return reply.send({
+        success: true,
+        data: list.map(formatCampaign),
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limitNum)),
+        },
+      });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }
@@ -247,8 +274,8 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const { status, search, page = '1', limit = '50' } = req.query;
-      const pageNum = parseInt(page, 10) || 1;
-      const limitNum = parseInt(limit, 10) || 50;
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.max(1, Math.min(500, parseInt(limit, 10) || 50));
       const offset = (pageNum - 1) * limitNum;
 
       const conditions: any[] = [];
@@ -301,7 +328,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
           page: pageNum,
           limit: limitNum,
           total,
-          totalPages: Math.ceil(total / limitNum),
+          totalPages: Math.max(1, Math.ceil(total / limitNum)),
         },
       });
     } catch (error: any) {

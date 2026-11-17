@@ -156,6 +156,7 @@ export interface CsatCriterion {
   isActive: boolean;
 }
 
+
 export interface CsatTextConfig {
   brandName: string;
   title: string;
@@ -1052,5 +1053,14 @@ export interface AiMcpServer {
   lastError?: string | null;
   isActive: boolean;
 }
+
+export interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  totalAll?: number;
+}
+
 
 

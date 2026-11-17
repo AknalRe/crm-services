@@ -23,6 +23,7 @@ import { subscribeLiveEvent } from '../services/liveEvents';
 import { AuthStatus, Contact, LicenseInfo, WahaSessionItem } from '../types';
 import { hasPerm } from '../lib/permissions';
 import { Button } from '../components/ui/Button';
+import { TablePagination } from '../components/ui/Pagination';
 import { Modal } from '../components/ui/Modal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
@@ -49,13 +50,20 @@ export const Contacts: React.FC<ContactsProps> = ({
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [masterCategories, setMasterCategories] = useState<string[]>(DEFAULT_CONTACT_CATEGORIES);
+  const [metaTags, setMetaTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [selectedTag, setSelectedTag] = useState('ALL');
   const [selectedKategori, setSelectedKategori] = useState('ALL');
   const [metricFilter, setMetricFilter] = useState<'ALL' | 'ASSESSED' | 'EXCLUDED'>('ALL');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(50);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalAll, setTotalAll] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
@@ -77,6 +85,8 @@ export const Contacts: React.FC<ContactsProps> = ({
     updated: number;
     skipped: number;
     quotaStopped: boolean;
+    currentTotal?: number;
+    maxContacts?: number;
   } | null>(null);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
@@ -107,16 +117,26 @@ export const Contacts: React.FC<ContactsProps> = ({
         search: search || undefined,
         tag: selectedTag !== 'ALL' ? selectedTag : undefined,
         kategori: selectedKategori !== 'ALL' ? selectedKategori : undefined,
-        limit: 500,
+        excludeFromMetrics: metricFilter !== 'ALL' ? metricFilter : undefined,
+        page,
+        limit,
       });
-      setContacts(res.data);
+      const list = res.data || [];
+      const meta = res.pagination;
+      setContacts(list);
+      setTotal(meta?.total ?? list.length);
+      setTotalPages(meta?.totalPages ?? 1);
+      setTotalAll(meta?.totalAll ?? meta?.total ?? list.length);
+      if (list.length === 0 && page > 1 && meta && meta.total > 0) {
+        setPage(Math.max(1, meta.totalPages));
+      }
       setError(null);
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || 'Gagal memuat data kontak');
     } finally {
       setLoading(false);
     }
-  }, [search, selectedTag, selectedKategori]);
+  }, [search, selectedTag, selectedKategori, metricFilter, page, limit]);
 
   useEffect(() => {
     fetchContacts();
@@ -125,6 +145,19 @@ export const Contacts: React.FC<ContactsProps> = ({
     });
     return unsub;
   }, [fetchContacts]);
+
+  const loadMetaTags = useCallback(async () => {
+    try {
+      const tags = await api.getContactTags();
+      if (Array.isArray(tags)) setMetaTags(tags);
+    } catch {
+      // ignore tag meta fetch errors
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMetaTags();
+  }, [loadMetaTags]);
 
   const handleOpenWaSyncModal = async () => {
     setSyncResult(null);
@@ -157,7 +190,7 @@ export const Contacts: React.FC<ContactsProps> = ({
       toast.success(
         `Sinkronisasi selesai: ${result.created} kontak baru, ${result.updated} diperbarui.`
       );
-      await fetchContacts();
+      await Promise.all([fetchContacts(), loadMetaTags()]);
     } catch (err: any) {
       toast.error(err.response?.data?.error || err.message || 'Gagal sinkronisasi kontak WhatsApp');
     } finally {
@@ -178,15 +211,18 @@ export const Contacts: React.FC<ContactsProps> = ({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchContacts();
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      fetchContacts();
+    }
   };
 
   const availableTags = Array.from(
-    new Set(
-      contacts
-        .flatMap((c) => (c.tags ? c.tags.split(',').map((t) => t.trim()) : []))
-        .filter(Boolean)
-    )
+    new Set([
+      ...metaTags,
+      ...contacts.flatMap((c) => (c.tags ? c.tags.split(',').map((t) => t.trim()) : [])),
+    ].filter(Boolean))
   );
 
   const availableCategories = Array.from(
@@ -279,11 +315,35 @@ export const Contacts: React.FC<ContactsProps> = ({
     }
   };
 
+  const pageContactIds = contacts.map((c) => c.id);
+  const isAllPageSelected =
+    pageContactIds.length > 0 && pageContactIds.every((id) => selectedIds.includes(id));
+
   const toggleSelectAll = () => {
-    if (selectedIds.length === contacts.length) {
-      setSelectedIds([]);
+    if (isAllPageSelected) {
+      const pageSet = new Set(pageContactIds);
+      setSelectedIds((prev) => prev.filter((id) => !pageSet.has(id)));
     } else {
-      setSelectedIds(contacts.map((c) => c.id));
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...pageContactIds])));
+    }
+  };
+
+  const handleSelectAllFiltered = async () => {
+    if (selectingAllFiltered) return;
+    setSelectingAllFiltered(true);
+    try {
+      const res = await api.getContactIds({
+        search: search || undefined,
+        tag: selectedTag !== 'ALL' ? selectedTag : undefined,
+        kategori: selectedKategori !== 'ALL' ? selectedKategori : undefined,
+        excludeFromMetrics: metricFilter !== 'ALL' ? metricFilter : undefined,
+      });
+      setSelectedIds(res.ids);
+      toast.success(`${res.ids.length.toLocaleString('id-ID')} kontak dipilih.`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal memilih seluruh kontak hasil filter');
+    } finally {
+      setSelectingAllFiltered(false);
     }
   };
 
@@ -481,11 +541,11 @@ export const Contacts: React.FC<ContactsProps> = ({
     }
   };
 
-  const displayedContacts = contacts.filter((c) => {
-    if (metricFilter === 'EXCLUDED') return Boolean(c.exclude_from_metrics);
-    if (metricFilter === 'ASSESSED') return !c.exclude_from_metrics;
-    return true;
-  });
+  const hasActiveFilter =
+    Boolean(search.trim()) ||
+    selectedTag !== 'ALL' ||
+    selectedKategori !== 'ALL' ||
+    metricFilter !== 'ALL';
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -498,13 +558,19 @@ export const Contacts: React.FC<ContactsProps> = ({
               type="text"
               placeholder="Cari nama, panggilan, nomor WA, alamat..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
               className="w-full h-9 pl-9 pr-8 bg-white border border-gray-200 rounded-md text-[13px] text-gray-800 placeholder-gray-400 focus:outline-none focus:border-indigo-500"
             />
             {search && (
               <button
                 type="button"
-                onClick={() => setSearch('')}
+                onClick={() => {
+                  setSearch('');
+                  setPage(1);
+                }}
                 title="Bersihkan pencarian"
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-400 hover:text-gray-700"
               >
@@ -516,7 +582,10 @@ export const Contacts: React.FC<ContactsProps> = ({
           <div className="grid grid-cols-2 sm:flex items-center gap-2 min-w-0">
             <select
               value={selectedKategori}
-              onChange={(e) => setSelectedKategori(e.target.value)}
+              onChange={(e) => {
+                setSelectedKategori(e.target.value);
+                setPage(1);
+              }}
               title="Filter Kelompok / Kategori Kontak"
               className="w-full sm:w-auto max-w-full min-w-0 h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-xs sm:text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
             >
@@ -531,7 +600,10 @@ export const Contacts: React.FC<ContactsProps> = ({
 
             <select
               value={selectedTag}
-              onChange={(e) => setSelectedTag(e.target.value)}
+              onChange={(e) => {
+                setSelectedTag(e.target.value);
+                setPage(1);
+              }}
               className="w-full sm:w-auto max-w-full min-w-0 h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-xs sm:text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
             >
               <option value="ALL">Semua Tag</option>
@@ -544,7 +616,10 @@ export const Contacts: React.FC<ContactsProps> = ({
 
             <select
               value={metricFilter}
-              onChange={(e) => setMetricFilter(e.target.value as 'ALL' | 'ASSESSED' | 'EXCLUDED')}
+              onChange={(e) => {
+                setMetricFilter(e.target.value as 'ALL' | 'ASSESSED' | 'EXCLUDED');
+                setPage(1);
+              }}
               title="Filter Status Penilaian SLA/CSAT"
               className="w-full sm:w-auto max-w-full min-w-0 h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-xs sm:text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
             >
@@ -559,7 +634,7 @@ export const Contacts: React.FC<ContactsProps> = ({
           {licenseInfo && licenseInfo.features?.maxContacts > 0 && (
             <div className="flex items-center justify-between sm:justify-start">
               <span className="inline-flex items-center h-8 sm:h-9 px-2.5 rounded-md text-[11px] sm:text-xs font-mono font-medium bg-gray-50 text-gray-700 border border-gray-200 tabular-nums">
-                {contacts.length}/{licenseInfo.features.maxContacts.toLocaleString('id-ID')} kontak
+                {totalAll.toLocaleString('id-ID')}/{licenseInfo.features.maxContacts.toLocaleString('id-ID')} kontak
               </span>
               {selectedIds.length > 0 && (
                 <span className="sm:hidden text-xs font-semibold text-indigo-700">
@@ -624,17 +699,17 @@ export const Contacts: React.FC<ContactsProps> = ({
           <LoadingState message="Memuat data pelanggan..." />
         ) : error && contacts.length === 0 ? (
           <ErrorState message={error} onRetry={fetchContacts} />
-        ) : displayedContacts.length === 0 ? (
+        ) : contacts.length === 0 ? (
           <EmptyState
             icon={<Users className="w-8 h-8" />}
-            title={contacts.length > 0 ? 'Tidak ada kontak di filter ini' : 'Belum ada data pelanggan'}
+            title={hasActiveFilter ? 'Tidak ada kontak di filter ini' : 'Belum ada data pelanggan'}
             description={
-              contacts.length > 0
-                ? 'Ubah filter pencarian atau status Non-Penilaian untuk melihat daftar kontak lain.'
+              hasActiveFilter
+                ? 'Ubah filter pencarian, kelompok, tag, atau status Non-Penilaian untuk melihat daftar kontak lain.'
                 : 'Tambahkan kontak pelanggan secara manual atau impor daftar melalui CSV.'
             }
             action={
-              canCreateContact && contacts.length === 0 ? (
+              canCreateContact && !hasActiveFilter ? (
                 <Button variant="primary" size="sm" onClick={handleOpenAddModal}>
                   Tambah Kontak
                 </Button>
@@ -648,11 +723,11 @@ export const Contacts: React.FC<ContactsProps> = ({
                 <label className="inline-flex items-center gap-2 cursor-pointer font-medium">
                   <input
                     type="checkbox"
-                    checked={contacts.length > 0 && selectedIds.length === contacts.length}
+                    checked={isAllPageSelected}
                     onChange={toggleSelectAll}
                     className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                   />
-                  <span>Pilih Semua ({displayedContacts.length})</span>
+                  <span>Pilih Halaman ({contacts.length})</span>
                 </label>
                 {selectedIds.length > 0 && (
                   <span className="font-semibold text-indigo-700 tabular-nums">
@@ -661,7 +736,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                 )}
               </div>
               <div className="divide-y divide-gray-200 md:grid md:grid-cols-2 md:divide-y-0 md:gap-px md:bg-gray-200">
-                {displayedContacts.map((contact) => {
+                {contacts.map((contact) => {
                   const isSelected = selectedIds.includes(contact.id);
                   const birthDate = contact.tanggal_lahir ? new Date(contact.tanggal_lahir) : null;
                   const isBirthdayToday =
@@ -840,7 +915,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                     <th className="p-3.5 w-10 text-center">
                       <input
                         type="checkbox"
-                        checked={contacts.length > 0 && selectedIds.length === contacts.length}
+                        checked={isAllPageSelected}
                         onChange={toggleSelectAll}
                         className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                       />
@@ -856,7 +931,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                 </thead>
 
                 <tbody className="divide-y divide-gray-200 text-xs">
-                  {displayedContacts.map((contact) => {
+                  {contacts.map((contact) => {
                     const isSelected = selectedIds.includes(contact.id);
                     const birthDate = contact.tanggal_lahir ? new Date(contact.tanggal_lahir) : null;
                     const isBirthdayToday =
@@ -1035,34 +1110,63 @@ export const Contacts: React.FC<ContactsProps> = ({
           </>
         )}
 
-        <div className="px-3.5 sm:px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-          <span className="tabular-nums">
-            Menampilkan: <strong className="text-gray-900">{displayedContacts.length}</strong>
-            {displayedContacts.length !== contacts.length ? ` dari ${contacts.length}` : ''} pelanggan | Terpilih:{' '}
-            <strong className="text-indigo-700">{selectedIds.length}</strong>
-          </span>
-          {selectedIds.length > 0 && (
-            <div className="flex items-center gap-3">
-              {canSendBroadcast && onStartBroadcastWithContacts && (
+        {(selectedIds.length > 0 || total > contacts.length) && (
+          <div className="px-3.5 sm:px-4 py-2.5 bg-indigo-50/60 border-t border-indigo-100 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-700">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="tabular-nums">
+                Terpilih: <strong className="text-indigo-700">{selectedIds.length.toLocaleString('id-ID')}</strong> kontak
+              </span>
+              {total > contacts.length && selectedIds.length < total && (
                 <button
                   type="button"
-                  onClick={() => onStartBroadcastWithContacts(selectedIds)}
-                  className="text-xs font-semibold text-indigo-700 hover:underline inline-flex items-center gap-1"
+                  disabled={selectingAllFiltered}
+                  onClick={handleSelectAllFiltered}
+                  className="text-xs font-semibold text-indigo-700 hover:underline disabled:opacity-50"
                 >
-                  <Send className="w-3 h-3" />
-                  <span>Kirim Siaran ({selectedIds.length})</span>
+                  {selectingAllFiltered
+                    ? 'Memilih semua...'
+                    : `Pilih semua ${total.toLocaleString('id-ID')} kontak di hasil filter`}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => setSelectedIds([])}
-                className="text-xs text-gray-500 hover:text-gray-800 underline"
-              >
-                Batalkan Pilihan
-              </button>
             </div>
-          )}
-        </div>
+            {selectedIds.length > 0 && (
+              <div className="flex items-center gap-3">
+                {canSendBroadcast && onStartBroadcastWithContacts && (
+                  <button
+                    type="button"
+                    onClick={() => onStartBroadcastWithContacts(selectedIds)}
+                    className="text-xs font-semibold text-indigo-700 hover:underline inline-flex items-center gap-1"
+                  >
+                    <Send className="w-3 h-3" />
+                    <span>Kirim Siaran ({selectedIds.length.toLocaleString('id-ID')})</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds([])}
+                  className="text-xs text-gray-500 hover:text-gray-800 underline"
+                >
+                  Batalkan Pilihan
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <TablePagination
+          page={page}
+          limit={limit}
+          total={total}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          onLimitChange={(nextLimit) => {
+            setLimit(nextLimit);
+            setPage(1);
+          }}
+          limitOptions={[25, 50, 100, 250, 500]}
+          itemLabel="pelanggan"
+          loading={loading}
+        />
       </div>
 
       {/* Add / Edit Contact Modal */}
@@ -1592,7 +1696,11 @@ export const Contacts: React.FC<ContactsProps> = ({
               </div>
               {syncResult.quotaStopped && (
                 <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                  Sebagian kontak tidak ditambahkan karena kuota maksimal lisensi kontak telah tercapai.
+                  Sebagian kontak tidak ditambahkan karena kuota maksimal lisensi kontak
+                  {syncResult.maxContacts
+                    ? ` (${(syncResult.currentTotal ?? 0).toLocaleString('id-ID')}/${syncResult.maxContacts.toLocaleString('id-ID')})`
+                    : ''}{' '}
+                  telah tercapai.
                 </p>
               )}
             </div>

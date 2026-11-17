@@ -20,6 +20,7 @@ import {
   PermissionCatalogItem,
   CrmSlaCsatSettings,
   CannedResponse,
+  PaginationMeta,
 } from '../types';
 import { getApiBaseUrl } from './paths';
 
@@ -47,9 +48,28 @@ export const api = {
   },
 
   // Contacts
-  getContacts: async (params?: { search?: string; tag?: string; kategori?: string; page?: number; limit?: number }) => {
+  getContacts: async (params?: {
+    search?: string;
+    tag?: string;
+    kategori?: string;
+    excludeFromMetrics?: 'ALL' | 'ASSESSED' | 'EXCLUDED';
+    page?: number;
+    limit?: number;
+  }): Promise<{ data: Contact[]; pagination: PaginationMeta }> => {
     const res = await client.get('/contacts', { params });
     return res.data;
+  },
+  getContactIds: async (params?: {
+    search?: string;
+    tag?: string;
+    kategori?: string;
+    excludeFromMetrics?: 'ALL' | 'ASSESSED' | 'EXCLUDED';
+  }): Promise<{ ids: string[]; pagination: PaginationMeta }> => {
+    const res = await client.get('/contacts', { params: { ...params, idsOnly: '1' } });
+    return {
+      ids: res.data.data || [],
+      pagination: res.data.pagination,
+    };
   },
   getContact: async (id: string): Promise<Contact> => {
     const res = await client.get(`/contacts/${id}`);
@@ -84,15 +104,43 @@ export const api = {
     updated: number;
     skipped: number;
     quotaStopped: boolean;
+    currentTotal?: number;
+    maxContacts?: number;
   }> => {
-    const res = await client.post('/contacts/sync-whatsapp', payload || {});
+    const res = await client.post('/contacts/sync-whatsapp', payload || {}, {
+      timeout: 120000,
+    });
     return res.data.data;
   },
 
   // Campaigns & Broadcasts
-  getCampaigns: async (params?: { status?: string; type?: string }): Promise<Campaign[]> => {
+  getCampaigns: async (params?: {
+    status?: string;
+    type?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<Campaign[]> => {
     const res = await client.get('/broadcasts', { params });
     return res.data.data;
+  },
+  getCampaignsPaged: async (params?: {
+    status?: string;
+    type?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ data: Campaign[]; pagination: PaginationMeta }> => {
+    const res = await client.get('/broadcasts', { params });
+    return {
+      data: res.data.data || [],
+      pagination: res.data.pagination || {
+        page: params?.page || 1,
+        limit: params?.limit || 25,
+        total: (res.data.data || []).length,
+        totalPages: 1,
+      },
+    };
   },
   getCampaign: async (id: string): Promise<Campaign & { recipients: CampaignRecipient[] }> => {
     const res = await client.get(`/broadcasts/${id}`);
@@ -127,7 +175,12 @@ export const api = {
     const res = await client.delete(`/broadcasts/${id}`);
     return res.data;
   },
-  getRecipientTracking: async (params?: { status?: string; search?: string; page?: number; limit?: number }) => {
+  getRecipientTracking: async (params?: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ data: CampaignRecipient[]; pagination: PaginationMeta }> => {
     const res = await client.get('/broadcasts/tracking/recipients', { params });
     return res.data;
   },
@@ -721,9 +774,34 @@ export const api = {
     return res.data.data;
   },
 
-  getScheduledPosts: async (): Promise<import('../types').ScheduledPostItem[]> => {
-    const res = await client.get('/posts');
+  getScheduledPosts: async (params?: {
+    channel?: string;
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<import('../types').ScheduledPostItem[]> => {
+    const res = await client.get('/posts', { params: { limit: 500, ...params } });
     return res.data.data || [];
+  },
+
+  getScheduledPostsPaged: async (params?: {
+    channel?: string;
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ data: import('../types').ScheduledPostItem[]; pagination: PaginationMeta }> => {
+    const res = await client.get('/posts', { params });
+    return {
+      data: res.data.data || [],
+      pagination: res.data.pagination || {
+        page: params?.page || 1,
+        limit: params?.limit || 25,
+        total: (res.data.data || []).length,
+        totalPages: 1,
+      },
+    };
   },
 
   createScheduledPost: async (data: {
