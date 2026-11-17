@@ -152,6 +152,9 @@ CREATE TABLE IF NOT EXISTS "companies" (
 	CONSTRAINT "companies_slug_unique" UNIQUE("slug")
 );
 --> statement-breakpoint
+ALTER TABLE "companies" ADD COLUMN IF NOT EXISTS "slug" text DEFAULT 'default' NOT NULL;--> statement-breakpoint
+ALTER TABLE "companies" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'ACTIVE' NOT NULL;--> statement-breakpoint
+ALTER TABLE "companies" ADD COLUMN IF NOT EXISTS "is_default" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 INSERT INTO "companies" ("id", "name", "slug", "status", "is_default", "created_at", "updated_at")
 VALUES ('company_default', 'Perusahaan Utama', 'default', 'ACTIVE', TRUE, NOW(), NOW())
 ON CONFLICT ("id") DO NOTHING;
