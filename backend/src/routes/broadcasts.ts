@@ -72,7 +72,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
     const allowed =
       req.method === 'GET'
         ? requirePermission('broadcasts', 'tracking')
-        : requirePermission('broadcasts');
+        : requirePermission('broadcasts.send');
     return allowed(req, reply);
   });
   // GET all campaigns

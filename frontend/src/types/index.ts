@@ -15,6 +15,8 @@ export interface Contact {
   kategori?: string | null;
   tags?: string | null;
   notes?: string | null;
+  exclude_from_metrics?: boolean;
+  exclude_reason?: string | null;
   identities?: ContactIdentityItem[];
   createdAt: string;
   updatedAt: string;
@@ -101,9 +103,15 @@ export interface Conversation {
   contactId: string;
   channel?: OmnichannelType;
   channelAccountId?: string | null;
+  channelAccountName?: string | null;
   externalThreadId?: string | null;
   contextTitle?: string | null;
   wahaSession?: string | null;
+  pushName?: string | null;
+  channelDisplayName?: string | null;
+  isGroup?: boolean;
+  excludeFromMetrics?: boolean;
+  excludeReason?: string | null;
   status?: 'OPEN' | 'PENDING' | 'RESOLVED';
   labels?: string | null;
   lastMessage?: string | null;
@@ -253,6 +261,9 @@ export interface ChatMessage {
   replyToSender?: string | null;
   metadataJson?: string | null;
   wahaMessageId?: string | null;
+  senderJid?: string | null;
+  senderPhone?: string | null;
+  senderName?: string | null;
   status: string;
   ackStatus: number;
   errorMessage?: string | null;
@@ -262,8 +273,31 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export interface ConversationParticipantItem {
+  jid: string;
+  phone: string | null;
+  name: string | null;
+  contactId: string | null;
+  contactName: string | null;
+  role: 'superadmin' | 'admin' | 'member';
+  messageCount: number;
+  lastMessageAt: string | null;
+  inGroup: boolean;
+}
+
+export interface ConversationParticipantsResponse {
+  isGroup: boolean;
+  groupJid: string | null;
+  groupName: string | null;
+  participants: ConversationParticipantItem[];
+  syncError?: string | null;
+}
+
 export interface ConversationAnalytics {
   totalConversations: number;
+  allConversationsCount?: number;
+  excludedCount?: number;
+  groupCount?: number;
   openCount: number;
   pendingCount: number;
   resolvedCount: number;
@@ -367,6 +401,7 @@ export interface MessageTemplateItem {
 export interface DashboardStats {
   summary: {
     totalContacts: number;
+    groupContactsCount?: number;
     totalCampaigns: number;
     totalRecipients: number;
     pending: number;
@@ -377,10 +412,27 @@ export interface DashboardStats {
     deliveryRate: number;
     readRate: number;
     birthdayTodayCount: number;
+    contactCategories?: Array<{ category: string; count: number }>;
+    activityTrend7d?: Array<{
+      date: string;
+      label: string;
+      conversationsAssessed: number;
+      conversationsExcluded: number;
+      broadcastSent: number;
+      broadcastRead: number;
+    }>;
   };
   conversationAnalytics?: ConversationAnalytics;
   recentCampaigns: Campaign[];
   recentActivity: CampaignRecipient[];
+}
+
+export type DashboardDrilldownKind = 'contacts' | 'recipients' | 'conversations' | 'csat';
+
+export interface DashboardDrilldownResponse {
+  kind: DashboardDrilldownKind;
+  totalMatched: number;
+  items: any[];
 }
 
 export interface WahaSessionItem {
@@ -450,6 +502,25 @@ export interface BirthdaySetting {
   };
 }
 
+export interface PermissionCatalogItem {
+  id: string;
+  group: string;
+  label: string;
+  description: string;
+  kind: 'menu' | 'action';
+}
+
+export interface CrmRoleItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  permissions: string[];
+  isSystem?: boolean;
+  agentCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface AuthStatus {
   initialized: boolean;
   authenticated: boolean;
@@ -458,6 +529,8 @@ export interface AuthStatus {
     name: string;
     email: string;
     role?: 'ADMIN' | 'AGENT';
+    roleId?: string | null;
+    roleName?: string | null;
     permissions?: string[];
   } | null;
 }
@@ -467,6 +540,8 @@ export interface AgentItem {
   name: string;
   email: string;
   role: 'ADMIN' | 'AGENT';
+  roleId?: string | null;
+  roleName?: string | null;
   permissions: string[];
   isActive: boolean;
   createdAt?: string;
@@ -632,21 +707,74 @@ export type SettingsSection =
   | 'sla_csat'
   | 'agents';
 
+export type ScheduledPostChannel =
+  | 'INSTAGRAM'
+  | 'FACEBOOK'
+  | 'THREADS'
+  | 'TELEGRAM'
+  | 'WHATSAPP'
+  | 'WHATSAPP_STATUS';
+
+export type ScheduledPostType =
+  | 'FEED'
+  | 'WA_POST'
+  | 'STATUS_TEXT'
+  | 'STATUS_IMAGE'
+  | 'STATUS_VIDEO'
+  | 'STATUS_VOICE';
+
+export interface PostTargetContact {
+  contactId?: string | null;
+  phone: string;
+  name?: string | null;
+}
+
+export interface WhatsAppStatusStyle {
+  backgroundColor?: string;
+  font?: number;
+}
+
+export interface WhatsAppStatusViewerItem {
+  id: string;
+  postId: string;
+  viewerJid: string;
+  viewerPhone?: string | null;
+  contactId?: string | null;
+  viewerName?: string | null;
+  ackStatus: number;
+  viewedAt: string;
+  updatedAt: string;
+}
+
 export interface ScheduledPostItem {
   id: string;
-  channel: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
-  channelAccountId: string;
+  channel: ScheduledPostChannel;
+  channelAccountId?: string | null;
   accountName?: string | null;
   accountExternalId?: string | null;
+  wahaSession?: string | null;
+  postType?: ScheduledPostType;
   caption: string;
   mediaUrl?: string | null;
   targetChatId?: string | null;
+  targetContacts?: PostTargetContact[];
+  statusStyle?: WhatsAppStatusStyle | null;
+  viewerCount?: number;
   status: 'SCHEDULED' | 'PUBLISHING' | 'PUBLISHED' | 'FAILED' | 'CANCELLED';
   scheduledAt: string;
   publishedAt?: string | null;
   externalPostId?: string | null;
   errorMessage?: string | null;
   createdAt: string;
+}
+
+export interface ScheduledPostViewersResponse {
+  post: ScheduledPostItem;
+  targets: PostTargetContact[];
+  viewers: WhatsAppStatusViewerItem[];
+  totalViewed: number;
+  totalDelivered: number;
+  syncError?: string | null;
 }
 
 export interface MediaLibraryItem {

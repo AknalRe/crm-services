@@ -32,6 +32,8 @@ export async function initDb() {
     `;
 
     await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS kategori TEXT;`;
+    await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS exclude_from_metrics BOOLEAN NOT NULL DEFAULT FALSE;`;
+    await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS exclude_reason TEXT;`;
     await sql`ALTER TABLE contacts ALTER COLUMN nomor_whatsapp DROP NOT NULL;`;
 
     await sql`
@@ -121,6 +123,11 @@ export async function initDb() {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS external_thread_id TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context_title TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS push_name TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_display_name TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_group BOOLEAN NOT NULL DEFAULT FALSE;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS exclude_from_metrics BOOLEAN NOT NULL DEFAULT FALSE;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS exclude_reason TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS session_started_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_key;`;
 
@@ -156,6 +163,9 @@ export async function initDb() {
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_body TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_sender TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS metadata_json TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_jid TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_phone TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_name TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS channel_accounts (
@@ -234,18 +244,32 @@ export async function initDb() {
     `;
 
     await sql`
+      CREATE TABLE IF NOT EXISTS crm_roles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        permissions TEXT NOT NULL DEFAULT '[]',
+        is_system BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    await sql`
       CREATE TABLE IF NOT EXISTS crm_agents (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'AGENT',
+        role_id TEXT,
         permissions TEXT NOT NULL DEFAULT '["dashboard","conversations","contacts"]',
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE crm_agents ADD COLUMN IF NOT EXISTS role_id TEXT;`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS canned_responses (
@@ -350,10 +374,15 @@ export async function initDb() {
       CREATE TABLE IF NOT EXISTS scheduled_posts (
         id TEXT PRIMARY KEY,
         channel TEXT NOT NULL,
-        channel_account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        channel_account_id TEXT REFERENCES channel_accounts(id) ON DELETE CASCADE,
+        waha_session TEXT,
+        post_type TEXT NOT NULL DEFAULT 'FEED',
         caption TEXT NOT NULL,
         media_url TEXT,
         target_chat_id TEXT,
+        target_contacts_json TEXT,
+        status_style_json TEXT,
+        viewer_count INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'SCHEDULED',
         scheduled_at TIMESTAMP NOT NULL,
         published_at TIMESTAMP,
@@ -363,6 +392,27 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE scheduled_posts ALTER COLUMN channel_account_id DROP NOT NULL;`;
+    await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
+    await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS post_type TEXT NOT NULL DEFAULT 'FEED';`;
+    await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS target_contacts_json TEXT;`;
+    await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS status_style_json TEXT;`;
+    await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS viewer_count INTEGER NOT NULL DEFAULT 0;`;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS whatsapp_status_views (
+        id TEXT PRIMARY KEY,
+        post_id TEXT NOT NULL REFERENCES scheduled_posts(id) ON DELETE CASCADE,
+        viewer_jid TEXT NOT NULL,
+        viewer_phone TEXT,
+        contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+        viewer_name TEXT,
+        ack_status INTEGER NOT NULL DEFAULT 3,
+        viewed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_status_view_post_viewer ON whatsapp_status_views (post_id, viewer_jid);`;
 
     await sql`
       CREATE TABLE IF NOT EXISTS content_ideas (

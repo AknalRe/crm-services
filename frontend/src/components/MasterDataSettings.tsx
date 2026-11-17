@@ -57,19 +57,23 @@ const TEMPLATE_CHANNEL_LABELS: Record<'ALL' | OmnichannelType, string> = {
 
 interface MasterDataSettingsProps {
   section: MasterDataSection;
+  canEdit?: boolean;
 }
 
-export const MasterDataSettings: React.FC<MasterDataSettingsProps> = ({ section }) => {
-  if (section === 'quick_replies') return <QuickRepliesMaster />;
-  if (section === 'products') return <ProductsMaster />;
-  if (section === 'labels') return <LabelsCategoriesMaster />;
-  return <TemplatesMaster />;
+export const MasterDataSettings: React.FC<MasterDataSettingsProps> = ({
+  section,
+  canEdit = true,
+}) => {
+  if (section === 'quick_replies') return <QuickRepliesMaster canEdit={canEdit} />;
+  if (section === 'products') return <ProductsMaster canEdit={canEdit} />;
+  if (section === 'labels') return <LabelsCategoriesMaster canEdit={canEdit} />;
+  return <TemplatesMaster canEdit={canEdit} />;
 };
 
 // -----------------------------------------------------------------------------
 // 1. Master Balasan Cepat (/kode)
 // -----------------------------------------------------------------------------
-const QuickRepliesMaster: React.FC = () => {
+const QuickRepliesMaster: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
   const toast = useToast();
   const [items, setItems] = useState<CannedResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -217,9 +221,11 @@ const QuickRepliesMaster: React.FC = () => {
             Ketik <code className="font-mono bg-gray-100 px-1 rounded">/kode</code> di Inbox Live Chat untuk menyisipkan template secara instan.
           </p>
         </div>
-        <Button type="button" variant="primary" size="sm" onClick={openCreate}>
-          Tambah Balasan Cepat
-        </Button>
+        {canEdit && (
+          <Button type="button" variant="primary" size="sm" onClick={openCreate}>
+            Tambah Balasan Cepat
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2.5">
@@ -383,8 +389,9 @@ const QuickRepliesMaster: React.FC = () => {
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         <button
                           type="button"
+                          disabled={!canEdit}
                           onClick={() => void handleToggleActive(item)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                             active
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : 'bg-gray-100 text-gray-500 border-gray-200'
@@ -408,22 +415,26 @@ const QuickRepliesMaster: React.FC = () => {
                           >
                             {copiedId === item.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => openEdit(item)}
-                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
-                            title="Edit"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget(item)}
-                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
-                            title="Hapus"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {canEdit && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openEdit(item)}
+                                className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
+                                title="Edit"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteTarget(item)}
+                                className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
+                                title="Hapus"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -557,7 +568,7 @@ const QuickRepliesMaster: React.FC = () => {
 // -----------------------------------------------------------------------------
 // 2. Master Katalog Produk & Jasa
 // -----------------------------------------------------------------------------
-const ProductsMaster: React.FC = () => {
+const ProductsMaster: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
   const toast = useToast();
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -711,9 +722,11 @@ const ProductsMaster: React.FC = () => {
             Daftar produk/jasa untuk penawaran cepat (Quick Quote) saat agent membalas pelanggan di Inbox CRM.
           </p>
         </div>
-        <Button type="button" variant="primary" size="sm" onClick={openCreate}>
-          Tambah Produk
-        </Button>
+        {canEdit && (
+          <Button type="button" variant="primary" size="sm" onClick={openCreate}>
+            Tambah Produk
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2.5">
@@ -859,8 +872,9 @@ const ProductsMaster: React.FC = () => {
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <button
                         type="button"
+                        disabled={!canEdit}
                         onClick={() => void handleToggleActive(p)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                           p.isActive
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : 'bg-gray-100 text-gray-500 border-gray-200'
@@ -870,24 +884,28 @@ const ProductsMaster: React.FC = () => {
                       </button>
                     </td>
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(p)}
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
-                          title="Edit Produk"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(p)}
-                          className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
-                          title="Hapus Produk"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {canEdit ? (
+                        <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(p)}
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
+                            title="Edit Produk"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(p)}
+                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
+                            title="Hapus Produk"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-gray-400">Lihat saja</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1021,7 +1039,7 @@ const ProductsMaster: React.FC = () => {
 // -----------------------------------------------------------------------------
 // 3. Master Label Percakapan & Kategori Kontak
 // -----------------------------------------------------------------------------
-const LabelsCategoriesMaster: React.FC = () => {
+const LabelsCategoriesMaster: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
   const toast = useToast();
   const [scope, setScope] = useState<CrmLabelScope>('CONVERSATION_LABEL');
   const [items, setItems] = useState<CrmLabelItem[]>([]);
@@ -1152,9 +1170,11 @@ const LabelsCategoriesMaster: React.FC = () => {
             Standarisasi label tiket di Inbox CRM dan kelompok kategori pada halaman Kontak Pelanggan.
           </p>
         </div>
-        <Button type="button" variant="primary" size="sm" onClick={openCreate}>
-          {scope === 'CONVERSATION_LABEL' ? 'Tambah Label Inbox' : 'Tambah Kategori Kontak'}
-        </Button>
+        {canEdit && (
+          <Button type="button" variant="primary" size="sm" onClick={openCreate}>
+            {scope === 'CONVERSATION_LABEL' ? 'Tambah Label Inbox' : 'Tambah Kategori Kontak'}
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -1269,8 +1289,9 @@ const LabelsCategoriesMaster: React.FC = () => {
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         <button
                           type="button"
+                          disabled={!canEdit}
                           onClick={() => void handleToggleActive(item)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer ${
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                             item.isActive
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : 'bg-gray-100 text-gray-500 border-gray-200'
@@ -1280,24 +1301,28 @@ const LabelsCategoriesMaster: React.FC = () => {
                         </button>
                       </td>
                       <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => openEdit(item)}
-                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
-                            title="Edit"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget(item)}
-                            className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
-                            title="Hapus"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {canEdit ? (
+                          <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => openEdit(item)}
+                              className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-indigo-700 hover:bg-indigo-50"
+                              title="Edit"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(item)}
+                              className="h-7 w-7 inline-flex items-center justify-center text-gray-500 hover:text-red-700 hover:bg-red-50"
+                              title="Hapus"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-gray-400">Lihat saja</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1419,7 +1444,7 @@ const LabelsCategoriesMaster: React.FC = () => {
 // -----------------------------------------------------------------------------
 // 4. Master Template Siaran & Pesan
 // -----------------------------------------------------------------------------
-const TemplatesMaster: React.FC = () => {
+const TemplatesMaster: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
   const toast = useToast();
   const [items, setItems] = useState<MessageTemplateItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1559,9 +1584,11 @@ const TemplatesMaster: React.FC = () => {
             Kumpulan naskah siap pakai untuk kampanye Siaran &amp; Follow Up tanpa mengetik ulang.
           </p>
         </div>
-        <Button type="button" variant="primary" size="sm" onClick={openCreate}>
-          Tambah Template
-        </Button>
+        {canEdit && (
+          <Button type="button" variant="primary" size="sm" onClick={openCreate}>
+            Tambah Template
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2.5">
@@ -1658,20 +1685,22 @@ const TemplatesMaster: React.FC = () => {
                   {item.content}
                 </p>
               </div>
-              <div className="flex items-center justify-end gap-1.5 pt-1">
-                <Button type="button" variant="ghost" size="sm" onClick={() => openEdit(item)}>
-                  Edit
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                  onClick={() => setDeleteTarget(item)}
-                >
-                  Hapus
-                </Button>
-              </div>
+              {canEdit && (
+                <div className="flex items-center justify-end gap-1.5 pt-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => openEdit(item)}>
+                    Edit
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => setDeleteTarget(item)}
+                  >
+                    Hapus
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
         </div>

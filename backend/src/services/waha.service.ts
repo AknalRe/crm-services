@@ -78,6 +78,271 @@ export function isPrivateOrInternalUrl(rawUrl?: string | null): boolean {
   }
 }
 
+export interface WahaStatusReceipt {
+  viewerJid: string;
+  phone: string | null;
+  ackStatus: number;
+  viewedAt?: string | null;
+}
+
+export function extractStatusReceiptsFromWahaMessage(msgData: any): WahaStatusReceipt[] {
+  if (!msgData || typeof msgData !== 'object') return [];
+  const receiptsRaw: any[] = [];
+
+  if (Array.isArray(msgData.receipts)) receiptsRaw.push(...msgData.receipts);
+  if (Array.isArray(msgData._data?.receipts)) receiptsRaw.push(...msgData._data.receipts);
+  if (Array.isArray(msgData._data?.userReceipt)) receiptsRaw.push(...msgData._data.userReceipt);
+  if (Array.isArray(msgData._data?.Info?.ReadBy)) {
+    for (const jid of msgData._data.Info.ReadBy) {
+      receiptsRaw.push({ userJid: jid, ack: 3 });
+    }
+  }
+  if (Array.isArray(msgData._data?.ReadBy)) {
+    for (const jid of msgData._data.ReadBy) {
+      receiptsRaw.push({ userJid: jid, ack: 3 });
+    }
+  }
+
+  const byViewer = new Map<string, WahaStatusReceipt>();
+  for (const item of receiptsRaw) {
+    if (!item) continue;
+    const rawJid =
+      typeof item === 'string'
+        ? item.trim()
+        : String(
+            item.userJid ||
+              item.jid ||
+              item.participant ||
+              item.user ||
+              item.id ||
+              item.from ||
+              ''
+          ).trim();
+    if (!rawJid || rawJid === 'status@broadcast' || rawJid.endsWith('@g.us')) continue;
+
+    let ackStatus = 0;
+    if (typeof item.ack === 'number' && !Number.isNaN(item.ack)) {
+      ackStatus = item.ack;
+    } else if (item.playedTimestamp) {
+      ackStatus = 4;
+    } else if (item.readTimestamp || item.receiptTimestamp || item.ackName === 'READ') {
+      ackStatus = 3;
+    } else if (item.deliveryTimestamp || item.ackName === 'DEVICE') {
+      ackStatus = 2;
+    } else if (typeof item === 'string') {
+      ackStatus = 3;
+    }
+
+    const rawTs = item.playedTimestamp || item.readTimestamp || item.receiptTimestamp || item.timestamp;
+    let viewedAt: string | null = null;
+    if (typeof rawTs === 'number' && rawTs > 0) {
+      viewedAt = new Date(rawTs > 10_000_000_000 ? rawTs : rawTs * 1000).toISOString();
+    } else if (typeof rawTs === 'string' && rawTs.trim()) {
+      const parsed = new Date(rawTs);
+      if (!Number.isNaN(parsed.getTime())) viewedAt = parsed.toISOString();
+    }
+
+    const phone = isPhoneWahaJid(rawJid) ? normalizePhoneNumber(fromWahaChatId(rawJid)) : null;
+    const prev = byViewer.get(rawJid);
+    if (!prev || ackStatus > prev.ackStatus) {
+      byViewer.set(rawJid, {
+        viewerJid: rawJid,
+        phone: phone || null,
+        ackStatus,
+        viewedAt: viewedAt || prev?.viewedAt || null,
+      });
+    }
+  }
+  return Array.from(byViewer.values());
+}
+
+export interface WahaContactRecord {
+  jid: string;
+  lid?: string | null;
+  phone: string | null;
+  name: string | null;
+  pushName: string | null;
+  isMyContact: boolean;
+  isGroup: boolean;
+  isMe: boolean;
+}
+
+export interface WahaGroupParticipant {
+  jid: string;
+  phone: string | null;
+  name: string | null;
+  role: 'superadmin' | 'admin' | 'member';
+}
+
+export interface WahaGroupInfo {
+  groupJid: string;
+  subject: string | null;
+  description?: string | null;
+  participants: WahaGroupParticipant[];
+}
+
+function extractValidNormalizedPhone(rawCandidate: unknown): string | null {
+  if (typeof rawCandidate !== 'string' && typeof rawCandidate !== 'number') return null;
+  const raw = String(rawCandidate).trim();
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (lower.endsWith('@g.us') || lower.endsWith('@broadcast') || lower.endsWith('@newsletter') || lower.endsWith('@lid')) {
+    return null;
+  }
+  const withoutDomain = raw.includes('@') ? fromWahaChatId(raw) : raw;
+  const normalized = normalizePhoneNumber(withoutDomain);
+  const digits = normalized.replace(/\D/g, '');
+  if (digits.length < 7 || digits.length > 15) return null;
+  return normalized;
+}
+
+export function normalizeWahaContactEntries(
+  rawList: any[],
+  lidPhoneMap?: Map<string, string>
+): WahaContactRecord[] {
+  if (!Array.isArray(rawList)) return [];
+  const byKey = new Map<string, WahaContactRecord>();
+
+  for (const item of rawList) {
+    if (!item || typeof item !== 'object') continue;
+    const rawJid = String(
+      item?.id?._serialized || item?.id?.id || item?.id || item?.jid || item?.JID || item?.chatId || ''
+    ).trim();
+    const lowerJid = rawJid.toLowerCase();
+    if (!rawJid || lowerJid === 'status@broadcast' || lowerJid.endsWith('@broadcast') || lowerJid.endsWith('@newsletter')) {
+      continue;
+    }
+    const isGroup = Boolean(item.isGroup || lowerJid.endsWith('@g.us'));
+    if (isGroup) continue;
+    const isMe = Boolean(item.isMe);
+    if (isMe) continue;
+
+    const lid = lowerJid.endsWith('@lid')
+      ? rawJid
+      : typeof item.lid === 'string' && item.lid.toLowerCase().endsWith('@lid')
+      ? item.lid.trim()
+      : null;
+
+    const phoneCandidates = [
+      item.number,
+      item.phoneNumber,
+      item.PhoneNumber,
+      item.pn,
+      item.PN,
+      item.phone,
+      isPhoneWahaJid(rawJid) ? rawJid : null,
+      lid ? lidPhoneMap?.get(lid) || null : null,
+    ];
+    let phone: string | null = null;
+    for (const c of phoneCandidates) {
+      const parsed = extractValidNormalizedPhone(c);
+      if (parsed) {
+        phone = parsed;
+        break;
+      }
+    }
+
+    const nameRaw =
+      item.name ||
+      item.FullName ||
+      item.fullName ||
+      item.verifiedName ||
+      item.shortName ||
+      item.FirstName ||
+      item.BusinessName ||
+      null;
+    const pushRaw = item.pushname || item.pushName || item.PushName || item.notify || null;
+    const name = typeof nameRaw === 'string' && nameRaw.trim() ? nameRaw.trim() : null;
+    const pushName = typeof pushRaw === 'string' && pushRaw.trim() ? pushRaw.trim() : null;
+    const isMyContact = Boolean(item.isMyContact);
+
+    if (!phone && !lid) continue;
+    const dedupKey = phone ? `p:${phone}` : `l:${lid}`;
+    const prev = byKey.get(dedupKey);
+    if (!prev) {
+      byKey.set(dedupKey, {
+        jid: rawJid,
+        lid,
+        phone,
+        name,
+        pushName,
+        isMyContact,
+        isGroup: false,
+        isMe: false,
+      });
+    } else {
+      byKey.set(dedupKey, {
+        ...prev,
+        lid: prev.lid || lid,
+        phone: prev.phone || phone,
+        name: prev.name || name,
+        pushName: prev.pushName || pushName,
+        isMyContact: prev.isMyContact || isMyContact,
+      });
+    }
+  }
+
+  return Array.from(byKey.values());
+}
+
+export function normalizeWahaGroupInfo(
+  groupJid: string,
+  rawData: any,
+  lidPhoneMap?: Map<string, string>
+): WahaGroupInfo | null {
+  if (!rawData || typeof rawData !== 'object') return null;
+  const subjectRaw =
+    rawData.subject ||
+    rawData.Subject ||
+    rawData.name ||
+    rawData.Name ||
+    rawData.groupMetadata?.subject ||
+    null;
+  const descRaw =
+    rawData.desc ||
+    rawData.description ||
+    rawData.Topic ||
+    rawData.groupMetadata?.desc ||
+    null;
+
+  const rawParticipants: any[] = Array.isArray(rawData.participants)
+    ? rawData.participants
+    : Array.isArray(rawData.Participants)
+    ? rawData.Participants
+    : Array.isArray(rawData.groupMetadata?.participants)
+    ? rawData.groupMetadata.participants
+    : [];
+
+  const byParticipant = new Map<string, WahaGroupParticipant>();
+  for (const p of rawParticipants) {
+    if (!p || typeof p !== 'object') continue;
+    const rawJid = String(p.id?._serialized || p.id?.id || p.id || p.JID || p.jid || '').trim();
+    if (!rawJid) continue;
+    const phone =
+      extractValidNormalizedPhone(p.phoneNumber) ||
+      extractValidNormalizedPhone(p.PhoneNumber) ||
+      extractValidNormalizedPhone(p.pn) ||
+      extractValidNormalizedPhone(p.PN) ||
+      (isPhoneWahaJid(rawJid) ? extractValidNormalizedPhone(rawJid) : null) ||
+      (lidPhoneMap?.get(rawJid) ? extractValidNormalizedPhone(lidPhoneMap.get(rawJid)) : null);
+
+    const isSuper = Boolean(p.isSuperAdmin || p.IsSuperAdmin || p.admin === 'superadmin');
+    const isAdmin = Boolean(p.isAdmin || p.IsAdmin || p.admin === 'admin');
+    const role: WahaGroupParticipant['role'] = isSuper ? 'superadmin' : isAdmin ? 'admin' : 'member';
+    const rawName = p.name || p.pushName || p.PushName || p.FullName || p.notify || null;
+    const name = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : null;
+
+    byParticipant.set(rawJid, { jid: rawJid, phone, name, role });
+  }
+
+  return {
+    groupJid,
+    subject: typeof subjectRaw === 'string' && subjectRaw.trim() ? subjectRaw.trim() : null,
+    description: typeof descRaw === 'string' && descRaw.trim() ? descRaw.trim() : null,
+    participants: Array.from(byParticipant.values()),
+  };
+}
+
 export interface WahaInteractiveButtonInput {
   type: 'reply' | 'url' | 'call' | 'copy';
   text: string;
@@ -1671,6 +1936,360 @@ export class WahaService {
       contentType,
       filename: pathName,
     };
+  }
+
+  private async executeSessionAction(
+    sessionName: string | undefined,
+    runner: (client: AxiosInstance, targetSession: string) => Promise<any>
+  ): Promise<WahaSendResult> {
+    const resolvedSession = sessionName?.trim() || undefined;
+    try {
+      const { client, session, ownerPrefix, mode } = await this.getClient();
+      let targetSession = resolvedSession
+        ? this.resolveOwnedSessionName(resolvedSession, ownerPrefix)
+        : session;
+      this.assertOwnedSession(targetSession, ownerPrefix);
+
+      if (!resolvedSession && (targetSession === 'default' || !targetSession)) {
+        const liveSession = await this.pickLiveWorkingSession(client, ownerPrefix);
+        if (liveSession) targetSession = liveSession;
+      }
+
+      const runWith = async (sess: string): Promise<WahaSendResult> => {
+        const resData = await runner(client, sess);
+        return {
+          success: true,
+          messageId: this.extractOutboundMessageId(resData),
+          sessionUsed: sess,
+        };
+      };
+
+      try {
+        return await runWith(targetSession);
+      } catch (firstErr: any) {
+        const httpStatus = firstErr?.response?.status;
+        if (!resolvedSession && (httpStatus === 404 || httpStatus === 422 || mode === 'EXTERNAL')) {
+          const fallbackWorking = await this.pickLiveWorkingSession(client, ownerPrefix, targetSession);
+          if (fallbackWorking) return await runWith(fallbackWorking);
+        }
+        let errMsg = this.extractWahaError(firstErr);
+        if (httpStatus === 404 || httpStatus === 422) {
+          const sInfo = await client
+            .get(`/api/sessions/${encodeURIComponent(targetSession)}`, { timeout: 3000 })
+            .catch(() => null);
+          const sessStatus = sInfo?.data?.status;
+          if (sessStatus && sessStatus !== 'WORKING') {
+            errMsg = `Sesi WhatsApp "${targetSession}" berstatus ${sessStatus}. Jalankan atau scan QR sesi tersebut terlebih dahulu.`;
+          }
+        }
+        return { success: false, sessionUsed: targetSession, error: errMsg };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        sessionUsed: resolvedSession,
+        error: this.extractWahaError(err),
+      };
+    }
+  }
+
+  /**
+   * Post WhatsApp Text Status (Story) via WAHA
+   */
+  public async sendTextStatus(
+    data: {
+      text: string;
+      backgroundColor?: string;
+      font?: number;
+      contacts?: string[];
+      linkPreview?: boolean;
+    },
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanContacts = (data.contacts || [])
+      .map((c) => toWahaChatId(c))
+      .filter(Boolean);
+    return this.executeSessionAction(sessionName, async (client, targetSession) => {
+      try {
+        const res = await client.post(
+          `/api/${encodeURIComponent(targetSession)}/status/text`,
+          {
+            text: data.text,
+            backgroundColor: data.backgroundColor || '#38b42f',
+            font: typeof data.font === 'number' ? data.font : 1,
+            linkPreview: data.linkPreview !== false,
+            ...(cleanContacts.length > 0 ? { contacts: cleanContacts } : {}),
+          },
+          { timeout: 30000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        const raw = this.extractWahaError(err).toLowerCase();
+        if (cleanContacts.length > 0 && raw.includes('contact')) {
+          throw new Error(
+            'Engine WAHA aktif tidak mendukung filter daftar kontak pada WhatsApp Status. Gunakan engine GOWS/NOWEB atau pilih "Semua Kontak".'
+          );
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Post WhatsApp Image, Video, or Voice Status (Story) via WAHA
+   */
+  public async sendMediaStatus(
+    data: {
+      mediaType: 'image' | 'video' | 'voice';
+      file: { url?: string; base64?: string; mimetype?: string; filename?: string };
+      caption?: string;
+      backgroundColor?: string;
+      contacts?: string[];
+    },
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanContacts = (data.contacts || [])
+      .map((c) => toWahaChatId(c))
+      .filter(Boolean);
+    const cleanBase64 = data.file.base64
+      ? data.file.base64.includes(',')
+        ? data.file.base64.split(',')[1]
+        : data.file.base64
+      : undefined;
+    const defaultMime =
+      data.mediaType === 'video'
+        ? 'video/mp4'
+        : data.mediaType === 'voice'
+        ? 'audio/ogg; codecs=opus'
+        : 'image/jpeg';
+
+    return this.executeSessionAction(sessionName, async (client, targetSession) => {
+      const fileObj = cleanBase64
+        ? {
+            mimetype: data.file.mimetype || defaultMime,
+            filename: data.file.filename || `status.${data.mediaType === 'video' ? 'mp4' : data.mediaType === 'voice' ? 'ogg' : 'jpg'}`,
+            data: cleanBase64,
+          }
+        : {
+            mimetype: data.file.mimetype || defaultMime,
+            url: data.file.url,
+          };
+
+      try {
+        const res = await client.post(
+          `/api/${encodeURIComponent(targetSession)}/status/${data.mediaType}`,
+          {
+            file: fileObj,
+            ...(data.mediaType !== 'voice' && data.caption ? { caption: data.caption } : {}),
+            ...(data.backgroundColor ? { backgroundColor: data.backgroundColor } : {}),
+            ...(data.mediaType === 'voice' ? { convert: true } : {}),
+            ...(cleanContacts.length > 0 ? { contacts: cleanContacts } : {}),
+          },
+          { timeout: 90000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        const raw = this.extractWahaError(err).toLowerCase();
+        if (cleanContacts.length > 0 && raw.includes('contact')) {
+          throw new Error(
+            'Engine WAHA aktif tidak mendukung filter daftar kontak pada WhatsApp Status. Gunakan engine GOWS/NOWEB atau pilih "Semua Kontak".'
+          );
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Delete a previously posted WhatsApp Status (Story)
+   */
+  public async deleteStatus(
+    statusMessageId: string,
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    return this.executeSessionAction(sessionName, async (client, targetSession) => {
+      const res = await client.post(
+        `/api/${encodeURIComponent(targetSession)}/status/delete`,
+        { id: statusMessageId, contacts: null },
+        { timeout: 15000 }
+      );
+      return res.data;
+    });
+  }
+
+  /**
+   * Query WAHA for delivery/view receipts on a posted WhatsApp Status message
+   */
+  public async fetchStatusViewers(
+    statusMessageId: string,
+    sessionName?: string
+  ): Promise<WahaStatusReceipt[]> {
+    const cleanId = String(statusMessageId || '').trim();
+    if (!cleanId) return [];
+    const { client, session, ownerPrefix } = await this.getClient();
+    let targetSession = sessionName?.trim()
+      ? this.resolveOwnedSessionName(sessionName.trim(), ownerPrefix)
+      : session;
+    this.assertOwnedSession(targetSession, ownerPrefix);
+    if (!sessionName?.trim() && (targetSession === 'default' || !targetSession)) {
+      const liveSession = await this.pickLiveWorkingSession(client, ownerPrefix);
+      if (liveSession) targetSession = liveSession;
+    }
+
+    const stanzaMatch = cleanId.match(/status@broadcast_([^_]+)/i);
+    const shortStanza =
+      stanzaMatch?.[1] ||
+      (cleanId.includes('_') ? cleanId.split('_').pop() || cleanId : cleanId);
+
+    try {
+      const directRes = await client.get(
+        `/api/${encodeURIComponent(targetSession)}/chats/status%40broadcast/messages/${encodeURIComponent(cleanId)}`,
+        { timeout: 8000 }
+      );
+      const parsed = extractStatusReceiptsFromWahaMessage(directRes.data);
+      if (parsed.length > 0) return parsed;
+    } catch {
+      // Fallback to listing recent status@broadcast messages below
+    }
+
+    try {
+      const listRes = await client.get(
+        `/api/${encodeURIComponent(targetSession)}/chats/status%40broadcast/messages`,
+        { params: { limit: 30 }, timeout: 8000 }
+      );
+      const list: any[] = Array.isArray(listRes.data) ? listRes.data : [];
+      const matched = list.find((m) => {
+        const candId = String(m?.id?._serialized || m?.id?.id || m?.id || m?.key?.id || '');
+        return candId === cleanId || (shortStanza && candId.includes(shortStanza));
+      });
+      if (matched) {
+        return extractStatusReceiptsFromWahaMessage(matched);
+      }
+    } catch {
+      // Non-fatal: webhook acks remain source of truth
+    }
+    return [];
+  }
+
+  private async resolveReadableSession(sessionName?: string): Promise<{
+    client: AxiosInstance;
+    targetSession: string;
+  }> {
+    const { client, session, ownerPrefix } = await this.getClient();
+    let targetSession = sessionName?.trim()
+      ? this.resolveOwnedSessionName(sessionName.trim(), ownerPrefix)
+      : session;
+    this.assertOwnedSession(targetSession, ownerPrefix);
+    if (!sessionName?.trim() && (targetSession === 'default' || !targetSession)) {
+      const liveSession = await this.pickLiveWorkingSession(client, ownerPrefix);
+      if (liveSession) targetSession = liveSession;
+    }
+    return { client, targetSession };
+  }
+
+  private async fetchLidPhoneLookup(client: AxiosInstance, session: string): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    try {
+      const res = await client.get(`/api/${encodeURIComponent(session)}/lids`, {
+        params: { limit: 2000 },
+        timeout: 6000,
+      });
+      const list = Array.isArray(res.data) ? res.data : [];
+      for (const item of list) {
+        const lid = String(item?.lid || '').trim();
+        const phone = extractValidNormalizedPhone(item?.pn || item?.phoneNumber);
+        if (lid && phone) map.set(lid, phone);
+      }
+    } catch {
+      // Best effort: engines that don't use @lid or omit endpoint simply skip
+    }
+    return map;
+  }
+
+  /**
+   * Fetch WhatsApp contact book from WAHA for CRM synchronization
+   */
+  public async fetchAllContacts(
+    sessionName?: string,
+    limit = 2000
+  ): Promise<{ contacts: WahaContactRecord[]; sessionUsed: string }> {
+    const { client, targetSession } = await this.resolveReadableSession(sessionName);
+    const endpoints: Array<{ url: string; params?: Record<string, any> }> = [
+      { url: '/api/contacts/all', params: { session: targetSession, limit } },
+      { url: `/api/${encodeURIComponent(targetSession)}/contacts/all`, params: { limit } },
+      { url: '/api/contacts', params: { session: targetSession, limit } },
+    ];
+
+    let rawList: any[] | null = null;
+    let lastError: any = null;
+    for (const ep of endpoints) {
+      try {
+        const res = await client.get(ep.url, { params: ep.params, timeout: 20000 });
+        if (Array.isArray(res.data)) {
+          rawList = res.data;
+          break;
+        }
+        if (Array.isArray(res.data?.contacts)) {
+          rawList = res.data.contacts;
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        const st = err?.response?.status;
+        if (st === 401 || st === 403) throw new Error(this.extractWahaError(err));
+      }
+    }
+
+    if (!rawList) {
+      throw new Error(this.extractWahaError(lastError) || 'Gagal mengambil daftar kontak dari WAHA');
+    }
+
+    const needsLidMap = rawList.some((item) => {
+      const idVal = String(item?.id?._serialized || item?.id || '').toLowerCase();
+      return idVal.endsWith('@lid') && !item?.number && !item?.phoneNumber && !item?.pn;
+    });
+    const lidMap = needsLidMap ? await this.fetchLidPhoneLookup(client, targetSession) : undefined;
+
+    return {
+      contacts: normalizeWahaContactEntries(rawList, lidMap),
+      sessionUsed: targetSession,
+    };
+  }
+
+  /**
+   * Fetch WhatsApp group metadata (subject & participants) from WAHA
+   */
+  public async getGroupInfo(
+    groupJid: string,
+    sessionName?: string
+  ): Promise<WahaGroupInfo | null> {
+    const cleanJid = String(groupJid || '').trim();
+    if (!cleanJid || !cleanJid.toLowerCase().endsWith('@g.us')) return null;
+
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const res = await client.get(
+        `/api/${encodeURIComponent(targetSession)}/groups/${encodeURIComponent(cleanJid)}`,
+        { timeout: 10000 }
+      );
+      if (!res?.data) return null;
+
+      const rawParticipants =
+        res.data?.participants ||
+        res.data?.Participants ||
+        res.data?.groupMetadata?.participants ||
+        [];
+      const hasLidOnly =
+        Array.isArray(rawParticipants) &&
+        rawParticipants.some((p: any) => {
+          const jid = String(p?.id?._serialized || p?.id || p?.JID || '').toLowerCase();
+          return jid.endsWith('@lid') && !p?.phoneNumber && !p?.PhoneNumber && !p?.pn;
+        });
+      const lidMap = hasLidOnly ? await this.fetchLidPhoneLookup(client, targetSession) : undefined;
+      return normalizeWahaGroupInfo(cleanJid, res.data, lidMap);
+    } catch {
+      return null;
+    }
   }
 }
 

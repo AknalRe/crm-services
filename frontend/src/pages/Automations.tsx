@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Zap, Trash2, Power } from 'lucide-react';
 import api from '../services/api';
-import { CommentAutomationItem } from '../types';
+import { AuthStatus, CommentAutomationItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
+import { hasPerm } from '../lib/permissions';
 
-export const Automations: React.FC = () => {
+export const Automations: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({ currentUser }) => {
+  const canEdit = hasPerm(currentUser, 'settings.edit');
   const toast = useToast();
   const [rules, setRules] = useState<CommentAutomationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,13 +104,15 @@ export const Automations: React.FC = () => {
             Balas komentar secara otomatis dan kirim DM ke pengguna yang berkomentar dengan kata kunci tertentu.
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => setShowForm((prev) => !prev)}
-        >
-          Buat Aturan
-        </Button>
+        {canEdit && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setShowForm((prev) => !prev)}
+          >
+            Buat Aturan
+          </Button>
+        )}
       </div>
 
       {showForm && (
@@ -238,24 +242,26 @@ export const Automations: React.FC = () => {
                   )}
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleToggle(r)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50 text-xs text-gray-700"
-                  >
-                    <Power className="w-3.5 h-3.5" />
-                    {r.isActive ? 'Matikan' : 'Aktifkan'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteTarget(r)}
-                    className="p-1.5 text-gray-400 hover:text-rose-600 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                    title="Hapus"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                {canEdit && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleToggle(r)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50 text-xs text-gray-700"
+                    >
+                      <Power className="w-3.5 h-3.5" />
+                      {r.isActive ? 'Matikan' : 'Aktifkan'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(r)}
+                      className="p-1.5 text-gray-400 hover:text-rose-600 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                      title="Hapus"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { AuthStatus, LicenseInfo, SettingsSection } from '../types';
 import { ReneoCrmLogo } from './ReneoCrmLogo';
+import { hasPerm } from '../lib/permissions';
 
 interface SidebarProps {
   currentTab: string;
@@ -61,7 +62,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isLiveChatUnlocked = Boolean(
     licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
   );
-  const isAdmin = !user || user.role !== 'AGENT';
+  const isAdmin = !user || user.role === 'ADMIN';
+  const canManageAgents = isAdmin || hasPerm(user, 'settings.agents');
 
   const isIntegrationsActive =
     currentTab === 'settings' &&
@@ -153,16 +155,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'templates', label: 'Template Siaran', icon: FileText },
   ];
 
-  const settingsSubItems: { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'automation', label: 'Auto-Reply & Jam Kerja', icon: Bot },
-    { id: 'sla_csat', label: 'SLA, Routing & CSAT', icon: Sliders },
-    ...(isAdmin ? [{ id: 'agents' as const, label: 'Tim & Hak Akses', icon: Users }] : []),
-  ];
+  const isItemAllowed = (id: string) => hasPerm(user, id);
 
-  const isItemAllowed = (id: string) => {
-    if (!user || user.role === 'ADMIN' || !Array.isArray(user.permissions)) return true;
-    return user.permissions.includes(id);
-  };
+  const settingsSubItems: { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    ...(isItemAllowed('settings')
+      ? [
+          { id: 'automation' as const, label: 'Auto-Reply & Jam Kerja', icon: Bot },
+          { id: 'sla_csat' as const, label: 'SLA, Routing & CSAT', icon: Sliders },
+        ]
+      : []),
+    ...(canManageAgents ? [{ id: 'agents' as const, label: 'Tim & Hak Akses', icon: Users }] : []),
+  ];
 
   const handleOpenSettingsSub = (section: SettingsSection) => {
     setCurrentTab('settings');
@@ -209,7 +212,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Navigation Links */}
       <nav className="flex-1 px-3 py-3 space-y-4 overflow-y-auto">
-        {isItemAllowed('broadcasts') && (
+        {isItemAllowed('broadcasts') && isItemAllowed('broadcasts.send') && (
           <button
             type="button"
             onClick={() => {
@@ -268,12 +271,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
 
-        {isItemAllowed('settings') && (
+        {(isItemAllowed('settings') || canManageAgents) && (
           <div className="space-y-1">
             <div className="px-2.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               Konfigurasi
             </div>
 
+            {isItemAllowed('settings') && (
+              <>
             {/* Dropdown: Integrasi & Kanal */}
             <div>
               <button
@@ -373,6 +378,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               )}
             </div>
+              </>
+            )}
 
             {/* Dropdown: Pengaturan CRM */}
             <div>
@@ -448,13 +455,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-medium text-white truncate min-w-0 flex-1">{user.name}</p>
                 <span
-                  className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase shrink-0 ${
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase shrink-0 max-w-[96px] truncate ${
                     user.role === 'AGENT'
                       ? 'bg-sky-950/70 text-sky-300 border border-sky-800/60'
                       : 'bg-indigo-950/70 text-indigo-300 border border-indigo-800/60'
                   }`}
+                  title={user.roleName || (user.role === 'AGENT' ? 'Agent' : 'Admin')}
                 >
-                  {user.role === 'AGENT' ? 'Agent' : 'Admin'}
+                  {user.roleName || (user.role === 'AGENT' ? 'Agent' : 'Admin')}
                 </span>
                 {onLogout && (
                   <button

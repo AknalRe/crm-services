@@ -24,6 +24,7 @@ import PublicCsatPage from './pages/PublicCsatPage';
 import PublicChannelConnectPage from './pages/PublicChannelConnectPage';
 import LandingPage from './pages/LandingPage';
 import api from './services/api';
+import { hasAnyPerm, hasPerm } from './lib/permissions';
 import { subscribeLiveEvent } from './services/liveEvents';
 import {
   getAppRootPath,
@@ -280,10 +281,14 @@ function AppShell() {
     if (!user || user.role === 'ADMIN') {
       return;
     }
-    if (settingsSection === 'agents') {
+    const canSeeSettings = hasPerm(user, 'settings');
+    const canManageAgents = hasPerm(user, 'settings.agents');
+    if (settingsSection === 'agents' && !canManageAgents) {
       setSettingsSection('whatsapp');
+    } else if (settingsSection !== 'agents' && !canSeeSettings && canManageAgents) {
+      setSettingsSection('agents');
     }
-    if (!Array.isArray(user.permissions) || user.permissions.length === 0) {
+    if (!Array.isArray(user.permissions)) {
       return;
     }
     const TAB_REQUIRED_PERMISSION: Record<string, string> = {
@@ -302,9 +307,28 @@ function AppShell() {
       automations: 'settings',
       'ai-agent': 'settings',
     };
-    const requiredPerm = TAB_REQUIRED_PERMISSION[currentTab] ?? currentTab;
-    if (!user.permissions.includes(requiredPerm)) {
-      setCurrentTab(user.permissions[0]);
+    const isTabAllowed = (tabName: string) => {
+      if (tabName === 'settings') {
+        return hasAnyPerm(user, ['settings', 'settings.agents']);
+      }
+      const reqPerm = TAB_REQUIRED_PERMISSION[tabName] ?? tabName;
+      return hasPerm(user, reqPerm);
+    };
+    if (!isTabAllowed(currentTab)) {
+      const candidateTabs = [
+        'dashboard',
+        'conversations',
+        'contacts',
+        'broadcasts',
+        'posts',
+        'birthday',
+        'tracking',
+        'settings',
+      ];
+      const firstAllowed = candidateTabs.find((candidate) => isTabAllowed(candidate));
+      if (firstAllowed && firstAllowed !== currentTab) {
+        setCurrentTab(firstAllowed);
+      }
     }
   }, [authStatus?.user, currentTab, settingsSection]);
 
@@ -500,6 +524,7 @@ function AppShell() {
           <div className="w-full min-w-0">
             {currentTab === 'dashboard' && (
               <Dashboard
+                currentUser={authStatus?.user}
                 onNavigate={(tab, target) => {
                   setTargetConversation(target || null);
                   setCurrentTab(tab);
@@ -508,24 +533,28 @@ function AppShell() {
             )}
             {currentTab === 'contacts' && (
               <Contacts
+                currentUser={authStatus?.user}
                 onStartBroadcastWithContacts={handleStartBroadcastWithContacts}
                 licenseInfo={licenseInfo}
               />
             )}
             {currentTab === 'broadcasts' && (
               <Broadcasts
+                currentUser={authStatus?.user}
                 initialContactIds={preselectedContactIds}
                 licenseInfo={licenseInfo}
               />
             )}
             {currentTab === 'posts' && (
               <ScheduledPosts
+                currentUser={authStatus?.user}
                 prefill={prefillPost}
                 onClearPrefill={() => setPrefillPost(null)}
               />
             )}
             {currentTab === 'ideas' && (
               <ContentIdeas
+                currentUser={authStatus?.user}
                 onConvertToPost={(p) => {
                   setPrefillPost(p);
                   setCurrentTab('posts');
@@ -534,6 +563,7 @@ function AppShell() {
             )}
             {currentTab === 'media' && (
               <MediaLibrary
+                currentUser={authStatus?.user}
                 onUseInPost={(url) => {
                   setPrefillPost({ mediaUrl: url });
                   setCurrentTab('posts');
@@ -542,8 +572,8 @@ function AppShell() {
             )}
             {currentTab === 'comments' && <Comments />}
             {currentTab === 'feed' && <SocialFeed />}
-            {currentTab === 'automations' && <Automations />}
-            {currentTab === 'ai-agent' && <AiAgent />}
+            {currentTab === 'automations' && <Automations currentUser={authStatus?.user} />}
+            {currentTab === 'ai-agent' && <AiAgent currentUser={authStatus?.user} />}
             {currentTab === 'birthday' && <BirthdayAutomation />}
             {currentTab === 'tracking' && <Tracking />}
             {currentTab === 'conversations' && (

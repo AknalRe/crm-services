@@ -431,6 +431,8 @@ export function startSlaMonitor(): void {
         .where(
           and(
             eq(conversations.status, 'OPEN'),
+            eq(conversations.excludeFromMetrics, false),
+            eq(conversations.isGroup, false),
             isNotNull(conversations.firstInboundAt),
             isNull(conversations.firstResponseAt)
           )

@@ -1,10 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Server,
   Globe,
   Trash2,
   Edit3,
   Search,
+  ShieldCheck,
+  Plus,
+  Lock,
+  Users,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -16,7 +20,9 @@ import {
   AgentItem,
   AgentQuota,
   AuthStatus,
+  CrmRoleItem,
   LicenseInfo,
+  PermissionCatalogItem,
   SettingsSection,
   WahaSessionItem,
   WahaStatus,
@@ -24,16 +30,31 @@ import {
 import { Button } from '../components/ui/Button';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
+import {
+  ALL_PERMISSION_KEYS,
+  PERMISSION_CATALOG_UI,
+  groupPermissionCatalog,
+  hasPerm,
+} from '../lib/permissions';
 
-const PERMISSION_OPTIONS = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'contacts', label: 'Kontak Pelanggan' },
-  { id: 'broadcasts', label: 'Siaran & Kampanye' },
-  { id: 'birthday', label: 'Ulang Tahun' },
-  { id: 'tracking', label: 'Pelacakan Status' },
-  { id: 'conversations', label: 'Live Chat CRM' },
-  { id: 'settings', label: 'Master Data & Pengaturan' },
-];
+function togglePermissionWithParent(prev: string[], perm: string): string[] {
+  const isSelected = prev.includes(perm);
+  if (isSelected) {
+    if (!perm.includes('.')) {
+      return prev.filter((item) => item !== perm && !item.startsWith(`${perm}.`));
+    }
+    return prev.filter((item) => item !== perm);
+  }
+  const next = new Set(prev);
+  next.add(perm);
+  if (perm.includes('.')) {
+    const parentMenu = perm.split('.')[0];
+    if ((ALL_PERMISSION_KEYS as readonly string[]).includes(parentMenu)) {
+      next.add(parentMenu);
+    }
+  }
+  return Array.from(next);
+}
 
 interface SettingsProps {
   wahaStatus: WahaStatus | null;
@@ -133,9 +154,15 @@ export const Settings: React.FC<SettingsProps> = ({
   const [savingWebhook, setSavingWebhook] = useState(false);
   const [syncingWebhook, setSyncingWebhook] = useState(false);
 
-  // Multi-Agent state (ADMIN only)
-  const isAdmin = !currentUser || currentUser.role !== 'AGENT';
+  // Multi-Agent & Role state (ADMIN or settings.agents)
+  const isFullAdmin = !currentUser || currentUser.role === 'ADMIN';
+  const canManageAgents = isFullAdmin || hasPerm(currentUser, 'settings.agents');
+  const canEditSettings = isFullAdmin || hasPerm(currentUser, 'settings.edit');
+  const [agentsSubTab, setAgentsSubTab] = useState<'agents' | 'roles'>('agents');
   const [agents, setAgents] = useState<AgentItem[]>([]);
+  const [roles, setRoles] = useState<CrmRoleItem[]>([]);
+  const [permissionCatalog, setPermissionCatalog] =
+    useState<PermissionCatalogItem[]>(PERMISSION_CATALOG_UI);
   const [agentQuota, setAgentQuota] = useState<AgentQuota | null>(null);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
@@ -144,9 +171,36 @@ export const Settings: React.FC<SettingsProps> = ({
   const [agentEmail, setAgentEmail] = useState('');
   const [agentPassword, setAgentPassword] = useState('');
   const [agentRole, setAgentRole] = useState<'ADMIN' | 'AGENT'>('AGENT');
-  const [agentPermissions, setAgentPermissions] = useState<string[]>(['dashboard', 'contacts', 'conversations']);
+  const [agentRoleId, setAgentRoleId] = useState<string>('role_cs');
+  const [agentPermissions, setAgentPermissions] = useState<string[]>([
+    'dashboard',
+    'contacts',
+    'contacts.create',
+    'contacts.edit',
+    'conversations',
+    'conversations.reply',
+    'conversations.manage',
+    'conversations.csat',
+    'tracking',
+  ]);
   const [savingAgent, setSavingAgent] = useState(false);
   const [confirmDeleteAgent, setConfirmDeleteAgent] = useState<AgentItem | null>(null);
+
+  const [showRoleForm, setShowRoleForm] = useState(false);
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [roleNameInput, setRoleNameInput] = useState('');
+  const [roleDescInput, setRoleDescInput] = useState('');
+  const [rolePermissionsInput, setRolePermissionsInput] = useState<string[]>([
+    'dashboard',
+    'contacts',
+    'contacts.create',
+    'contacts.edit',
+    'conversations',
+    'conversations.reply',
+    'conversations.manage',
+  ]);
+  const [savingRole, setSavingRole] = useState(false);
+  const [confirmDeleteRole, setConfirmDeleteRole] = useState<CrmRoleItem | null>(null);
   const [internalTab, setInternalTab] = useState<SettingsSection>('whatsapp');
   const settingsTab = activeSection ?? internalTab;
   const setSettingsTab = (sec: SettingsSection) => {
@@ -154,19 +208,33 @@ export const Settings: React.FC<SettingsProps> = ({
     onSectionChange?.(sec);
   };
 
+  const groupedPermissionCatalog = useMemo(
+    () => groupPermissionCatalog(permissionCatalog),
+    [permissionCatalog]
+  );
+
+  const permissionLabelMap = useMemo(
+    () => new Map(permissionCatalog.map((item) => [item.id, item.label])),
+    [permissionCatalog]
+  );
+
   const fetchAgents = useCallback(async () => {
-    if (!isAdmin) return;
+    if (!canManageAgents) return;
     setAgentsLoading(true);
     try {
       const data = await api.getAgents();
       setAgents(data.agents || []);
+      setRoles(data.roles || []);
+      if (Array.isArray(data.permissionCatalog) && data.permissionCatalog.length > 0) {
+        setPermissionCatalog(data.permissionCatalog);
+      }
       setAgentQuota(data.quota || null);
     } catch {
       setAgents([]);
     } finally {
       setAgentsLoading(false);
     }
-  }, [isAdmin]);
+  }, [canManageAgents]);
 
   useEffect(() => {
     void fetchAgents();
@@ -177,8 +245,24 @@ export const Settings: React.FC<SettingsProps> = ({
     setAgentName('');
     setAgentEmail('');
     setAgentPassword('');
+    const csStarter = roles.find((r) => r.id === 'role_cs') || roles.find((r) => r.id !== 'role_admin');
     setAgentRole('AGENT');
-    setAgentPermissions(['dashboard', 'contacts', 'conversations']);
+    setAgentRoleId(csStarter ? csStarter.id : '__CUSTOM__');
+    setAgentPermissions(
+      csStarter
+        ? csStarter.permissions
+        : [
+            'dashboard',
+            'contacts',
+            'contacts.create',
+            'contacts.edit',
+            'conversations',
+            'conversations.reply',
+            'conversations.manage',
+            'conversations.csat',
+            'tracking',
+          ]
+    );
     setShowAgentForm(false);
   };
 
@@ -188,38 +272,150 @@ export const Settings: React.FC<SettingsProps> = ({
     setAgentEmail(agent.email);
     setAgentPassword('');
     setAgentRole(agent.role);
+    setAgentRoleId(
+      agent.role === 'ADMIN' ? 'role_admin' : agent.roleId ? agent.roleId : '__CUSTOM__'
+    );
     setAgentPermissions(agent.permissions || []);
     setShowAgentForm(true);
   };
 
+  const handleSelectAgentRoleTemplate = (nextRoleId: string) => {
+    setAgentRoleId(nextRoleId);
+    if (nextRoleId === 'role_admin') {
+      setAgentRole('ADMIN');
+      setAgentPermissions([...ALL_PERMISSION_KEYS]);
+      return;
+    }
+    setAgentRole('AGENT');
+    if (nextRoleId === '__CUSTOM__') {
+      return;
+    }
+    const matched = roles.find((r) => r.id === nextRoleId);
+    if (matched) {
+      setAgentPermissions(matched.permissions || []);
+    }
+  };
+
   const togglePermission = (perm: string) => {
-    setAgentPermissions((prev) =>
-      prev.includes(perm) ? prev.filter((p) => p !== perm) : [...prev, perm]
-    );
+    setAgentPermissions((prev) => togglePermissionWithParent(prev, perm));
+  };
+
+  const resetRoleForm = () => {
+    setEditingRoleId(null);
+    setRoleNameInput('');
+    setRoleDescInput('');
+    setRolePermissionsInput([
+      'dashboard',
+      'contacts',
+      'contacts.create',
+      'contacts.edit',
+      'conversations',
+      'conversations.reply',
+      'conversations.manage',
+    ]);
+    setShowRoleForm(false);
+  };
+
+  const handleStartCreateRole = () => {
+    resetRoleForm();
+    setShowRoleForm(true);
+  };
+
+  const handleStartEditRole = (role: CrmRoleItem) => {
+    setEditingRoleId(role.id);
+    setRoleNameInput(role.name);
+    setRoleDescInput(role.description || '');
+    setRolePermissionsInput(Array.isArray(role.permissions) ? role.permissions : []);
+    setShowRoleForm(true);
+  };
+
+  const handleSaveRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roleNameInput.trim()) {
+      toast.error('Nama role wajib diisi.');
+      return;
+    }
+    if (rolePermissionsInput.length === 0) {
+      toast.error('Pilih minimal 1 izin menu/aksi untuk role ini.');
+      return;
+    }
+    setSavingRole(true);
+    try {
+      if (editingRoleId) {
+        await api.updateRole(editingRoleId, {
+          name: roleNameInput.trim(),
+          description: roleDescInput.trim() || null,
+          permissions: rolePermissionsInput,
+        });
+        toast.success(`Role "${roleNameInput.trim()}" berhasil diperbarui.`);
+      } else {
+        await api.createRole({
+          name: roleNameInput.trim(),
+          description: roleDescInput.trim() || null,
+          permissions: rolePermissionsInput,
+        });
+        toast.success(`Role "${roleNameInput.trim()}" berhasil dibuat.`);
+      }
+      resetRoleForm();
+      await fetchAgents();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menyimpan role.');
+    } finally {
+      setSavingRole(false);
+    }
+  };
+
+  const handleConfirmDeleteRole = async () => {
+    if (!confirmDeleteRole) return;
+    try {
+      await api.deleteRole(confirmDeleteRole.id);
+      toast.success(`Role "${confirmDeleteRole.name}" dihapus.`);
+      setConfirmDeleteRole(null);
+      await fetchAgents();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menghapus role.');
+    }
   };
 
   const handleSaveAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingAgent(true);
     try {
+      const resolvedRole: 'ADMIN' | 'AGENT' =
+        agentRoleId === 'role_admin' || agentRole === 'ADMIN' ? 'ADMIN' : 'AGENT';
+      const resolvedRoleId =
+        resolvedRole === 'ADMIN'
+          ? 'role_admin'
+          : agentRoleId === '__CUSTOM__'
+          ? null
+          : agentRoleId || null;
+      const effectivePerms =
+        resolvedRole === 'ADMIN'
+          ? [...ALL_PERMISSION_KEYS]
+          : resolvedRoleId
+          ? roles.find((r) => r.id === resolvedRoleId)?.permissions || agentPermissions
+          : agentPermissions;
+
       if (editingAgentId) {
         await api.updateAgent(editingAgentId, {
           name: agentName.trim(),
           email: agentEmail.trim(),
           ...(agentPassword.trim() ? { password: agentPassword.trim() } : {}),
-          role: agentRole,
-          permissions: agentRole === 'ADMIN' ? PERMISSION_OPTIONS.map((p) => p.id) : agentPermissions,
+          role: resolvedRole,
+          roleId: resolvedRoleId,
+          permissions: effectivePerms,
         });
-        toast.success('Data agent berhasil diperbarui.');
+        toast.success('Data akun CS berhasil diperbarui.');
       } else {
         await api.createAgent({
           name: agentName.trim(),
           email: agentEmail.trim(),
           password: agentPassword.trim(),
-          role: agentRole,
-          permissions: agentRole === 'ADMIN' ? PERMISSION_OPTIONS.map((p) => p.id) : agentPermissions,
+          role: resolvedRole,
+          roleId: resolvedRoleId,
+          permissions: effectivePerms,
         });
-        toast.success('Agent baru berhasil ditambahkan.');
+        toast.success('Akun CS baru berhasil ditambahkan.');
       }
       resetAgentForm();
       await fetchAgents();
@@ -741,6 +937,15 @@ export const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className="space-y-5">
+      {settingsTab !== 'agents' && !canEditSettings && (
+        <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
+          <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            <strong>Mode Lihat Saja:</strong> Role{' '}
+            <strong>{currentUser?.roleName || 'Agent'}</strong> hanya dapat meninjau konfigurasi ini tanpa hak ubah/simpan (<code className="font-mono">settings.edit</code>).
+          </span>
+        </div>
+      )}
       {settingsTab === 'whatsapp' && (
       <div className="space-y-5">
       {/* Header */}
@@ -785,8 +990,9 @@ export const Settings: React.FC<SettingsProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
+                disabled={!canEditSettings}
                 onClick={() => handleSelectMode('INTERNAL')}
-                className={`p-3.5 rounded-lg border text-left transition-colors ${
+                className={`p-3.5 rounded-lg border text-left transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
                   configMode === 'INTERNAL'
                     ? 'border-indigo-600 bg-indigo-50/40 text-gray-900'
                     : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
@@ -810,8 +1016,9 @@ export const Settings: React.FC<SettingsProps> = ({
 
               <button
                 type="button"
+                disabled={!canEditSettings}
                 onClick={() => handleSelectMode('EXTERNAL')}
-                className={`p-3.5 rounded-lg border text-left transition-colors ${
+                className={`p-3.5 rounded-lg border text-left transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
                   configMode === 'EXTERNAL'
                     ? 'border-indigo-600 bg-indigo-50/40 text-gray-900'
                     : 'border-gray-200 hover:border-gray-300 text-gray-600 bg-white'
@@ -871,6 +1078,7 @@ export const Settings: React.FC<SettingsProps> = ({
                       type="button"
                       variant="primary"
                       isLoading={activatingInternal}
+                      disabled={!canEditSettings}
                       onClick={() => void handleActivateInternalMode()}
                     >
                       Simpan &amp; Aktifkan WAHA Internal
@@ -940,7 +1148,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   >
                     Tes Koneksi WAHA
                   </Button>
-                  <Button type="submit" variant="primary" isLoading={saving}>
+                  <Button type="submit" variant="primary" isLoading={saving} disabled={!canEditSettings}>
                     {savedMode !== 'EXTERNAL'
                       ? 'Simpan & Aktifkan WAHA Eksternal'
                       : 'Simpan Konfigurasi WAHA'}
@@ -1022,7 +1230,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         placeholder="Tambah nama sesi baru (contoh: cs-1, sales)"
                         value={newSessionName}
                         onChange={(e) => setNewSessionName(e.target.value)}
-                        disabled={sessions.length >= maxSessions}
+                        disabled={!canEditSettings || sessions.length >= maxSessions}
                         className="w-full flex-none sm:flex-1 h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
                       />
                       <Button
@@ -1030,7 +1238,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         variant="primary"
                         size="md"
                         isLoading={creatingSession}
-                        disabled={!newSessionName.trim() || sessions.length >= maxSessions}
+                        disabled={!canEditSettings || !newSessionName.trim() || sessions.length >= maxSessions}
                         className="w-full sm:w-auto shrink-0"
                       >
                         Tambah Sesi
@@ -1119,7 +1327,7 @@ export const Settings: React.FC<SettingsProps> = ({
                                   type="button"
                                   variant="secondary"
                                   size="sm"
-                                  disabled={isBusy}
+                                  disabled={!canEditSettings || isBusy}
                                   onClick={() => handleSwitchActiveSession(item.name)}
                                 >
                                   Jadikan Default
@@ -1131,7 +1339,7 @@ export const Settings: React.FC<SettingsProps> = ({
                                     type="button"
                                     variant="secondary"
                                     size="sm"
-                                    disabled={isBusy}
+                                    disabled={!canEditSettings || isBusy}
                                     onClick={() => void handleQuickStartSession(item.name)}
                                   >
                                     Start
@@ -1140,6 +1348,7 @@ export const Settings: React.FC<SettingsProps> = ({
                                     type="button"
                                     variant="secondary"
                                     size="sm"
+                                    disabled={!canEditSettings}
                                     onClick={() => onOpenQr(item.name)}
                                   >
                                     Scan QR
@@ -1151,7 +1360,7 @@ export const Settings: React.FC<SettingsProps> = ({
                                   type="button"
                                   variant="ghost"
                                   size="sm"
-                                  disabled={isBusy}
+                                  disabled={!canEditSettings || isBusy}
                                   className="text-red-600 hover:bg-red-50 hover:text-red-700"
                                   onClick={() => setConfirmDeleteSession(item.name)}
                                   aria-label={`Hapus sesi ${item.name}`}
@@ -1338,7 +1547,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   variant="primary"
                   size="md"
                   className="w-full"
-                  disabled={isServerOffline || sessionActionLoading}
+                  disabled={!canEditSettings || isServerOffline || sessionActionLoading}
                   onClick={() => onOpenQr(inspectedSession)}
                 >
                   Buka Scanner QR WhatsApp
@@ -1350,7 +1559,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   variant="secondary"
                   size="md"
                   onClick={handleStartSession}
-                  disabled={isActiveWorking || isServerOffline || sessionActionLoading}
+                  disabled={!canEditSettings || isActiveWorking || isServerOffline || sessionActionLoading}
                   isLoading={sessionActionLoading}
                 >
                   Start Sesi
@@ -1360,7 +1569,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   variant="secondary"
                   size="md"
                   onClick={() => setConfirmAction('stop')}
-                  disabled={!canStopOrLogout || sessionActionLoading}
+                  disabled={!canEditSettings || !canStopOrLogout || sessionActionLoading}
                 >
                   Stop Sesi
                 </Button>
@@ -1371,7 +1580,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 size="md"
                 className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 hover:text-red-700"
                 onClick={() => setConfirmAction('logout')}
-                disabled={!canStopOrLogout || sessionActionLoading}
+                disabled={!canEditSettings || !canStopOrLogout || sessionActionLoading}
               >
                 Logout Sesi WhatsApp
               </Button>
@@ -1387,7 +1596,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   variant="secondary"
                   size="sm"
                   isLoading={syncingWebhook}
-                  disabled={isPendingModeSwitch || isServerOffline}
+                  disabled={!canEditSettings || isPendingModeSwitch || isServerOffline}
                   onClick={() => void handleSyncWebhooksNow()}
                 >
                   Sinkronkan
@@ -1448,6 +1657,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   variant="secondary"
                   size="sm"
                   isLoading={savingWebhook}
+                  disabled={!canEditSettings}
                   onClick={() => void handleSaveWebhookUrl()}
                   className="shrink-0"
                 >
@@ -1490,355 +1700,794 @@ export const Settings: React.FC<SettingsProps> = ({
 
       {/* Pengaturan SLA, Routing Agent & Survei CSAT */}
       {settingsTab === 'sla_csat' && (
-        <SlaRoutingCsatSettings licenseInfo={licenseInfo} />
+        <SlaRoutingCsatSettings licenseInfo={licenseInfo} canEdit={canEditSettings} />
       )}
 
-      {/* Manajemen Multi-Agent & Hak Akses (ADMIN only) */}
-      {settingsTab === 'agents' && !isAdmin && (
+      {/* Manajemen Multi-CS, Role & Batasan Akses */}
+      {settingsTab === 'agents' && !canManageAgents && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-5 text-xs text-amber-800">
-          Halaman Manajemen Multi-Agent &amp; Hak Akses hanya tersedia untuk pengguna dengan peran ADMIN.
+          Halaman Manajemen Multi-CS, Role &amp; Batasan Akses hanya tersedia untuk Admin atau role dengan izin <code className="font-mono">settings.agents</code>.
         </div>
       )}
-      {settingsTab === 'agents' && isAdmin && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-semibold text-gray-900">Manajemen Akun &amp; Agent</h3>
-                {agentQuota && (
-                  <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px] font-mono border border-gray-200">
-                    {agentQuota.currentCount}/{agentQuota.maxAgents} akun
+      {settingsTab === 'agents' && canManageAgents && (
+        <div className="space-y-4">
+          {/* Sub-navigasi Akun CS vs Role Builder */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    Manajemen Multi-CS &amp; Role Batasan Akses
+                  </h3>
+                  {agentQuota && (
+                    <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px] font-mono border border-gray-200">
+                      {agentQuota.currentCount}/{agentQuota.maxAgents} akun CS
+                    </span>
+                  )}
+                  <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[11px] font-mono border border-indigo-200">
+                    {roles.length} role
                   </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Buat Role khusus dengan batasan menu, aksi, dan tombol tertentu, lalu tugaskan ke akun CS. Pembatasan berlaku di API backend maupun menu/tombol frontend.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setAgentsSubTab('agents')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                      agentsSubTab === 'agents'
+                        ? 'bg-white text-gray-900 shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Akun CS ({agents.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAgentsSubTab('roles')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                      agentsSubTab === 'roles'
+                        ? 'bg-white text-gray-900 shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Role &amp; Batasan ({roles.length})</span>
+                  </button>
+                </div>
+
+                {agentsSubTab === 'roles' ? (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={handleStartCreateRole}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    Buat Role Baru
+                  </Button>
+                ) : agentQuota && !agentQuota.multiAgent ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={onOpenPlans}
+                  >
+                    Upgrade Multi-CS
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      resetAgentForm();
+                      setShowAgentForm(true);
+                    }}
+                    disabled={Boolean(agentQuota && agentQuota.currentCount >= agentQuota.maxAgents)}
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    Tambah Akun CS
+                  </Button>
                 )}
               </div>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Kelola akun agent dan batasi akses menu untuk masing-masing agent sesuai paket lisensi.
-              </p>
             </div>
 
-            {agentQuota && !agentQuota.multiAgent ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={onOpenPlans}
-              >
-                Upgrade untuk Multi-Agent
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  resetAgentForm();
-                  setShowAgentForm(true);
-                }}
-                disabled={Boolean(agentQuota && agentQuota.currentCount >= agentQuota.maxAgents)}
-              >
-                Tambah Agent
-              </Button>
-            )}
-          </div>
-
-          {agentQuota && !agentQuota.multiAgent && (
-            <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800 flex flex-wrap items-center justify-between gap-3">
-              <span>
-                Paket <strong>{agentQuota.plan}</strong> hanya mendukung 1 akun admin utama. Upgrade ke paket Pro (maks 5 agent) atau Enterprise (maks 25 agent) untuk menambah agent dengan pembatasan akses.
-              </span>
-              {onOpenPlans && (
-                <button
-                  type="button"
-                  onClick={onOpenPlans}
-                  className="px-2.5 py-1 rounded bg-amber-600 text-white text-[11px] font-medium hover:bg-amber-700 shrink-0"
-                >
-                  Lihat Paket
-                </button>
-              )}
-            </div>
-          )}
-
-          {showAgentForm && (
-            <form onSubmit={handleSaveAgent} className="p-4 rounded-lg bg-gray-50 border border-gray-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-semibold text-gray-900">
-                  {editingAgentId ? 'Edit Data Agent' : 'Tambah Agent Baru'}
-                </h4>
-                <button
-                  type="button"
-                  onClick={resetAgentForm}
-                  className="text-xs text-gray-500 hover:text-gray-800"
-                >
-                  Batal
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-gray-700 mb-1">Nama</label>
-                  <input
-                    type="text"
-                    required
-                    value={agentName}
-                    onChange={(e) => setAgentName(e.target.value)}
-                    placeholder="Nama Agent"
-                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-gray-700 mb-1">Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={agentEmail}
-                    onChange={(e) => setAgentEmail(e.target.value)}
-                    placeholder="agent@domain.com"
-                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-gray-700 mb-1">
-                    Password {editingAgentId ? '(kosongkan jika tetap)' : ''}
-                  </label>
-                  <input
-                    type="password"
-                    required={!editingAgentId}
-                    minLength={6}
-                    value={agentPassword}
-                    onChange={(e) => setAgentPassword(e.target.value)}
-                    placeholder="Min. 6 karakter"
-                    className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-gray-700 mb-1">Peran</label>
-                  <select
-                    value={agentRole}
-                    onChange={(e) => setAgentRole(e.target.value as 'ADMIN' | 'AGENT')}
-                    className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs"
-                  >
-                    <option value="AGENT">AGENT (Terbatas)</option>
-                    <option value="ADMIN">ADMIN (Akses Penuh)</option>
-                  </select>
-                </div>
-              </div>
-
-              {agentRole === 'AGENT' && (
-                <div>
-                  <label className="block text-[11px] font-medium text-gray-700 mb-1.5">
-                    Batasan Akses Menu
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {PERMISSION_OPTIONS.map((perm) => {
-                      const checked = agentPermissions.includes(perm.id);
-                      return (
-                        <label
-                          key={perm.id}
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs cursor-pointer ${
-                            checked
-                              ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
-                              : 'bg-white border-gray-200 text-gray-600'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => togglePermission(perm.id)}
-                            className="rounded border-gray-300 text-indigo-600"
-                          />
-                          <span>{perm.label}</span>
-                        </label>
-                      );
-                    })}
+            {agentsSubTab === 'agents' && (
+              <div className="space-y-4">
+                {agentQuota && !agentQuota.multiAgent && (
+                  <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800 flex flex-wrap items-center justify-between gap-3">
+                    <span>
+                      Paket <strong>{agentQuota.plan}</strong> hanya mendukung 1 akun admin utama. Upgrade ke paket Pro (maks 5 akun CS) atau Enterprise (maks 25 akun CS) untuk Multi-CS dengan Role khusus.
+                    </span>
+                    {onOpenPlans && (
+                      <button
+                        type="button"
+                        onClick={onOpenPlans}
+                        className="px-2.5 py-1 rounded bg-amber-600 text-white text-[11px] font-medium hover:bg-amber-700 shrink-0"
+                      >
+                        Lihat Paket
+                      </button>
+                    )}
                   </div>
-                </div>
-              )}
+                )}
 
-              <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="secondary" size="sm" onClick={resetAgentForm}>
-                  Batal
-                </Button>
-                <Button type="submit" variant="primary" size="sm" isLoading={savingAgent}>
-                  {editingAgentId ? 'Simpan Perubahan' : 'Buat Akun Agent'}
-                </Button>
-              </div>
-            </form>
-          )}
+                {showAgentForm && (
+                  <form onSubmit={handleSaveAgent} className="p-4 rounded-lg bg-gray-50 border border-gray-200 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-semibold text-gray-900">
+                        {editingAgentId ? 'Edit Data Akun CS' : 'Tambah Akun CS Baru'}
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={resetAgentForm}
+                        className="text-xs text-gray-500 hover:text-gray-800"
+                      >
+                        Batal
+                      </button>
+                    </div>
 
-          {agentsLoading ? (
-            <div className="text-xs text-gray-500 py-4 text-center">Memuat daftar agent...</div>
-          ) : agents.length === 0 ? (
-            <div className="text-xs text-gray-500 py-4 text-center">Belum ada data agent.</div>
-          ) : (
-            <>
-              <div className="sm:hidden divide-y divide-gray-200 border border-gray-200 rounded-md overflow-hidden">
-                {agents.map((ag) => {
-                  const isSelf = currentUser?.id === ag.id || currentUser?.email === ag.email;
-                  return (
-                    <div key={ag.id} className="p-3 bg-white space-y-2 text-xs">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="font-semibold text-gray-900 truncate">{ag.name}</div>
-                          <div className="text-[11px] text-gray-500 font-mono truncate">{ag.email}</div>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                              ag.role === 'ADMIN'
-                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                : 'bg-sky-50 text-sky-700 border border-sky-200'
-                            }`}
-                          >
-                            {ag.role}
-                          </span>
-                          <button
-                            type="button"
-                            disabled={isSelf}
-                            onClick={() => void handleToggleAgentActive(ag)}
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                              ag.isActive
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-gray-100 text-gray-500 border border-gray-200'
-                            } ${isSelf ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
-                          >
-                            {ag.isActive ? 'Aktif' : 'Nonaktif'}
-                          </button>
-                        </div>
-                      </div>
-
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                       <div>
-                        {ag.role === 'ADMIN' ? (
-                          <span className="text-[11px] text-gray-500">Akses: Semua Menu</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-1">
-                            {(ag.permissions || []).map((p) => (
-                              <span
-                                key={p}
-                                className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]"
-                              >
-                                {PERMISSION_OPTIONS.find((o) => o.id === p)?.label || p}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        <label className="block text-[11px] font-medium text-gray-700 mb-1">Nama CS</label>
+                        <input
+                          type="text"
+                          required
+                          value={agentName}
+                          onChange={(e) => setAgentName(e.target.value)}
+                          placeholder="Misal: Rina (CS Shift Pagi)"
+                          className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
+                        />
                       </div>
-
-                      <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-gray-100">
-                        <button
-                          type="button"
-                          onClick={() => handleStartEditAgent(ag)}
-                          className="h-7 px-2.5 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-gray-700 hover:bg-gray-50"
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-700 mb-1">Email Login</label>
+                        <input
+                          type="email"
+                          required
+                          value={agentEmail}
+                          onChange={(e) => setAgentEmail(e.target.value)}
+                          placeholder="cs@domain.com"
+                          className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-700 mb-1">
+                          Password {editingAgentId ? '(kosongkan jika tetap)' : ''}
+                        </label>
+                        <input
+                          type="password"
+                          required={!editingAgentId}
+                          minLength={6}
+                          value={agentPassword}
+                          onChange={(e) => setAgentPassword(e.target.value)}
+                          placeholder="Min. 6 karakter"
+                          className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-700 mb-1">
+                          Pilih Role &amp; Batasan
+                        </label>
+                        <select
+                          value={agentRoleId}
+                          onChange={(e) => handleSelectAgentRoleTemplate(e.target.value)}
+                          className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs"
                         >
-                          <Edit3 className="w-3 h-3" />
-                          <span>Edit</span>
-                        </button>
-                        {!isSelf && (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteAgent(ag)}
-                            className="h-7 px-2.5 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-red-600 hover:bg-red-50"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            <span>Hapus</span>
-                          </button>
-                        )}
+                          {roles
+                            .filter((r) => isFullAdmin || r.id !== 'role_admin')
+                            .map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {r.name} ({r.permissions.length} izin)
+                              </option>
+                            ))}
+                          <option value="__CUSTOM__">Khusus / Override Manual</option>
+                        </select>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
 
-              <div className="hidden sm:block overflow-x-auto">
-                <table className="w-full min-w-[540px] text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
-                      <th className="py-2 pr-3 font-medium">Nama &amp; Email</th>
-                      <th className="py-2 px-3 font-medium">Peran</th>
-                      <th className="py-2 px-3 font-medium">Akses Menu</th>
-                      <th className="py-2 px-3 font-medium">Status</th>
-                      <th className="py-2 pl-3 font-medium text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {agents.map((ag) => {
-                      const isSelf = currentUser?.id === ag.id || currentUser?.email === ag.email;
-                      return (
-                        <tr key={ag.id} className="hover:bg-gray-50/70">
-                          <td className="py-2.5 pr-3">
-                            <div className="font-medium text-gray-900">{ag.name}</div>
-                            <div className="text-[11px] text-gray-500 font-mono">{ag.email}</div>
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                ag.role === 'ADMIN'
-                                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                  : 'bg-sky-50 text-sky-700 border border-sky-200'
-                              }`}
-                            >
-                              {ag.role}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3">
-                            {ag.role === 'ADMIN' ? (
-                              <span className="text-[11px] text-gray-500">Semua Menu</span>
-                            ) : (
+                    {agentRoleId !== 'role_admin' && agentRole !== 'ADMIN' && (
+                      <div className="space-y-2.5 pt-1">
+                        {agentRoleId !== '__CUSTOM__' ? (
+                          <div className="p-3 rounded-md bg-white border border-gray-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="space-y-1">
+                              <div className="font-medium text-gray-800">
+                                Mengikuti Role:{' '}
+                                <span className="text-indigo-700">
+                                  {roles.find((r) => r.id === agentRoleId)?.name || agentRoleId}
+                                </span>
+                              </div>
                               <div className="flex flex-wrap gap-1">
-                                {(ag.permissions || []).map((p) => (
+                                {(roles.find((r) => r.id === agentRoleId)?.permissions || agentPermissions).map((p) => (
                                   <span
                                     key={p}
-                                    className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]"
+                                    className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px]"
                                   >
-                                    {PERMISSION_OPTIONS.find((o) => o.id === p)?.label || p}
+                                    {permissionLabelMap.get(p) || p}
                                   </span>
                                 ))}
                               </div>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3">
+                            </div>
                             <button
                               type="button"
-                              disabled={isSelf}
-                              onClick={() => void handleToggleAgentActive(ag)}
-                              className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                ag.isActive
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : 'bg-gray-100 text-gray-500 border border-gray-200'
-                              } ${isSelf ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                              onClick={() => handleSelectAgentRoleTemplate('__CUSTOM__')}
+                              className="px-2.5 py-1.5 rounded border border-gray-200 bg-gray-50 hover:bg-gray-100 text-[11px] font-medium text-gray-700 shrink-0 self-start sm:self-center"
                             >
-                              {ag.isActive ? 'Aktif' : 'Nonaktif'}
+                              Sesuaikan Khusus Akun Ini
                             </button>
-                          </td>
-                          <td className="py-2.5 pl-3 text-right">
-                            <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="text-[11px] font-semibold text-gray-700">
+                                Checklist Batasan Menu &amp; Tombol Khusus ({agentPermissions.length} dipilih)
+                              </label>
                               <button
                                 type="button"
-                                onClick={() => handleStartEditAgent(ag)}
-                                className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
-                                title="Edit Agent"
+                                onClick={() => setAgentsSubTab('roles')}
+                                className="text-[11px] text-indigo-600 hover:underline"
                               >
-                                <Edit3 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                Simpan sebagai Role permanen? Buat di tab Role &amp; Batasan
                               </button>
-                              {!isSelf && (
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                              {groupedPermissionCatalog.map((grp) => (
+                                <div
+                                  key={grp.group}
+                                  className="p-3 rounded-md bg-white border border-gray-200 space-y-2"
+                                >
+                                  <div className="text-[11px] font-semibold text-gray-800 border-b border-gray-100 pb-1">
+                                    {grp.group}
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    {grp.items.map((perm) => {
+                                      const checked = agentPermissions.includes(perm.id);
+                                      const restrictedForSubAdmin =
+                                        !isFullAdmin &&
+                                        (perm.id === 'settings.agents' || perm.id === 'settings.edit') &&
+                                        !hasPerm(currentUser, perm.id);
+                                      return (
+                                        <label
+                                          key={perm.id}
+                                          className={`flex items-start gap-2 text-xs ${
+                                            restrictedForSubAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                          }`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            disabled={restrictedForSubAdmin}
+                                            onChange={() => togglePermission(perm.id)}
+                                            className="mt-0.5 rounded border-gray-300 text-indigo-600"
+                                          />
+                                          <div className="min-w-0 leading-snug">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                              <span className="font-medium text-gray-800">{perm.label}</span>
+                                              <span
+                                                className={`px-1 py-0.2 rounded text-[9px] font-semibold uppercase ${
+                                                  perm.kind === 'menu'
+                                                    ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                                }`}
+                                              >
+                                                {perm.kind === 'menu' ? 'Menu' : 'Tombol'}
+                                              </span>
+                                            </div>
+                                            <p className="text-[10px] text-gray-500">{perm.description}</p>
+                                          </div>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <Button type="button" variant="secondary" size="sm" onClick={resetAgentForm}>
+                        Batal
+                      </Button>
+                      <Button type="submit" variant="primary" size="sm" isLoading={savingAgent}>
+                        {editingAgentId ? 'Simpan Perubahan' : 'Buat Akun CS'}
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {agentsLoading ? (
+                  <div className="text-xs text-gray-500 py-4 text-center">Memuat daftar akun CS...</div>
+                ) : agents.length === 0 ? (
+                  <div className="text-xs text-gray-500 py-4 text-center">Belum ada data akun CS.</div>
+                ) : (
+                  <>
+                    <div className="sm:hidden divide-y divide-gray-200 border border-gray-200 rounded-md overflow-hidden">
+                      {agents.map((ag) => {
+                        const isSelf = currentUser?.id === ag.id || currentUser?.email === ag.email;
+                        const cannotTouchAdmin = !isFullAdmin && ag.role === 'ADMIN';
+                        const visiblePerms = ag.permissions || [];
+                        return (
+                          <div key={ag.id} className="p-3 bg-white space-y-2 text-xs">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-gray-900 truncate">{ag.name}</div>
+                                <div className="text-[11px] text-gray-500 font-mono truncate">{ag.email}</div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                    ag.role === 'ADMIN'
+                                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                      : 'bg-sky-50 text-sky-700 border border-sky-200'
+                                  }`}
+                                >
+                                  {ag.roleName || (ag.role === 'ADMIN' ? 'Administrator' : 'Custom')}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={isSelf || cannotTouchAdmin}
+                                  onClick={() => void handleToggleAgentActive(ag)}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                    ag.isActive
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      : 'bg-gray-100 text-gray-500 border border-gray-200'
+                                  } ${isSelf || cannotTouchAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                                >
+                                  {ag.isActive ? 'Aktif' : 'Nonaktif'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div>
+                              {ag.role === 'ADMIN' ? (
+                                <span className="text-[11px] text-gray-500">Akses: Semua Menu &amp; Aksi Penuh</span>
+                              ) : (
+                                <div className="flex flex-wrap gap-1">
+                                  {visiblePerms.slice(0, 5).map((p) => (
+                                    <span
+                                      key={p}
+                                      className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]"
+                                    >
+                                      {permissionLabelMap.get(p) || p}
+                                    </span>
+                                  ))}
+                                  {visiblePerms.length > 5 && (
+                                    <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-medium">
+                                      +{visiblePerms.length - 5} izin lainnya
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-gray-100">
+                              <button
+                                type="button"
+                                disabled={cannotTouchAdmin}
+                                onClick={() => handleStartEditAgent(ag)}
+                                className="h-7 px-2.5 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit</span>
+                              </button>
+                              {!isSelf && !cannotTouchAdmin && (
                                 <button
                                   type="button"
                                   onClick={() => setConfirmDeleteAgent(ag)}
-                                  className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 transition-colors"
-                                  title="Hapus Agent"
+                                  className="h-7 px-2.5 rounded border border-gray-200 bg-white inline-flex items-center gap-1 text-[11px] text-red-600 hover:bg-red-50"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Hapus</span>
                                 </button>
                               )}
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full min-w-[560px] text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
+                            <th className="py-2 pr-3 font-medium">Nama &amp; Email</th>
+                            <th className="py-2 px-3 font-medium">Role</th>
+                            <th className="py-2 px-3 font-medium">Batasan Menu &amp; Tombol</th>
+                            <th className="py-2 px-3 font-medium">Status</th>
+                            <th className="py-2 pl-3 font-medium text-right">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {agents.map((ag) => {
+                            const isSelf = currentUser?.id === ag.id || currentUser?.email === ag.email;
+                            const cannotTouchAdmin = !isFullAdmin && ag.role === 'ADMIN';
+                            const visiblePerms = ag.permissions || [];
+                            return (
+                              <tr key={ag.id} className="hover:bg-gray-50/70">
+                                <td className="py-2.5 pr-3">
+                                  <div className="font-medium text-gray-900">{ag.name}</div>
+                                  <div className="text-[11px] text-gray-500 font-mono">{ag.email}</div>
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                      ag.role === 'ADMIN'
+                                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                        : 'bg-sky-50 text-sky-700 border border-sky-200'
+                                    }`}
+                                  >
+                                    {ag.roleName || (ag.role === 'ADMIN' ? 'Administrator' : 'Custom Manual')}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  {ag.role === 'ADMIN' ? (
+                                    <span className="text-[11px] text-gray-500">Akses Penuh (18 izin)</span>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-1 max-w-md">
+                                      {visiblePerms.slice(0, 4).map((p) => (
+                                        <span
+                                          key={p}
+                                          className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px]"
+                                        >
+                                          {permissionLabelMap.get(p) || p}
+                                        </span>
+                                      ))}
+                                      {visiblePerms.length > 4 && (
+                                        <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-medium">
+                                          +{visiblePerms.length - 4} lainnya ({visiblePerms.length} total)
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <button
+                                    type="button"
+                                    disabled={isSelf || cannotTouchAdmin}
+                                    onClick={() => void handleToggleAgentActive(ag)}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                      ag.isActive
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        : 'bg-gray-100 text-gray-500 border border-gray-200'
+                                    } ${isSelf || cannotTouchAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                                  >
+                                    {ag.isActive ? 'Aktif' : 'Nonaktif'}
+                                  </button>
+                                </td>
+                                <td className="py-2.5 pl-3 text-right">
+                                  <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">
+                                    <button
+                                      type="button"
+                                      disabled={cannotTouchAdmin}
+                                      onClick={() => handleStartEditAgent(ag)}
+                                      className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors disabled:opacity-40"
+                                      title="Edit Akun CS"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                    </button>
+                                    {!isSelf && !cannotTouchAdmin && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteAgent(ag)}
+                                        className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 transition-colors"
+                                        title="Hapus Akun CS"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
               </div>
-            </>
-          )}
+            )}
+
+            {agentsSubTab === 'roles' && (
+              <div className="space-y-4">
+                {showRoleForm && (
+                  <form onSubmit={handleSaveRole} className="p-4 rounded-lg bg-gray-50 border border-gray-200 space-y-3.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-900">
+                          {editingRoleId ? `Edit Role "${roleNameInput}"` : 'Buat Role Baru & Batasan Akses'}
+                        </h4>
+                        <p className="text-[11px] text-gray-500">
+                          Centang menu dan aksi/tombol yang diizinkan. Semua akun CS dengan role ini otomatis diperbarui.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={resetRoleForm}
+                        className="text-xs text-gray-500 hover:text-gray-800 shrink-0"
+                      >
+                        Batal
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-700 mb-1">
+                          Nama Role <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={roleNameInput}
+                          onChange={(e) => setRoleNameInput(e.target.value)}
+                          placeholder="Misal: CS Magang, Kepala Shift, Admin Konten"
+                          className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-gray-700 mb-1">
+                          Deskripsi Batasan Role
+                        </label>
+                        <input
+                          type="text"
+                          value={roleDescInput}
+                          onChange={(e) => setRoleDescInput(e.target.value)}
+                          placeholder="Misal: Bisa balas chat & tambah kontak, dilarang hapus/ekspor"
+                          className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-medium text-gray-600 mr-1">Preset Cepat:</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRolePermissionsInput(
+                            ALL_PERMISSION_KEYS.filter(
+                              (k) => isFullAdmin || (k !== 'settings.agents' && k !== 'settings.edit')
+                            )
+                          )
+                        }
+                        className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-100 text-[11px] text-gray-700"
+                      >
+                        Semua Izin
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRolePermissionsInput([
+                            'dashboard',
+                            'contacts',
+                            'contacts.create',
+                            'contacts.edit',
+                            'conversations',
+                            'conversations.reply',
+                            'conversations.manage',
+                            'conversations.csat',
+                            'tracking',
+                          ])
+                        }
+                        className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-100 text-[11px] text-gray-700"
+                      >
+                        Hanya CS Chat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRolePermissionsInput([
+                            'dashboard',
+                            'contacts',
+                            'broadcasts',
+                            'broadcasts.send',
+                            'tracking',
+                          ])
+                        }
+                        className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-100 text-[11px] text-gray-700"
+                      >
+                        Tim Konten &amp; Story
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRolePermissionsInput([
+                            'dashboard',
+                            'contacts',
+                            'broadcasts',
+                            'tracking',
+                            'conversations',
+                            'conversations.view_all',
+                          ])
+                        }
+                        className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-100 text-[11px] text-gray-700"
+                      >
+                        Mode Read-Only / Auditor
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRolePermissionsInput([])}
+                        className="px-2 py-1 rounded border border-gray-200 bg-white hover:bg-red-50 hover:text-red-600 text-[11px] text-gray-500"
+                      >
+                        Kosongkan
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {groupedPermissionCatalog.map((grp) => {
+                        const groupKeys = grp.items.map((item) => item.id);
+                        const allChecked = groupKeys.every((k) => rolePermissionsInput.includes(k));
+                        return (
+                          <div key={grp.group} className="p-3 rounded-md bg-white border border-gray-200 space-y-2">
+                            <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                              <span className="text-[11px] font-semibold text-gray-900">{grp.group}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (allChecked) {
+                                    setRolePermissionsInput((prev) =>
+                                      prev.filter((k) => !groupKeys.includes(k))
+                                    );
+                                  } else {
+                                    setRolePermissionsInput((prev) =>
+                                      Array.from(
+                                        new Set([
+                                          ...prev,
+                                          ...groupKeys.filter(
+                                            (k) =>
+                                              isFullAdmin ||
+                                              (k !== 'settings.agents' && k !== 'settings.edit') ||
+                                              hasPerm(currentUser, k)
+                                          ),
+                                        ])
+                                      )
+                                    );
+                                  }
+                                }}
+                                className="text-[10px] font-medium text-indigo-600 hover:underline"
+                              >
+                                {allChecked ? 'Lepas Grup' : 'Pilih Grup'}
+                              </button>
+                            </div>
+                            <div className="space-y-2">
+                              {grp.items.map((perm) => {
+                                const checked = rolePermissionsInput.includes(perm.id);
+                                const restrictedForSubAdmin =
+                                  !isFullAdmin &&
+                                  (perm.id === 'settings.agents' || perm.id === 'settings.edit') &&
+                                  !hasPerm(currentUser, perm.id);
+                                return (
+                                  <label
+                                    key={perm.id}
+                                    className={`flex items-start gap-2 text-xs ${
+                                      restrictedForSubAdmin ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      disabled={restrictedForSubAdmin}
+                                      onChange={() =>
+                                        setRolePermissionsInput((prev) =>
+                                          togglePermissionWithParent(prev, perm.id)
+                                        )
+                                      }
+                                      className="mt-0.5 rounded border-gray-300 text-indigo-600"
+                                    />
+                                    <div className="min-w-0 leading-snug">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="font-medium text-gray-800">{perm.label}</span>
+                                        <span
+                                          className={`px-1 py-0.2 rounded text-[9px] font-semibold uppercase ${
+                                            perm.kind === 'menu'
+                                              ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                          }`}
+                                        >
+                                          {perm.kind === 'menu' ? 'Menu' : 'Tombol / Aksi'}
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] text-gray-500">{perm.description}</p>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <Button type="button" variant="secondary" size="sm" onClick={resetRoleForm}>
+                        Batal
+                      </Button>
+                      <Button type="submit" variant="primary" size="sm" isLoading={savingRole}>
+                        {editingRoleId ? 'Simpan Perubahan Role' : 'Simpan Role Baru'}
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {roles.map((r) => {
+                    const menuCount = r.permissions.filter((p) => !p.includes('.')).length;
+                    const actionCount = r.permissions.filter((p) => p.includes('.')).length;
+                    const lockEditRoleAdmin = r.id === 'role_admin';
+                    return (
+                      <div
+                        key={r.id}
+                        className="p-3.5 rounded-lg border border-gray-200 bg-white flex flex-col justify-between gap-3"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs font-semibold text-gray-900">{r.name}</span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                                  r.isSystem
+                                    ? 'bg-gray-50 text-gray-600 border-gray-200'
+                                    : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                }`}
+                              >
+                                {r.isSystem ? 'Bawaan' : 'Custom'}
+                              </span>
+                            </div>
+                            <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[10px] font-mono shrink-0">
+                              {r.agentCount || 0} CS
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">
+                            {r.description || 'Tanpa deskripsi tambahan.'}
+                          </p>
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            <span className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 text-[10px] font-medium">
+                              {menuCount} Menu
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-medium">
+                              {actionCount} Batasan Tombol/Aksi
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-[11px]">
+                          <span className="text-gray-400 font-mono truncate">{r.id}</span>
+                          <div className="flex items-center gap-1.5">
+                            {!lockEditRoleAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditRole(r)}
+                                className="h-7 px-2.5 rounded border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 inline-flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Atur Batasan</span>
+                              </button>
+                            )}
+                            {!r.isSystem && (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteRole(r)}
+                                className="h-7 px-2.5 rounded border border-gray-200 bg-white hover:bg-red-50 text-red-600 inline-flex items-center gap-1"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Hapus</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1846,10 +2495,13 @@ export const Settings: React.FC<SettingsProps> = ({
         settingsTab === 'products' ||
         settingsTab === 'labels' ||
         settingsTab === 'templates') && (
-        <MasterDataSettings section={settingsTab as MasterDataSection} />
+        <MasterDataSettings
+          section={settingsTab as MasterDataSection}
+          canEdit={canEditSettings}
+        />
       )}
-      {settingsTab === 'automation' && <AutomationSettings />}
-      {settingsTab === 'omnichannel' && <OmnichannelSettings />}
+      {settingsTab === 'automation' && <AutomationSettings canEdit={canEditSettings} />}
+      {settingsTab === 'omnichannel' && <OmnichannelSettings canEdit={canEditSettings} />}
 
       <ConfirmModal
         isOpen={confirmAction !== null}
@@ -1888,6 +2540,16 @@ export const Settings: React.FC<SettingsProps> = ({
         title={`Hapus Agent "${confirmDeleteAgent?.name}"?`}
         description="Akun agent ini akan dihapus permanen dan tidak bisa login lagi ke CRM."
         confirmLabel="Ya, Hapus Agent"
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={confirmDeleteRole !== null}
+        onClose={() => setConfirmDeleteRole(null)}
+        onConfirm={handleConfirmDeleteRole}
+        title={`Hapus Role "${confirmDeleteRole?.name}"?`}
+        description="Role custom ini akan dihapus. Jika ada CS yang menggunakannya, lepaskan/pindahkan role akun tersebut terlebih dahulu."
+        confirmLabel="Ya, Hapus Role"
         variant="danger"
       />
     </div>

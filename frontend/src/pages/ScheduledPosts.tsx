@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Send,
   Trash2,
@@ -12,17 +12,35 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  Users,
+  RefreshCw,
+  Smartphone,
+  Video,
+  Mic,
+  Type as TypeIcon,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { ChannelAccount, ScheduledPostItem } from '../types';
+import { hasPerm } from '../lib/permissions';
+import {
+  AuthStatus,
+  ChannelAccount,
+  Contact,
+  ScheduledPostChannel,
+  ScheduledPostItem,
+  ScheduledPostType,
+  ScheduledPostViewersResponse,
+  WahaSessionItem,
+} from '../types';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState } from '../components/ui/StateBlocks';
 
-type PostChannel = 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
+type PostChannel = ScheduledPostChannel;
 
 interface ScheduledPostsProps {
+  currentUser?: AuthStatus['user'] | null;
   prefill?: {
     channel?: PostChannel;
     caption?: string;
@@ -36,21 +54,61 @@ const POST_CHANNEL_META: Record<PostChannel, { label: string; badgeCls: string }
   FACEBOOK: { label: 'Facebook Page', badgeCls: 'bg-blue-50 text-blue-700 border-blue-200' },
   THREADS: { label: 'Threads', badgeCls: 'bg-gray-100 text-gray-800 border-gray-300' },
   TELEGRAM: { label: 'Telegram Channel', badgeCls: 'bg-sky-50 text-sky-700 border-sky-200' },
+  WHATSAPP_STATUS: { label: 'WhatsApp Story', badgeCls: 'bg-teal-50 text-teal-700 border-teal-200' },
+  WHATSAPP: { label: 'Post WhatsApp', badgeCls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
 };
 
+const STORY_BG_COLORS = [
+  '#38b42f',
+  '#0f766e',
+  '#1d4ed8',
+  '#6d28d9',
+  '#be123c',
+  '#b45309',
+  '#1e293b',
+];
+
+const STORY_TYPE_LABELS: Record<ScheduledPostType, string> = {
+  FEED: 'Feed',
+  WA_POST: 'Post WA',
+  STATUS_TEXT: 'Story Teks',
+  STATUS_IMAGE: 'Story Gambar',
+  STATUS_VIDEO: 'Story Video',
+  STATUS_VOICE: 'Story Suara',
+};
+
+function isVideoMediaUrl(url: string): boolean {
+  return /\.(mp4|mov|webm|avi|3gp)(\?|$)/i.test(url);
+}
+
+function isAudioMediaUrl(url: string): boolean {
+  return /\.(mp3|ogg|wav|m4a|aac|opus)(\?|$)/i.test(url);
+}
+
 export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
+  currentUser,
   prefill,
   onClearPrefill,
 }) => {
   const toast = useToast();
+  const canPublishPost = hasPerm(currentUser, 'broadcasts.send');
   const [posts, setPosts] = useState<ScheduledPostItem[]>([]);
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
+  const [wahaSessions, setWahaSessions] = useState<WahaSessionItem[]>([]);
+  const [contactsList, setContactsList] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [channel, setChannel] = useState<PostChannel>('INSTAGRAM');
   const [channelAccountId, setChannelAccountId] = useState('');
+  const [wahaSession, setWahaSession] = useState('');
+  const [statusPostType, setStatusPostType] = useState<'STATUS_TEXT' | 'STATUS_IMAGE' | 'STATUS_VIDEO' | 'STATUS_VOICE'>('STATUS_TEXT');
+  const [statusBgColor, setStatusBgColor] = useState('#38b42f');
+  const [statusFont, setStatusFont] = useState<number>(1);
+  const [targetAudienceMode, setTargetAudienceMode] = useState<'ALL' | 'SELECTED'>('ALL');
+  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
+  const [contactSearch, setContactSearch] = useState('');
   const [caption, setCaption] = useState('');
   const [mediaUrl, setMediaUrl] = useState('');
   const [targetChatId, setTargetChatId] = useState('');
@@ -58,6 +116,12 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
   const [scheduledAt, setScheduledAt] = useState('');
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [viewersModal, setViewersModal] = useState<{
+    post: ScheduledPostItem;
+    loading: boolean;
+    data: ScheduledPostViewersResponse | null;
+  } | null>(null);
 
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [calendarGranularity, setCalendarGranularity] = useState<'month' | 'week'>('month');
@@ -85,13 +149,13 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
         const result = String(reader.result || '');
         const uploaded = await api.uploadMedia({
           fileName: file.name,
-          mimeType: file.type || 'image/png',
+          mimeType: file.type || 'application/octet-stream',
           base64: result,
         });
         setMediaUrl(uploaded.url);
-        toast.success('Gambar berhasil diunggah');
+        toast.success('Media berhasil diunggah');
       } catch (err: any) {
-        toast.error(err.response?.data?.error || 'Gagal mengunggah gambar');
+        toast.error(err.response?.data?.error || 'Gagal mengunggah media');
       } finally {
         setUploadingMedia(false);
       }
@@ -101,16 +165,30 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
 
   const loadData = useCallback(async () => {
     try {
-      const [postList, accList] = await Promise.all([
+      const [postList, accList, sessionRes, contactRes] = await Promise.all([
         api.getScheduledPosts(),
         api.getChannels(),
+        api.getWahaSessions().catch(() => ({ sessions: [], activeSession: '' })),
+        api.getContacts({ limit: 500 }).catch(() => ({ data: [] })),
       ]);
       setPosts(postList || []);
       setAccounts(accList || []);
+      const fetchedSessions = sessionRes?.sessions || [];
+      setWahaSessions(fetchedSessions);
+      const rawContacts = Array.isArray(contactRes) ? contactRes : contactRes?.data || [];
+      setContactsList(rawContacts.filter((c: Contact) => Boolean(c.nomor_whatsapp)));
       setChannelAccountId((prev) => {
         if (prev) return prev;
         const first = (accList || []).find((a) => a.channel === channel && a.isActive);
         return first?.id || '';
+      });
+      setWahaSession((prev) => {
+        if (prev && fetchedSessions.some((s) => s.name === prev)) return prev;
+        const preferred =
+          fetchedSessions.find((s) => s.name === sessionRes?.activeSession && s.status === 'WORKING') ||
+          fetchedSessions.find((s) => s.status === 'WORKING') ||
+          fetchedSessions[0];
+        return preferred?.name || '';
       });
     } catch {
       // ignore initial error
@@ -139,31 +217,78 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
     onClearPrefill?.();
   }, [prefill, accounts, onClearPrefill]);
 
+  const isWaChannel = channel === 'WHATSAPP' || channel === 'WHATSAPP_STATUS';
   const matchingAccounts = accounts.filter((a) => a.channel === channel && a.isActive);
+  const filteredContacts = useMemo(() => {
+    const q = contactSearch.trim().toLowerCase();
+    if (!q) return contactsList;
+    return contactsList.filter(
+      (c) =>
+        c.nama_lengkap?.toLowerCase().includes(q) ||
+        c.nomor_whatsapp?.toLowerCase().includes(q)
+    );
+  }, [contactsList, contactSearch]);
 
   const handleChannelChange = (nextCh: PostChannel) => {
     setChannel(nextCh);
     const first = accounts.find((a) => a.channel === nextCh && a.isActive);
     setChannelAccountId(first?.id || '');
+    if (nextCh === 'WHATSAPP') {
+      setTargetAudienceMode('SELECTED');
+    } else if (nextCh === 'WHATSAPP_STATUS') {
+      setTargetAudienceMode('ALL');
+    }
+  };
+
+  const toggleContactSelection = (id: string) => {
+    setSelectedContactIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!channelAccountId) {
-      toast.error(`Pilih akun ${POST_CHANNEL_META[channel].label} terlebih dahulu`);
-      return;
-    }
-    if (!caption.trim()) {
-      toast.error('Caption / teks postingan wajib diisi');
-      return;
-    }
-    if (channel === 'INSTAGRAM' && !mediaUrl.trim()) {
-      toast.error('Postingan Instagram Feed memerlukan URL gambar publik');
-      return;
-    }
-    if (channel === 'TELEGRAM' && !targetChatId.trim()) {
-      toast.error('Target Channel / Group ID Telegram wajib diisi');
-      return;
+    if (isWaChannel) {
+      if (wahaSessions.length === 0 || !wahaSession) {
+        toast.error('Pilih sesi WhatsApp (WAHA) aktif terlebih dahulu');
+        return;
+      }
+      if (channel === 'WHATSAPP_STATUS') {
+        if (statusPostType === 'STATUS_TEXT' && !caption.trim()) {
+          toast.error('Teks WhatsApp Story wajib diisi');
+          return;
+        }
+        if (statusPostType !== 'STATUS_TEXT' && !mediaUrl.trim()) {
+          toast.error('Upload atau isi URL media untuk WhatsApp Story ini');
+          return;
+        }
+      } else {
+        if (selectedContactIds.length === 0) {
+          toast.error('Pilih minimal 1 kontak tujuan untuk Post WhatsApp');
+          return;
+        }
+        if (!caption.trim() && !mediaUrl.trim()) {
+          toast.error('Isi teks pesan atau unggah media untuk Post WhatsApp');
+          return;
+        }
+      }
+    } else {
+      if (!channelAccountId) {
+        toast.error(`Pilih akun ${POST_CHANNEL_META[channel].label} terlebih dahulu`);
+        return;
+      }
+      if (!caption.trim()) {
+        toast.error('Caption / teks postingan wajib diisi');
+        return;
+      }
+      if (channel === 'INSTAGRAM' && !mediaUrl.trim()) {
+        toast.error('Postingan Instagram Feed memerlukan URL gambar publik');
+        return;
+      }
+      if (channel === 'TELEGRAM' && !targetChatId.trim()) {
+        toast.error('Target Channel / Group ID Telegram wajib diisi');
+        return;
+      }
     }
     if (publishMode === 'SCHEDULED' && !scheduledAt) {
       toast.error('Pilih tanggal dan jam jadwal postingan');
@@ -172,12 +297,31 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
 
     setSubmitting(true);
     try {
+      const effectiveTargetIds =
+        channel === 'WHATSAPP' || (channel === 'WHATSAPP_STATUS' && targetAudienceMode === 'SELECTED')
+          ? selectedContactIds
+          : [];
       await api.createScheduledPost({
         channel,
-        channelAccountId,
+        channelAccountId: isWaChannel ? null : channelAccountId,
+        wahaSession: isWaChannel ? wahaSession : null,
+        postType:
+          channel === 'WHATSAPP_STATUS'
+            ? statusPostType
+            : channel === 'WHATSAPP'
+            ? 'WA_POST'
+            : 'FEED',
         caption: caption.trim(),
-        mediaUrl: mediaUrl.trim() || null,
+        mediaUrl:
+          channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_TEXT'
+            ? null
+            : mediaUrl.trim() || null,
         targetChatId: channel === 'TELEGRAM' ? targetChatId.trim() : null,
+        targetContactIds: effectiveTargetIds.length > 0 ? effectiveTargetIds : undefined,
+        statusStyle:
+          channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_TEXT'
+            ? { backgroundColor: statusBgColor, font: statusFont }
+            : null,
         scheduledAt: publishMode === 'SCHEDULED' ? new Date(scheduledAt).toISOString() : null,
         publishNow: publishMode === 'NOW',
       });
@@ -194,6 +338,33 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
       toast.error(err.response?.data?.error || 'Gagal menjadwalkan postingan');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleOpenViewers = async (post: ScheduledPostItem, sync = true) => {
+    setViewersModal({ post, loading: true, data: null });
+    try {
+      const data = await api.getScheduledPostViewers(post.id, sync);
+      setViewersModal({ post: data.post || post, loading: false, data });
+      setPosts((prev) =>
+        prev.map((p) => (p.id === post.id ? { ...p, viewerCount: data.totalViewed } : p))
+      );
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal memuat daftar penonton Story');
+      setViewersModal((prev) => (prev ? { ...prev, loading: false } : null));
+    }
+  };
+
+  const handleDeleteRemoteStatus = async (id: string) => {
+    setBusyId(id);
+    try {
+      await api.deleteRemoteWhatsAppStatus(id);
+      toast.success('WhatsApp Story berhasil ditarik/dihapus dari WhatsApp');
+      loadData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menghapus Story di WhatsApp');
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -242,17 +413,19 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
         <div>
           <h1 className="text-lg font-semibold text-gray-900">Jadwal Postingan Kanal</h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Jadwalkan atau terbitkan langsung konten ke Instagram Feed, Facebook Page, Threads, dan Channel Telegram.
+            Jadwalkan atau terbitkan langsung konten ke Instagram Feed, Facebook Page, Threads, Telegram, Post WhatsApp, dan WhatsApp Story (Status).
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowCsvModal(true)}
-          >
-            Impor CSV
-          </Button>
+          {canPublishPost && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowCsvModal(true)}
+            >
+              Impor CSV
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -265,23 +438,26 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Create / Schedule Form */}
-        <form
-          onSubmit={handleSubmit}
-          className="lg:col-span-5 bg-white rounded-lg border border-gray-200 p-5 space-y-4 h-fit"
-        >
+        {canPublishPost && (
+          <form
+            onSubmit={handleSubmit}
+            className="lg:col-span-5 bg-white rounded-lg border border-gray-200 p-5 space-y-4 h-fit"
+          >
           <div className="pb-3 border-b border-gray-100">
             <h2 className="text-sm font-semibold text-gray-900">
               Buat Postingan Baru
             </h2>
           </div>
 
-          <div className="grid grid-cols-2 gap-1.5">
-            {(['INSTAGRAM', 'FACEBOOK', 'THREADS', 'TELEGRAM'] as PostChannel[]).map((ch) => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            {(
+              ['INSTAGRAM', 'FACEBOOK', 'THREADS', 'TELEGRAM', 'WHATSAPP_STATUS', 'WHATSAPP'] as PostChannel[]
+            ).map((ch) => (
               <button
                 key={ch}
                 type="button"
                 onClick={() => handleChannelChange(ch)}
-                className={`px-3 py-2 rounded-md border text-xs font-medium text-left transition-colors ${
+                className={`px-2.5 py-2 rounded-md border text-xs font-medium text-left transition-colors ${
                   channel === ch
                     ? 'border-indigo-600 bg-indigo-50/50 text-indigo-900'
                     : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
@@ -292,28 +468,264 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             ))}
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Akun Kanal Terhubung
-            </label>
-            {matchingAccounts.length === 0 ? (
-              <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
-                Belum ada akun {POST_CHANNEL_META[channel].label} aktif. Tambahkan di menu Integrasi &amp; Kanal → Omnichannel.
+          {isWaChannel ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Sesi / Nomor WhatsApp Pengirim (WAHA)
+              </label>
+              {wahaSessions.length === 0 ? (
+                <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                  Belum ada sesi WhatsApp WAHA aktif. Hubungkan sesi di menu Integrasi &amp; Kanal → WhatsApp.
+                </div>
+              ) : (
+                <select
+                  value={wahaSession}
+                  onChange={(e) => setWahaSession(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+                >
+                  {wahaSessions.map((sess) => (
+                    <option key={sess.name} value={sess.name}>
+                      {sess.name} ({sess.status}){sess.me?.pushName ? ` — ${sess.me.pushName}` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Akun Kanal Terhubung
+              </label>
+              {matchingAccounts.length === 0 ? (
+                <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                  Belum ada akun {POST_CHANNEL_META[channel].label} aktif. Tambahkan di menu Integrasi &amp; Kanal → Omnichannel.
+                </div>
+              ) : (
+                <select
+                  value={channelAccountId}
+                  onChange={(e) => setChannelAccountId(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
+                >
+                  {matchingAccounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name} ({acc.accountId})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {channel === 'WHATSAPP_STATUS' && (
+            <div className="space-y-3 p-3 rounded-lg bg-gray-50 border border-gray-200">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                  Jenis WhatsApp Story
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  {(
+                    [
+                      { id: 'STATUS_TEXT', label: 'Teks', icon: TypeIcon },
+                      { id: 'STATUS_IMAGE', label: 'Gambar', icon: ImageIcon },
+                      { id: 'STATUS_VIDEO', label: 'Video', icon: Video },
+                      { id: 'STATUS_VOICE', label: 'Suara', icon: Mic },
+                    ] as const
+                  ).map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setStatusPostType(item.id)}
+                        className={`px-2 py-1.5 rounded border text-xs font-medium flex items-center justify-center gap-1 ${
+                          statusPostType === item.id
+                            ? 'border-teal-600 bg-teal-50 text-teal-800'
+                            : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5 shrink-0" />
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            ) : (
-              <select
-                value={channelAccountId}
-                onChange={(e) => setChannelAccountId(e.target.value)}
-                className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
-              >
-                {matchingAccounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name} ({acc.accountId})
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
+
+              {statusPostType === 'STATUS_TEXT' && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-gray-600">Warna Latar Story</span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {STORY_BG_COLORS.map((hex) => (
+                        <button
+                          key={hex}
+                          type="button"
+                          onClick={() => setStatusBgColor(hex)}
+                          aria-label={`Pilih warna ${hex}`}
+                          style={{ backgroundColor: hex }}
+                          className={`w-5 h-5 rounded-full border-2 transition-transform ${
+                            statusBgColor === hex ? 'border-gray-900 scale-110' : 'border-white'
+                          }`}
+                        />
+                      ))}
+                      <input
+                        type="color"
+                        value={statusBgColor}
+                        onChange={(e) => setStatusBgColor(e.target.value)}
+                        className="w-6 h-5 p-0 border border-gray-300 rounded cursor-pointer"
+                        title="Pilih warna kustom"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-gray-600">Gaya Font</span>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3].map((f) => (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() => setStatusFont(f)}
+                          className={`px-2 py-0.5 rounded text-[11px] border ${
+                            statusFont === f
+                              ? 'border-teal-600 bg-teal-50 text-teal-800 font-semibold'
+                              : 'border-gray-200 bg-white text-gray-600'
+                          }`}
+                        >
+                          Font {f}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div
+                    style={{ backgroundColor: statusBgColor }}
+                    className={`rounded-md px-4 py-5 text-center text-white min-h-[76px] flex items-center justify-center shadow-inner ${
+                      statusFont === 2 ? 'font-bold text-sm' : statusFont === 3 ? 'font-serif text-sm' : 'font-sans text-[13px]'
+                    }`}
+                  >
+                    <span className="whitespace-pre-wrap break-words">
+                      {caption.trim() || 'Pratinjau teks WhatsApp Story Anda...'}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isWaChannel && (
+            <div className="space-y-2 p-3 rounded-lg bg-gray-50 border border-gray-200">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-gray-700 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-gray-500" />
+                  <span>
+                    {channel === 'WHATSAPP' ? 'Kontak Tujuan Pengiriman' : 'Target Penonton Story'}
+                  </span>
+                  {channel === 'WHATSAPP' && <span className="text-red-500">*</span>}
+                </label>
+                {selectedContactIds.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-800">
+                    {selectedContactIds.length} dipilih
+                  </span>
+                )}
+              </div>
+
+              {channel === 'WHATSAPP_STATUS' && (
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTargetAudienceMode('ALL')}
+                    className={`px-2.5 py-1.5 rounded border text-xs font-medium ${
+                      targetAudienceMode === 'ALL'
+                        ? 'border-teal-600 bg-teal-50 text-teal-800'
+                        : 'border-gray-200 bg-white text-gray-600'
+                    }`}
+                  >
+                    Semua Kontak
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTargetAudienceMode('SELECTED')}
+                    className={`px-2.5 py-1.5 rounded border text-xs font-medium ${
+                      targetAudienceMode === 'SELECTED'
+                        ? 'border-teal-600 bg-teal-50 text-teal-800'
+                        : 'border-gray-200 bg-white text-gray-600'
+                    }`}
+                  >
+                    Pilih Kontak Tertentu
+                  </button>
+                </div>
+              )}
+
+              {(channel === 'WHATSAPP' || targetAudienceMode === 'SELECTED') && (
+                <div className="space-y-2 pt-1">
+                  {channel === 'WHATSAPP_STATUS' && (
+                    <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                      Filter kontak Story didukung oleh engine GOWS / NOWEB (untuk engine WEBJS pilih Semua Kontak).
+                    </p>
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={contactSearch}
+                      onChange={(e) => setContactSearch(e.target.value)}
+                      placeholder="Cari nama atau nomor WA..."
+                      className="flex-1 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const visibleIds = filteredContacts.map((c) => c.id);
+                        setSelectedContactIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+                      }}
+                      className="px-2 py-1 text-[11px] font-medium rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-100"
+                    >
+                      Pilih Semua
+                    </button>
+                    {selectedContactIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedContactIds([])}
+                        className="px-2 py-1 text-[11px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-40 overflow-y-auto bg-white border border-gray-200 rounded divide-y divide-gray-100">
+                    {filteredContacts.length === 0 ? (
+                      <div className="p-3 text-center text-[11px] text-gray-400">
+                        Tidak ada kontak dengan nomor WhatsApp yang cocok.
+                      </div>
+                    ) : (
+                      filteredContacts.map((c) => {
+                        const checked = selectedContactIds.includes(c.id);
+                        return (
+                          <label
+                            key={c.id}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-xs hover:bg-gray-50 ${
+                              checked ? 'bg-indigo-50/40' : ''
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleContactSelection(c.id)}
+                              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="font-medium text-gray-800 truncate flex-1">
+                              {c.nama_lengkap}
+                            </span>
+                            <span className="text-[11px] font-mono text-gray-500 shrink-0">
+                              +{c.nomor_whatsapp}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {channel === 'TELEGRAM' && (
             <div>
@@ -330,63 +742,92 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             </div>
           )}
 
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-medium text-gray-700">
-                URL Gambar / Media Publik{' '}
-                {channel === 'INSTAGRAM' ? (
-                  <span className="text-red-500">*</span>
-                ) : (
-                  <span className="text-gray-400">(opsional)</span>
-                )}
-              </label>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/mp4"
-                onChange={handleUploadImage}
-                className="hidden"
-              />
-              <button
-                type="button"
-                disabled={uploadingMedia}
-                onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
-              >
-                <Upload className="w-3 h-3" />
-                {uploadingMedia ? 'Mengunggah...' : 'Upload Gambar'}
-              </button>
+          {!(channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_TEXT') && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-gray-700">
+                  URL Media / File{' '}
+                  {channel === 'INSTAGRAM' || (channel === 'WHATSAPP_STATUS' && statusPostType !== 'STATUS_TEXT') ? (
+                    <span className="text-red-500">*</span>
+                  ) : (
+                    <span className="text-gray-400">(opsional)</span>
+                  )}
+                </label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={
+                    channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VOICE'
+                      ? 'audio/*'
+                      : channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VIDEO'
+                      ? 'video/*'
+                      : 'image/*,video/*,audio/*'
+                  }
+                  onChange={handleUploadImage}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={uploadingMedia}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
+                >
+                  <Upload className="w-3 h-3" />
+                  {uploadingMedia ? 'Mengunggah...' : 'Upload Media'}
+                </button>
+              </div>
+              <div className="relative">
+                <ImageIcon className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
+                <input
+                  type="url"
+                  placeholder="https://domain.com/media.jpg atau klik Upload Media"
+                  value={mediaUrl}
+                  onChange={(e) => setMediaUrl(e.target.value)}
+                  className="w-full h-9 pl-8 pr-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              {mediaUrl.trim() && isVideoMediaUrl(mediaUrl.trim()) ? (
+                <video
+                  src={mediaUrl.trim()}
+                  controls
+                  className="mt-2 w-full max-h-44 rounded-md border border-gray-200 bg-black"
+                />
+              ) : mediaUrl.trim() && isAudioMediaUrl(mediaUrl.trim()) ? (
+                <audio src={mediaUrl.trim()} controls className="mt-2 w-full" />
+              ) : (
+                mediaUrl.trim() &&
+                (/^https?:\/\//i.test(mediaUrl.trim()) || mediaUrl.trim().startsWith('/')) && (
+                  <img
+                    src={mediaUrl.trim()}
+                    alt="Pratinjau media"
+                    className="mt-2 w-full max-h-40 object-cover rounded-md border border-gray-200"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                )
+              )}
             </div>
-            <div className="relative">
-              <ImageIcon className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
-              <input
-                type="url"
-                placeholder="https://domain.com/banner-promo.jpg atau klik Upload Gambar"
-                value={mediaUrl}
-                onChange={(e) => setMediaUrl(e.target.value)}
-                className="w-full h-9 pl-8 pr-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            {mediaUrl.trim() && /^https?:\/\//i.test(mediaUrl.trim()) && (
-              <img
-                src={mediaUrl.trim()}
-                alt="Pratinjau media"
-                className="mt-2 w-full max-h-40 object-cover rounded-md border border-gray-200"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            )}
-          </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">
-              Caption / Isi Postingan <span className="text-red-500">*</span>
+              {channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_TEXT'
+                ? 'Teks WhatsApp Story'
+                : channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VOICE'
+                ? 'Label / Catatan Internal Story (opsional)'
+                : 'Caption / Isi Postingan'}{' '}
+              {!(isWaChannel && (mediaUrl.trim() || statusPostType === 'STATUS_VOICE')) && (
+                <span className="text-red-500">*</span>
+              )}
             </label>
             <textarea
               rows={4}
-              required
-              placeholder="Tulis caption postingan Anda..."
+              placeholder={
+                channel === 'WHATSAPP_STATUS'
+                  ? 'Tulis teks Story atau caption media...'
+                  : 'Tulis caption postingan Anda...'
+              }
               value={caption}
               onChange={(e) => setCaption(e.target.value)}
               className="w-full p-3 bg-white border border-gray-200 rounded-md text-[13px] leading-relaxed focus:outline-none focus:border-indigo-500"
@@ -439,15 +880,16 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             type="submit"
             variant="primary"
             isLoading={submitting}
-            disabled={matchingAccounts.length === 0}
+            disabled={isWaChannel ? wahaSessions.length === 0 : matchingAccounts.length === 0}
             className="w-full"
           >
             {publishMode === 'NOW' ? 'Terbitkan Postingan' : 'Simpan Jadwal Postingan'}
           </Button>
         </form>
+        )}
 
         {/* Queue / History / Calendar */}
-        <div className="lg:col-span-7 bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className={`${canPublishPost ? 'lg:col-span-7' : 'lg:col-span-12'} bg-white rounded-lg border border-gray-200 overflow-hidden`}>
           <div className="px-5 py-3.5 border-b border-gray-200 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-gray-900">
@@ -484,6 +926,8 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                 className="h-8 px-2.5 bg-white border border-gray-200 rounded text-xs text-gray-700"
               >
                 <option value="ALL">Semua Channel</option>
+                <option value="WHATSAPP_STATUS">WhatsApp Story</option>
+                <option value="WHATSAPP">Post WhatsApp</option>
                 <option value="INSTAGRAM">Instagram Feed</option>
                 <option value="FACEBOOK">Facebook Page</option>
                 <option value="THREADS">Threads</option>
@@ -515,7 +959,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
               return (
                 <EmptyState
                   title="Belum ada jadwal postingan"
-                  description="Buat postingan terjadwal untuk Instagram, Facebook, Threads, atau Channel Telegram di formulir sebelah kiri."
+                  description="Buat postingan atau WhatsApp Story terjadwal melalui formulir di sebelah kiri."
                 />
               );
             }
@@ -674,6 +1118,12 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
               <div className="divide-y divide-gray-200">
                 {filteredPosts.map((post) => {
                   const meta = POST_CHANNEL_META[post.channel] || POST_CHANNEL_META.INSTAGRAM;
+                  const targetCount = post.targetContacts?.length || 0;
+                  const isWaStatus = post.channel === 'WHATSAPP_STATUS';
+                  const isWaPost = post.channel === 'WHATSAPP';
+                  const subTypeLabel = post.postType && post.postType !== 'FEED' && post.postType !== 'WA_POST'
+                    ? STORY_TYPE_LABELS[post.postType]
+                    : null;
                   return (
                     <div key={post.id} className="p-4 space-y-2 hover:bg-gray-50/50">
                       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -681,9 +1131,27 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                           <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${meta.badgeCls}`}>
                             {meta.label}
                           </span>
-                          {post.accountName && (
-                            <span className="text-[11px] font-medium text-gray-700">
-                              {post.accountName}
+                          {subTypeLabel && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                              {subTypeLabel}
+                            </span>
+                          )}
+                          {post.wahaSession ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <Smartphone className="w-2.5 h-2.5" />
+                              {post.wahaSession}
+                            </span>
+                          ) : (
+                            post.accountName && (
+                              <span className="text-[11px] font-medium text-gray-700">
+                                {post.accountName}
+                              </span>
+                            )
+                          )}
+                          {(isWaStatus || isWaPost) && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              <Users className="w-2.5 h-2.5" />
+                              {targetCount > 0 ? `${targetCount} Kontak` : 'Semua Kontak'}
                             </span>
                           )}
                           <span
@@ -709,15 +1177,35 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                       </div>
 
                       <div className="flex items-start gap-3">
-                        {post.mediaUrl && (
-                          <img
-                            src={post.mediaUrl}
-                            alt="Media postingan"
-                            className="w-14 h-14 rounded object-cover border border-gray-200 shrink-0"
-                          />
+                        {post.mediaUrl ? (
+                          isVideoMediaUrl(post.mediaUrl) ? (
+                            <div className="w-14 h-14 rounded bg-slate-900 text-white flex items-center justify-center shrink-0">
+                              <Video className="w-5 h-5" />
+                            </div>
+                          ) : isAudioMediaUrl(post.mediaUrl) ? (
+                            <div className="w-14 h-14 rounded bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
+                              <Mic className="w-5 h-5" />
+                            </div>
+                          ) : (
+                            <img
+                              src={post.mediaUrl}
+                              alt="Media postingan"
+                              className="w-14 h-14 rounded object-cover border border-gray-200 shrink-0"
+                            />
+                          )
+                        ) : (
+                          isWaStatus &&
+                          post.postType === 'STATUS_TEXT' && (
+                            <div
+                              style={{ backgroundColor: post.statusStyle?.backgroundColor || '#38b42f' }}
+                              className="w-14 h-14 rounded flex items-center justify-center text-white text-[10px] font-semibold p-1 text-center shrink-0 border border-black/10"
+                            >
+                              Story
+                            </div>
+                          )
                         )}
                         <p className="text-xs text-gray-800 whitespace-pre-wrap flex-1 line-clamp-3">
-                          {post.caption}
+                          {post.caption || (isAudioMediaUrl(post.mediaUrl || '') ? 'Voice Story WhatsApp' : '(Media WhatsApp)')}
                         </p>
                       </div>
 
@@ -727,36 +1215,63 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                         </div>
                       )}
 
-                      <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1">
-                        {(post.status === 'SCHEDULED' || post.status === 'FAILED') && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            isLoading={busyId === post.id}
-                            onClick={() => handlePublishNow(post.id)}
-                          >
-                            Terbitkan Sekarang
-                          </Button>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <div className="flex items-center gap-2">
+                          {isWaStatus && post.status === 'PUBLISHED' && (
+                            <button
+                              type="button"
+                              onClick={() => void handleOpenViewers(post, true)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 text-[11px] font-medium transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Penonton ({post.viewerCount ?? 0})</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {canPublishPost && (
+                          <div className="flex flex-wrap items-center justify-end gap-1.5">
+                            {(post.status === 'SCHEDULED' || post.status === 'FAILED') && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                isLoading={busyId === post.id}
+                                onClick={() => handlePublishNow(post.id)}
+                              >
+                                Terbitkan Sekarang
+                              </Button>
+                            )}
+                            {post.status === 'SCHEDULED' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={busyId === post.id}
+                                onClick={() => handleCancel(post.id)}
+                              >
+                                Batalkan
+                              </Button>
+                            )}
+                            {isWaStatus && post.status === 'PUBLISHED' && post.externalPostId && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={busyId === post.id}
+                                onClick={() => void handleDeleteRemoteStatus(post.id)}
+                              >
+                                Tarik Story
+                              </Button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={busyId === post.id}
+                              onClick={() => handleDelete(post.id)}
+                              className="p-1.5 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                              title="Hapus"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         )}
-                        {post.status === 'SCHEDULED' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busyId === post.id}
-                            onClick={() => handleCancel(post.id)}
-                          >
-                            Batalkan
-                          </Button>
-                        )}
-                        <button
-                          type="button"
-                          disabled={busyId === post.id}
-                          onClick={() => handleDelete(post.id)}
-                          className="p-1.5 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
-                          title="Hapus"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
                       </div>
                     </div>
                   );
@@ -767,6 +1282,120 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
         </div>
       </div>
 
+      {viewersModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2.5 sm:p-4">
+          <div className="bg-white rounded-lg border border-gray-200 max-w-lg w-full p-4 sm:p-5 space-y-4 max-h-[90dvh] flex flex-col">
+            <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-3 shrink-0">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-teal-600" />
+                  <span>Penonton WhatsApp Story</span>
+                </h3>
+                <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">
+                  {viewersModal.post.caption || 'Story WhatsApp'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={viewersModal.loading}
+                  onClick={() => void handleOpenViewers(viewersModal.post, true)}
+                  title="Sinkronkan daftar penonton dari WAHA"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-200 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${viewersModal.loading ? 'animate-spin' : ''}`} />
+                  <span>Segarkan</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewersModal(null)}
+                  className="p-1 text-gray-400 hover:text-gray-600"
+                >
+                  <XCircle className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {viewersModal.loading ? (
+              <LoadingState message="Mengambil data penonton Story dari WAHA..." />
+            ) : (
+              <div className="space-y-3 overflow-y-auto flex-1 pr-1">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2.5 rounded-md bg-teal-50 border border-teal-200">
+                    <span className="text-[10px] font-medium text-teal-700 uppercase">Sudah Dilihat</span>
+                    <p className="text-lg font-bold text-teal-900 tabular-nums">
+                      {viewersModal.data?.totalViewed ?? 0}
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded-md bg-gray-50 border border-gray-200">
+                    <span className="text-[10px] font-medium text-gray-500 uppercase">Total Tanda Terima</span>
+                    <p className="text-lg font-bold text-gray-900 tabular-nums">
+                      {viewersModal.data?.totalDelivered ?? 0}
+                    </p>
+                  </div>
+                </div>
+
+                {viewersModal.data?.syncError && (
+                  <div className="p-2 rounded bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                    Catatan sinkronisasi WAHA: {viewersModal.data.syncError}. Penonton juga tercatat otomatis melalui webhook real-time saat Story dibuka.
+                  </div>
+                )}
+
+                {viewersModal.data && viewersModal.data.targets.length > 0 && (
+                  <div className="text-[11px] text-gray-600 bg-indigo-50/60 border border-indigo-100 rounded px-2.5 py-1.5">
+                    Target khusus Story ini: <strong>{viewersModal.data.targets.length}</strong> kontak dipilih.
+                  </div>
+                )}
+
+                {!viewersModal.data || viewersModal.data.viewers.length === 0 ? (
+                  <EmptyState
+                    title="Belum ada penonton tercatat"
+                    description="Penonton akan muncul di sini secara otomatis saat kontak membuka WhatsApp Story Anda (webhook ack) atau klik Segarkan."
+                  />
+                ) : (
+                  <div className="divide-y divide-gray-100 border border-gray-200 rounded-md">
+                    {viewersModal.data.viewers.map((viewer) => (
+                      <div
+                        key={viewer.id}
+                        className="px-3 py-2 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 truncate">
+                            {viewer.viewerName ||
+                              (viewer.viewerPhone ? `+${viewer.viewerPhone}` : viewer.viewerJid)}
+                          </div>
+                          <div className="text-[11px] font-mono text-gray-500 truncate">
+                            {viewer.viewerPhone ? `+${viewer.viewerPhone}` : viewer.viewerJid}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 space-y-0.5">
+                          <span
+                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                              viewer.ackStatus >= 3
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-gray-100 text-gray-600 border border-gray-200'
+                            }`}
+                          >
+                            {viewer.ackStatus >= 4
+                              ? 'Diputar'
+                              : viewer.ackStatus === 3
+                              ? 'Dilihat'
+                              : 'Terkirim'}
+                          </span>
+                          <div className="text-[10px] font-mono text-gray-400">
+                            {new Date(viewer.viewedAt).toLocaleString('id-ID')}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showCsvModal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2.5 sm:p-4">
           <div className="bg-white rounded-lg border border-gray-200 max-w-xl w-full p-4 sm:p-5 space-y-4 max-h-[92dvh] overflow-y-auto">
@@ -774,7 +1403,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
               <div>
                 <h3 className="text-sm font-semibold text-gray-900">Impor Jadwal Postingan (CSV)</h3>
                 <p className="text-[11px] text-gray-500 mt-0.5">
-                  Format kolom: <code className="font-mono">channel,caption,scheduledAt,mediaUrl,targetChatId</code>
+                  Format kolom: <code className="font-mono">channel,caption,scheduledAt,mediaUrl,targetChatId</code>. Untuk <code className="font-mono">WHATSAPP</code> / <code className="font-mono">WHATSAPP_STATUS</code>, isi <code className="font-mono">targetChatId</code> dengan nomor WA (pisahkan <code className="font-mono">;</code>).
                 </p>
               </div>
               <button

@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image as ImageIcon, Trash2, Copy, Send, Film } from 'lucide-react';
 import api from '../services/api';
-import { MediaLibraryItem } from '../types';
+import { AuthStatus, MediaLibraryItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState } from '../components/ui/StateBlocks';
+import { hasPerm } from '../lib/permissions';
 
 interface MediaLibraryProps {
+  currentUser?: AuthStatus['user'] | null;
   onUseInPost?: (mediaUrl: string) => void;
 }
 
@@ -16,7 +18,8 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export const MediaLibrary: React.FC<MediaLibraryProps> = ({ onUseInPost }) => {
+export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseInPost }) => {
+  const canEdit = hasPerm(currentUser, 'broadcasts.send');
   const toast = useToast();
   const [items, setItems] = useState<MediaLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,23 +88,25 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ onUseInPost }) => {
             Foto dan video yang pernah Anda unggah, siap dipakai ulang untuk postingan kanal.
           </p>
         </div>
-        <div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*,video/mp4"
-            onChange={handleUpload}
-            className="hidden"
-          />
-          <Button
-            variant="primary"
-            size="sm"
-            isLoading={uploading}
-            onClick={() => fileRef.current?.click()}
-          >
-            Unggah Media
-          </Button>
-        </div>
+        {canEdit && (
+          <div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,video/mp4"
+              onChange={handleUpload}
+              className="hidden"
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              isLoading={uploading}
+              onClick={() => fileRef.current?.click()}
+            >
+              Unggah Media
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -176,7 +181,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ onUseInPost }) => {
                         <Copy className="w-3 h-3" />
                         Salin
                       </button>
-                      {onUseInPost && (
+                      {canEdit && onUseInPost && (
                         <button
                           type="button"
                           onClick={() => onUseInPost(item.url)}
@@ -187,14 +192,16 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ onUseInPost }) => {
                         </button>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(item.filename)}
-                      className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
-                      title="Hapus media"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(item.filename)}
+                        className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                        title="Hapus media"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

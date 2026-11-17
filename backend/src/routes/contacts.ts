@@ -12,6 +12,7 @@ import {
 import { normalizePhoneNumber } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
+import { wahaService } from '../services/waha.service';
 import { requirePermission } from './auth';
 import crypto from 'crypto';
 
@@ -27,6 +28,8 @@ export function formatContact(c: any) {
     kategori: c.kategori || null,
     tags: c.tags,
     notes: c.notes,
+    exclude_from_metrics: Boolean(c.excludeFromMetrics),
+    exclude_reason: c.excludeReason || null,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
   };
@@ -34,11 +37,17 @@ export function formatContact(c: any) {
 
 export default async function contactsRouter(fastify: FastifyInstance) {
   fastify.addHook('preHandler', async (req, reply) => {
-    const allowed =
-      req.method === 'GET'
-        ? requirePermission('contacts', 'conversations', 'broadcasts')
-        : requirePermission('contacts');
-    return allowed(req, reply);
+    const path = (req.routeOptions?.url || req.url || '').toLowerCase();
+    if (req.method === 'GET') {
+      return requirePermission('contacts', 'conversations', 'broadcasts')(req, reply);
+    }
+    if (req.method === 'DELETE') {
+      return requirePermission('contacts.delete')(req, reply);
+    }
+    if (req.method === 'PUT' || path.includes('/merge')) {
+      return requirePermission('contacts.edit')(req, reply);
+    }
+    return requirePermission('contacts.create')(req, reply);
   });
   // GET all contacts with search and filter
   fastify.get('/', async (req: FastifyRequest<{
@@ -154,6 +163,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       kategori?: string;
       tags?: string | string[];
       notes?: string;
+      exclude_from_metrics?: boolean;
+      exclude_reason?: string | null;
       identities?: Array<{ channel: string; externalId: string; handle?: string }>;
     };
   }>, reply: FastifyReply) => {
@@ -167,6 +178,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         kategori,
         tags,
         notes,
+        exclude_from_metrics,
+        exclude_reason,
         identities,
       } = req.body;
 
@@ -237,6 +250,10 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           kategori: kategori?.trim() || null,
           tags: Array.isArray(tags) ? tags.join(',') : tags || null,
           notes: notes || null,
+          excludeFromMetrics: Boolean(exclude_from_metrics),
+          excludeReason: exclude_from_metrics
+            ? (exclude_reason ? String(exclude_reason).trim() || 'Bukan Customer' : 'Bukan Customer')
+            : null,
           createdAt: now,
           updatedAt: now,
         })
@@ -271,6 +288,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       kategori?: string;
       tags?: string | string[];
       notes?: string;
+      exclude_from_metrics?: boolean;
+      exclude_reason?: string | null;
     };
   }>, reply: FastifyReply) => {
     try {
@@ -283,6 +302,8 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         kategori,
         tags,
         notes,
+        exclude_from_metrics,
+        exclude_reason,
       } = req.body;
 
       const updateData: any = { updatedAt: new Date() };
@@ -307,6 +328,18 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       if (kategori !== undefined) updateData.kategori = kategori ? kategori.trim() : null;
       if (tags !== undefined) updateData.tags = Array.isArray(tags) ? tags.join(',') : tags;
       if (notes !== undefined) updateData.notes = notes;
+      if (typeof exclude_from_metrics === 'boolean') {
+        updateData.excludeFromMetrics = exclude_from_metrics;
+        if (exclude_from_metrics) {
+          updateData.excludeReason = exclude_reason !== undefined
+            ? (exclude_reason ? String(exclude_reason).trim() || 'Bukan Customer' : 'Bukan Customer')
+            : 'Bukan Customer';
+        } else if (exclude_reason === undefined) {
+          updateData.excludeReason = null;
+        }
+      } else if (exclude_reason !== undefined) {
+        updateData.excludeReason = exclude_reason ? String(exclude_reason).trim() || null : null;
+      }
 
       const updated = await db
         .update(contacts)
@@ -316,6 +349,20 @@ export default async function contactsRouter(fastify: FastifyInstance) {
 
       if (updated.length === 0) {
         return reply.status(404).send({ success: false, error: 'Kontak tidak ditemukan' });
+      }
+
+      if (typeof exclude_from_metrics === 'boolean' || exclude_reason !== undefined) {
+        const nextExcl = Boolean(updated[0].excludeFromMetrics);
+        const nextReason = nextExcl ? (updated[0].excludeReason || 'Bukan Customer') : null;
+        await db
+          .update(conversations)
+          .set({
+            excludeFromMetrics: nextExcl,
+            excludeReason: nextReason,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(conversations.contactId, req.params.id), eq(conversations.isGroup, false)));
+        liveEvents.emit('conversations:update', { contactId: req.params.id });
       }
 
       return reply.send({ success: true, data: formatContact(updated[0]) });
@@ -578,4 +625,169 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       }
     }
   );
+
+  // POST sync contacts from connected WhatsApp session via WAHA
+  fastify.post<{
+    Body: { session?: string; overwriteNames?: boolean };
+  }>('/sync-whatsapp', async (req, reply) => {
+    try {
+      const lic = await licenseService.assertLicenseActive();
+      const requestedSession = req.body?.session ? String(req.body.session).trim() : undefined;
+      const overwriteNames = Boolean(req.body?.overwriteNames);
+
+      const { contacts: waContacts, sessionUsed } = await wahaService.fetchAllContacts(requestedSession);
+      const existingList = await db
+        .select({
+          id: contacts.id,
+          namaLengkap: contacts.namaLengkap,
+          namaPanggilan: contacts.namaPanggilan,
+          nomorWhatsapp: contacts.nomorWhatsapp,
+        })
+        .from(contacts);
+
+      const phoneMap = new Map<string, (typeof existingList)[number]>();
+      for (const c of existingList) {
+        if (c.nomorWhatsapp) {
+          phoneMap.set(normalizePhoneNumber(c.nomorWhatsapp), c);
+        }
+      }
+
+      const existingIds = await db
+        .select({
+          contactId: contactIdentities.contactId,
+          externalId: contactIdentities.externalId,
+        })
+        .from(contactIdentities)
+        .where(eq(contactIdentities.channel, 'WHATSAPP'));
+      const lidSet = new Set<string>(existingIds.map((x) => x.externalId));
+
+      let currentTotal = existingList.length;
+      const maxContacts = lic.features?.maxContacts || 0;
+
+      let created = 0;
+      let updated = 0;
+      let skipped = 0;
+      let quotaStopped = false;
+      const now = new Date();
+
+      for (const item of waContacts) {
+        if (!item.phone) {
+          skipped++;
+          continue;
+        }
+        const preferredName = (item.name || item.pushName || '').trim();
+        const existing = phoneMap.get(item.phone);
+
+        if (existing) {
+          const isPlaceholderName =
+            !existing.namaLengkap ||
+            /^Kontak \d+$/i.test(existing.namaLengkap) ||
+            existing.namaLengkap.replace(/\D/g, '') === item.phone;
+          const nextName =
+            preferredName && (overwriteNames || isPlaceholderName) ? preferredName : null;
+          const nextNick =
+            !existing.namaPanggilan && item.pushName ? item.pushName.trim() : null;
+
+          if (nextName || nextNick) {
+            await db
+              .update(contacts)
+              .set({
+                ...(nextName ? { namaLengkap: nextName } : {}),
+                ...(nextNick ? { namaPanggilan: nextNick } : {}),
+                updatedAt: now,
+              })
+              .where(eq(contacts.id, existing.id));
+            updated++;
+          } else {
+            skipped++;
+          }
+
+          if (item.lid && !lidSet.has(item.lid)) {
+            await db
+              .insert(contactIdentities)
+              .values({
+                id: crypto.randomUUID(),
+                contactId: existing.id,
+                channel: 'WHATSAPP',
+                externalId: item.lid,
+                handle: `+${item.phone}`,
+                createdAt: now,
+              })
+              .onConflictDoNothing()
+              .catch(() => {});
+            lidSet.add(item.lid);
+          }
+          continue;
+        }
+
+        if (maxContacts > 0 && currentTotal >= maxContacts) {
+          quotaStopped = true;
+          skipped++;
+          continue;
+        }
+
+        const newId = crypto.randomUUID();
+        const finalName = preferredName || `+${item.phone}`;
+        const [inserted] = await db
+          .insert(contacts)
+          .values({
+            id: newId,
+            namaLengkap: finalName,
+            namaPanggilan: item.pushName?.trim() || null,
+            nomorWhatsapp: item.phone,
+            tags: 'WhatsApp Sync',
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({
+            id: contacts.id,
+            namaLengkap: contacts.namaLengkap,
+            namaPanggilan: contacts.namaPanggilan,
+            nomorWhatsapp: contacts.nomorWhatsapp,
+          });
+
+        if (inserted) {
+          phoneMap.set(item.phone, inserted);
+          currentTotal++;
+          created++;
+          if (item.lid && !lidSet.has(item.lid)) {
+            await db
+              .insert(contactIdentities)
+              .values({
+                id: crypto.randomUUID(),
+                contactId: inserted.id,
+                channel: 'WHATSAPP',
+                externalId: item.lid,
+                handle: `+${item.phone}`,
+                createdAt: now,
+              })
+              .onConflictDoNothing()
+              .catch(() => {});
+            lidSet.add(item.lid);
+          }
+        }
+      }
+
+      if (created > 0 || updated > 0) {
+        liveEvents.emit('contacts:update', { created, updated, source: 'whatsapp-sync' });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          sessionUsed,
+          totalFetched: waContacts.length,
+          created,
+          updated,
+          skipped,
+          quotaStopped,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(error?.statusCode || 500).send({
+        success: false,
+        error: error.message || 'Gagal menyinkronkan kontak dari WhatsApp',
+      });
+    }
+  });
 }

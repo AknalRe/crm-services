@@ -13,7 +13,7 @@ const CHANNEL_OPTIONS: Array<{ value: OmnichannelType; label: string; idHint: st
   { value: 'TELEGRAM', label: 'Telegram Bot', idHint: 'Bot Username (tanpa @)' },
 ];
 
-export const OmnichannelSettings: React.FC = () => {
+export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit = true }) => {
   const toast = useToast();
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
   const [channel, setChannel] = useState<OmnichannelType>('INSTAGRAM');
@@ -179,7 +179,7 @@ export const OmnichannelSettings: React.FC = () => {
                 <button
                   key={ch}
                   type="button"
-                  disabled={!ready}
+                  disabled={!canEdit || !ready}
                   onClick={() => {
                     const base = window.location.pathname.replace(/\/+$/, '');
                     window.location.href = `${base}/api/channels/oauth/start?channel=${ch}`;
@@ -250,7 +250,7 @@ export const OmnichannelSettings: React.FC = () => {
           onChange={(e) => setAccessToken(e.target.value)}
           className="sm:col-span-2 h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs font-mono"
         />
-        <Button type="submit" variant="primary" size="md" isLoading={saving} className="sm:col-span-2">
+        <Button type="submit" variant="primary" size="md" isLoading={saving} disabled={!canEdit} className="sm:col-span-2">
           Hubungkan
         </Button>
       </form>
@@ -301,8 +301,9 @@ export const OmnichannelSettings: React.FC = () => {
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
+                  disabled={!canEdit}
                   onClick={() => void handleToggle(acc)}
-                  className={`h-7 px-2.5 rounded text-[11px] font-medium border ${
+                  className={`h-7 px-2.5 rounded text-[11px] font-medium border disabled:opacity-60 disabled:cursor-not-allowed ${
                     acc.isActive
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                       : 'bg-gray-50 text-gray-500 border-gray-200'
@@ -310,14 +311,16 @@ export const OmnichannelSettings: React.FC = () => {
                 >
                   {acc.isActive ? 'Aktif' : 'Nonaktif'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void handleDelete(acc.id)}
-                  className="p-1.5 text-gray-400 hover:text-red-600"
-                  title="Hapus Channel"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(acc.id)}
+                    className="p-1.5 text-gray-400 hover:text-red-600"
+                    title="Hapus Channel"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -348,6 +351,7 @@ export const OmnichannelSettings: React.FC = () => {
               variant="secondary"
               size="sm"
               isLoading={creatingLink}
+              disabled={!canEdit}
               onClick={() => void handleCreateConnectLink()}
             >
               Buat Link

@@ -39,7 +39,7 @@ const MATCH_TYPE_LABELS: Record<AutoReplyRule['matchType'], string> = {
   STARTS_WITH: 'Diawali',
 };
 
-export const AutomationSettings: React.FC = () => {
+export const AutomationSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit = true }) => {
   const toast = useToast();
   const [config, setConfig] = useState<AutomationConfig>(DEFAULT_CONFIG);
   const [rules, setRules] = useState<AutoReplyRule[]>([]);
@@ -320,7 +320,7 @@ export const AutomationSettings: React.FC = () => {
           </div>
 
           <div className="lg:col-span-2 flex justify-end">
-            <Button type="submit" variant="primary" size="md" isLoading={savingAuto}>
+            <Button type="submit" variant="primary" size="md" isLoading={savingAuto} disabled={!canEdit}>
               Simpan Auto-Reply &amp; Jam Kerja
             </Button>
           </div>
@@ -338,9 +338,11 @@ export const AutomationSettings: React.FC = () => {
               Balasan otomatis instan saat pesan masuk cocok dengan kata kunci (angka prioritas kecil diproses lebih dulu).
             </p>
           </div>
-          <Button type="button" variant="secondary" size="sm" onClick={openCreateRule}>
-            Tambah Aturan
-          </Button>
+          {canEdit && (
+            <Button type="button" variant="secondary" size="sm" onClick={openCreateRule}>
+              Tambah Aturan
+            </Button>
+          )}
         </div>
 
         {rules.length === 0 ? (
@@ -373,8 +375,9 @@ export const AutomationSettings: React.FC = () => {
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
+                    disabled={!canEdit}
                     onClick={() => void handleToggleRule(r)}
-                    className={`h-6 px-2 rounded text-[10px] font-semibold border cursor-pointer ${
+                    className={`h-6 px-2 rounded text-[10px] font-semibold border cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
                       r.isActive
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                         : 'bg-gray-50 text-gray-500 border-gray-200'
@@ -382,22 +385,26 @@ export const AutomationSettings: React.FC = () => {
                   >
                     {r.isActive ? 'Aktif' : 'Nonaktif'}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => openEditRule(r)}
-                    className="p-1 text-gray-400 hover:text-indigo-700"
-                    title="Edit Aturan"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteTarget(r)}
-                    className="p-1 text-gray-400 hover:text-red-600"
-                    title="Hapus Aturan"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {canEdit && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openEditRule(r)}
+                        className="p-1 text-gray-400 hover:text-indigo-700"
+                        title="Edit Aturan"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(r)}
+                        className="p-1 text-gray-400 hover:text-red-600"
+                        title="Hapus Aturan"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

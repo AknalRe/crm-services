@@ -148,7 +148,7 @@ export async function readUploadedMediaAsDataUri(
       mimetype: mimeMatch?.[1] || fallbackMimeType || 'application/octet-stream',
     };
   }
-  const match = trimmed.match(/\/api\/media\/files\/([a-zA-Z0-9._-]+)$/);
+  const match = trimmed.match(/\/api\/media\/files\/([a-zA-Z0-9._-]+)(?:[?#].*)?$/);
   if (!match) return null;
   const filename = match[1];
   const filePath = path.join(UPLOADS_DIR, filename);
@@ -222,7 +222,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
   // Delete an uploaded media file
   fastify.delete<{ Params: { filename: string } }>(
     '/files/:filename',
-    { preHandler: requirePermission('broadcasts', 'conversations') },
+    { preHandler: requirePermission('broadcasts.send') },
     async (req, reply) => {
       try {
         const filename = String(req.params.filename || '').trim();
@@ -289,7 +289,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
     Body: { fileName?: string; mimeType?: string; base64?: string };
   }>(
     '/upload',
-    { preHandler: requirePermission('broadcasts', 'conversations') },
+    { preHandler: requirePermission('broadcasts.send', 'conversations.reply') },
     async (req, reply) => {
       try {
         const saved = await saveBase64MediaFile({

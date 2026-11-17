@@ -6,7 +6,12 @@ import { commentAutomations } from '../db/schema';
 import { requirePermission } from './auth';
 
 export default async function automationsRouter(fastify: FastifyInstance) {
-  fastify.addHook('preHandler', requirePermission('settings'));
+  fastify.addHook('preHandler', async (req, reply) => {
+    if (req.method === 'GET') {
+      return requirePermission('settings')(req, reply);
+    }
+    return requirePermission('settings.edit')(req, reply);
+  });
 
   fastify.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {

@@ -56,7 +56,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   // POST update WAHA settings
   fastify.post<{
     Body: { mode?: 'INTERNAL' | 'EXTERNAL'; baseUrl?: string; apiKey?: string; session?: string; webhookUrl?: string };
-  }>('/waha', { preHandler: requirePermission('settings') }, async (req, reply: FastifyReply) => {
+  }>('/waha', { preHandler: requirePermission('settings.edit') }, async (req, reply: FastifyReply) => {
     try {
       const { mode = 'INTERNAL', baseUrl, apiKey, session, webhookUrl } = req.body || {};
       const now = new Date();
@@ -121,7 +121,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   // POST test WAHA connection (supports testing unsaved external URL & API Key)
   fastify.post<{
     Body: { mode?: 'INTERNAL' | 'EXTERNAL'; baseUrl?: string; apiKey?: string };
-  }>('/waha/test', { preHandler: requirePermission('settings') }, async (req, reply: FastifyReply) => {
+  }>('/waha/test', { preHandler: requirePermission('settings.edit') }, async (req, reply: FastifyReply) => {
     try {
       const result = await wahaService.testConnection(req.body || {});
       return reply.send({ success: true, data: result });
@@ -311,7 +311,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   });
 
   // POST update CRM CSAT template & SLA settings (supports partial updates)
-  fastify.post('/crm', { preHandler: requirePermission('settings') }, async (req: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/crm', { preHandler: requirePermission('settings.edit') }, async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       const body = (req.body || {}) as {
         csatTemplate?: string;
@@ -450,7 +450,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
       slaEscalationEnabled?: boolean;
       slaAlertWebhookUrl?: string;
     };
-  }>('/automation', { preHandler: requirePermission('settings') }, async (req, reply) => {
+  }>('/automation', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
       const b = req.body || {};
       const now = new Date();
@@ -536,7 +536,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   // Auto-reply rules CRUD
   fastify.post<{
     Body: { keyword?: string; matchType?: string; replyText?: string; priority?: number };
-  }>('/auto-replies', { preHandler: requirePermission('settings') }, async (req, reply) => {
+  }>('/auto-replies', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
       const keyword = String(req.body?.keyword || '').trim();
       const replyText = String(req.body?.replyText || '').trim();
@@ -576,7 +576,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
   fastify.patch<{
     Params: { id: string };
     Body: { isActive?: boolean; keyword?: string; matchType?: string; replyText?: string; priority?: number };
-  }>('/auto-replies/:id', { preHandler: requirePermission('settings') }, async (req, reply) => {
+  }>('/auto-replies/:id', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
       const patch: Record<string, any> = { updatedAt: new Date() };
       if (req.body?.isActive !== undefined) patch.isActive = Boolean(req.body.isActive);
@@ -620,7 +620,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
 
   fastify.delete<{ Params: { id: string } }>(
     '/auto-replies/:id',
-    { preHandler: requirePermission('settings') },
+    { preHandler: requirePermission('settings.edit') },
     async (req, reply) => {
       try {
         const deleted = await db
@@ -657,7 +657,7 @@ export default async function settingsRouter(fastify: FastifyInstance) {
 
   fastify.post(
     '/webhook-deliveries/test',
-    { preHandler: requirePermission('settings') },
+    { preHandler: requirePermission('settings.edit') },
     async (_req, reply) => {
       try {
         const result = await notifyAlertWebhook('test_ping', {

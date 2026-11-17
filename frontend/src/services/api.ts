@@ -16,6 +16,8 @@ import {
   PaymentMethodItem,
   AgentItem,
   AgentQuota,
+  CrmRoleItem,
+  PermissionCatalogItem,
   CrmSlaCsatSettings,
   CannedResponse,
 } from '../types';
@@ -32,6 +34,15 @@ export const api = {
   // Dashboard
   getDashboardStats: async (): Promise<DashboardStats> => {
     const res = await client.get('/dashboard/stats');
+    return res.data.data;
+  },
+  getDashboardDrilldown: async (params: {
+    kind: import('../types').DashboardDrilldownKind;
+    filter?: string;
+    value?: string;
+    q?: string;
+  }): Promise<import('../types').DashboardDrilldownResponse> => {
+    const res = await client.get('/dashboard/drilldown', { params });
     return res.data.data;
   },
 
@@ -61,6 +72,20 @@ export const api = {
   },
   getContactTags: async (): Promise<string[]> => {
     const res = await client.get('/contacts/meta/tags');
+    return res.data.data;
+  },
+  syncWhatsAppContacts: async (payload?: {
+    session?: string;
+    overwriteNames?: boolean;
+  }): Promise<{
+    sessionUsed: string;
+    totalFetched: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    quotaStopped: boolean;
+  }> => {
+    const res = await client.post('/contacts/sync-whatsapp', payload || {});
     return res.data.data;
   },
 
@@ -196,6 +221,10 @@ export const api = {
       status?: 'OPEN' | 'PENDING' | 'RESOLVED';
       labels?: string | null;
       wahaSession?: string | null;
+      channelDisplayName?: string | null;
+      excludeFromMetrics?: boolean;
+      excludeReason?: string | null;
+      applyToContact?: boolean;
       contactNotes?: string | null;
       contactTags?: string | null;
       assignedAgentId?: string | null;
@@ -205,6 +234,15 @@ export const api = {
   ): Promise<{ csatSent?: boolean }> => {
     const res = await client.patch(`/conversations/${id}`, payload);
     return res.data.data || {};
+  },
+  getConversationParticipants: async (
+    id: string,
+    sync = true
+  ): Promise<import('../types').ConversationParticipantsResponse> => {
+    const res = await client.get(`/conversations/${id}/participants`, {
+      params: { sync: sync ? 'true' : 'false' },
+    });
+    return res.data.data;
   },
   addConversationNote: async (id: string, body: string): Promise<ChatMessage> => {
     const res = await client.post(`/conversations/${id}/notes`, { body });
@@ -350,8 +388,13 @@ export const api = {
     return res.data.data;
   },
 
-  // Multi-Agent Management
-  getAgents: async (): Promise<{ agents: AgentItem[]; quota: AgentQuota }> => {
+  // Multi-Agent & Role Management
+  getAgents: async (): Promise<{
+    agents: AgentItem[];
+    roles: CrmRoleItem[];
+    permissionCatalog: PermissionCatalogItem[];
+    quota: AgentQuota;
+  }> => {
     const res = await client.get('/agents');
     return res.data.data;
   },
@@ -359,8 +402,9 @@ export const api = {
     name: string;
     email: string;
     password: string;
-    role: 'ADMIN' | 'AGENT';
-    permissions: string[];
+    role?: 'ADMIN' | 'AGENT';
+    roleId?: string | null;
+    permissions?: string[];
   }): Promise<AgentItem> => {
     const res = await client.post('/agents', data);
     return res.data.data;
@@ -372,6 +416,7 @@ export const api = {
       email?: string;
       password?: string;
       role?: 'ADMIN' | 'AGENT';
+      roleId?: string | null;
       permissions?: string[];
       isActive?: boolean;
     }
@@ -381,6 +426,32 @@ export const api = {
   },
   deleteAgent: async (id: string): Promise<void> => {
     await client.delete(`/agents/${id}`);
+  },
+  getRoles: async (): Promise<{ roles: CrmRoleItem[]; permissionCatalog: PermissionCatalogItem[] }> => {
+    const res = await client.get('/agents/roles');
+    return res.data.data;
+  },
+  createRole: async (data: {
+    name: string;
+    description?: string | null;
+    permissions: string[];
+  }): Promise<CrmRoleItem> => {
+    const res = await client.post('/agents/roles', data);
+    return res.data.data;
+  },
+  updateRole: async (
+    roleId: string,
+    data: {
+      name?: string;
+      description?: string | null;
+      permissions?: string[];
+    }
+  ): Promise<CrmRoleItem> => {
+    const res = await client.patch(`/agents/roles/${roleId}`, data);
+    return res.data.data;
+  },
+  deleteRole: async (roleId: string): Promise<void> => {
+    await client.delete(`/agents/roles/${roleId}`);
   },
 
   // Open Conversation with any contact
@@ -642,15 +713,37 @@ export const api = {
   },
 
   createScheduledPost: async (data: {
-    channel: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
-    channelAccountId: string;
+    channel: import('../types').ScheduledPostChannel;
+    channelAccountId?: string | null;
+    wahaSession?: string | null;
+    postType?: import('../types').ScheduledPostType;
     caption: string;
     mediaUrl?: string | null;
     targetChatId?: string | null;
+    targetContactIds?: string[];
+    targetContacts?: Array<{ contactId?: string | null; phone?: string; name?: string | null }>;
+    statusStyle?: import('../types').WhatsAppStatusStyle | null;
     scheduledAt?: string | null;
     publishNow?: boolean;
   }): Promise<import('../types').ScheduledPostItem> => {
     const res = await client.post('/posts', data);
+    return res.data.data;
+  },
+
+  getScheduledPostViewers: async (
+    id: string,
+    sync = true
+  ): Promise<import('../types').ScheduledPostViewersResponse> => {
+    const res = await client.get(`/posts/${id}/viewers`, {
+      params: { sync: sync ? 'true' : 'false' },
+    });
+    return res.data.data;
+  },
+
+  deleteRemoteWhatsAppStatus: async (
+    id: string
+  ): Promise<import('../types').ScheduledPostItem> => {
+    const res = await client.post(`/posts/${id}/delete-remote`);
     return res.data.data;
   },
 
@@ -715,7 +808,9 @@ export const api = {
   importScheduledPosts: async (
     items: Array<{
       channel: string;
-      channelAccountId?: string;
+      channelAccountId?: string | null;
+      wahaSession?: string | null;
+      postType?: string | null;
       caption: string;
       mediaUrl?: string | null;
       targetChatId?: string | null;

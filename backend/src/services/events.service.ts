@@ -8,7 +8,8 @@ export type LiveEventType =
   | 'license:update'
   | 'sla:breach'
   | 'csat:low'
-  | 'posts:update';
+  | 'posts:update'
+  | 'contacts:update';
 
 export interface LiveEventPayload {
   type: LiveEventType;

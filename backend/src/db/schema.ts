@@ -11,6 +11,8 @@ export const contacts = pgTable('contacts', {
   kategori: text('kategori'),
   tags: text('tags'), // JSON string or comma-separated
   notes: text('notes'),
+  excludeFromMetrics: boolean('exclude_from_metrics').default(false).notNull(),
+  excludeReason: text('exclude_reason'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -69,7 +71,12 @@ export const conversations = pgTable('conversations', {
   channelAccountId: text('channel_account_id'),
   externalThreadId: text('external_thread_id'),
   contextTitle: text('context_title'),
+  pushName: text('push_name'),
+  channelDisplayName: text('channel_display_name'),
   wahaSession: text('waha_session'),
+  isGroup: boolean('is_group').default(false).notNull(),
+  excludeFromMetrics: boolean('exclude_from_metrics').default(false).notNull(),
+  excludeReason: text('exclude_reason'),
   assignedAgentId: text('assigned_agent_id'),
   assignedAgentName: text('assigned_agent_name'),
   status: text('status').default('OPEN').notNull(), // OPEN, PENDING, RESOLVED
@@ -104,6 +111,9 @@ export const chatMessages = pgTable('chat_messages', {
   channel: text('channel').default('WHATSAPP').notNull(),
   externalMessageId: text('external_message_id'),
   wahaSession: text('waha_session'),
+  senderJid: text('sender_jid'),
+  senderPhone: text('sender_phone'),
+  senderName: text('sender_name'),
   body: text('body').notNull(),
   mediaUrl: text('media_url'),
   mediaType: text('media_type'), // image, document, audio, video
@@ -145,13 +155,24 @@ export const systemSettings = pgTable('system_settings', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const crmRoles = pgTable('crm_roles', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  description: text('description'),
+  permissions: text('permissions').notNull(), // JSON array of PermissionKey
+  isSystem: boolean('is_system').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export const crmAgents = pgTable('crm_agents', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   role: text('role').default('AGENT').notNull(), // ADMIN | AGENT
-  permissions: text('permissions').default('["dashboard","conversations","contacts"]').notNull(), // JSON array of tab keys
+  roleId: text('role_id'),
+  permissions: text('permissions').default('["dashboard","conversations","contacts"]').notNull(), // JSON array of tab/action keys
   isActive: boolean('is_active').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -300,19 +321,37 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
 
 export const scheduledPosts = pgTable('scheduled_posts', {
   id: text('id').primaryKey(),
-  channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM
+  channel: text('channel').notNull(), // INSTAGRAM | FACEBOOK | THREADS | TELEGRAM | WHATSAPP | WHATSAPP_STATUS
   channelAccountId: text('channel_account_id')
-    .references(() => channelAccounts.id, { onDelete: 'cascade' })
-    .notNull(),
+    .references(() => channelAccounts.id, { onDelete: 'cascade' }),
+  wahaSession: text('waha_session'),
+  postType: text('post_type').default('FEED').notNull(), // FEED | WA_POST | STATUS_TEXT | STATUS_IMAGE | STATUS_VIDEO | STATUS_VOICE
   caption: text('caption').notNull(),
   mediaUrl: text('media_url'),
   targetChatId: text('target_chat_id'),
+  targetContactsJson: text('target_contacts_json'),
+  statusStyleJson: text('status_style_json'),
+  viewerCount: integer('viewer_count').default(0).notNull(),
   status: text('status').default('SCHEDULED').notNull(), // SCHEDULED | PUBLISHING | PUBLISHED | FAILED | CANCELLED
   scheduledAt: timestamp('scheduled_at').notNull(),
   publishedAt: timestamp('published_at'),
   externalPostId: text('external_post_id'),
   errorMessage: text('error_message'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const whatsappStatusViews = pgTable('whatsapp_status_views', {
+  id: text('id').primaryKey(),
+  postId: text('post_id')
+    .references(() => scheduledPosts.id, { onDelete: 'cascade' })
+    .notNull(),
+  viewerJid: text('viewer_jid').notNull(),
+  viewerPhone: text('viewer_phone'),
+  contactId: text('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
+  viewerName: text('viewer_name'),
+  ackStatus: integer('ack_status').default(3).notNull(), // 2=DELIVERED, 3=READ/VIEWED, 4=PLAYED
+  viewedAt: timestamp('viewed_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 

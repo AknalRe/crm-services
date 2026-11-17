@@ -2,20 +2,283 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
 import { db } from '../db';
-import { crmAgents, systemSettings } from '../db/schema';
+import { crmAgents, crmRoles, systemSettings } from '../db/schema';
 
 const SESSION_COOKIE = 'crm_session';
 export const ALL_PERMISSIONS = [
   'dashboard',
+  'dashboard.export',
   'contacts',
+  'contacts.create',
+  'contacts.edit',
+  'contacts.delete',
   'broadcasts',
+  'broadcasts.send',
   'birthday',
   'tracking',
   'conversations',
+  'conversations.view_all',
+  'conversations.reply',
+  'conversations.manage',
+  'conversations.csat',
   'settings',
+  'settings.edit',
+  'settings.agents',
 ] as const;
 
 export type PermissionKey = (typeof ALL_PERMISSIONS)[number];
+
+export interface PermissionCatalogEntry {
+  id: PermissionKey;
+  group: string;
+  label: string;
+  description: string;
+  kind: 'menu' | 'action';
+}
+
+export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
+  {
+    id: 'dashboard',
+    group: 'Dashboard & Laporan',
+    label: 'Akses Menu Dashboard',
+    description: 'Melihat ringkasan analitik CRM dan detail drilldown.',
+    kind: 'menu',
+  },
+  {
+    id: 'dashboard.export',
+    group: 'Dashboard & Laporan',
+    label: 'Ekspor Laporan CSV',
+    description: 'Mengunduh laporan CSV percakapan, performa CS, & siaran.',
+    kind: 'action',
+  },
+  {
+    id: 'contacts',
+    group: 'Kontak Pelanggan',
+    label: 'Akses Menu & Lihat Kontak',
+    description: 'Membuka daftar kontak pelanggan & detail profilnya.',
+    kind: 'menu',
+  },
+  {
+    id: 'contacts.create',
+    group: 'Kontak Pelanggan',
+    label: 'Tambah, Impor & Sinkron WA',
+    description: 'Menambah kontak manual, impor CSV/Excel, dan sinkronisasi dari WAHA.',
+    kind: 'action',
+  },
+  {
+    id: 'contacts.edit',
+    group: 'Kontak Pelanggan',
+    label: 'Edit, Gabung & Tandai Penilaian',
+    description: 'Mengubah data kontak, menggabungkan duplikat, & menandai Non-Penilaian.',
+    kind: 'action',
+  },
+  {
+    id: 'contacts.delete',
+    group: 'Kontak Pelanggan',
+    label: 'Hapus Kontak Pelanggan',
+    description: 'Menghapus permanen data kontak dari CRM.',
+    kind: 'action',
+  },
+  {
+    id: 'broadcasts',
+    group: 'Siaran & Konten Sosial',
+    label: 'Akses Menu Siaran, Jadwal Post & Media',
+    description: 'Melihat daftar kampanye, kalender postingan, WA Story, ide konten & pustaka media.',
+    kind: 'menu',
+  },
+  {
+    id: 'broadcasts.send',
+    group: 'Siaran & Konten Sosial',
+    label: 'Buat & Kirim Siaran / Posting / Story',
+    description: 'Membuat kampanye siaran, menerbitkan/menjadwalkan post, Story WA & upload media.',
+    kind: 'action',
+  },
+  {
+    id: 'birthday',
+    group: 'Otomasi & Pelacakan',
+    label: 'Akses & Kelola Ulang Tahun',
+    description: 'Melihat & mengatur ucapan otomatis ulang tahun.',
+    kind: 'menu',
+  },
+  {
+    id: 'tracking',
+    group: 'Otomasi & Pelacakan',
+    label: 'Akses Pelacakan Status Kirim',
+    description: 'Melihat status centang terkirim/sampai/dibaca seluruh siaran.',
+    kind: 'menu',
+  },
+  {
+    id: 'conversations',
+    group: 'Inbox Live Chat & Multi-CS',
+    label: 'Akses Menu Inbox, Komentar & Feed',
+    description: 'Membuka kotak masuk omnichannel, grup WA, komentar, dan feed sosial.',
+    kind: 'menu',
+  },
+  {
+    id: 'conversations.view_all',
+    group: 'Inbox Live Chat & Multi-CS',
+    label: 'Lihat Obrolan Semua CS',
+    description: 'Jika dinonaktifkan, CS hanya melihat obrolan miliknya sendiri atau yang belum ditugaskan.',
+    kind: 'action',
+  },
+  {
+    id: 'conversations.reply',
+    group: 'Inbox Live Chat & Multi-CS',
+    label: 'Balas Chat, Kirim Media & Tombol',
+    description: 'Mengirim balasan teks, gambar, dokumen, video, tautan, tombol, & polling.',
+    kind: 'action',
+  },
+  {
+    id: 'conversations.manage',
+    group: 'Inbox Live Chat & Multi-CS',
+    label: 'Kelola Status, Assign CS, Label & Non-Penilaian',
+    description: 'Membuat chat baru, ubah Open/Pending/Done, assign CS, edit label, nama kanal, & Non-Penilaian.',
+    kind: 'action',
+  },
+  {
+    id: 'conversations.csat',
+    group: 'Inbox Live Chat & Multi-CS',
+    label: 'Kirim Survei CSAT Manual',
+    description: 'Mengirim tautan penilaian kepuasan pelanggan secara manual dari inbox.',
+    kind: 'action',
+  },
+  {
+    id: 'settings',
+    group: 'Pengaturan & Integrasi',
+    label: 'Akses Menu Pengaturan, Kanal, Master Data & AI',
+    description: 'Membuka konfigurasi WAHA, omnichannel, master data, jam kerja, SLA & Agent AI.',
+    kind: 'menu',
+  },
+  {
+    id: 'settings.edit',
+    group: 'Pengaturan & Integrasi',
+    label: 'Ubah & Simpan Pengaturan Sistem',
+    description: 'Mengubah sesi WAHA, akun kanal, AI Agent, otomasi komentar, jam kerja & SLA.',
+    kind: 'action',
+  },
+  {
+    id: 'settings.agents',
+    group: 'Pengaturan & Integrasi',
+    label: 'Kelola Tim CS, Role & Batasan Akses',
+    description: 'Membuat role baru dengan batasan khusus serta menambah/mengedit akun CS.',
+    kind: 'action',
+  },
+];
+
+export const DEFAULT_STARTER_ROLES: Array<{
+  id: string;
+  name: string;
+  description: string;
+  permissions: PermissionKey[];
+  isSystem: boolean;
+}> = [
+  {
+    id: 'role_admin',
+    name: 'Administrator',
+    description: 'Akses penuh ke seluruh menu, aksi, integrasi, dan manajemen role CS.',
+    permissions: [...ALL_PERMISSIONS],
+    isSystem: true,
+  },
+  {
+    id: 'role_supervisor',
+    name: 'Supervisor CS',
+    description: 'Memantau seluruh chat tim, laporan CSV, kontak, dan menugaskan CS tanpa mengubah integrasi sistem.',
+    permissions: [
+      'dashboard',
+      'dashboard.export',
+      'contacts',
+      'contacts.create',
+      'contacts.edit',
+      'broadcasts',
+      'broadcasts.send',
+      'birthday',
+      'tracking',
+      'conversations',
+      'conversations.view_all',
+      'conversations.reply',
+      'conversations.manage',
+      'conversations.csat',
+    ],
+    isSystem: true,
+  },
+  {
+    id: 'role_cs',
+    name: 'Customer Service',
+    description: 'Fokus melayani obrolan miliknya/belum ditugaskan, kelola status, & tambah kontak tanpa akses hapus/ekspor/pengaturan.',
+    permissions: [
+      'dashboard',
+      'contacts',
+      'contacts.create',
+      'contacts.edit',
+      'conversations',
+      'conversations.reply',
+      'conversations.manage',
+      'conversations.csat',
+      'tracking',
+    ],
+    isSystem: true,
+  },
+  {
+    id: 'role_content',
+    name: 'Marketing & Konten',
+    description: 'Mengelola siaran promo, jadwal posting sosial media, WhatsApp Story, pustaka media & pelacakan.',
+    permissions: [
+      'dashboard',
+      'contacts',
+      'contacts.create',
+      'broadcasts',
+      'broadcasts.send',
+      'birthday',
+      'tracking',
+    ],
+    isSystem: true,
+  },
+  {
+    id: 'role_auditor',
+    name: 'Viewer / Auditor (Read-Only)',
+    description: 'Hanya memantau dashboard, riwayat chat tim, dan status pengiriman tanpa bisa membalas atau menghapus data.',
+    permissions: [
+      'dashboard',
+      'dashboard.export',
+      'contacts',
+      'broadcasts',
+      'tracking',
+      'conversations',
+      'conversations.view_all',
+    ],
+    isSystem: true,
+  },
+];
+
+let rolesSeedPromise: Promise<void> | null = null;
+export async function ensureDefaultRolesSeeded(): Promise<void> {
+  if (!rolesSeedPromise) {
+    rolesSeedPromise = (async () => {
+      const existing = await db.select({ id: crmRoles.id }).from(crmRoles);
+      const existingIds = new Set(existing.map((r) => r.id));
+      const now = new Date();
+      for (const starter of DEFAULT_STARTER_ROLES) {
+        if (existingIds.has(starter.id)) continue;
+        await db
+          .insert(crmRoles)
+          .values({
+            id: starter.id,
+            name: starter.name,
+            description: starter.description,
+            permissions: JSON.stringify(starter.permissions),
+            isSystem: starter.isSystem,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoNothing()
+          .catch(() => {});
+      }
+    })().catch(() => {
+      rolesSeedPromise = null;
+    });
+  }
+  await rolesSeedPromise;
+}
 
 export async function getSettingMap(): Promise<Record<string, string>> {
   const rows = await db.select().from(systemSettings);
@@ -93,22 +356,67 @@ function parseCookie(header: string | undefined, name: string): string | null {
   return null;
 }
 
-export function parseAgentPermissions(raw: string | null | undefined, role: string): string[] {
+const LEGACY_COARSE_EXPANSIONS: Record<string, PermissionKey[]> = {
+  dashboard: ['dashboard', 'dashboard.export'],
+  contacts: ['contacts', 'contacts.create', 'contacts.edit'],
+  broadcasts: ['broadcasts', 'broadcasts.send'],
+  birthday: ['birthday'],
+  tracking: ['tracking'],
+  conversations: [
+    'conversations',
+    'conversations.view_all',
+    'conversations.reply',
+    'conversations.manage',
+    'conversations.csat',
+  ],
+  settings: ['settings', 'settings.edit'],
+};
+
+export function expandPermissionsList(
+  rawList: string[],
+  role: string,
+  strictGranular = false
+): PermissionKey[] {
   if (role === 'ADMIN') return [...ALL_PERMISSIONS];
-  if (!raw) return ['dashboard', 'conversations', 'contacts'];
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.map((p) => String(p)).filter((p) => (ALL_PERMISSIONS as readonly string[]).includes(p));
+  const validSet = new Set<PermissionKey>();
+  const validKeys = ALL_PERMISSIONS as readonly string[];
+  const filtered = rawList.filter((p): p is PermissionKey => validKeys.includes(p));
+  const hasDottedKey = filtered.some((p) => p.includes('.'));
+
+  for (const p of filtered) {
+    validSet.add(p);
+    if (!strictGranular && !hasDottedKey && LEGACY_COARSE_EXPANSIONS[p]) {
+      for (const exp of LEGACY_COARSE_EXPANSIONS[p]) {
+        validSet.add(exp);
+      }
     }
-  } catch {
-    // Fallback comma-separated
-    return raw
-      .split(',')
-      .map((p) => p.trim())
-      .filter((p) => (ALL_PERMISSIONS as readonly string[]).includes(p));
   }
-  return ['dashboard', 'conversations', 'contacts'];
+  return Array.from(validSet);
+}
+
+export function parseAgentPermissions(
+  raw: string | null | undefined,
+  role: string,
+  strictGranular = false
+): PermissionKey[] {
+  if (role === 'ADMIN') return [...ALL_PERMISSIONS];
+  let parsedList: string[] = [];
+  if (!raw) {
+    parsedList = ['dashboard', 'conversations', 'contacts'];
+  } else {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsedList = parsed.map((p) => String(p).trim());
+      }
+    } catch {
+      parsedList = raw
+        .split(',')
+        .map((p) => p.trim())
+        .filter(Boolean);
+    }
+  }
+  return expandPermissionsList(parsedList, role, strictGranular);
 }
 
 async function ensurePrimaryAdminSeeded(map: Record<string, string>): Promise<void> {
@@ -129,6 +437,7 @@ async function ensurePrimaryAdminSeeded(map: Record<string, string>): Promise<vo
       email: email.toLowerCase(),
       passwordHash: passHash,
       role: 'ADMIN',
+      roleId: 'role_admin',
       permissions: JSON.stringify([...ALL_PERMISSIONS]),
       isActive: true,
       createdAt: now,
@@ -142,7 +451,39 @@ export interface AuthUserSession {
   name: string;
   email: string;
   role: 'ADMIN' | 'AGENT';
-  permissions: string[];
+  roleId?: string | null;
+  roleName?: string | null;
+  permissions: PermissionKey[];
+}
+
+export function hasUserPermission(user: AuthUserSession | null | undefined, perm: PermissionKey): boolean {
+  if (!user) return false;
+  if (user.role === 'ADMIN') return true;
+  return Array.isArray(user.permissions) && user.permissions.includes(perm);
+}
+
+export async function resolveAgentRoleSession(
+  agent: typeof crmAgents.$inferSelect
+): Promise<AuthUserSession> {
+  await ensureDefaultRolesSeeded();
+  let matchedRole: typeof crmRoles.$inferSelect | undefined;
+  if (agent.roleId) {
+    const roleRows = await db.select().from(crmRoles).where(eq(crmRoles.id, agent.roleId)).limit(1);
+    matchedRole = roleRows[0];
+  }
+  const role: 'ADMIN' | 'AGENT' =
+    agent.role === 'ADMIN' || matchedRole?.id === 'role_admin' ? 'ADMIN' : 'AGENT';
+  const strictGranular = Boolean(matchedRole);
+  const rawPermSource = matchedRole ? matchedRole.permissions : agent.permissions;
+  return {
+    id: agent.id,
+    name: agent.name,
+    email: agent.email,
+    role,
+    roleId: matchedRole?.id || agent.roleId || (role === 'ADMIN' ? 'role_admin' : null),
+    roleName: matchedRole?.name || (role === 'ADMIN' ? 'Administrator' : 'Agent Kustom'),
+    permissions: parseAgentPermissions(rawPermSource, role, strictGranular),
+  };
 }
 
 export async function getCurrentAuthUser(req: FastifyRequest): Promise<AuthUserSession | null> {
@@ -161,14 +502,7 @@ export async function getCurrentAuthUser(req: FastifyRequest): Promise<AuthUserS
   const agent = rows[0];
   if (!agent || !agent.isActive) return null;
 
-  const role: 'ADMIN' | 'AGENT' = agent.role === 'ADMIN' ? 'ADMIN' : 'AGENT';
-  return {
-    id: agent.id,
-    name: agent.name,
-    email: agent.email,
-    role,
-    permissions: parseAgentPermissions(agent.permissions, role),
-  };
+  return resolveAgentRoleSession(agent);
 }
 
 export function requirePermission(...allowed: PermissionKey[]) {
@@ -182,7 +516,7 @@ export function requirePermission(...allowed: PermissionKey[]) {
     return reply.status(403).send({
       success: false,
       code: 'PERMISSION_DENIED',
-      error: 'Akses menu ini dibatasi oleh admin',
+      error: `Akses fitur atau aksi ini dibatasi oleh role "${user.roleName || user.role}"`,
     });
   };
 }
@@ -246,6 +580,7 @@ export default async function authRouter(fastify: FastifyInstance) {
         email,
         passwordHash: passHash,
         role: 'ADMIN',
+        roleId: 'role_admin',
         permissions: JSON.stringify([...ALL_PERMISSIONS]),
         isActive: true,
         createdAt: now,
@@ -290,17 +625,11 @@ export default async function authRouter(fastify: FastifyInstance) {
 
       const token = signToken(agent.email, secret);
       reply.header('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
-      const role: 'ADMIN' | 'AGENT' = agent.role === 'ADMIN' ? 'ADMIN' : 'AGENT';
+      const userSession = await resolveAgentRoleSession(agent);
       return reply.send({
         success: true,
         data: {
-          user: {
-            id: agent.id,
-            name: agent.name,
-            email: agent.email,
-            role,
-            permissions: parseAgentPermissions(agent.permissions, role),
-          },
+          user: userSession,
         },
       });
     } catch (err: any) {

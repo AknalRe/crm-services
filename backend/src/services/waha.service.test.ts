@@ -1023,5 +1023,247 @@ test('inbound WAHA media extraction, unmasked downloadMedia proxy, and mime norm
   assert.match(savedOgg.relativeUrl, /\.ogg$/);
 });
 
+test('WhatsApp Status sending, deletion, viewer parsing, and ACK ID extraction work accurately', async (t) => {
+  const { extractStatusReceiptsFromWahaMessage } = require('./waha.service') as typeof import('./waha.service');
+  const { extractWahaMessageIds, extractStatusAckParticipant } = require('../routes/waha') as typeof import('../routes/waha');
+
+  // 1. Test status@broadcast ACK stanza & participant extraction
+  const ackPayload = {
+    id: 'false_status@broadcast_3EB0ABCDEF12_628123456789@c.us',
+    from: 'status@broadcast',
+    ack: 3,
+  };
+  const { exactIds, stanzaIds } = extractWahaMessageIds(ackPayload);
+  assert.ok(exactIds.includes('false_status@broadcast_3EB0ABCDEF12_628123456789@c.us'));
+  assert.ok(stanzaIds.includes('3EB0ABCDEF12'));
+  assert.equal(extractStatusAckParticipant(ackPayload, exactIds), '628123456789@c.us');
+
+  const nestedParticipant = extractStatusAckParticipant(
+    { participant: '628987654321@lid', id: 'false_status@broadcast_3EB0999' },
+    ['false_status@broadcast_3EB0999']
+  );
+  assert.equal(nestedParticipant, '628987654321@lid');
+
+  // 2. Test WAHA message receipt parser (_data.receipts & Info.ReadBy)
+  const gowsReceipts = extractStatusReceiptsFromWahaMessage({
+    _data: {
+      Info: {
+        ReadBy: ['628111222333@s.whatsapp.net', '628444555666@lid'],
+      },
+      receipts: [
+        { userJid: '628777888999@c.us', readTimestamp: 1700000100 },
+      ],
+    },
+  });
+  assert.equal(gowsReceipts.length, 3);
+  assert.ok(gowsReceipts.some((r) => r.viewerJid === '628111222333@s.whatsapp.net' && r.ackStatus === 3));
+  assert.ok(
+    gowsReceipts.some(
+      (r) =>
+        r.viewerJid === '628777888999@c.us' &&
+        Boolean(r.viewedAt) &&
+        new Date(r.viewedAt as string).getTime() === 1700000100 * 1000
+    )
+  );
+
+  // 3. Test sendTextStatus, sendMediaStatus, contacts rejection guard, deleteStatus & fetchStatusViewers
+  stubWahaEnvSession(t, 'marketing');
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha.example.com',
+    apiKey: 'secret-token',
+    session: 'marketing',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  const postCalls: Array<{ url: string; body: any }> = [];
+  axios.create = (() =>
+    ({
+      get: async (url: string) => {
+        if (url === '/api/sessions?all=true') {
+          return { data: [{ name: 'marketing', status: 'WORKING' }] };
+        }
+        if (url.includes('/chats/status%40broadcast/messages/')) {
+          return {
+            data: {
+              id: 'true_status@broadcast_STAT999',
+              receipts: [{ jid: '628123456@c.us', ack: 3, timestamp: 1700000200 }],
+            },
+          };
+        }
+        throw new Error(`Unexpected GET ${url}`);
+      },
+      post: async (url: string, body: any) => {
+        postCalls.push({ url, body });
+        if (url.includes('/status/image') && Array.isArray(body?.contacts)) {
+          throw new Error('contacts property is not supported in WEBJS engine');
+        }
+        return { data: { id: { _serialized: 'true_status@broadcast_STAT999' } } };
+      },
+      put: async () => ({ data: {} }),
+      delete: async () => ({ data: {} }),
+    }) as any) as any;
+
+  const textRes = await wahaService.sendTextStatus(
+    {
+      text: 'Promo Akhir Pekan',
+      backgroundColor: '#1d4ed8',
+      font: 2,
+      contacts: ['08123456789'],
+    },
+    'marketing'
+  );
+  assert.equal(textRes.messageId, 'true_status@broadcast_STAT999');
+  assert.equal(postCalls[0]?.url, '/api/marketing/status/text');
+  assert.deepEqual(postCalls[0]?.body?.contacts, ['628123456789@c.us']);
+
+  const imgFailRes = await wahaService.sendMediaStatus(
+    {
+      mediaType: 'image',
+      file: { base64: 'data:image/jpeg;base64,ZmFrZQ==', mimetype: 'image/jpeg', filename: 'story.jpg' },
+      caption: 'Diskon 50%',
+      contacts: ['628123456789'],
+    },
+    'marketing'
+  );
+  assert.equal(imgFailRes.success, false);
+  assert.match(imgFailRes.error || '', /tidak mendukung filter daftar kontak/i);
+
+  await wahaService.deleteStatus('true_status@broadcast_STAT999', 'marketing');
+  assert.equal(postCalls[postCalls.length - 1]?.url, '/api/marketing/status/delete');
+  assert.equal(postCalls[postCalls.length - 1]?.body?.id, 'true_status@broadcast_STAT999');
+
+  const viewers = await wahaService.fetchStatusViewers('true_status@broadcast_STAT999', 'marketing');
+  assert.equal(viewers.length, 1);
+  assert.equal(viewers[0]?.viewerJid, '628123456@c.us');
+});
+
+test('WAHA contact synchronization and group metadata normalization support GOWS, NOWEB, and WEBJS shapes', async (t) => {
+  const { normalizeWahaContactEntries, normalizeWahaGroupInfo } = require('./waha.service') as typeof import('./waha.service');
+  const { extractGroupParticipant } = require('../routes/waha') as typeof import('../routes/waha');
+
+  const gowsGroupPart = extractGroupParticipant({
+    from: '12036300112233@g.us',
+    _data: {
+      Info: {
+        Chat: '12036300112233@g.us',
+        Sender: '9988776655@lid',
+        SenderAlt: '628111222333:2@s.whatsapp.net',
+      },
+    },
+  });
+  assert.equal(gowsGroupPart.participantJid, '628111222333:2@s.whatsapp.net');
+  assert.equal(gowsGroupPart.participantPhone, '628111222333');
+
+  const webjsGroupPart = extractGroupParticipant({
+    from: '12036300112233@g.us',
+    participant: '628777888999@c.us',
+  });
+  assert.equal(webjsGroupPart.participantJid, '628777888999@c.us');
+  assert.equal(webjsGroupPart.participantPhone, '628777888999');
+
+  const lidMap = new Map<string, string>([['9988776655@lid', '6285511223344']]);
+  const normalizedContacts = normalizeWahaContactEntries(
+    [
+      { id: '628111222333@c.us', name: 'Budi CRM', pushname: 'Budi', isMyContact: true },
+      { id: '9988776655@lid', pushName: 'Lid Customer' },
+      { id: '12036300112233@g.us', name: 'Group Should Skip', isGroup: true },
+      { id: '628000000000@c.us', name: 'Self', isMe: true },
+      { id: 'status@broadcast', name: 'Status' },
+    ],
+    lidMap
+  );
+  assert.equal(normalizedContacts.length, 2);
+  assert.equal(normalizedContacts[0]?.phone, '628111222333');
+  assert.equal(normalizedContacts[0]?.name, 'Budi CRM');
+  assert.equal(normalizedContacts[1]?.phone, '6285511223344');
+  assert.equal(normalizedContacts[1]?.lid, '9988776655@lid');
+  assert.equal(normalizedContacts[1]?.pushName, 'Lid Customer');
+
+  const groupInfo = normalizeWahaGroupInfo(
+    '12036300112233@g.us',
+    {
+      Subject: 'Tim Sales Internal',
+      Participants: [
+        { JID: '628111222333@s.whatsapp.net', IsSuperAdmin: true, FullName: 'Leader' },
+        { JID: '9988776655@lid', IsAdmin: true, PushName: 'Admin WA' },
+        { JID: '628999888777:4@s.whatsapp.net' },
+      ],
+    },
+    lidMap
+  );
+  assert.ok(groupInfo);
+  assert.equal(groupInfo.subject, 'Tim Sales Internal');
+  assert.equal(groupInfo.participants.length, 3);
+  assert.equal(groupInfo.participants[0]?.role, 'superadmin');
+  assert.equal(groupInfo.participants[1]?.phone, '6285511223344');
+  assert.equal(groupInfo.participants[1]?.role, 'admin');
+  assert.equal(groupInfo.participants[2]?.phone, '628999888777');
+  assert.equal(groupInfo.participants[2]?.role, 'member');
+
+  stubWahaEnvSession(t, 'sales');
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha.example.com',
+    apiKey: 'secret-token',
+    session: 'sales',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  axios.create = (() =>
+    ({
+      get: async (url: string) => {
+        if (url === '/api/contacts/all') {
+          return {
+            data: [
+              { id: '08123456789@c.us', name: 'Andi Wijaya', isMyContact: true },
+              { id: '9988776655@lid', pushName: 'Sari Lid' },
+            ],
+          };
+        }
+        if (url === '/api/sales/lids') {
+          return { data: [{ lid: '9988776655@lid', pn: '6285511223344@s.whatsapp.net' }] };
+        }
+        if (url === '/api/sales/groups/12036300112233%40g.us') {
+          return {
+            data: {
+              subject: 'Koordinasi Vendor',
+              participants: [{ id: '628123456789@c.us', isAdmin: true }],
+            },
+          };
+        }
+        throw new Error(`Unexpected GET ${url}`);
+      },
+      post: async () => ({ data: {} }),
+      put: async () => ({ data: {} }),
+      delete: async () => ({ data: {} }),
+    }) as any) as any;
+
+  const synced = await wahaService.fetchAllContacts('sales');
+  assert.equal(synced.sessionUsed, 'sales');
+  assert.equal(synced.contacts.length, 2);
+  assert.equal(synced.contacts[0]?.phone, '628123456789');
+  assert.equal(synced.contacts[1]?.phone, '6285511223344');
+
+  const grp = await wahaService.getGroupInfo('12036300112233@g.us', 'sales');
+  assert.ok(grp);
+  assert.equal(grp.subject, 'Koordinasi Vendor');
+  assert.equal(grp.participants[0]?.role, 'admin');
+});
+
+
+
 
 

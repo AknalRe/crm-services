@@ -72,7 +72,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     };
   }>(
     '/quick-replies',
-    { preHandler: requirePermission('settings', 'conversations') },
+    { preHandler: requirePermission('settings.edit', 'conversations.manage') },
     async (req, reply: FastifyReply) => {
       try {
         const shortCode = normalizeShortCode(String(req.body?.shortCode || ''));
@@ -122,7 +122,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     };
   }>(
     '/quick-replies/:id',
-    { preHandler: requirePermission('settings', 'conversations') },
+    { preHandler: requirePermission('settings.edit', 'conversations.manage') },
     async (req, reply: FastifyReply) => {
       try {
         const patch: Record<string, any> = { updatedAt: new Date() };
@@ -176,7 +176,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
 
   fastify.delete<{ Params: { id: string } }>(
     '/quick-replies/:id',
-    { preHandler: requirePermission('settings', 'conversations') },
+    { preHandler: requirePermission('settings.edit', 'conversations.manage') },
     async (req, reply: FastifyReply) => {
       try {
         const deleted = await db
@@ -228,7 +228,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
       sortOrder?: number;
       isActive?: boolean;
     };
-  }>('/labels', { preHandler: requirePermission('settings') }, async (req, reply: FastifyReply) => {
+  }>('/labels', { preHandler: requirePermission('settings.edit') }, async (req, reply: FastifyReply) => {
     try {
       const scope = String(req.body?.scope || '').trim().toUpperCase();
       if (!VALID_SCOPES.has(scope)) {
@@ -288,7 +288,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
       sortOrder?: number;
       isActive?: boolean;
     };
-  }>('/labels/:id', { preHandler: requirePermission('settings') }, async (req, reply: FastifyReply) => {
+  }>('/labels/:id', { preHandler: requirePermission('settings.edit') }, async (req, reply: FastifyReply) => {
     try {
       const [existing] = await db
         .select()
@@ -349,7 +349,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
 
   fastify.delete<{ Params: { id: string } }>(
     '/labels/:id',
-    { preHandler: requirePermission('settings') },
+    { preHandler: requirePermission('settings.edit') },
     async (req, reply: FastifyReply) => {
       try {
         const deleted = await db
@@ -403,7 +403,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     };
   }>(
     '/templates',
-    { preHandler: requirePermission('settings', 'broadcasts') },
+    { preHandler: requirePermission('settings.edit', 'broadcasts.send') },
     async (req, reply: FastifyReply) => {
       try {
         const name = String(req.body?.name || '').trim();
@@ -452,7 +452,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
     };
   }>(
     '/templates/:id',
-    { preHandler: requirePermission('settings', 'broadcasts') },
+    { preHandler: requirePermission('settings.edit', 'broadcasts.send') },
     async (req, reply: FastifyReply) => {
       try {
         const patch: Record<string, any> = { updatedAt: new Date() };
@@ -499,7 +499,7 @@ export default async function masterDataRouter(fastify: FastifyInstance) {
 
   fastify.delete<{ Params: { id: string } }>(
     '/templates/:id',
-    { preHandler: requirePermission('settings', 'broadcasts') },
+    { preHandler: requirePermission('settings.edit', 'broadcasts.send') },
     async (req, reply: FastifyReply) => {
       try {
         const deleted = await db

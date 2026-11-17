@@ -14,9 +14,14 @@ import {
   MapPin,
   X,
   Send,
+  RefreshCw,
+  Smartphone,
+  EyeOff,
 } from 'lucide-react';
 import api from '../services/api';
-import { Contact, LicenseInfo } from '../types';
+import { subscribeLiveEvent } from '../services/liveEvents';
+import { AuthStatus, Contact, LicenseInfo, WahaSessionItem } from '../types';
+import { hasPerm } from '../lib/permissions';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
@@ -24,6 +29,7 @@ import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
 interface ContactsProps {
+  currentUser?: AuthStatus['user'] | null;
   onStartBroadcastWithContacts?: (contactIds: string[]) => void;
   licenseInfo?: LicenseInfo | null;
 }
@@ -31,10 +37,16 @@ interface ContactsProps {
 const DEFAULT_CONTACT_CATEGORIES = ['Umum', 'VIP', 'Prospek', 'Pelanggan Tetap', 'Korporat', 'Partner'];
 
 export const Contacts: React.FC<ContactsProps> = ({
+  currentUser,
   onStartBroadcastWithContacts,
   licenseInfo,
 }) => {
   const toast = useToast();
+  const canCreateContact = hasPerm(currentUser, 'contacts.create');
+  const canEditContact = hasPerm(currentUser, 'contacts.edit');
+  const canDeleteContact = hasPerm(currentUser, 'contacts.delete');
+  const canSendBroadcast = hasPerm(currentUser, 'broadcasts') && hasPerm(currentUser, 'broadcasts.send');
+
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [masterCategories, setMasterCategories] = useState<string[]>(DEFAULT_CONTACT_CATEGORIES);
   const [loading, setLoading] = useState(true);
@@ -42,6 +54,7 @@ export const Contacts: React.FC<ContactsProps> = ({
   const [search, setSearch] = useState('');
   const [selectedTag, setSelectedTag] = useState('ALL');
   const [selectedKategori, setSelectedKategori] = useState('ALL');
+  const [metricFilter, setMetricFilter] = useState<'ALL' | 'ASSESSED' | 'EXCLUDED'>('ALL');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -52,6 +65,19 @@ export const Contacts: React.FC<ContactsProps> = ({
   const [savingIdentity, setSavingIdentity] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [isWaSyncModalOpen, setIsWaSyncModalOpen] = useState(false);
+  const [waSessions, setWaSessions] = useState<WahaSessionItem[]>([]);
+  const [syncSession, setSyncSession] = useState('');
+  const [overwriteNames, setOverwriteNames] = useState(false);
+  const [syncingWa, setSyncingWa] = useState(false);
+  const [syncResult, setSyncResult] = useState<{
+    sessionUsed: string;
+    totalFetched: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    quotaStopped: boolean;
+  } | null>(null);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -65,6 +91,8 @@ export const Contacts: React.FC<ContactsProps> = ({
     kategori: '',
     tags: '',
     notes: '',
+    exclude_from_metrics: false,
+    exclude_reason: '',
   });
 
   const [importText, setImportText] = useState('');
@@ -92,7 +120,50 @@ export const Contacts: React.FC<ContactsProps> = ({
 
   useEffect(() => {
     fetchContacts();
+    const unsub = subscribeLiveEvent('contacts:update', () => {
+      void fetchContacts();
+    });
+    return unsub;
   }, [fetchContacts]);
+
+  const handleOpenWaSyncModal = async () => {
+    setSyncResult(null);
+    setIsWaSyncModalOpen(true);
+    try {
+      const res = await api.getWahaSessions();
+      const list = res.sessions || [];
+      setWaSessions(list);
+      const preferred =
+        list.find((s) => s.name === res.activeSession && s.status === 'WORKING')?.name ||
+        list.find((s) => s.status === 'WORKING')?.name ||
+        list[0]?.name ||
+        '';
+      setSyncSession(preferred);
+    } catch {
+      setWaSessions([]);
+    }
+  };
+
+  const handleRunWaSync = async () => {
+    if (syncingWa) return;
+    setSyncingWa(true);
+    setSyncResult(null);
+    try {
+      const result = await api.syncWhatsAppContacts({
+        session: syncSession || undefined,
+        overwriteNames,
+      });
+      setSyncResult(result);
+      toast.success(
+        `Sinkronisasi selesai: ${result.created} kontak baru, ${result.updated} diperbarui.`
+      );
+      await fetchContacts();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || err.message || 'Gagal sinkronisasi kontak WhatsApp');
+    } finally {
+      setSyncingWa(false);
+    }
+  };
 
   useEffect(() => {
     api
@@ -136,6 +207,8 @@ export const Contacts: React.FC<ContactsProps> = ({
       kategori: '',
       tags: '',
       notes: '',
+      exclude_from_metrics: false,
+      exclude_reason: '',
     });
     setIsModalOpen(true);
   };
@@ -151,6 +224,8 @@ export const Contacts: React.FC<ContactsProps> = ({
       kategori: contact.kategori || '',
       tags: contact.tags || '',
       notes: contact.notes || '',
+      exclude_from_metrics: Boolean(contact.exclude_from_metrics),
+      exclude_reason: contact.exclude_reason || '',
     });
     setIsModalOpen(true);
   };
@@ -406,6 +481,12 @@ export const Contacts: React.FC<ContactsProps> = ({
     }
   };
 
+  const displayedContacts = contacts.filter((c) => {
+    if (metricFilter === 'EXCLUDED') return Boolean(c.exclude_from_metrics);
+    if (metricFilter === 'ASSESSED') return !c.exclude_from_metrics;
+    return true;
+  });
+
   return (
     <div className="space-y-4 sm:space-y-5">
       {/* Action Header */}
@@ -460,6 +541,17 @@ export const Contacts: React.FC<ContactsProps> = ({
                 </option>
               ))}
             </select>
+
+            <select
+              value={metricFilter}
+              onChange={(e) => setMetricFilter(e.target.value as 'ALL' | 'ASSESSED' | 'EXCLUDED')}
+              title="Filter Status Penilaian SLA/CSAT"
+              className="w-full sm:w-auto max-w-full min-w-0 h-9 px-2.5 sm:px-3 bg-white border border-gray-200 rounded-md text-xs sm:text-[13px] text-gray-700 focus:outline-none focus:border-indigo-500 truncate"
+            >
+              <option value="ALL">Semua Penilaian</option>
+              <option value="ASSESSED">Masuk Penilaian</option>
+              <option value="EXCLUDED">Non-Penilaian</option>
+            </select>
           </div>
         </div>
 
@@ -478,7 +570,7 @@ export const Contacts: React.FC<ContactsProps> = ({
           )}
 
           <div className="grid grid-cols-2 sm:flex sm:items-center gap-2">
-            {selectedIds.length > 0 && onStartBroadcastWithContacts && (
+            {canSendBroadcast && selectedIds.length > 0 && onStartBroadcastWithContacts && (
               <Button
                 variant="primary"
                 size="md"
@@ -490,24 +582,38 @@ export const Contacts: React.FC<ContactsProps> = ({
               </Button>
             )}
 
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={() => setIsImportModalOpen(true)}
-              className="justify-center"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Import Data</span>
-            </Button>
+            {canCreateContact && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => void handleOpenWaSyncModal()}
+                  className="justify-center"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Sinkronkan WA</span>
+                </Button>
 
-            <Button
-              variant={selectedIds.length > 0 ? 'secondary' : 'primary'}
-              size="md"
-              onClick={handleOpenAddModal}
-              className="justify-center"
-            >
-              <span>Tambah Kontak</span>
-            </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => setIsImportModalOpen(true)}
+                  className="justify-center"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Import Data</span>
+                </Button>
+
+                <Button
+                  variant={selectedIds.length > 0 && canSendBroadcast ? 'secondary' : 'primary'}
+                  size="md"
+                  onClick={handleOpenAddModal}
+                  className="col-span-2 sm:col-span-1 justify-center"
+                >
+                  <span>Tambah Kontak</span>
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -518,15 +624,21 @@ export const Contacts: React.FC<ContactsProps> = ({
           <LoadingState message="Memuat data pelanggan..." />
         ) : error && contacts.length === 0 ? (
           <ErrorState message={error} onRetry={fetchContacts} />
-        ) : contacts.length === 0 ? (
+        ) : displayedContacts.length === 0 ? (
           <EmptyState
             icon={<Users className="w-8 h-8" />}
-            title="Belum ada data pelanggan"
-            description="Tambahkan kontak pelanggan secara manual atau impor daftar melalui CSV."
+            title={contacts.length > 0 ? 'Tidak ada kontak di filter ini' : 'Belum ada data pelanggan'}
+            description={
+              contacts.length > 0
+                ? 'Ubah filter pencarian atau status Non-Penilaian untuk melihat daftar kontak lain.'
+                : 'Tambahkan kontak pelanggan secara manual atau impor daftar melalui CSV.'
+            }
             action={
-              <Button variant="primary" size="sm" onClick={handleOpenAddModal}>
-                Tambah Kontak
-              </Button>
+              canCreateContact && contacts.length === 0 ? (
+                <Button variant="primary" size="sm" onClick={handleOpenAddModal}>
+                  Tambah Kontak
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -540,7 +652,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                     onChange={toggleSelectAll}
                     className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                   />
-                  <span>Pilih Semua ({contacts.length})</span>
+                  <span>Pilih Semua ({displayedContacts.length})</span>
                 </label>
                 {selectedIds.length > 0 && (
                   <span className="font-semibold text-indigo-700 tabular-nums">
@@ -549,7 +661,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                 )}
               </div>
               <div className="divide-y divide-gray-200 md:grid md:grid-cols-2 md:divide-y-0 md:gap-px md:bg-gray-200">
-                {contacts.map((contact) => {
+                {displayedContacts.map((contact) => {
                   const isSelected = selectedIds.includes(contact.id);
                   const birthDate = contact.tanggal_lahir ? new Date(contact.tanggal_lahir) : null;
                   const isBirthdayToday =
@@ -581,8 +693,17 @@ export const Contacts: React.FC<ContactsProps> = ({
                             {contact.nama_lengkap.slice(0, 2).toUpperCase()}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="font-semibold text-gray-900 text-[13px] leading-snug break-words">
-                              {contact.nama_lengkap}
+                            <div className="font-semibold text-gray-900 text-[13px] leading-snug break-words flex flex-wrap items-center gap-1.5">
+                              <span>{contact.nama_lengkap}</span>
+                              {contact.exclude_from_metrics && (
+                                <span
+                                  title={contact.exclude_reason || 'Dikecualikan dari penilaian SLA/CSAT'}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-medium"
+                                >
+                                  <EyeOff className="w-2.5 h-2.5" />
+                                  <span>Non-Penilaian</span>
+                                </span>
+                              )}
                             </div>
                             {contact.nama_panggilan && (
                               <div className="text-[11px] text-gray-500 truncate">
@@ -591,26 +712,32 @@ export const Contacts: React.FC<ContactsProps> = ({
                             )}
                           </div>
                         </label>
-                        <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(contact)}
-                            className="h-8 w-8 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50"
-                            title="Edit Kontak"
-                          >
-                            <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setDeleteTarget({ id: contact.id, name: contact.nama_lengkap })
-                            }
-                            className="h-8 w-8 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50"
-                            title="Hapus Kontak"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-                          </button>
-                        </div>
+                        {(canEditContact || canDeleteContact) && (
+                          <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shrink-0">
+                            {canEditContact && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(contact)}
+                                className="h-8 w-8 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50"
+                                title="Edit Kontak"
+                              >
+                                <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
+                              </button>
+                            )}
+                            {canDeleteContact && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({ id: contact.id, name: contact.nama_lengkap })
+                                }
+                                className="h-8 w-8 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50"
+                                title="Hapus Kontak"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -729,7 +856,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                 </thead>
 
                 <tbody className="divide-y divide-gray-200 text-xs">
-                  {contacts.map((contact) => {
+                  {displayedContacts.map((contact) => {
                     const isSelected = selectedIds.includes(contact.id);
                     const birthDate = contact.tanggal_lahir ? new Date(contact.tanggal_lahir) : null;
                     const isBirthdayToday =
@@ -754,7 +881,18 @@ export const Contacts: React.FC<ContactsProps> = ({
                         </td>
 
                         <td className="py-3 px-4">
-                          <div className="font-semibold text-gray-900">{contact.nama_lengkap}</div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-semibold text-gray-900">{contact.nama_lengkap}</span>
+                            {contact.exclude_from_metrics && (
+                              <span
+                                title={contact.exclude_reason || 'Dikecualikan dari penilaian SLA/CSAT'}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-medium"
+                              >
+                                <EyeOff className="w-2.5 h-2.5" />
+                                <span>Non-Penilaian</span>
+                              </span>
+                            )}
+                          </div>
                           {contact.nama_panggilan && (
                             <div className="text-[11px] text-gray-500">
                               Panggilan: <span className="text-gray-700">{contact.nama_panggilan}</span>
@@ -859,26 +997,34 @@ export const Contacts: React.FC<ContactsProps> = ({
                         </td>
 
                         <td className="py-3 px-4 text-right">
-                          <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEditModal(contact)}
-                              className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
-                              title="Edit Kontak"
-                            >
-                              <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setDeleteTarget({ id: contact.id, name: contact.nama_lengkap })
-                              }
-                              className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 transition-colors"
-                              title="Hapus Kontak"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-                            </button>
-                          </div>
+                          {(canEditContact || canDeleteContact) ? (
+                            <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">
+                              {canEditContact && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditModal(contact)}
+                                  className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-indigo-700 hover:bg-indigo-50 transition-colors"
+                                  title="Edit Kontak"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                </button>
+                              )}
+                              {canDeleteContact && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDeleteTarget({ id: contact.id, name: contact.nama_lengkap })
+                                  }
+                                  className="h-7 w-7 inline-flex items-center justify-center text-gray-600 hover:text-red-700 hover:bg-red-50 transition-colors"
+                                  title="Hapus Kontak"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">Lihat saja</span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -891,12 +1037,13 @@ export const Contacts: React.FC<ContactsProps> = ({
 
         <div className="px-3.5 sm:px-4 py-3 bg-gray-50 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
           <span className="tabular-nums">
-            Total: <strong className="text-gray-900">{contacts.length}</strong> pelanggan | Terpilih:{' '}
+            Menampilkan: <strong className="text-gray-900">{displayedContacts.length}</strong>
+            {displayedContacts.length !== contacts.length ? ` dari ${contacts.length}` : ''} pelanggan | Terpilih:{' '}
             <strong className="text-indigo-700">{selectedIds.length}</strong>
           </span>
           {selectedIds.length > 0 && (
             <div className="flex items-center gap-3">
-              {onStartBroadcastWithContacts && (
+              {canSendBroadcast && onStartBroadcastWithContacts && (
                 <button
                   type="button"
                   onClick={() => onStartBroadcastWithContacts(selectedIds)}
@@ -1057,6 +1204,38 @@ export const Contacts: React.FC<ContactsProps> = ({
                 className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
               />
             </div>
+          </div>
+
+          <div className="p-3 rounded-md bg-amber-50/60 border border-amber-200/80 space-y-2">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.exclude_from_metrics}
+                onChange={(e) =>
+                  setFormData({ ...formData, exclude_from_metrics: e.target.checked })
+                }
+                className="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+              />
+              <div className="text-xs leading-snug">
+                <div className="font-semibold text-gray-900">
+                  Dikecualikan dari Penilaian SLA &amp; CSAT (Non-Penilaian)
+                </div>
+                <p className="text-[11px] text-gray-600 mt-0.5">
+                  Aktifkan jika kontak ini bukan pelanggan (misal internal tim, kurir, vendor, atau bot). Otomatis berlaku ke semua obrolan aktif &amp; obrolan masuk berikutnya.
+                </p>
+              </div>
+            </label>
+            {formData.exclude_from_metrics && (
+              <div>
+                <input
+                  type="text"
+                  placeholder="Alasan (misal: Tim Internal / Kurir / Vendor)"
+                  value={formData.exclude_reason}
+                  onChange={(e) => setFormData({ ...formData, exclude_reason: e.target.value })}
+                  className="w-full h-8 px-2.5 bg-white border border-amber-200 rounded text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            )}
           </div>
 
           {!editingContact && (
@@ -1317,6 +1496,109 @@ export const Contacts: React.FC<ContactsProps> = ({
         confirmLabel="Hapus Kontak"
         variant="danger"
       />
+
+      {/* WhatsApp Contact Sync Modal */}
+      <Modal
+        isOpen={isWaSyncModalOpen}
+        onClose={() => !syncingWa && setIsWaSyncModalOpen(false)}
+        title="Sinkronkan Kontak dari WhatsApp"
+        subtitle="Ambil daftar kontak tersimpan & chat dari sesi WAHA ke CRM"
+        isLoading={syncingWa}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setIsWaSyncModalOpen(false)}
+              disabled={syncingWa}
+            >
+              Tutup
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void handleRunWaSync()}
+              isLoading={syncingWa}
+              disabled={waSessions.length === 0}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Mulai Sinkronkan</span>
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4 text-xs text-gray-700">
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">
+              Pilih Sesi / Nomor WhatsApp (WAHA)
+            </label>
+            {waSessions.length === 0 ? (
+              <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800">
+                Belum ada sesi WhatsApp WAHA yang terhubung. Pastikan sesi berstatus WORKING di menu Integrasi &amp; Kanal.
+              </div>
+            ) : (
+              <select
+                value={syncSession}
+                onChange={(e) => setSyncSession(e.target.value)}
+                className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+              >
+                {waSessions.map((s) => (
+                  <option key={s.name} value={s.name}>
+                    {s.name} ({s.status}){s.me?.pushName ? ` — ${s.me.pushName}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          <label className="flex items-start gap-2 p-2.5 rounded-md border border-gray-200 bg-gray-50 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={overwriteNames}
+              onChange={(e) => setOverwriteNames(e.target.checked)}
+              className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <div>
+              <span className="font-medium text-gray-900 block">
+                Timpa nama kontak CRM yang sudah ada dengan nama dari WhatsApp
+              </span>
+              <span className="text-[11px] text-gray-500">
+                Jika tidak dicentang, nama pelanggan yang sudah Anda edit manual tidak akan berubah (hanya menambah kontak baru &amp; mengisi nama bawaan kosong).
+              </span>
+            </div>
+          </label>
+
+          {syncResult && (
+            <div className="p-3 rounded-md bg-emerald-50 border border-emerald-200 space-y-2">
+              <div className="flex items-center gap-1.5 font-semibold text-emerald-900">
+                <Smartphone className="w-4 h-4 text-emerald-600" />
+                <span>Hasil Sinkronisasi (Sesi: {syncResult.sessionUsed})</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center tabular-nums">
+                <div className="bg-white rounded border border-emerald-200 p-2">
+                  <span className="text-[10px] text-gray-500 block">Ditemukan</span>
+                  <span className="font-bold text-gray-900 text-sm">{syncResult.totalFetched}</span>
+                </div>
+                <div className="bg-white rounded border border-emerald-200 p-2">
+                  <span className="text-[10px] text-emerald-700 block">Baru</span>
+                  <span className="font-bold text-emerald-800 text-sm">+{syncResult.created}</span>
+                </div>
+                <div className="bg-white rounded border border-emerald-200 p-2">
+                  <span className="text-[10px] text-indigo-700 block">Diperbarui</span>
+                  <span className="font-bold text-indigo-800 text-sm">{syncResult.updated}</span>
+                </div>
+                <div className="bg-white rounded border border-emerald-200 p-2">
+                  <span className="text-[10px] text-gray-500 block">Dilewati</span>
+                  <span className="font-bold text-gray-700 text-sm">{syncResult.skipped}</span>
+                </div>
+              </div>
+              {syncResult.quotaStopped && (
+                <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  Sebagian kontak tidak ditambahkan karena kuota maksimal lisensi kontak telah tercapai.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };

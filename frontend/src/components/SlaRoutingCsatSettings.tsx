@@ -24,6 +24,7 @@ import { useToast } from './ui/ToastProvider';
 
 interface SlaRoutingCsatSettingsProps {
   licenseInfo?: LicenseInfo | null;
+  canEdit?: boolean;
 }
 
 const DEFAULT_CSAT_TEMPLATE =
@@ -116,7 +117,10 @@ function slugifyKey(raw: string, idx: number): string {
   return s || `aspek_${idx}`;
 }
 
-export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ licenseInfo }) => {
+export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({
+  licenseInfo,
+  canEdit = true,
+}) => {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -506,7 +510,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
           </div>
 
           <div className="flex justify-end">
-            <Button type="submit" variant="primary" size="md" isLoading={savingSla}>
+            <Button type="submit" variant="primary" size="md" isLoading={savingSla} disabled={!canEdit}>
               Simpan SLA &amp; Routing
             </Button>
           </div>
@@ -1299,7 +1303,7 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({ 
           </div>
 
           <div className="flex justify-end pt-1">
-            <Button type="submit" variant="primary" size="md" isLoading={savingCsat}>
+            <Button type="submit" variant="primary" size="md" isLoading={savingCsat} disabled={!canEdit}>
               Simpan Pengaturan &amp; Target CSAT
             </Button>
           </div>

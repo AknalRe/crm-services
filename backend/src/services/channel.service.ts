@@ -138,6 +138,20 @@ export async function upsertInboundChannelMessage(params: {
 
   const existing = convRows[0];
   let conversationId = existing?.id;
+  const inboundPush = (senderName || senderHandle || '').trim() || null;
+
+  const contactRows = await db
+    .select({
+      excludeFromMetrics: contacts.excludeFromMetrics,
+      excludeReason: contacts.excludeReason,
+    })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .limit(1);
+  const contactExcluded = Boolean(contactRows[0]?.excludeFromMetrics);
+  const contactExcludeReason = contactExcluded
+    ? (contactRows[0]?.excludeReason || 'Bukan Customer')
+    : null;
 
   if (!conversationId) {
     conversationId = crypto.randomUUID();
@@ -148,6 +162,9 @@ export async function upsertInboundChannelMessage(params: {
       channelAccountId,
       externalThreadId: externalThreadId || null,
       contextTitle: contextTitle || null,
+      pushName: inboundPush,
+      excludeFromMetrics: contactExcluded,
+      excludeReason: contactExcludeReason,
       status: 'OPEN',
       lastMessage: body,
       lastMessageAt: now,
@@ -165,6 +182,11 @@ export async function upsertInboundChannelMessage(params: {
       .set({
         externalThreadId: externalThreadId || existing.externalThreadId,
         contextTitle: contextTitle || existing.contextTitle,
+        pushName: inboundPush || existing.pushName,
+        excludeFromMetrics: contactExcluded ? true : existing.excludeFromMetrics,
+        excludeReason: contactExcluded
+          ? (contactExcludeReason || existing.excludeReason || 'Bukan Customer')
+          : existing.excludeReason,
         status: isReopeningFromResolved ? 'OPEN' : existing.status,
         sessionStartedAt: isReopeningFromResolved
           ? now

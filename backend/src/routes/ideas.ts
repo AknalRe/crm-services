@@ -12,7 +12,13 @@ const DEFAULT_IDEA_COLUMNS = [
 ];
 
 export default async function ideasRouter(fastify: FastifyInstance) {
-  fastify.addHook('preHandler', requirePermission('broadcasts'));
+  fastify.addHook('preHandler', async (req, reply) => {
+    const allowed =
+      req.method === 'GET'
+        ? requirePermission('broadcasts')
+        : requirePermission('broadcasts.send');
+    return allowed(req, reply);
+  });
 
   fastify.get('/columns', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {

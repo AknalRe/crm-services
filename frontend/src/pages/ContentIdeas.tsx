@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Lightbulb, Plus, Trash2, ArrowRight, ArrowLeft, Send, X } from 'lucide-react';
 import api from '../services/api';
-import { ContentIdeaItem, IdeaColumn } from '../types';
+import { AuthStatus, ContentIdeaItem, IdeaColumn } from '../types';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState } from '../components/ui/StateBlocks';
+import { hasPerm } from '../lib/permissions';
 
 interface ContentIdeasProps {
+  currentUser?: AuthStatus['user'] | null;
   onConvertToPost?: (prefill: {
     channel: 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
     caption: string;
@@ -19,8 +21,9 @@ const DEFAULT_COLUMNS: IdeaColumn[] = [
   { id: 'SIAP', label: 'Siap' },
 ];
 
-export const ContentIdeas: React.FC<ContentIdeasProps> = ({ onConvertToPost }) => {
+export const ContentIdeas: React.FC<ContentIdeasProps> = ({ currentUser, onConvertToPost }) => {
   const toast = useToast();
+  const canEdit = hasPerm(currentUser, 'broadcasts.send');
   const [ideas, setIdeas] = useState<ContentIdeaItem[]>([]);
   const [columns, setColumns] = useState<IdeaColumn[]>(DEFAULT_COLUMNS);
   const [loading, setLoading] = useState(true);
@@ -139,16 +142,18 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ onConvertToPost }) =
             Catat ide konten, atur per kolom (Ide, Dikerjakan, Siap), lalu jadikan postingan terjadwal saat siap.
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => {
-            setStage('IDE');
-            setShowForm((prev) => !prev);
-          }}
-        >
-          Catat Ide
-        </Button>
+        {canEdit && (
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setStage('IDE');
+              setShowForm((prev) => !prev);
+            }}
+          >
+            Catat Ide
+          </Button>
+        )}
       </div>
 
       {showForm && (
@@ -224,29 +229,31 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ onConvertToPost }) =
                       {colItems.length}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setStage(col.id);
-                        setShowForm(true);
-                      }}
-                      className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
-                      title={`Tambah ide ke ${col.label}`}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                    {!isDefaultCol && (
+                  {canEdit && (
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => handleRemoveColumn(col.id)}
-                        className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
-                        title={`Hapus kolom ${col.label}`}
+                        onClick={() => {
+                          setStage(col.id);
+                          setShowForm(true);
+                        }}
+                        className="p-1 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+                        title={`Tambah ide ke ${col.label}`}
                       >
-                        <X className="w-3.5 h-3.5" />
+                        <Plus className="w-3.5 h-3.5" />
                       </button>
-                    )}
-                  </div>
+                      {!isDefaultCol && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveColumn(col.id)}
+                          className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+                          title={`Hapus kolom ${col.label}`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {colItems.length === 0 ? (
@@ -265,14 +272,16 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ onConvertToPost }) =
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             {item.channel}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(item.id)}
-                            className="text-gray-400 hover:text-rose-600"
-                            title="Hapus ide"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(item.id)}
+                              className="text-gray-400 hover:text-rose-600"
+                              title="Hapus ide"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
 
                         <div className="text-xs font-semibold text-gray-900">{item.title}</div>
@@ -282,46 +291,48 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ onConvertToPost }) =
                           </p>
                         )}
 
-                        <div className="flex items-center justify-between pt-1.5 border-t border-gray-200/70 gap-1">
-                          <div className="flex items-center gap-1">
-                            {colIdx > 0 && (
+                        {canEdit && (
+                          <div className="flex items-center justify-between pt-1.5 border-t border-gray-200/70 gap-1">
+                            <div className="flex items-center gap-1">
+                              {colIdx > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveStage(item, columns[colIdx - 1].id)}
+                                  className="p-1 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
+                                  title={`Pindah ke ${columns[colIdx - 1].label}`}
+                                >
+                                  <ArrowLeft className="w-3 h-3" />
+                                </button>
+                              )}
+                              {colIdx < columns.length - 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMoveStage(item, columns[colIdx + 1].id)}
+                                  className="p-1 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
+                                  title={`Pindah ke ${columns[colIdx + 1].label}`}
+                                >
+                                  <ArrowRight className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+
+                            {onConvertToPost && (
                               <button
                                 type="button"
-                                onClick={() => handleMoveStage(item, columns[colIdx - 1].id)}
-                                className="p-1 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
-                                title={`Pindah ke ${columns[colIdx - 1].label}`}
+                                onClick={() =>
+                                  onConvertToPost({
+                                    channel: item.channel,
+                                    caption: item.notes ? `${item.title}\n\n${item.notes}` : item.title,
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-medium whitespace-nowrap"
                               >
-                                <ArrowLeft className="w-3 h-3" />
-                              </button>
-                            )}
-                            {colIdx < columns.length - 1 && (
-                              <button
-                                type="button"
-                                onClick={() => handleMoveStage(item, columns[colIdx + 1].id)}
-                                className="p-1 rounded bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
-                                title={`Pindah ke ${columns[colIdx + 1].label}`}
-                              >
-                                <ArrowRight className="w-3 h-3" />
+                                <Send className="w-2.5 h-2.5" />
+                                Jadikan Post
                               </button>
                             )}
                           </div>
-
-                          {onConvertToPost && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onConvertToPost({
-                                  channel: item.channel,
-                                  caption: item.notes ? `${item.title}\n\n${item.notes}` : item.title,
-                                })
-                              }
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-medium whitespace-nowrap"
-                            >
-                              <Send className="w-2.5 h-2.5" />
-                              Jadikan Post
-                            </button>
-                          )}
-                        </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -330,45 +341,47 @@ export const ContentIdeas: React.FC<ContentIdeasProps> = ({ onConvertToPost }) =
             );
           })}
 
-          <div className="bg-gray-50/70 rounded-lg border border-dashed border-gray-300 p-3.5">
-            {showAddCol ? (
-              <form onSubmit={handleAddColumn} className="space-y-2">
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder="Nama kolom baru (mis. Revisi)..."
-                  value={newColLabel}
-                  onChange={(e) => setNewColLabel(e.target.value)}
-                  className="w-full h-8 px-2.5 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
-                />
-                <div className="flex items-center justify-end gap-1.5">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setShowAddCol(false);
-                      setNewColLabel('');
-                    }}
-                  >
-                    Batal
-                  </Button>
-                  <Button type="submit" variant="primary" size="sm">
-                    Tambah
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShowAddCol(true)}
-                className="w-full py-2 inline-flex items-center justify-center gap-1.5 text-xs font-medium text-gray-600 hover:text-indigo-700"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Kolom
-              </button>
-            )}
-          </div>
+          {canEdit && (
+            <div className="bg-gray-50/70 rounded-lg border border-dashed border-gray-300 p-3.5">
+              {showAddCol ? (
+                <form onSubmit={handleAddColumn} className="space-y-2">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="Nama kolom baru (mis. Revisi)..."
+                    value={newColLabel}
+                    onChange={(e) => setNewColLabel(e.target.value)}
+                    className="w-full h-8 px-2.5 bg-white border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
+                  />
+                  <div className="flex items-center justify-end gap-1.5">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setShowAddCol(false);
+                        setNewColLabel('');
+                      }}
+                    >
+                      Batal
+                    </Button>
+                    <Button type="submit" variant="primary" size="sm">
+                      Tambah
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowAddCol(true)}
+                  className="w-full py-2 inline-flex items-center justify-center gap-1.5 text-xs font-medium text-gray-600 hover:text-indigo-700"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Kolom
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

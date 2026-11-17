@@ -29,130 +29,161 @@ const NAV_LINKS = [
 
 const USE_CASE_ROWS = [
   {
-    segment: 'Toko Online & Reseller',
+    segment: 'Toko Online & Multi-Nomor WhatsApp',
     problem:
-      'Chat masuk tersebar di 3-4 HP admin. Pesanan sering terlewat atau dibalas ganda saat jam sibuk.',
+      'Pelanggan menghubungi Nomor Admin A dan Nomor Cabang B — chat tercampur jadi satu benang, atau nama kontak berubah-ubah saat push name baru masuk.',
     solution:
-      'Semua nomor WhatsApp (QR & Resmi) dan DM media sosial masuk ke satu kotak masuk dengan pembagian tugas per staf CS.',
+      'Percakapan dipisah per nomor WhatsApp dan kanal sosial dengan push name atau label khusus per kanal, namun tetap tertaut ke profil pelanggan tunggal beserta identitas lintas kanalnya.',
   },
   {
-    segment: 'Bisnis Aktif Iklan IG / FB / Threads',
+    segment: 'Tim Multi-CS dengan Kebutuhan Role Ketat',
     problem:
-      'Komentar "harga?" atau "minat" di postingan iklan menumpuk dan tidak sempat di-DM satu per satu.',
+      'Semua akun staf punya akses yang sama — CS baru berisiko menghapus kontak, mengunduh seluruh database CSV, membuka chat agen lain, atau mengubah integrasi WAHA.',
     solution:
-      'Balas komentar otomatis dan kirim pesan pembuka ke DM pelanggan secara langsung agar calon pembeli segera ditangani.',
+      'Buat Role custom dari checklist batasan menu, aksi, dan tombol (termasuk izin lihat semua chat, balas/kelola tiket, ekspor CSV, edit kontak, kirim siaran, hingga kelola pengaturan).',
   },
   {
-    segment: 'Tim CS & Sales Berkembang',
+    segment: 'Grup WhatsApp & Chat Internal Mengacaukan Laporan',
     problem:
-      'Saat staf CS keluar, riwayat chat dan data pelanggan ikut hilang bersama nomor HP lama.',
+      'Pesan dari grup WhatsApp operasional, kurir, vendor, atau bot ikut masuk perhitungan SLA keterlambatan balas dan memicu survei CSAT otomatis.',
     solution:
-      'Data kontak, katalog produk, dan seluruh riwayat percakapan tersimpan di server Anda sendiri dengan akun login terpisah per staf.',
+      'Grup WhatsApp (@g.us) masuk lengkap dengan daftar partisipan & otomatis berstatus Non-Penilaian. Kontak non-customer juga bisa ditandai Non-Penilaian permanen agar obrolan seterusnya tetap dikecualikan.',
+  },
+  {
+    segment: 'Promosi WhatsApp Story & Jadwal Konten Harian',
+    problem:
+      'Admin lupa posting Story WA atau unggahan IG/FB/Threads saat jam promo, tidak bisa menyasar kontak WA tertentu, dan tidak tahu siapa saja yang menonton Story.',
+    solution:
+      'Jadwalkan postingan lintas kanal serta WhatsApp Story (teks, gambar, video, suara) ke daftar kontak terpilih, lengkap dengan sinkronisasi data penonton Story dari WhatsApp.',
+  },
+  {
+    segment: 'Evaluasi SLA, CSAT Multi-Sesi & Analitik Terlalu Dangkal',
+    problem:
+      'Pelanggan bertanya berkali-kali di hari berbeda, tetapi riwayat chat tertimpa/terputus dan angka grafik dashboard tidak menjelaskan percakapan mana yang lambat dibalas.',
+    solution:
+      'Riwayat chat tetap utuh tanpa reset; setiap sesi selesai dapat mengirim survei CSAT multi-kriteria baru. Seluruh kartu metrik, grafik tren, CSAT, dan performa CS di dashboard bisa diklik (drilldown) ke data detailnya.',
+  },
+  {
+    segment: 'Komentar Iklan IG / FB / Threads & Pertanyaan Luar Jam Kerja',
+    problem:
+      'Komentar "harga?" di postingan iklan menumpuk tanpa DM balasan, sementara chat malam hari menunggu admin pagi hingga calon pembeli keburu pindah toko.',
+    solution:
+      'Balas komentar & kirim pembuka DM otomatis, jalankan auto-reply kata kunci/jam operasional, atau aktifkan Agent AI (OpenAI, Gemini, Anthropic, Ollama, Knowledge Book & MCP Tools).',
   },
 ];
 
 const CHANNEL_ROWS = [
   {
-    name: 'WhatsApp (Scan QR)',
-    mode: 'Multi-nomor',
-    detail: 'Hubungkan beberapa nomor WhatsApp operasional cukup dengan scan QR.',
+    name: 'WhatsApp (Scan QR Multi-Sesi)',
+    mode: 'Chat, Grup & Story',
+    detail: 'Hubungkan banyak nomor WA sekaligus, sinkronkan kontak & grup WA, plus jadwalkan WhatsApp Story.',
   },
   {
     name: 'WhatsApp Bisnis Resmi',
     mode: 'Meta Cloud',
-    detail: 'Nomor resmi terverifikasi untuk komunikasi dan template bisnis.',
+    detail: 'Nomor resmi terverifikasi untuk komunikasi terstruktur, media interaktif, dan siaran bisnis.',
   },
   {
     name: 'Instagram',
-    mode: 'DM & Komentar',
-    detail: 'Balas DM dan tanggapi komentar postingan dari layar yang sama.',
+    mode: 'DM, Feed & Komentar',
+    detail: 'Balas DM, jadwalkan postingan feed, dan kirim DM otomatis ke komentar iklan dari satu layar.',
   },
   {
     name: 'Facebook Messenger',
     mode: 'Halaman & Komentar',
-    detail: 'Kelola pesan masuk halaman bisnis dan komentar iklan tanpa pindah tab.',
+    detail: 'Kelola pesan masuk halaman bisnis, penjadwalan post Page, dan komentar tanpa pindah aplikasi.',
   },
   {
     name: 'Threads',
-    mode: 'Komentar',
-    detail: 'Pantau dan balas interaksi komentar akun Threads usaha Anda.',
+    mode: 'Post & Mentions',
+    detail: 'Jadwalkan utas Threads serta pantau dan balas interaksi komentar akun usaha Anda.',
   },
   {
     name: 'Telegram',
-    mode: 'Bot Bisnis',
-    detail: 'Terima pertanyaan pelanggan atau notifikasi melalui bot Telegram.',
+    mode: 'Bot Bisnis & Channel',
+    detail: 'Terima pertanyaan pelanggan lewat bot Telegram atau jadwalkan pengumuman ke channel.',
   },
 ];
 
 const FEATURE_ITEMS = [
   {
     num: '01',
-    title: 'Asisten AI & Balas Komentar Otomatis',
-    desc: 'Menjawab pertanyaan umum di luar jam kerja dan menindaklanjuti komentar media sosial ke pesan pribadi.',
+    title: 'Multi-CS Role & Batasan Tombol Granular',
+    desc: 'Buat role custom dengan 18+ kontrol izin menu dan tombol: batasi siapa yang boleh membalas, melihat obrolan tim lain, mengekspor CSV, menghapus kontak, atau mengubah pengaturan.',
   },
   {
     num: '02',
-    title: 'Siaran Promo Terjadwal dengan Jeda Aman',
-    desc: 'Kirim info promo ke segmen kontak tertentu dengan jeda antar-pesan otomatis agar pengiriman lebih terjaga.',
+    title: 'Multi-Nomor WhatsApp, Grup WA & Push Name Terpisah',
+    desc: 'Satu kontak bisa dihubungkan melalui beberapa nomor WA/kanal dengan tampilan nama & riwayat obrolan terpisah per sesi, plus dukungan chat grup WhatsApp dan daftar partisipannya.',
   },
   {
     num: '03',
-    title: 'Katalog Produk & Ringkasan Tagihan di Chat',
-    desc: 'Pilih produk dan hitung total pesanan langsung di samping jendela chat tanpa perlu mengetik ulang harga.',
+    title: 'Filter Kontak Non-Penilaian untuk Akurasi SLA & CSAT',
+    desc: 'Tandai internal tim, vendor, kurir, atau grup WA sebagai Non-Penilaian sekali di kontak maupun obrolan agar obrolan seterusnya otomatis dikecualikan dari laporan & CSAT otomatis.',
   },
   {
     num: '04',
-    title: 'Pesan Ulang Tahun Pelanggan Otomatis',
-    desc: 'Kirim ucapan dan penawaran khusus pada hari ulang tahun pelanggan untuk mendorong pembelian ulang.',
+    title: 'WhatsApp Story Terjadwal, Audiens & Data Penonton',
+    desc: 'Publikasikan atau jadwalkan Story teks, foto, video, dan suara ke daftar kontak WA terpilih, pantau status pembacaannya, dan jadwalkan post IG/FB/Threads/Telegram dari satu kalender.',
   },
   {
     num: '05',
-    title: 'Survei Kepuasan & Target Waktu Balas',
-    desc: 'Kirim tautan penilaian singkat setelah chat selesai dan pantau kecepatan respon setiap staf CS.',
+    title: 'Analitik Dashboard Klik-untuk-Detail (Drilldown)',
+    desc: 'Klik kartu KPI, grafik tren 7 hari, funnel pengiriman siaran, sebaran jam sibuk, hingga aspek CSAT terendah untuk langsung memeriksa daftar kontak dan membuka percakapan terkait.',
   },
   {
     num: '06',
-    title: 'Tautan Sambung Akun untuk Klien',
-    desc: 'Bagikan tautan sekali pakai agar klien bisa menautkan akun media sosialnya tanpa memberi akses admin.',
+    title: 'Inbox Lengkap: Media, Reply Kutipan, Tombol & Typing',
+    desc: 'Kirim gambar, video, audio, dokumen, tautan preview, tombol interaktif, polling, balasan kutipan (quote reply), tanda dibaca real-time, serta indikator status mengetik pelanggan.',
+  },
+  {
+    num: '07',
+    title: 'Agent AI Multi-Model, Knowledge Book & MCP Tools',
+    desc: 'Hubungkan OpenAI, Gemini, Anthropic, atau Ollama lokal dengan buku panduan Markdown, skill, serta MCP tool server eksternal dan sistem failover model otomatis.',
+  },
+  {
+    num: '08',
+    title: 'Sinkron Kontak WhatsApp, Katalog Produk & Survei CSAT Multi-Sesi',
+    desc: 'Tarik kontak langsung dari sesi WA aktif tanpa input manual, sisipkan harga produk (Quick Quote), dan kumpulkan penilaian CSAT multi-kriteria per sesi selesai tanpa mereset riwayat chat.',
   },
 ];
 
 const COMPARISON_ROWS = [
   {
-    aspect: 'Semua chat WA, IG, FB, Threads & Telegram di 1 layar',
+    aspect: 'Semua chat WA, WA Bisnis, IG, FB, Threads & Telegram di 1 layar',
     manual: { ok: false, text: 'Harus buka banyak HP & aplikasi' },
-    saas: { ok: true, text: 'Ada, umumnya dibatasi paket' },
-    reneo: { ok: true, text: '6 kanal langsung di 1 layar' },
+    saas: { ok: true, text: 'Ada, umumnya dibatasi kuota kanal' },
+    reneo: { ok: true, text: '6 kanal + multi-nomor WA terpisah per sesi' },
   },
   {
-    aspect: 'Biaya tambahan per pesan & per nomor dari panel',
-    manual: { ok: true, text: 'Gratis, tapi rawan chat terlewat' },
-    saas: { ok: false, text: 'Kena biaya langganan / per pesan' },
-    reneo: { ok: true, text: 'Tanpa biaya per pesan dari panel' },
+    aspect: 'Role CS Custom dengan batasan menu, aksi & tombol di UI/API',
+    manual: { ok: false, text: 'Semua pegang HP akses penuh' },
+    saas: { ok: true, text: 'Umumnya terkunci di paket Enterprise' },
+    reneo: { ok: true, text: 'Termasuk builder Role & izin granular' },
   },
   {
-    aspect: 'Kepemilikan data pelanggan & riwayat chat',
-    manual: { ok: false, text: 'Hilang jika HP rusak atau staf keluar' },
-    saas: { ok: false, text: 'Tersimpan di server pihak ketiga' },
-    reneo: { ok: true, text: '100% di server Anda sendiri' },
+    aspect: 'Pengecualian grup WA & kontak Non-Penilaian pada metrik SLA/CSAT',
+    manual: { ok: false, text: 'Sulit dipilah di spreadsheet' },
+    saas: { ok: false, text: 'Semua chat masuk rata dihitung laporan' },
+    reneo: { ok: true, text: 'Otomatis untuk grup WA & melekat di kontak' },
   },
   {
-    aspect: 'Gabung WhatsApp Scan QR + WA Bisnis Resmi',
-    manual: { ok: false, text: 'Tidak terpusat' },
-    saas: { ok: false, text: 'Umumnya wajib WA Resmi saja' },
-    reneo: { ok: true, text: 'Bisa dipakai bersamaan' },
+    aspect: 'WhatsApp Story terjadwal + pilih target kontak + sinkron penonton',
+    manual: { ok: false, text: 'Posting manual tiap hari dari HP' },
+    saas: { ok: false, text: 'Tidak tersedia untuk WA Status/Story' },
+    reneo: { ok: true, text: 'Terjadwal multi-format + daftar penonton' },
   },
   {
-    aspect: 'Asisten AI & balas otomatis komentar sosial media',
-    manual: { ok: false, text: 'Balas manual satu per satu' },
-    saas: { ok: true, text: 'Biasanya fitur berbayar terpisah' },
-    reneo: { ok: true, text: 'Tersedia dan bisa diatur per kanal' },
+    aspect: 'Kepemilikan data pelanggan & biaya per pesan dari panel',
+    manual: { ok: false, text: 'Chat hilang jika HP rusak / staf resign' },
+    saas: { ok: false, text: 'Data di server vendor + biaya per pesan' },
+    reneo: { ok: true, text: '100% di server sendiri, nol biaya pesan panel' },
   },
   {
-    aspect: 'Pembagian chat tim CS & pantau kecepatan balas',
-    manual: { ok: false, text: 'Sulit dipantau, rawan rebutan chat' },
-    saas: { ok: true, text: 'Tersedia di paket menengah/atas' },
-    reneo: { ok: true, text: 'Pembagian otomatis, peran CS & laporan' },
+    aspect: 'Analitik Drilldown klik-untuk-detail + Agent AI (Multi-Model & MCP)',
+    manual: { ok: false, text: 'Tidak ada metrik SLA & AI' },
+    saas: { ok: true, text: 'Biasanya add-on berbayar terpisah' },
+    reneo: { ok: true, text: 'Bawaan langsung & fleksibel bawa API key sendiri' },
   },
 ];
 
@@ -169,35 +200,35 @@ const STEPS = [
   },
   {
     num: '03',
-    title: 'Sambungkan Kanal & Tim CS',
-    desc: 'Scan QR WhatsApp atau tautkan WA Bisnis, IG, FB, Threads, dan Telegram, lalu buat akun staf CS agar chat terbagi otomatis.',
+    title: 'Sambungkan Kanal, Sinkron Kontak & Atur Role CS',
+    desc: 'Scan QR WhatsApp multi-nomor, sinkronkan kontak WhatsApp, hubungkan kanal sosial media, lalu buat Role & akun tim CS sesuai batas wewenangnya.',
   },
 ];
 
 const FAQS = [
   {
-    q: 'Apakah bisa memakai WhatsApp biasa (QR) dan WhatsApp Bisnis Resmi bersamaan?',
-    a: 'Bisa. Anda dapat menggabungkan beberapa nomor WhatsApp lewat scan QR sekaligus menyambungkan nomor WhatsApp Bisnis resmi dari Meta di satu kotak masuk.',
+    q: 'Apakah bisa memakai banyak nomor WhatsApp QR dan WhatsApp Bisnis Resmi bersamaan?',
+    a: 'Bisa. Satu pelanggan yang mengirim pesan ke Nomor A dan Nomor B dipisahkan jendela percakapannya sesuai sesi dan push name masing-masing, tetapi tetap terhubung ke satu profil kontak CRM.',
   },
   {
-    q: 'Apakah ada biaya tambahan per pesan saat mengirim broadcast atau membalas chat?',
-    a: 'Tidak ada biaya tambahan per pesan dari panel Reneo. Nomor WhatsApp yang terhubung via scan QR (WAHA) tidak dikenakan biaya per percakapan Meta. Jika Anda memakai WhatsApp Cloud API resmi Meta, biaya percakapan mengikuti tarif langsung dari Meta Business.',
+    q: 'Bagaimana agar chat tim internal, kurir, atau grup WhatsApp tidak mengacaukan laporan SLA & CSAT?',
+    a: 'Obrolan grup WhatsApp otomatis ditandai Non-Penilaian (dan partisipannya tetap terlihat di panel chat). Untuk kontak pribadi internal/vendor, cukup tandai Non-Penilaian sekali — sistem akan menerapkannya ke kontak tersebut serta seluruh percakapan berikutnya secara otomatis.',
   },
   {
-    q: 'Apakah data kontak dan riwayat chat pelanggan aman?',
-    a: 'Aman. Seluruh data pelanggan, katalog produk, dan riwayat percakapan tersimpan langsung di server/container milik Anda sendiri, terpisah per domain dan tidak bercampur dengan pengguna lain.',
+    q: 'Apakah saya bisa membatasi staf CS agar hanya melihat chat miliknya dan tidak bisa menghapus/mengekspor data?',
+    a: 'Bisa. Melalui menu Role & Batasan Akses, Anda dapat membuat role baru (seperti CS Shift, Supervisor, atau Konten) dan mencentang izin per menu hingga level tombol (balas chat, kirim CSAT, tambah/hapus kontak, ekspor CSV, atau pengaturan WAHA).',
   },
   {
-    q: 'Apakah staf CS atau Sales bisa punya akun login masing-masing?',
-    a: 'Bisa. Anda dapat membuat akun terpisah untuk setiap staf, membatasi menu apa saja yang boleh dibuka, dan membagi chat masuk secara otomatis.',
+    q: 'Apakah ada biaya tambahan per pesan saat mengirim broadcast, Story WA, atau membalas chat?',
+    a: 'Tidak ada biaya tambahan per pesan dari panel Reneo. Nomor WhatsApp yang terhubung via scan QR (WAHA) tidak dikenakan biaya per percakapan Meta. Jika Anda memakai WhatsApp Cloud API resmi Meta, biaya mengikuti tarif langsung dari Meta Business.',
   },
   {
-    q: 'Apakah perlu keahlian IT untuk mengoperasikannya sehari-hari?',
-    a: 'Tidak perlu. Tampilan kotak masuk dibuat menyerupai aplikasi chat harian sehingga pemilik usaha maupun admin CS baru bisa langsung memakainya.',
+    q: 'Bagaimana jika satu pelanggan meminta survei CSAT beberapa kali pada sesi chat yang berbeda?',
+    a: 'Riwayat chat tidak pernah direset agar audit tetap mudah. Setiap kali sesi selesai dan survei dikirim, sistem membuat tiket CSAT tersendiri untuk periode tersebut dan tiap penilaian bisa langsung menyorot segmen chat terkaitnya.',
   },
   {
-    q: 'Bagaimana jika tim CS bertambah atau ada staf yang resign?',
-    a: 'Anda cukup membuat akun staf baru atau menonaktifkan akun lama di Pengaturan. Seluruh kontak dan riwayat chat pelanggan tetap tersimpan utuh di server Anda.',
+    q: 'Apakah data kontak dan riwayat chat pelanggan tetap aman jika ada staf CS yang keluar?',
+    a: 'Aman. Semua data kontak, identitas lintas kanal, dan riwayat percakapan tersimpan utuh di database server milik Anda sendiri. Anda cukup menonaktifkan atau mengganti role akun CS tersebut di Pengaturan.',
   },
 ];
 
@@ -333,9 +364,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </h1>
 
             <p className="text-sm text-slate-600 leading-relaxed">
-              Satukan pesan WhatsApp (Multi-Nomor QR &amp; Bisnis Resmi), komentar dan DM Instagram,
-              Facebook, Threads, serta Telegram di satu kotak masuk. Dilengkapi katalog produk,
-              Asisten AI, siaran terjadwal, dan laporan kecepatan balas tim.
+              Satukan pesan WhatsApp (Multi-Nomor QR, Grup WA, Story &amp; Bisnis Resmi), komentar
+              dan DM Instagram, Facebook, Threads, serta Telegram di satu kotak masuk. Dilengkapi
+              builder Role Multi-CS granular, filter kontak Non-Penilaian, Agent AI, siaran
+              terjadwal, dan dashboard analitik klik-untuk-detail.
             </p>
 
             <div className="space-y-2.5">
@@ -386,16 +418,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 pt-4 border-t border-slate-200">
               <div className="py-2 sm:py-0 sm:pr-4">
-                <div className="text-sm font-bold text-slate-900">6 Kanal Pesan</div>
-                <div className="text-xs text-slate-500">WA, WA Bisnis, IG, FB, Threads, TG</div>
+                <div className="text-sm font-bold text-slate-900">6 Kanal + WA Story</div>
+                <div className="text-xs text-slate-500">Multi-sesi WA, Grup, IG, FB, Threads, TG</div>
               </div>
               <div className="py-2 sm:py-0 sm:px-4">
-                <div className="text-sm font-bold text-slate-900">Multi-Staf CS</div>
-                <div className="text-xs text-slate-500">Bagi chat &amp; pantau respon</div>
+                <div className="text-sm font-bold text-slate-900">Multi-CS &amp; Role Custom</div>
+                <div className="text-xs text-slate-500">Batasi menu &amp; tombol per staf CS</div>
               </div>
               <div className="py-2 sm:py-0 sm:pl-4">
-                <div className="text-sm font-bold text-slate-900">Server Sendiri</div>
-                <div className="text-xs text-slate-500">Data kontak milik usaha Anda</div>
+                <div className="text-sm font-bold text-slate-900">SLA, CSAT &amp; Drilldown</div>
+                <div className="text-xs text-slate-500">Klik grafik untuk detail + Non-Penilaian</div>
               </div>
             </div>
           </div>

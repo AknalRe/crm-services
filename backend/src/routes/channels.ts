@@ -62,7 +62,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       accessToken?: string;
       verifyToken?: string;
     };
-  }>('/', { preHandler: requirePermission('settings') }, async (req, reply) => {
+  }>('/', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
       const channel = String(req.body?.channel || '').trim().toUpperCase() as OmnichannelType;
       if (!ALLOWED_CHANNELS.has(channel)) {
@@ -108,7 +108,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
   fastify.patch<{
     Params: { id: string };
     Body: { name?: string; accountId?: string; accessToken?: string; isActive?: boolean };
-  }>('/:id', { preHandler: requirePermission('settings') }, async (req, reply) => {
+  }>('/:id', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
     try {
       const patch: Record<string, any> = { updatedAt: new Date() };
       if (req.body?.name !== undefined) patch.name = String(req.body.name).trim();
@@ -135,7 +135,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
   // Delete channel account
   fastify.delete<{ Params: { id: string } }>(
     '/:id',
-    { preHandler: requirePermission('settings') },
+    { preHandler: requirePermission('settings.edit') },
     async (req, reply) => {
       try {
         const deleted = await db
@@ -410,7 +410,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
 
   fastify.post<{ Body: { channel?: string; label?: string; expiresHours?: number } }>(
     '/connect-links',
-    { preHandler: requirePermission('settings') },
+    { preHandler: requirePermission('settings.edit') },
     async (req, reply) => {
       try {
         const channel = String(req.body?.channel || '').trim().toUpperCase() as OmnichannelType;
@@ -612,7 +612,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         }
       } else {
         const authCheck = await new Promise<boolean>((resolve) => {
-          requirePermission('settings')(req as any, reply as any).then(
+          requirePermission('settings.edit')(req as any, reply as any).then(
             () => resolve(!reply.sent),
             () => resolve(false)
           );

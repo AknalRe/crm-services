@@ -10,7 +10,9 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
+import { hasPerm } from '../lib/permissions';
 import {
+  AuthStatus,
   Campaign,
   ChannelAccount,
   Contact,
@@ -27,13 +29,21 @@ import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
 interface BroadcastsProps {
+  currentUser?: AuthStatus['user'] | null;
   initialContactIds?: string[];
   licenseInfo?: LicenseInfo | null;
 }
 
-export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licenseInfo }) => {
+export const Broadcasts: React.FC<BroadcastsProps> = ({
+  currentUser,
+  initialContactIds,
+  licenseInfo,
+}) => {
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<'create' | 'history'>('create');
+  const canSendBroadcast = hasPerm(currentUser, 'broadcasts.send');
+  const [activeTab, setActiveTab] = useState<'create' | 'history'>(() =>
+    hasPerm(currentUser, 'broadcasts.send') ? 'create' : 'history'
+  );
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -251,18 +261,20 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
     <div className="space-y-5">
       {/* Top Navigation Tabs */}
       <div className="flex border-b border-gray-200 gap-4 sm:gap-6 overflow-x-auto">
-        <button
-          type="button"
-          onClick={() => setActiveTab('create')}
-          className={`pb-3 text-[13px] font-semibold flex items-center gap-2 border-b-2 whitespace-nowrap shrink-0 transition-colors ${
-            activeTab === 'create'
-              ? 'border-indigo-600 text-indigo-600'
-              : 'border-transparent text-gray-500 hover:text-gray-900'
-          }`}
-        >
-          <Send className="w-4 h-4 shrink-0" />
-          <span>Buat Siaran Baru</span>
-        </button>
+        {canSendBroadcast && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('create')}
+            className={`pb-3 text-[13px] font-semibold flex items-center gap-2 border-b-2 whitespace-nowrap shrink-0 transition-colors ${
+              activeTab === 'create'
+                ? 'border-indigo-600 text-indigo-600'
+                : 'border-transparent text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            <Send className="w-4 h-4 shrink-0" />
+            <span>Buat Siaran Baru</span>
+          </button>
+        )}
 
         <button
           type="button"
@@ -740,11 +752,13 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
             ) : campaigns.length === 0 ? (
               <EmptyState
                 title="Belum ada riwayat siaran"
-                description="Buat kampanye siaran pertama Anda di tab Buat Siaran Baru."
+                description="Belum ada kampanye siaran yang tercatat."
                 action={
-                  <Button variant="primary" size="sm" onClick={() => setActiveTab('create')}>
-                    Buat Siaran Baru
-                  </Button>
+                  canSendBroadcast ? (
+                    <Button variant="primary" size="sm" onClick={() => setActiveTab('create')}>
+                      Buat Siaran Baru
+                    </Button>
+                  ) : undefined
                 }
               />
             ) : (
@@ -797,7 +811,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                             {camp.status}
                           </span>
 
-                          {(camp.status === 'PROCESSING' || camp.status === 'SCHEDULED') && (
+                          {canSendBroadcast && (camp.status === 'PROCESSING' || camp.status === 'SCHEDULED') && (
                             <Button
                               variant="danger"
                               size="sm"
@@ -807,7 +821,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({ initialContactIds, licen
                             </Button>
                           )}
 
-                          {camp.failedCount > 0 && camp.status !== 'PROCESSING' && (
+                          {canSendBroadcast && camp.failedCount > 0 && camp.status !== 'PROCESSING' && (
                             <Button
                               variant="secondary"
                               size="sm"

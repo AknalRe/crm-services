@@ -14,9 +14,11 @@ import {
   AiSkillPreset,
   AiSlotVerifyResult,
   AiTestResult,
+  AuthStatus,
   BuiltinCrmTool,
   ExternalAiProviderId,
 } from '../types';
+import { hasPerm } from '../lib/permissions';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, ErrorState } from '../components/ui/StateBlocks';
 import { AiModelConfigPanel } from '../components/ai/AiModelConfigPanel';
@@ -198,8 +200,9 @@ function normalizeConfigState(cfg?: Partial<AiAgentConfig> | null): AiAgentConfi
   };
 }
 
-export const AiAgent: React.FC = () => {
+export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({ currentUser }) => {
   const toast = useToast();
+  const canEdit = hasPerm(currentUser, 'settings.edit');
   const [activeTab, setActiveTab] = useState<AiTabId>('personality');
   const [catalog, setCatalog] = useState<AiProviderCatalogEntry[]>(FALLBACK_CATALOG);
   const [config, setConfig] = useState<AiAgentConfig>(DEFAULT_FORM_CONFIG);
@@ -514,13 +517,20 @@ export const AiAgent: React.FC = () => {
         <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-gray-200 bg-white text-xs font-medium text-gray-800 self-start sm:self-auto">
           <input
             type="checkbox"
+            disabled={!canEdit}
             checked={config.enabled}
             onChange={(e) => void handleToggleAgentEnabled(e.target.checked)}
-            className="rounded border-gray-300"
+            className="rounded border-gray-300 disabled:opacity-50"
           />
           <span>{config.enabled ? 'Agent AI Aktif' : 'Agent AI Nonaktif'}</span>
         </label>
       </div>
+
+      {!canEdit && (
+        <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+          <strong>Mode Lihat Saja:</strong> Role <strong>{currentUser?.roleName || 'Agent'}</strong> hanya dapat meninjau konfigurasi Agent AI &amp; Knowledge Book tanpa hak mengubah (<code className="font-mono">settings.edit</code>).
+        </div>
+      )}
 
       <div className="flex items-center gap-5 border-b border-gray-200 overflow-x-auto">
         {(
@@ -558,14 +568,14 @@ export const AiAgent: React.FC = () => {
 
       {activeTab === 'personality' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          <div className="lg:col-span-7">
+          <fieldset disabled={!canEdit} className="lg:col-span-7 min-w-0">
             <AiPersonalityPromptPanel
               config={config}
               savingConfig={savingConfig}
               onChangeConfig={(patch) => setConfig((prev) => ({ ...prev, ...patch }))}
               onSave={handleSaveConfig}
             />
-          </div>
+          </fieldset>
           <div className="lg:col-span-5">
             <AiTestSimulatorPanel
               testMessage={testMessage}
@@ -582,7 +592,7 @@ export const AiAgent: React.FC = () => {
 
       {activeTab === 'models' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-          <div className="lg:col-span-7">
+          <fieldset disabled={!canEdit} className="lg:col-span-7 min-w-0">
             <AiModelConfigPanel
               config={config}
               catalog={catalog}
@@ -604,7 +614,7 @@ export const AiAgent: React.FC = () => {
               onAddFallback={handleAddFallback}
               onSave={handleSaveConfig}
             />
-          </div>
+          </fieldset>
           <div className="lg:col-span-5">
             <AiTestSimulatorPanel
               testMessage={testMessage}
@@ -620,24 +630,28 @@ export const AiAgent: React.FC = () => {
       )}
 
       {activeTab === 'knowledge' && (
-        <AiKnowledgeBooksPanel
-          books={books}
-          bookPresets={bookPresets}
-          knowledge={knowledge}
-          onRefreshKnowledge={refreshKnowledgeOnly}
-        />
+        <fieldset disabled={!canEdit} className="min-w-0">
+          <AiKnowledgeBooksPanel
+            books={books}
+            bookPresets={bookPresets}
+            knowledge={knowledge}
+            onRefreshKnowledge={refreshKnowledgeOnly}
+          />
+        </fieldset>
       )}
 
       {activeTab === 'skills-mcp' && (
-        <AiSkillsMcpPanel
-          config={config}
-          skills={skills}
-          skillPresets={skillPresets}
-          builtinTools={builtinTools}
-          mcpServers={mcpServers}
-          onRefreshSkillsAndMcp={refreshSkillsAndMcpOnly}
-          onSaveBuiltinTools={handleSaveBuiltinTools}
-        />
+        <fieldset disabled={!canEdit} className="min-w-0">
+          <AiSkillsMcpPanel
+            config={config}
+            skills={skills}
+            skillPresets={skillPresets}
+            builtinTools={builtinTools}
+            mcpServers={mcpServers}
+            onRefreshSkillsAndMcp={refreshSkillsAndMcpOnly}
+            onSaveBuiltinTools={handleSaveBuiltinTools}
+          />
+        </fieldset>
       )}
 
       {activeTab === 'simulator' && (

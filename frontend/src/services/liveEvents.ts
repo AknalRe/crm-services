@@ -8,7 +8,8 @@ type LiveEventType =
   | 'license:update'
   | 'sla:breach'
   | 'csat:low'
-  | 'posts:update';
+  | 'posts:update'
+  | 'contacts:update';
 
 type LiveListener = (payload: any) => void;
 
@@ -31,6 +32,8 @@ function ensureConnected() {
     'license:update',
     'sla:breach',
     'csat:low',
+    'posts:update',
+    'contacts:update',
   ];
 
   eventTypes.forEach((eventType) => {

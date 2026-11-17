@@ -6,6 +6,41 @@ import { formatCampaign, formatRecipient } from './broadcasts';
 import { CsatCriterionScoreDetail, extractCsatCriteriaDetails } from '../services/csat.service';
 import { getSettingMap, requirePermission } from './auth';
 
+function toWibDateKey(d: Date | string | null | undefined): string | null {
+  if (!d) return null;
+  const dateObj = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(dateObj.getTime())) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(dateObj)
+      .map((p) => [p.type, p.value])
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function isExcludedConversation(c: typeof conversations.$inferSelect): boolean {
+  return Boolean(c.excludeFromMetrics || c.isGroup);
+}
+
+function getConversationDisplayName(
+  c: typeof conversations.$inferSelect,
+  contact?: typeof contacts.$inferSelect | null
+): string {
+  return (
+    c.channelDisplayName?.trim() ||
+    c.contextTitle?.trim() ||
+    c.pushName?.trim() ||
+    contact?.namaLengkap?.trim() ||
+    contact?.nomorWhatsapp?.trim() ||
+    'Pelanggan'
+  );
+}
+
 type CriterionAggMap = Map<
   string,
   { key: string; label: string; sum: number; count: number; distribution: Record<number, number> }
@@ -44,7 +79,13 @@ function serializeCriteriaSummary(map: CriterionAggMap) {
 const DEFAULT_SLA_TARGET_MINUTES = 15;
 
 export default async function dashboardRouter(fastify: FastifyInstance) {
-  fastify.addHook('preHandler', requirePermission('dashboard'));
+  fastify.addHook('preHandler', async (req, reply) => {
+    const path = req.routeOptions?.url || req.url || '';
+    if (path.includes('/export')) {
+      return requirePermission('dashboard.export')(req, reply);
+    }
+    return requirePermission('dashboard')(req, reply);
+  });
   fastify.get('/stats', async (_req: FastifyRequest, reply: FastifyReply) => {
     try {
       const settings = await getSettingMap();
@@ -54,36 +95,32 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
 
       // Parallel aggregations
       const [
-        totalContactsRes,
+        allContactsList,
         totalCampaignsRes,
-        totalRecipientsRes,
-        pendingRes,
-        sentRes,
-        deliveredRes,
-        readRes,
-        failedRes,
+        allRecipientsRows,
         recentCampaignsList,
         recentActivityList,
-        birthdayContactsList,
         conversationRows,
         csatRows,
       ] = await Promise.all([
-        db.select({ count: sql<number>`count(*)` }).from(contacts),
+        db
+          .select({
+            id: contacts.id,
+            kategori: contacts.kategori,
+            tanggalLahir: contacts.tanggalLahir,
+            nomorWhatsapp: contacts.nomorWhatsapp,
+          })
+          .from(contacts),
         db.select({ count: sql<number>`count(*)` }).from(campaigns),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(eq(campaignRecipients.status, 'PENDING')),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(
-          or(eq(campaignRecipients.status, 'SENT'), eq(campaignRecipients.ackStatus, 1))
-        ),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(
-          or(eq(campaignRecipients.status, 'DELIVERED'), eq(campaignRecipients.ackStatus, 2))
-        ),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(
-          or(eq(campaignRecipients.status, 'READ'), gte(campaignRecipients.ackStatus, 3))
-        ),
-        db.select({ count: sql<number>`count(*)` }).from(campaignRecipients).where(
-          or(eq(campaignRecipients.status, 'FAILED'), eq(campaignRecipients.ackStatus, -1))
-        ),
+        db
+          .select({
+            status: campaignRecipients.status,
+            ackStatus: campaignRecipients.ackStatus,
+            sentAt: campaignRecipients.sentAt,
+            readAt: campaignRecipients.readAt,
+            createdAt: campaignRecipients.createdAt,
+          })
+          .from(campaignRecipients),
         db.select().from(campaigns).orderBy(desc(campaigns.createdAt)).limit(5),
         db
           .select({
@@ -96,7 +133,6 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           .leftJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
           .orderBy(desc(campaignRecipients.updatedAt))
           .limit(10),
-        db.select({ tanggalLahir: contacts.tanggalLahir }).from(contacts).where(isNotNull(contacts.tanggalLahir)),
         db
           .select({
             conv: conversations,
@@ -107,14 +143,35 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         db.select().from(csatResponses).where(isNotNull(csatResponses.rating)),
       ]);
 
-      const totalContacts = Number(totalContactsRes[0]?.count || 0);
+      const customerContacts = allContactsList.filter(
+        (c) => (c.kategori || '').trim().toLowerCase() !== 'grup whatsapp'
+      );
+      const totalContacts = customerContacts.length;
+      const groupContactsCount = allContactsList.length - customerContacts.length;
+
+      const categoryCountMap = new Map<string, number>();
+      for (const c of customerContacts) {
+        const cat = (c.kategori || '').trim() || 'Tanpa Kategori';
+        categoryCountMap.set(cat, (categoryCountMap.get(cat) || 0) + 1);
+      }
+      const contactCategories = Array.from(categoryCountMap.entries())
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+
       const totalCampaigns = Number(totalCampaignsRes[0]?.count || 0);
-      const totalRecipients = Number(totalRecipientsRes[0]?.count || 0);
-      const pendingRecipients = Number(pendingRes[0]?.count || 0);
-      const sentRecipients = Number(sentRes[0]?.count || 0);
-      const deliveredRecipients = Number(deliveredRes[0]?.count || 0);
-      const readRecipients = Number(readRes[0]?.count || 0);
-      const failedRecipients = Number(failedRes[0]?.count || 0);
+      const totalRecipients = allRecipientsRows.length;
+      let pendingRecipients = 0;
+      let sentRecipients = 0;
+      let deliveredRecipients = 0;
+      let readRecipients = 0;
+      let failedRecipients = 0;
+      for (const r of allRecipientsRows) {
+        if (r.status === 'PENDING') pendingRecipients++;
+        if (r.status === 'SENT' || r.ackStatus === 1) sentRecipients++;
+        if (r.status === 'DELIVERED' || r.ackStatus === 2) deliveredRecipients++;
+        if (r.status === 'READ' || r.ackStatus >= 3) readRecipients++;
+        if (r.status === 'FAILED' || r.ackStatus === -1) failedRecipients++;
+      }
 
       const totalSentAndBeyond = sentRecipients + deliveredRecipients + readRecipients;
       const deliveryRate =
@@ -138,11 +195,52 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       );
       const currentMonth = Number.parseInt(wibParts.month, 10);
       const currentDay = Number.parseInt(wibParts.day, 10);
-      const birthdayTodayCount = birthdayContactsList.filter((c) => {
+      const birthdayTodayCount = customerContacts.filter((c) => {
         if (!c.tanggalLahir) return false;
         const bDate = new Date(c.tanggalLahir);
         return bDate.getUTCMonth() + 1 === currentMonth && bDate.getUTCDate() === currentDay;
       }).length;
+
+      // Build last 7 days trend buckets (Asia/Jakarta)
+      const trendBuckets: Array<{
+        date: string;
+        label: string;
+        conversationsAssessed: number;
+        conversationsExcluded: number;
+        broadcastSent: number;
+        broadcastRead: number;
+      }> = [];
+      const trendMap = new Map<string, (typeof trendBuckets)[number]>();
+      for (let i = 6; i >= 0; i--) {
+        const day = new Date(Date.now() - i * 86_400_000);
+        const key = toWibDateKey(day)!;
+        const label = new Intl.DateTimeFormat('id-ID', {
+          timeZone: 'Asia/Jakarta',
+          day: 'numeric',
+          month: 'short',
+        }).format(day);
+        const entry = {
+          date: key,
+          label,
+          conversationsAssessed: 0,
+          conversationsExcluded: 0,
+          broadcastSent: 0,
+          broadcastRead: 0,
+        };
+        trendBuckets.push(entry);
+        trendMap.set(key, entry);
+      }
+      for (const r of allRecipientsRows) {
+        const sentKey = toWibDateKey(r.sentAt || r.createdAt);
+        if (sentKey && trendMap.has(sentKey)) {
+          if (r.status === 'SENT' || r.status === 'DELIVERED' || r.status === 'READ' || r.ackStatus >= 1) {
+            trendMap.get(sentKey)!.broadcastSent += 1;
+          }
+          if (r.status === 'READ' || r.ackStatus >= 3) {
+            trendMap.get(sentKey)!.broadcastRead += 1;
+          }
+        }
+      }
 
       // Chatwoot-style Conversation, SLA & CSAT Analytics
       let openCount = 0;
@@ -208,19 +306,39 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         submittedAt: Date | null;
       }> = [];
 
+      const assessedRows = conversationRows.filter((r) => !isExcludedConversation(r.conv));
+      const excludedCount = conversationRows.length - assessedRows.length;
+      const groupCount = conversationRows.filter((r) => Boolean(r.conv.isGroup)).length;
+
+      for (const row of conversationRows) {
+        const convDay = toWibDateKey(row.conv.lastInboundAt || row.conv.firstInboundAt || row.conv.createdAt);
+        if (convDay && trendMap.has(convDay)) {
+          if (isExcludedConversation(row.conv)) {
+            trendMap.get(convDay)!.conversationsExcluded += 1;
+          } else {
+            trendMap.get(convDay)!.conversationsAssessed += 1;
+          }
+        }
+      }
+
       const convIdsWithCsatRows = new Set<string>(csatRows.map((r) => r.conversationId));
       const convMetaMap = new Map<
         string,
-        { contactName: string; phone: string; wahaSession: string | null }
+        { contactName: string; phone: string; wahaSession: string | null; excluded: boolean }
       >();
 
       for (const row of conversationRows) {
         const c = row.conv;
         convMetaMap.set(c.id, {
-          contactName: row.contact?.namaLengkap || row.contact?.nomorWhatsapp || 'Pelanggan',
+          contactName: getConversationDisplayName(c, row.contact),
           phone: row.contact?.nomorWhatsapp || '',
           wahaSession: c.wahaSession,
+          excluded: isExcludedConversation(c),
         });
+      }
+
+      for (const row of assessedRows) {
+        const c = row.conv;
         const st = (c.status || 'OPEN').toUpperCase();
         if (st === 'RESOLVED') resolvedCount++;
         else if (st === 'PENDING') pendingCount++;
@@ -331,6 +449,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       for (const r of csatRows) {
         if (!r.rating || r.rating < 1 || r.rating > 5) continue;
         const meta = convMetaMap.get(r.conversationId);
+        if (meta?.excluded) continue;
         const scoreVal =
           typeof r.overallScore === 'number' && Number.isFinite(r.overallScore)
             ? r.overallScore
@@ -398,7 +517,10 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       });
 
       const conversationAnalytics = {
-        totalConversations: conversationRows.length,
+        totalConversations: assessedRows.length,
+        allConversationsCount: conversationRows.length,
+        excludedCount,
+        groupCount,
         openCount,
         pendingCount,
         resolvedCount,
@@ -451,6 +573,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         data: {
           summary: {
             totalContacts,
+            groupContactsCount,
             totalCampaigns,
             totalRecipients,
             pending: pendingRecipients,
@@ -461,12 +584,354 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             deliveryRate,
             readRate,
             birthdayTodayCount,
+            contactCategories,
+            activityTrend7d: trendBuckets,
           },
           conversationAnalytics,
           recentCampaigns: recentCampaignsList.map(formatCampaign),
           recentActivity: recentActivityList.map((r) =>
             formatRecipient(r.recipient, r.contact, r.campaign)
           ),
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // Interactive Click-to-Detail Drilldown endpoint for every Dashboard card, chart & table row
+  fastify.get<{
+    Querystring: { kind?: string; filter?: string; value?: string; q?: string };
+  }>('/drilldown', async (req, reply) => {
+    try {
+      const kind = String(req.query?.kind || 'conversations').toLowerCase().trim();
+      const filter = String(req.query?.filter || 'all').toLowerCase().trim();
+      const value = req.query?.value !== undefined ? String(req.query.value).trim() : '';
+      const q = String(req.query?.q || '').trim().toLowerCase();
+
+      if (kind === 'contacts') {
+        const rows = await db.select().from(contacts).orderBy(desc(contacts.createdAt));
+        const nonGroupContacts = rows.filter(
+          (c) => (c.kategori || '').trim().toLowerCase() !== 'grup whatsapp'
+        );
+
+        const wibParts = Object.fromEntries(
+          new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Jakarta',
+            month: '2-digit',
+            day: '2-digit',
+          })
+            .formatToParts(new Date())
+            .map((p) => [p.type, p.value])
+        );
+        const curMonth = Number.parseInt(wibParts.month, 10);
+        const curDay = Number.parseInt(wibParts.day, 10);
+
+        let matched = nonGroupContacts;
+        if (filter === 'birthday_today') {
+          matched = nonGroupContacts.filter((c) => {
+            if (!c.tanggalLahir) return false;
+            const d = new Date(c.tanggalLahir);
+            return d.getUTCMonth() + 1 === curMonth && d.getUTCDate() === curDay;
+          });
+        } else if (filter === 'category' && value) {
+          matched = nonGroupContacts.filter(
+            (c) => ((c.kategori || '').trim() || 'Tanpa Kategori').toLowerCase() === value.toLowerCase()
+          );
+        }
+
+        if (q) {
+          matched = matched.filter(
+            (c) =>
+              c.namaLengkap.toLowerCase().includes(q) ||
+              (c.nomorWhatsapp || '').includes(q) ||
+              (c.kategori || '').toLowerCase().includes(q) ||
+              (c.tags || '').toLowerCase().includes(q)
+          );
+        }
+
+        return reply.send({
+          success: true,
+          data: {
+            kind: 'contacts',
+            totalMatched: matched.length,
+            items: matched.slice(0, 200).map((c) => ({
+              id: c.id,
+              nama_lengkap: c.namaLengkap,
+              nama_panggilan: c.namaPanggilan,
+              nomor_whatsapp: c.nomorWhatsapp,
+              kategori: c.kategori || 'Tanpa Kategori',
+              tags: c.tags,
+              tanggal_lahir: c.tanggalLahir,
+              createdAt: c.createdAt,
+            })),
+          },
+        });
+      }
+
+      if (kind === 'recipients') {
+        const rows = await db
+          .select({
+            recipient: campaignRecipients,
+            contact: contacts,
+            campaign: campaigns,
+          })
+          .from(campaignRecipients)
+          .leftJoin(contacts, eq(campaignRecipients.contactId, contacts.id))
+          .leftJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
+          .orderBy(desc(campaignRecipients.updatedAt));
+
+        let matched = rows;
+        if (filter === 'sent') {
+          matched = rows.filter(
+            (r) =>
+              r.recipient.status === 'SENT' ||
+              r.recipient.status === 'DELIVERED' ||
+              r.recipient.status === 'READ' ||
+              r.recipient.ackStatus >= 1
+          );
+        } else if (filter === 'delivered') {
+          matched = rows.filter(
+            (r) =>
+              r.recipient.status === 'DELIVERED' ||
+              r.recipient.status === 'READ' ||
+              r.recipient.ackStatus >= 2
+          );
+        } else if (filter === 'read') {
+          matched = rows.filter(
+            (r) => r.recipient.status === 'READ' || r.recipient.ackStatus >= 3
+          );
+        } else if (filter === 'failed') {
+          matched = rows.filter(
+            (r) => r.recipient.status === 'FAILED' || r.recipient.ackStatus === -1
+          );
+        } else if (filter === 'pending') {
+          matched = rows.filter((r) => r.recipient.status === 'PENDING');
+        } else if (filter === 'campaign' && value) {
+          matched = rows.filter((r) => r.recipient.campaignId === value);
+        } else if (filter === 'date' && value) {
+          matched = rows.filter(
+            (r) => toWibDateKey(r.recipient.sentAt || r.recipient.createdAt) === value
+          );
+        }
+
+        if (q) {
+          matched = matched.filter(
+            (r) =>
+              (r.contact?.namaLengkap || '').toLowerCase().includes(q) ||
+              r.recipient.phone.includes(q) ||
+              (r.campaign?.title || '').toLowerCase().includes(q) ||
+              r.recipient.status.toLowerCase().includes(q)
+          );
+        }
+
+        return reply.send({
+          success: true,
+          data: {
+            kind: 'recipients',
+            totalMatched: matched.length,
+            items: matched.slice(0, 200).map((r) => formatRecipient(r.recipient, r.contact, r.campaign)),
+          },
+        });
+      }
+
+      if (kind === 'csat') {
+        const [csatList, convRows] = await Promise.all([
+          db
+            .select()
+            .from(csatResponses)
+            .where(isNotNull(csatResponses.rating))
+            .orderBy(desc(csatResponses.submittedAt)),
+          db
+            .select({ conv: conversations, contact: contacts })
+            .from(conversations)
+            .leftJoin(contacts, eq(conversations.contactId, contacts.id)),
+        ]);
+
+        const convMap = new Map(convRows.map((r) => [r.conv.id, r]));
+        const items: any[] = [];
+
+        for (const r of csatList) {
+          const row = convMap.get(r.conversationId);
+          if (row && isExcludedConversation(row.conv)) continue;
+          const criteriaDetails = extractCsatCriteriaDetails(r);
+          const overallScore =
+            typeof r.overallScore === 'number' && Number.isFinite(r.overallScore)
+              ? r.overallScore
+              : r.rating || 0;
+
+          if (filter === 'star' && value) {
+            if (String(r.rating) !== value) continue;
+          } else if (filter === 'criterion' && value) {
+            if (!criteriaDetails.some((cd) => cd.key === value)) continue;
+          } else if (filter === 'profile' && value) {
+            const profId = r.profileId || 'default';
+            if (profId !== value) continue;
+          } else if (filter === 'agent' && value) {
+            const ag = r.assignedAgentName || 'Belum Ditugaskan';
+            if (ag !== value) continue;
+          }
+
+          const contactName = row
+            ? getConversationDisplayName(row.conv, row.contact)
+            : 'Pelanggan';
+          const phone = row?.contact?.nomorWhatsapp || '';
+
+          if (q) {
+            const hay = `${contactName} ${phone} ${r.feedback || ''} ${r.assignedAgentName || ''} ${r.profileName || ''}`.toLowerCase();
+            if (!hay.includes(q)) continue;
+          }
+
+          items.push({
+            id: r.id,
+            conversationId: r.conversationId,
+            token: r.token,
+            contactName,
+            phone,
+            wahaSession: r.wahaSession || row?.conv.wahaSession || null,
+            agentName: r.assignedAgentName || null,
+            profileName: r.profileName || 'Umum (Default)',
+            rating: r.rating,
+            overallScore: Number(overallScore.toFixed(2)),
+            criteriaDetails,
+            feedback: r.feedback || null,
+            conversationStartedAt: r.conversationStartedAt || null,
+            conversationResolvedAt: r.conversationResolvedAt || null,
+            submittedAt: r.submittedAt || null,
+          });
+        }
+
+        return reply.send({
+          success: true,
+          data: {
+            kind: 'csat',
+            totalMatched: items.length,
+            items: items.slice(0, 200),
+          },
+        });
+      }
+
+      // Default: kind === 'conversations'
+      const settings = await getSettingMap();
+      const slaRaw = Number.parseInt(settings.sla_target_minutes || String(DEFAULT_SLA_TARGET_MINUTES), 10);
+      const slaTargetSeconds =
+        (Number.isFinite(slaRaw) && slaRaw >= 1 ? Math.min(1440, slaRaw) : DEFAULT_SLA_TARGET_MINUTES) * 60;
+
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .orderBy(desc(conversations.updatedAt));
+
+      let matched = convRows;
+      if (filter === 'excluded') {
+        matched = convRows.filter((r) => isExcludedConversation(r.conv));
+      } else if (filter === 'group') {
+        matched = convRows.filter((r) => Boolean(r.conv.isGroup));
+      } else {
+        const assessedOnly =
+          filter === 'date' ? convRows : convRows.filter((r) => !isExcludedConversation(r.conv));
+        if (filter === 'open') {
+          matched = assessedOnly.filter((r) => (r.conv.status || 'OPEN').toUpperCase() === 'OPEN');
+        } else if (filter === 'pending') {
+          matched = assessedOnly.filter((r) => (r.conv.status || 'OPEN').toUpperCase() === 'PENDING');
+        } else if (filter === 'resolved') {
+          matched = assessedOnly.filter((r) => (r.conv.status || 'OPEN').toUpperCase() === 'RESOLVED');
+        } else if (filter === 'frt') {
+          matched = assessedOnly.filter((r) => Boolean(r.conv.firstInboundAt && r.conv.firstResponseAt));
+        } else if (filter === 'resolved_time') {
+          matched = assessedOnly.filter((r) => Boolean(r.conv.resolvedAt && r.conv.createdAt));
+        } else if (filter === 'sla_met') {
+          matched = assessedOnly.filter((r) => {
+            if (!r.conv.firstInboundAt || !r.conv.firstResponseAt) return false;
+            const sec = Math.max(
+              0,
+              Math.round((new Date(r.conv.firstResponseAt).getTime() - new Date(r.conv.firstInboundAt).getTime()) / 1000)
+            );
+            return sec <= slaTargetSeconds;
+          });
+        } else if (filter === 'sla_breached') {
+          matched = assessedOnly.filter((r) => {
+            if (!r.conv.firstInboundAt || !r.conv.firstResponseAt) return false;
+            const sec = Math.max(
+              0,
+              Math.round((new Date(r.conv.firstResponseAt).getTime() - new Date(r.conv.firstInboundAt).getTime()) / 1000)
+            );
+            return sec > slaTargetSeconds;
+          });
+        } else if (filter === 'session' && value) {
+          matched = assessedOnly.filter((r) => (r.conv.wahaSession || 'Default') === value);
+        } else if (filter === 'channel' && value) {
+          matched = assessedOnly.filter(
+            (r) => (r.conv.channel || 'WHATSAPP').toUpperCase() === value.toUpperCase()
+          );
+        } else if (filter === 'agent' && value) {
+          matched = assessedOnly.filter(
+            (r) => (r.conv.assignedAgentName || 'Belum Ditugaskan') === value
+          );
+        } else if (filter === 'date' && value) {
+          matched = assessedOnly.filter(
+            (r) =>
+              toWibDateKey(r.conv.lastInboundAt || r.conv.firstInboundAt || r.conv.createdAt) === value
+          );
+        } else {
+          matched = assessedOnly;
+        }
+      }
+
+      if (q) {
+        matched = matched.filter((r) => {
+          const disp = getConversationDisplayName(r.conv, r.contact);
+          const hay = `${disp} ${r.contact?.namaLengkap || ''} ${r.contact?.nomorWhatsapp || ''} ${r.conv.wahaSession || ''} ${r.conv.assignedAgentName || ''} ${r.conv.lastMessage || ''}`.toLowerCase();
+          return hay.includes(q);
+        });
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          kind: 'conversations',
+          totalMatched: matched.length,
+          items: matched.slice(0, 200).map(({ conv, contact }) => {
+            const frtSeconds =
+              conv.firstInboundAt && conv.firstResponseAt
+                ? Math.max(
+                    0,
+                    Math.round(
+                      (new Date(conv.firstResponseAt).getTime() - new Date(conv.firstInboundAt).getTime()) / 1000
+                    )
+                  )
+                : null;
+            const resolutionSeconds =
+              conv.resolvedAt && conv.createdAt
+                ? Math.max(
+                    0,
+                    Math.round(
+                      (new Date(conv.resolvedAt).getTime() - new Date(conv.createdAt).getTime()) / 1000
+                    )
+                  )
+                : null;
+            return {
+              id: conv.id,
+              contactId: conv.contactId,
+              displayName: getConversationDisplayName(conv, contact),
+              contactName: contact?.namaLengkap || 'Pelanggan',
+              phone: contact?.nomorWhatsapp || '',
+              channel: conv.channel || 'WHATSAPP',
+              wahaSession: conv.wahaSession || null,
+              status: conv.status || 'OPEN',
+              isGroup: Boolean(conv.isGroup),
+              excludeFromMetrics: Boolean(conv.excludeFromMetrics),
+              excludeReason: conv.excludeReason || null,
+              assignedAgentName: conv.assignedAgentName || null,
+              frtSeconds,
+              resolutionSeconds,
+              slaMet: frtSeconds !== null ? frtSeconds <= slaTargetSeconds : null,
+              csatScore: conv.csatOverallScore ?? conv.csatRating ?? null,
+              lastMessage: conv.lastMessage || '',
+              lastMessageAt: conv.lastMessageAt,
+            };
+          }),
         },
       });
     } catch (error: any) {
@@ -565,7 +1030,11 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             return item;
           };
 
+          const excludedConvIds = new Set(
+            convRows.filter((r) => isExcludedConversation(r.conv)).map((r) => r.conv.id)
+          );
           for (const { conv } of convRows) {
+            if (isExcludedConversation(conv)) continue;
             const ag = ensure(conv.assignedAgentName || 'Belum Ditugaskan');
             ag.total++;
             if (conv.status === 'RESOLVED') ag.resolved++;
@@ -589,6 +1058,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           }
           const criterionLabels = new Map<string, string>();
           for (const c of csatRows) {
+            if (excludedConvIds.has(c.conversationId)) continue;
             if (typeof c.rating === 'number') {
               const ag = ensure(c.assignedAgentName || 'Belum Ditugaskan');
               const scoreVal =
@@ -659,6 +1129,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             'WhatsApp',
             'Kategori Kontak',
             'Sesi WAHA',
+            'Grup WA',
+            'Status Penilaian',
             'Agent',
             'Status',
             'Label',
@@ -680,12 +1152,17 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
                   )
                 : '';
             const details = latestCsatByConv.get(conv.id) || [];
+            const excludedLabel = isExcludedConversation(conv)
+              ? `Non-Penilaian (${conv.excludeReason || 'Bukan Customer'})`
+              : 'Dinilai';
             return [
               conv.id,
-              contact?.namaLengkap || '',
+              getConversationDisplayName(conv, contact),
               contact?.nomorWhatsapp || '',
               contact?.kategori || '',
               conv.wahaSession || '',
+              conv.isGroup ? 'Ya' : 'Tidak',
+              excludedLabel,
               conv.assignedAgentName || '',
               conv.status,
               conv.labels || '',

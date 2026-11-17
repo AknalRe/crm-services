@@ -1,8 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, desc, asc, gt } from 'drizzle-orm';
+import { and, eq, desc, asc, gt, inArray } from 'drizzle-orm';
 import { db } from '../db';
-import { conversations, chatMessages, contacts, contactIdentities, crmAgents, cannedResponses, csatResponses } from '../db/schema';
+import { conversations, chatMessages, contacts, contactIdentities, crmAgents, cannedResponses, csatResponses, channelAccounts } from '../db/schema';
 import { wahaService, WahaInteractiveButtonInput, WahaSendResult, formatInteractiveButtonsFallbackText, formatLinkPreviewFallbackText } from '../services/waha.service';
+import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import { OmnichannelType, sendOutboundChannelMessage } from '../services/channel.service';
@@ -13,7 +14,12 @@ import {
   parseCsatSurveyConfig,
   resolveCsatProfileForConversation,
 } from '../services/csat.service';
-import { getSettingMap, requirePermission } from './auth';
+import {
+  getCurrentAuthUser,
+  getSettingMap,
+  hasUserPermission,
+  requirePermission,
+} from './auth';
 import { readUploadedMediaAsDataUri, saveBase64MediaFile } from './media';
 import crypto from 'crypto';
 
@@ -60,6 +66,9 @@ async function resolveWhatsAppTarget(
   conv: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect
 ): Promise<string | null> {
+  if (conv.externalThreadId && conv.externalThreadId.toLowerCase().endsWith('@g.us')) {
+    return conv.externalThreadId.trim();
+  }
   if (contact.nomorWhatsapp && contact.nomorWhatsapp.trim()) {
     return contact.nomorWhatsapp.trim();
   }
@@ -268,7 +277,7 @@ async function markWhatsAppConversationSeen(
 }
 
 export default async function conversationsRouter(fastify: FastifyInstance) {
-  // Enforce Live Chat CRM license and conversations permission on all conversation routes
+  // Enforce Live Chat CRM license, menu access, and granular action permissions
   const checkConvPerm = requirePermission('conversations');
   fastify.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
     await checkConvPerm(req, reply);
@@ -282,6 +291,23 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         feature: 'liveChatCrm',
         error: err.message,
       });
+    }
+
+    const routePath = (req.routeOptions?.url || req.url || '').toLowerCase();
+    if (req.method === 'POST' && routePath.endsWith('/csat-cta')) {
+      return requirePermission('conversations.csat')(req, reply);
+    }
+    if (
+      req.method === 'POST' &&
+      (routePath.endsWith('/messages') || routePath.endsWith('/retry') || routePath.endsWith('/typing'))
+    ) {
+      return requirePermission('conversations.reply')(req, reply);
+    }
+    if (
+      (req.method === 'PATCH' || req.method === 'POST' || req.method === 'DELETE') &&
+      !routePath.endsWith('/read')
+    ) {
+      return requirePermission('conversations.manage')(req, reply);
     }
   });
 
@@ -455,9 +481,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   });
 
   // GET all conversations
-  fastify.get('/', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const rows = await db
+      const authUser = await getCurrentAuthUser(req);
+      const canViewAll = hasUserPermission(authUser, 'conversations.view_all');
+
+      const allRows = await db
         .select({
           conv: conversations,
           contact: contacts,
@@ -465,6 +494,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
         .orderBy(desc(conversations.updatedAt));
+
+      const rows = canViewAll
+        ? allRows
+        : allRows.filter(
+            (r) => !r.conv.assignedAgentId || (authUser?.id && r.conv.assignedAgentId === authUser.id)
+          );
 
       const csatRows = await db
         .select()
@@ -494,10 +529,28 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         csatByConv.set(cr.conversationId, list);
       }
 
+      const accountRows = await db
+        .select({ id: channelAccounts.id, name: channelAccounts.name })
+        .from(channelAccounts);
+      const accountNameMap = new Map<string, string>();
+      for (const acc of accountRows) {
+        accountNameMap.set(acc.id, acc.name);
+      }
+
       const data = rows.map((r) => ({
         id: r.conv.id,
         contactId: r.conv.contactId,
         wahaSession: r.conv.wahaSession,
+        pushName: r.conv.pushName || null,
+        channelDisplayName: r.conv.channelDisplayName || null,
+        externalThreadId: r.conv.externalThreadId || null,
+        contextTitle: r.conv.contextTitle || null,
+        isGroup: Boolean(r.conv.isGroup || r.conv.externalThreadId?.toLowerCase().endsWith('@g.us')),
+        excludeFromMetrics: Boolean(r.conv.excludeFromMetrics),
+        excludeReason: r.conv.excludeReason || null,
+        channelAccountName: r.conv.channelAccountId
+          ? accountNameMap.get(r.conv.channelAccountId) || null
+          : null,
         assignedAgentId: r.conv.assignedAgentId,
         assignedAgentName: r.conv.assignedAgentName,
         status: r.conv.status || 'OPEN',
@@ -529,6 +582,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               tags: r.contact.tags,
               notes: r.contact.notes,
               alamat: r.contact.alamat,
+              exclude_from_metrics: Boolean(r.contact.excludeFromMetrics),
+              exclude_reason: r.contact.excludeReason || null,
             }
           : undefined,
       }));
@@ -587,6 +642,191 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       }
 
       return reply.send({ success: true, data: messages });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // GET conversation participants (especially for WhatsApp group chats)
+  fastify.get('/:id/participants', async (
+    req: FastifyRequest<{
+      Params: { id: string };
+      Querystring: { sync?: string };
+    }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(eq(conversations.id, req.params.id))
+        .limit(1);
+      const row = convRows[0];
+      if (!row?.conv) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
+      const groupJid = row.conv.externalThreadId?.toLowerCase().endsWith('@g.us')
+        ? row.conv.externalThreadId.trim()
+        : null;
+      const isGroup = Boolean(row.conv.isGroup || groupJid);
+
+      const msgRows = await db
+        .select({
+          senderJid: chatMessages.senderJid,
+          senderPhone: chatMessages.senderPhone,
+          senderName: chatMessages.senderName,
+          direction: chatMessages.direction,
+          createdAt: chatMessages.createdAt,
+        })
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, row.conv.id))
+        .orderBy(asc(chatMessages.createdAt));
+
+      interface ParticipantEntry {
+        jid: string;
+        phone: string | null;
+        name: string | null;
+        contactId: string | null;
+        contactName: string | null;
+        role: 'superadmin' | 'admin' | 'member';
+        messageCount: number;
+        lastMessageAt: string | null;
+        inGroup: boolean;
+      }
+
+      const byKey = new Map<string, ParticipantEntry>();
+      const makeKey = (jid?: string | null, phone?: string | null, name?: string | null) => {
+        if (phone) return `p:${normalizePhoneNumber(phone)}`;
+        if (jid) return `j:${jid.toLowerCase()}`;
+        return `n:${String(name || 'unknown').toLowerCase()}`;
+      };
+
+      for (const m of msgRows) {
+        if (m.direction !== 'INBOUND') continue;
+        if (!m.senderJid && !m.senderPhone && !m.senderName) continue;
+        const phone = m.senderPhone ? normalizePhoneNumber(m.senderPhone) : null;
+        const jid = m.senderJid || (phone ? `${phone}@c.us` : m.senderName || 'unknown');
+        const key = makeKey(jid, phone, m.senderName);
+        const prev = byKey.get(key);
+        const iso = m.createdAt ? new Date(m.createdAt).toISOString() : null;
+        if (!prev) {
+          byKey.set(key, {
+            jid,
+            phone,
+            name: m.senderName || (phone ? `+${phone}` : fromWahaChatId(jid)),
+            contactId: null,
+            contactName: null,
+            role: 'member',
+            messageCount: 1,
+            lastMessageAt: iso,
+            inGroup: true,
+          });
+        } else {
+          byKey.set(key, {
+            ...prev,
+            name: m.senderName || prev.name,
+            phone: phone || prev.phone,
+            messageCount: prev.messageCount + 1,
+            lastMessageAt: iso || prev.lastMessageAt,
+          });
+        }
+      }
+
+      let groupName: string | null = row.conv.contextTitle || row.contact?.namaLengkap || null;
+      let syncError: string | null = null;
+      if (isGroup && groupJid && req.query?.sync !== 'false') {
+        try {
+          const grpInfo = await wahaService.getGroupInfo(groupJid, row.conv.wahaSession || undefined);
+          if (grpInfo) {
+            if (grpInfo.subject) {
+              groupName = grpInfo.subject;
+              if (
+                (!row.conv.contextTitle || /^Grup (WhatsApp|\d+)/i.test(row.conv.contextTitle)) &&
+                row.conv.contextTitle !== grpInfo.subject
+              ) {
+                await db
+                  .update(conversations)
+                  .set({ contextTitle: grpInfo.subject, pushName: grpInfo.subject, updatedAt: new Date() })
+                  .where(eq(conversations.id, row.conv.id))
+                  .catch(() => {});
+              }
+            }
+            for (const gp of grpInfo.participants) {
+              const key = makeKey(gp.jid, gp.phone, gp.name);
+              const prev = byKey.get(key);
+              if (!prev) {
+                byKey.set(key, {
+                  jid: gp.jid,
+                  phone: gp.phone,
+                  name: gp.name || (gp.phone ? `+${gp.phone}` : fromWahaChatId(gp.jid)),
+                  contactId: null,
+                  contactName: null,
+                  role: gp.role,
+                  messageCount: 0,
+                  lastMessageAt: null,
+                  inGroup: true,
+                });
+              } else {
+                byKey.set(key, {
+                  ...prev,
+                  role: gp.role !== 'member' ? gp.role : prev.role,
+                  name: prev.name || gp.name,
+                  phone: prev.phone || gp.phone,
+                  inGroup: true,
+                });
+              }
+            }
+          }
+        } catch (err: any) {
+          syncError = err?.message || 'Gagal sinkronisasi anggota grup dari WAHA';
+        }
+      }
+
+      // Enrich with CRM contacts when phone numbers match
+      const phones = Array.from(
+        new Set(Array.from(byKey.values()).map((x) => x.phone).filter(Boolean) as string[])
+      );
+      if (phones.length > 0) {
+        const matchedContacts = await db
+          .select({ id: contacts.id, namaLengkap: contacts.namaLengkap, nomorWhatsapp: contacts.nomorWhatsapp })
+          .from(contacts)
+          .where(inArray(contacts.nomorWhatsapp, phones));
+        const contactByPhone = new Map(
+          matchedContacts
+            .filter((c) => Boolean(c.nomorWhatsapp))
+            .map((c) => [normalizePhoneNumber(c.nomorWhatsapp!), c])
+        );
+        for (const [key, entry] of byKey.entries()) {
+          if (entry.phone && contactByPhone.has(entry.phone)) {
+            const matched = contactByPhone.get(entry.phone)!;
+            byKey.set(key, {
+              ...entry,
+              contactId: matched.id,
+              contactName: matched.namaLengkap,
+            });
+          }
+        }
+      }
+
+      const participants = Array.from(byKey.values()).sort((a, b) => {
+        if (b.messageCount !== a.messageCount) return b.messageCount - a.messageCount;
+        const roleRank = { superadmin: 3, admin: 2, member: 1 };
+        if (roleRank[b.role] !== roleRank[a.role]) return roleRank[b.role] - roleRank[a.role];
+        return (a.contactName || a.name || a.jid).localeCompare(b.contactName || b.name || b.jid);
+      });
+
+      return reply.send({
+        success: true,
+        data: {
+          isGroup,
+          groupJid,
+          groupName,
+          participants,
+          syncError,
+        },
+      });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }
@@ -686,24 +926,29 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .orderBy(desc(conversations.updatedAt));
 
       const now = new Date();
-      const targetSession = req.body?.session?.trim() || existingRows[0]?.wahaSession || null;
+      const requestedSession = req.body?.session?.trim() || null;
+      const matchedExisting = requestedSession
+        ? existingRows.find((c) => c.wahaSession === requestedSession) ||
+          existingRows.find((c) => !c.wahaSession)
+        : existingRows[0];
+      const targetSession = requestedSession || matchedExisting?.wahaSession || null;
 
-      if (existingRows[0]) {
-        const isReopeningFromResolved = existingRows[0].status === 'RESOLVED';
+      if (matchedExisting) {
+        const isReopeningFromResolved = matchedExisting.status === 'RESOLVED';
         const updated = await db
           .update(conversations)
           .set({
             status: 'OPEN',
             sessionStartedAt: isReopeningFromResolved
               ? now
-              : existingRows[0].sessionStartedAt || existingRows[0].firstInboundAt || existingRows[0].createdAt,
+              : matchedExisting.sessionStartedAt || matchedExisting.firstInboundAt || matchedExisting.createdAt,
             resolvedAt: null,
             wahaSession: targetSession,
             updatedAt: now,
           })
-          .where(eq(conversations.id, existingRows[0].id))
+          .where(eq(conversations.id, matchedExisting.id))
           .returning();
-        liveEvents.emit('conversations:update', { conversationId: existingRows[0].id });
+        liveEvents.emit('conversations:update', { conversationId: matchedExisting.id });
         return reply.send({ success: true, data: updated[0] });
       }
 
@@ -714,6 +959,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           contactId: contact.id,
           channel: 'WHATSAPP',
           status: 'OPEN',
+          excludeFromMetrics: Boolean(contact.excludeFromMetrics),
+          excludeReason: contact.excludeFromMetrics ? (contact.excludeReason || 'Bukan Customer') : null,
           sessionStartedAt: now,
           wahaSession: targetSession,
           unreadCount: 0,
@@ -729,12 +976,16 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // PATCH update conversation metadata (status, labels, wahaSession, contact notes/tags)
+  // PATCH update conversation metadata (status, labels, channelDisplayName, excludeFromMetrics, wahaSession, contact notes/tags)
   fastify.patch('/:id', async (req: FastifyRequest<{
     Params: { id: string };
     Body: {
       status?: string;
       labels?: string | null;
+      channelDisplayName?: string | null;
+      excludeFromMetrics?: boolean;
+      excludeReason?: string | null;
+      applyToContact?: boolean;
       wahaSession?: string | null;
       contactNotes?: string | null;
       contactTags?: string | null;
@@ -779,6 +1030,27 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         convUpdate.labels = req.body.labels ? String(req.body.labels).trim() || null : null;
       }
 
+      if (req.body?.channelDisplayName !== undefined) {
+        convUpdate.channelDisplayName = req.body.channelDisplayName
+          ? String(req.body.channelDisplayName).trim() || null
+          : null;
+      }
+
+      if (typeof req.body?.excludeFromMetrics === 'boolean') {
+        convUpdate.excludeFromMetrics = req.body.excludeFromMetrics;
+        if (req.body.excludeFromMetrics) {
+          convUpdate.excludeReason = req.body.excludeReason !== undefined
+            ? (req.body.excludeReason ? String(req.body.excludeReason).trim() || 'Bukan Customer' : 'Bukan Customer')
+            : (existing.excludeReason || (existing.isGroup ? 'Grup WhatsApp' : 'Bukan Customer'));
+        } else if (req.body.excludeReason === undefined) {
+          convUpdate.excludeReason = null;
+        }
+      } else if (req.body?.excludeReason !== undefined) {
+        convUpdate.excludeReason = req.body.excludeReason
+          ? String(req.body.excludeReason).trim() || null
+          : null;
+      }
+
       if (req.body?.wahaSession !== undefined) {
         convUpdate.wahaSession = req.body.wahaSession ? String(req.body.wahaSession).trim() || null : null;
       }
@@ -803,13 +1075,42 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .set(convUpdate)
         .where(eq(conversations.id, existing.id));
 
-      if (req.body?.contactNotes !== undefined || req.body?.contactTags !== undefined) {
+      // Propagate Non-Penilaian marking to the master Contact and all its sibling/future non-group conversations by default
+      const shouldPropagateMetricExclusion =
+        (typeof req.body?.excludeFromMetrics === 'boolean' || req.body?.excludeReason !== undefined) &&
+        req.body?.applyToContact !== false;
+
+      if (
+        req.body?.contactNotes !== undefined ||
+        req.body?.contactTags !== undefined ||
+        shouldPropagateMetricExclusion
+      ) {
         const contactUpdate: any = { updatedAt: now };
         if (req.body.contactNotes !== undefined) {
           contactUpdate.notes = req.body.contactNotes ? String(req.body.contactNotes).trim() || null : null;
         }
         if (req.body.contactTags !== undefined) {
           contactUpdate.tags = req.body.contactTags ? String(req.body.contactTags).trim() || null : null;
+        }
+        if (shouldPropagateMetricExclusion) {
+          const nextExcl =
+            convUpdate.excludeFromMetrics !== undefined
+              ? Boolean(convUpdate.excludeFromMetrics)
+              : existing.excludeFromMetrics;
+          const nextReason = nextExcl
+            ? (convUpdate.excludeReason !== undefined ? convUpdate.excludeReason : existing.excludeReason) ||
+              (existing.isGroup ? 'Grup WhatsApp' : 'Bukan Customer')
+            : null;
+          contactUpdate.excludeFromMetrics = nextExcl;
+          contactUpdate.excludeReason = nextReason;
+          await db
+            .update(conversations)
+            .set({
+              excludeFromMetrics: nextExcl,
+              excludeReason: nextReason,
+              updatedAt: now,
+            })
+            .where(and(eq(conversations.contactId, existing.contactId), eq(conversations.isGroup, false)));
         }
         await db
           .update(contacts)
@@ -826,9 +1127,14 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         convUpdate.status === 'RESOLVED' && existing.status !== 'RESOLVED';
       if (transitioningToResolved) {
         const settings = await getSettingMap();
+        const isExcluded = Boolean(
+          convUpdate.excludeFromMetrics !== undefined
+            ? convUpdate.excludeFromMetrics
+            : existing.excludeFromMetrics || existing.isGroup
+        );
         const shouldSendCsat =
           req.body?.sendCsat === true ||
-          (req.body?.sendCsat !== false && settings.csat_auto_on_resolve === 'true');
+          (req.body?.sendCsat !== false && settings.csat_auto_on_resolve === 'true' && !isExcluded);
         if (shouldSendCsat) {
           const contactRows = await db
             .select()
@@ -1073,7 +1379,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           quotedSenderLabel =
             quotedRows[0].direction === 'OUTBOUND'
               ? 'Tim CS'
-              : conversation.contact.namaLengkap || 'Pelanggan';
+              : quotedRows[0].senderName || conversation.contact.namaLengkap || 'Pelanggan';
           quotedWahaId = quotedRows[0].wahaMessageId || undefined;
         }
       }

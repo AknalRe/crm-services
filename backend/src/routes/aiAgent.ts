@@ -72,7 +72,12 @@ function serializeSkill(row: typeof aiSkills.$inferSelect) {
 }
 
 export default async function aiAgentRouter(fastify: FastifyInstance) {
-  fastify.addHook('preHandler', requirePermission('settings'));
+  fastify.addHook('preHandler', async (req, reply) => {
+    if (req.method === 'GET') {
+      return requirePermission('settings')(req, reply);
+    }
+    return requirePermission('settings.edit')(req, reply);
+  });
 
   // ── Provider Catalog, Config, Model Discovery & Testing ─────────────────
 

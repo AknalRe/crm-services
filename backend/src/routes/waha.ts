@@ -8,7 +8,9 @@ import {
   contactIdentities,
   contacts,
   conversations,
+  scheduledPosts,
 } from '../db/schema';
+import { upsertWhatsappStatusView } from '../services/post.service';
 import { wahaService } from '../services/waha.service';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
@@ -234,6 +236,51 @@ export function extractPhoneCandidatesFromWahaPayload(payload: any): string[] {
   return out;
 }
 
+export function extractGroupParticipant(payload: any): {
+  participantJid: string | null;
+  participantPhone: string | null;
+} {
+  const jidCandidates = [
+    payload?.participant,
+    payload?.author,
+    payload?._data?.participant,
+    payload?._data?.key?.participant,
+    payload?._data?.Info?.SenderAlt,
+    payload?._data?.Info?.Sender,
+  ];
+  let participantJid: string | null = null;
+  for (const c of jidCandidates) {
+    if (typeof c !== 'string') continue;
+    const trimmed = c.trim();
+    if (!trimmed || trimmed.toLowerCase().endsWith('@g.us') || trimmed.toLowerCase().endsWith('@broadcast')) {
+      continue;
+    }
+    participantJid = trimmed;
+    break;
+  }
+
+  const phoneCandidates = [
+    payload?._data?.Info?.SenderAlt,
+    payload?._data?.key?.participantPn,
+    payload?._data?.key?.senderPn,
+    participantJid,
+  ];
+  let participantPhone: string | null = null;
+  for (const c of phoneCandidates) {
+    if (typeof c !== 'string') continue;
+    const trimmed = c.trim();
+    if (!trimmed || !isPhoneWahaJid(trimmed)) continue;
+    const normalized = normalizePhoneNumber(fromWahaChatId(trimmed));
+    const digits = normalized.replace(/\D/g, '');
+    if (digits.length >= 7 && digits.length <= 15) {
+      participantPhone = normalized;
+      break;
+    }
+  }
+
+  return { participantJid, participantPhone };
+}
+
 export function extractWahaPresence(
   payload: any
 ): { chatId: string; status: 'typing' | 'recording' | 'online' | 'paused' } | null {
@@ -267,7 +314,7 @@ export function extractWahaPresence(
   return null;
 }
 
-function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: string[] } {
+export function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: string[] } {
   const batchIds = [
     ...(Array.isArray(payload?.ids) ? payload.ids : []),
     ...(Array.isArray(payload?._data?.Info?.IDs) ? payload._data.Info.IDs : []),
@@ -290,10 +337,15 @@ function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: s
     const trimmed = val.trim();
     if (!trimmed) continue;
     exactSet.add(trimmed);
+    // WAHA status ACK ids follow `<fromMe>_status@broadcast_<STANZA>_<VIEWER_JID>`
+    const statusMatch = trimmed.match(/status@broadcast_([^_]+)(?:_|$)/i);
+    if (statusMatch?.[1] && statusMatch[1].length >= 6) {
+      stanzaSet.add(statusMatch[1].trim());
+    }
     const lastUnderscore = trimmed.lastIndexOf('_');
     if (lastUnderscore !== -1 && lastUnderscore < trimmed.length - 1) {
       const stanza = trimmed.slice(lastUnderscore + 1).trim();
-      if (stanza.length >= 8) {
+      if (stanza.length >= 8 && !stanza.includes('@')) {
         stanzaSet.add(stanza);
       }
     }
@@ -303,6 +355,35 @@ function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: s
     exactIds: Array.from(exactSet),
     stanzaIds: Array.from(stanzaSet),
   };
+}
+
+export function extractStatusAckParticipant(payload: any, exactIds: string[]): string | null {
+  const directCandidates = [
+    payload?.participant,
+    payload?.id?.participant,
+    payload?._data?.Info?.SenderAlt,
+    payload?._data?.Info?.Sender,
+    payload?._data?.participant,
+    payload?._data?.key?.participant,
+  ];
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (trimmed && !trimmed.toLowerCase().startsWith('status@broadcast')) {
+        return trimmed;
+      }
+    }
+  }
+  for (const idStr of exactIds) {
+    const suffixMatch = idStr.match(/status@broadcast_[^_]+_(.+)$/i);
+    if (suffixMatch?.[1]) {
+      const viewer = suffixMatch[1].trim();
+      if (viewer && !viewer.toLowerCase().startsWith('status@broadcast')) {
+        return viewer;
+      }
+    }
+  }
+  return null;
 }
 
 function normalizeWahaAck(payload: any): number | null {
@@ -328,8 +409,8 @@ function normalizeWahaAck(payload: any): number | null {
 }
 
 export default async function wahaRouter(fastify: FastifyInstance) {
-  const requireWahaRead = requirePermission('settings', 'conversations', 'broadcasts');
-  const requireWahaManage = requirePermission('settings');
+  const requireWahaRead = requirePermission('settings', 'conversations', 'broadcasts', 'contacts');
+  const requireWahaManage = requirePermission('settings.edit');
 
   // GET WAHA server & session status
   fastify.get('/status', { preHandler: requireWahaRead }, async (req: FastifyRequest, reply: FastifyReply) => {
@@ -605,6 +686,56 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             })
             .where(and(or(...chatConditions), lt(chatMessages.ackStatus, ackValue)));
 
+          // Record real-time WhatsApp Status/Story viewer receipts
+          const ackFrom = String(
+            payload?.from || payload?.to || payload?.chatId || payload?._data?.Info?.Chat || ''
+          ).toLowerCase();
+          const isStatusAck =
+            ackFrom === 'status@broadcast' ||
+            exactIds.some((idVal) => idVal.toLowerCase().includes('status@broadcast'));
+          if (isStatusAck && ackValue >= 2) {
+            const viewerJid = extractStatusAckParticipant(payload, exactIds);
+            if (viewerJid) {
+              const statusPostConditions = [
+                inArray(scheduledPosts.externalPostId, allIds),
+                ...stanzaIds.map((stanza) => like(scheduledPosts.externalPostId, `%_${stanza}%`)),
+                ...stanzaIds.map((stanza) => eq(scheduledPosts.externalPostId, stanza)),
+              ];
+              const matchedStatusPosts = await db
+                .select({ id: scheduledPosts.id, wahaSession: scheduledPosts.wahaSession })
+                .from(scheduledPosts)
+                .where(and(eq(scheduledPosts.channel, 'WHATSAPP_STATUS'), or(...statusPostConditions)));
+
+              let viewerPhone: string | null = null;
+              const lowerViewer = viewerJid.toLowerCase();
+              if (lowerViewer.endsWith('@lid')) {
+                viewerPhone = await wahaService
+                  .resolveLidToPhone(webhookSession || matchedStatusPosts[0]?.wahaSession || undefined, viewerJid)
+                  .catch(() => null);
+              } else {
+                const rawDigits = fromWahaChatId(viewerJid);
+                viewerPhone = rawDigits ? normalizePhoneNumber(rawDigits) || null : null;
+              }
+
+              for (const stPost of matchedStatusPosts) {
+                await upsertWhatsappStatusView({
+                  postId: stPost.id,
+                  viewerJid,
+                  viewerPhone,
+                  sessionName: webhookSession || stPost.wahaSession || null,
+                  ackStatus: ackValue,
+                  viewedAt: now,
+                });
+              }
+              if (matchedStatusPosts.length > 0) {
+                liveEvents.emit('posts:update', {
+                  statusPostIds: matchedStatusPosts.map((p) => p.id),
+                  ack: ackValue,
+                });
+              }
+            }
+          }
+
           console.log(
             `[WAHA Webhook] message.ack session=${webhookSession || '-'} ack=${ackValue} ids=${allIds.join(',')} matchedRecipients=${recList.length}`
           );
@@ -695,33 +826,36 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       const rawChatId = String(payload?.chatId || rawFrom).trim();
       const lowerFrom = rawFrom.toLowerCase();
       const lowerChat = rawChatId.toLowerCase();
-      const isNonPersonal =
+      const isBroadcastOrNewsletter =
         !rawFrom ||
         lowerFrom === 'status@broadcast' ||
         lowerChat === 'status@broadcast' ||
         lowerFrom.endsWith('@broadcast') ||
         lowerChat.endsWith('@broadcast') ||
         lowerFrom.endsWith('@newsletter') ||
-        lowerChat.endsWith('@newsletter') ||
-        lowerFrom.endsWith('@g.us') ||
-        lowerChat.endsWith('@g.us');
-      const isPersonalChat = !isNonPersonal && isPersonalWahaJid(rawFrom);
+        lowerChat.endsWith('@newsletter');
+      const isGroupChat =
+        !isBroadcastOrNewsletter && (lowerFrom.endsWith('@g.us') || lowerChat.endsWith('@g.us'));
+      const groupJid = isGroupChat
+        ? (lowerFrom.endsWith('@g.us') ? rawFrom : rawChatId)
+        : null;
+      const isPersonalChat = !isBroadcastOrNewsletter && !isGroupChat && isPersonalWahaJid(rawFrom);
 
       if (isInboundMessageEvent && payload) {
         const now = new Date();
         if (isWahaFromMe(payload)) {
           return reply.send({ success: true, message: 'Webhook ignored (fromMe)' });
         }
-        if (!isPersonalChat) {
+        if (!isPersonalChat && !isGroupChat) {
           wahaService.recordWebhookEvent({
             receivedAt: now.toISOString(),
             event,
             session: webhookSession || null,
             from: rawFrom || null,
             outcome: 'IGNORED',
-            note: 'Bukan chat personal 1:1',
+            note: 'Bukan chat personal atau grup WA',
           });
-          return reply.send({ success: true, message: 'Webhook ignored (non-personal JID)' });
+          return reply.send({ success: true, message: 'Webhook ignored (unsupported JID)' });
         }
 
         const inboundSession = webhookSession ? String(webhookSession).trim() : null;
@@ -827,12 +961,6 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           return reply.send({ success: true, message: 'Webhook ignored (empty message body)' });
         }
 
-        const isLidSource = lowerFrom.endsWith('@lid');
-        let fromPhone: string | null = extractPhoneCandidatesFromWahaPayload(payload)[0] || null;
-        if (!fromPhone && isLidSource) {
-          fromPhone = await wahaService.resolveLidToPhone(inboundSession, rawFrom);
-        }
-
         const notifyName = String(
           payload.notifyName ||
           payload._data?.notifyName ||
@@ -841,110 +969,263 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           ''
         ).trim();
 
-        // Find contact by normalized phone OR WAHA @lid contact identity
         let contact: typeof contacts.$inferSelect | undefined;
-        if (fromPhone) {
-          const phoneVariants = Array.from(
-            new Set([
-              fromPhone,
-              `+${fromPhone}`,
-              fromPhone.startsWith('62') ? `0${fromPhone.slice(2)}` : '',
-            ].filter(Boolean))
-          );
-          const contactList = await db
-            .select()
-            .from(contacts)
-            .where(inArray(contacts.nomorWhatsapp, phoneVariants));
-          contact = contactList[0];
-        }
+        let isLidSource = false;
+        let fromPhone: string | null = null;
+        let resolvedGroupSubject: string | null = null;
+        let groupSenderJid: string | null = null;
+        let groupSenderPhone: string | null = null;
+        let groupSenderName: string | null = null;
 
-        if (!contact && isLidSource) {
-          const identityRows = await db
+        if (isGroupChat && groupJid) {
+          // Resolve group subject and find/create Group record in CRM
+          const payloadGroupName = String(
+            payload.chatName ||
+              payload._data?.Info?.GroupName ||
+              payload._data?.groupName ||
+              payload.group?.subject ||
+              payload._data?.chat?.name ||
+              ''
+          ).trim();
+          resolvedGroupSubject = payloadGroupName || null;
+
+          const groupIdRows = await db
             .select()
             .from(contactIdentities)
             .where(
               and(
                 eq(contactIdentities.channel, 'WHATSAPP'),
-                eq(contactIdentities.externalId, rawFrom)
+                eq(contactIdentities.externalId, groupJid)
               )
-            );
-          if (identityRows[0]) {
+            )
+            .limit(1);
+
+          if (groupIdRows[0]) {
             const byId = await db
               .select()
               .from(contacts)
-              .where(eq(contacts.id, identityRows[0].contactId));
+              .where(eq(contacts.id, groupIdRows[0].contactId))
+              .limit(1);
             contact = byId[0];
           }
-        }
 
-        if (!contact) {
-          const fallbackSuffix = fromPhone ? fromPhone.slice(-4) : rawFrom.split('@')[0].slice(-4);
-          const contactName = notifyName || `Kontak ${fallbackSuffix}`;
-          try {
-            const insertedContacts = await db
+          const hasFallbackGroupName = !contact || /^Grup (WhatsApp|\d+)/i.test(contact.namaLengkap);
+          if (!resolvedGroupSubject && hasFallbackGroupName) {
+            const grpInfo = await wahaService
+              .getGroupInfo(groupJid, inboundSession || undefined)
+              .catch(() => null);
+            if (grpInfo?.subject) {
+              resolvedGroupSubject = grpInfo.subject;
+            }
+          }
+
+          const effectiveGroupName =
+            resolvedGroupSubject ||
+            contact?.namaLengkap ||
+            `Grup WhatsApp ${fromWahaChatId(groupJid).slice(-6)}`;
+
+          if (!contact) {
+            const [insertedGrp] = await db
               .insert(contacts)
               .values({
                 id: crypto.randomUUID(),
-                namaLengkap: contactName,
-                nomorWhatsapp: fromPhone || null,
-                tags: 'Inbound Lead',
+                namaLengkap: effectiveGroupName,
+                nomorWhatsapp: null,
+                kategori: 'Grup WhatsApp',
+                tags: 'Grup WhatsApp,Non-Penilaian',
+                excludeFromMetrics: true,
+                excludeReason: 'Grup WhatsApp',
                 createdAt: now,
                 updatedAt: now,
               })
               .returning();
-            contact = insertedContacts[0];
-          } catch (insertErr: any) {
-            if (fromPhone) {
-              const retryList = await db
+            contact = insertedGrp;
+            await db
+              .insert(contactIdentities)
+              .values({
+                id: crypto.randomUUID(),
+                contactId: contact.id,
+                channel: 'WHATSAPP',
+                externalId: groupJid,
+                handle: effectiveGroupName,
+                createdAt: now,
+              })
+              .onConflictDoNothing()
+              .catch(() => {});
+          } else if (
+            resolvedGroupSubject &&
+            resolvedGroupSubject !== contact.namaLengkap &&
+            /^Grup (WhatsApp|\d+)/i.test(contact.namaLengkap)
+          ) {
+            await db
+              .update(contacts)
+              .set({ namaLengkap: resolvedGroupSubject, updatedAt: now })
+              .where(eq(contacts.id, contact.id))
+              .catch(() => {});
+            contact = { ...contact, namaLengkap: resolvedGroupSubject };
+          }
+
+          // Extract group message sender participant details
+          const extractedParticipant = extractGroupParticipant(payload);
+          groupSenderJid = extractedParticipant.participantJid;
+          groupSenderPhone = extractedParticipant.participantPhone;
+          if (!groupSenderPhone && groupSenderJid?.toLowerCase().endsWith('@lid')) {
+            groupSenderPhone = await wahaService
+              .resolveLidToPhone(inboundSession, groupSenderJid)
+              .catch(() => null);
+          }
+
+          let matchedMemberName: string | null = null;
+          if (groupSenderPhone) {
+            const pVariants = Array.from(
+              new Set([
+                groupSenderPhone,
+                `+${groupSenderPhone}`,
+                groupSenderPhone.startsWith('62') ? `0${groupSenderPhone.slice(2)}` : '',
+              ].filter(Boolean))
+            );
+            const matchedMember = await db
+              .select({ namaLengkap: contacts.namaLengkap })
+              .from(contacts)
+              .where(inArray(contacts.nomorWhatsapp, pVariants))
+              .limit(1);
+            matchedMemberName = matchedMember[0]?.namaLengkap || null;
+          }
+          groupSenderName =
+            notifyName ||
+            matchedMemberName ||
+            (groupSenderPhone ? `+${groupSenderPhone}` : groupSenderJid ? fromWahaChatId(groupSenderJid) : null);
+        } else {
+          isLidSource = lowerFrom.endsWith('@lid');
+          fromPhone = extractPhoneCandidatesFromWahaPayload(payload)[0] || null;
+          if (!fromPhone && isLidSource) {
+            fromPhone = await wahaService.resolveLidToPhone(inboundSession, rawFrom);
+          }
+
+          // Find contact by normalized phone OR WAHA @lid contact identity
+          if (fromPhone) {
+            const phoneVariants = Array.from(
+              new Set([
+                fromPhone,
+                `+${fromPhone}`,
+                fromPhone.startsWith('62') ? `0${fromPhone.slice(2)}` : '',
+              ].filter(Boolean))
+            );
+            const contactList = await db
+              .select()
+              .from(contacts)
+              .where(inArray(contacts.nomorWhatsapp, phoneVariants));
+            contact = contactList[0];
+          }
+
+          if (!contact && isLidSource) {
+            const identityRows = await db
+              .select()
+              .from(contactIdentities)
+              .where(
+                and(
+                  eq(contactIdentities.channel, 'WHATSAPP'),
+                  eq(contactIdentities.externalId, rawFrom)
+                )
+              );
+            if (identityRows[0]) {
+              const byId = await db
                 .select()
                 .from(contacts)
-                .where(eq(contacts.nomorWhatsapp, fromPhone));
-              contact = retryList[0];
+                .where(eq(contacts.id, identityRows[0].contactId));
+              contact = byId[0];
             }
-            if (!contact) throw insertErr;
           }
-        } else if (fromPhone && !contact.nomorWhatsapp) {
-          await db
-            .update(contacts)
-            .set({ nomorWhatsapp: fromPhone, updatedAt: now })
-            .where(eq(contacts.id, contact.id))
-            .catch(() => {});
+
+          if (!contact) {
+            const fallbackSuffix = fromPhone ? fromPhone.slice(-4) : rawFrom.split('@')[0].slice(-4);
+            const contactName = notifyName || `Kontak ${fallbackSuffix}`;
+            try {
+              const insertedContacts = await db
+                .insert(contacts)
+                .values({
+                  id: crypto.randomUUID(),
+                  namaLengkap: contactName,
+                  nomorWhatsapp: fromPhone || null,
+                  tags: 'Inbound Lead',
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                .returning();
+              contact = insertedContacts[0];
+            } catch (insertErr: any) {
+              if (fromPhone) {
+                const retryList = await db
+                  .select()
+                  .from(contacts)
+                  .where(eq(contacts.nomorWhatsapp, fromPhone));
+                contact = retryList[0];
+              }
+              if (!contact) throw insertErr;
+            }
+          } else if (fromPhone && !contact.nomorWhatsapp) {
+            await db
+              .update(contacts)
+              .set({ nomorWhatsapp: fromPhone, updatedAt: now })
+              .where(eq(contacts.id, contact.id))
+              .catch(() => {});
+          }
+
+          if (isLidSource && contact) {
+            await db
+              .insert(contactIdentities)
+              .values({
+                id: crypto.randomUUID(),
+                contactId: contact.id,
+                channel: 'WHATSAPP',
+                externalId: rawFrom,
+                handle: fromPhone ? `+${fromPhone}` : notifyName || null,
+                createdAt: now,
+              })
+              .onConflictDoNothing()
+              .catch(() => {});
+          }
         }
 
-        if (isLidSource && contact) {
-          await db
-            .insert(contactIdentities)
-            .values({
-              id: crypto.randomUUID(),
-              contactId: contact.id,
-              channel: 'WHATSAPP',
-              externalId: rawFrom,
-              handle: fromPhone ? `+${fromPhone}` : notifyName || null,
-              createdAt: now,
-            })
-            .onConflictDoNothing()
-            .catch(() => {});
-        }
+        const effectiveConversationPreview =
+          isGroupChat && groupSenderName ? `${groupSenderName}: ${body}` : body;
 
-        // Upsert WhatsApp Conversation
+        // Upsert WhatsApp Conversation separated per wahaSession while sharing the same master Contact
+        const normalizedInboundSession = inboundSession ? inboundSession.trim() : null;
         const convList = await db
           .select()
           .from(conversations)
-          .where(and(eq(conversations.contactId, contact.id), eq(conversations.channel, 'WHATSAPP')));
+          .where(and(eq(conversations.contactId, contact.id), eq(conversations.channel, 'WHATSAPP')))
+          .orderBy(desc(conversations.updatedAt));
 
-        const existingConv = convList[0];
-        let convId = existingConv?.id;
+        const existingConv = normalizedInboundSession
+          ? convList.find((c) => c.wahaSession === normalizedInboundSession) ||
+            convList.find((c) => !c.wahaSession)
+          : convList[0];
+        let convId: string;
 
-        if (!convId) {
+        const contactExcluded = Boolean(isGroupChat || contact.excludeFromMetrics);
+        const contactExcludeReason = isGroupChat
+          ? 'Grup WhatsApp'
+          : contact.excludeFromMetrics
+          ? (contact.excludeReason || 'Bukan Customer')
+          : null;
+
+        if (!existingConv) {
           convId = crypto.randomUUID();
           await db.insert(conversations).values({
             id: convId,
             contactId: contact.id,
             channel: 'WHATSAPP',
-            externalThreadId: isLidSource ? rawFrom : null,
-            wahaSession: inboundSession,
+            externalThreadId: isGroupChat ? groupJid : isLidSource ? rawFrom : null,
+            contextTitle: isGroupChat ? (resolvedGroupSubject || contact.namaLengkap) : null,
+            wahaSession: normalizedInboundSession,
+            pushName: isGroupChat ? (resolvedGroupSubject || contact.namaLengkap) : notifyName || null,
+            isGroup: isGroupChat,
+            excludeFromMetrics: contactExcluded,
+            excludeReason: contactExcludeReason,
             status: 'OPEN',
-            lastMessage: body,
+            lastMessage: effectiveConversationPreview,
             lastMessageAt: now,
             firstInboundAt: now,
             lastInboundAt: now,
@@ -954,12 +1235,30 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             updatedAt: now,
           });
         } else {
+          convId = existingConv.id;
           const isReopeningFromResolved = existingConv.status === 'RESOLVED';
           await db
             .update(conversations)
             .set({
-              wahaSession: inboundSession || existingConv.wahaSession,
-              externalThreadId: isLidSource ? rawFrom : existingConv.externalThreadId,
+              wahaSession: normalizedInboundSession || existingConv.wahaSession,
+              externalThreadId: isGroupChat
+                ? groupJid
+                : isLidSource
+                ? rawFrom
+                : existingConv.externalThreadId,
+              contextTitle: isGroupChat
+                ? (resolvedGroupSubject || existingConv.contextTitle || contact.namaLengkap)
+                : existingConv.contextTitle,
+              pushName: isGroupChat
+                ? (resolvedGroupSubject || existingConv.pushName || contact.namaLengkap)
+                : notifyName || existingConv.pushName,
+              isGroup: isGroupChat || existingConv.isGroup,
+              excludeFromMetrics: contactExcluded ? true : existingConv.excludeFromMetrics,
+              excludeReason: isGroupChat
+                ? (existingConv.excludeReason || 'Grup WhatsApp')
+                : contactExcluded
+                ? (contactExcludeReason || existingConv.excludeReason || 'Bukan Customer')
+                : existingConv.excludeReason,
               status: isReopeningFromResolved ? 'OPEN' : existingConv.status,
               sessionStartedAt: isReopeningFromResolved
                 ? now
@@ -967,7 +1266,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               resolvedAt: isReopeningFromResolved ? null : existingConv.resolvedAt,
               firstInboundAt: existingConv.firstInboundAt || now,
               lastInboundAt: now,
-              lastMessage: body,
+              lastMessage: effectiveConversationPreview,
               lastMessageAt: now,
               unreadCount: sql`${conversations.unreadCount} + 1`,
               updatedAt: now,
@@ -981,14 +1280,22 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         let replyToSender: string | null = null;
         if (quotedWahaId) {
           const quotedRows = await db
-            .select({ id: chatMessages.id, body: chatMessages.body, direction: chatMessages.direction })
+            .select({
+              id: chatMessages.id,
+              body: chatMessages.body,
+              direction: chatMessages.direction,
+              senderName: chatMessages.senderName,
+            })
             .from(chatMessages)
             .where(eq(chatMessages.wahaMessageId, String(quotedWahaId)))
             .limit(1);
           if (quotedRows[0]) {
             replyToMessageId = quotedRows[0].id;
             if (!replyToBody) replyToBody = quotedRows[0].body.slice(0, 160);
-            replyToSender = quotedRows[0].direction === 'OUTBOUND' ? 'Tim CS' : (contact.namaLengkap || 'Pelanggan');
+            replyToSender =
+              quotedRows[0].direction === 'OUTBOUND'
+                ? 'Tim CS'
+                : (quotedRows[0].senderName || contact.namaLengkap || 'Pelanggan');
           }
         }
 
@@ -1001,6 +1308,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           messageType: mediaType ? 'MEDIA' : 'TEXT',
           channel: 'WHATSAPP',
           wahaSession: inboundSession,
+          senderJid: isGroupChat ? groupSenderJid : rawFrom || null,
+          senderPhone: isGroupChat ? groupSenderPhone : fromPhone || null,
+          senderName: isGroupChat ? groupSenderName : notifyName || null,
           body,
           mediaUrl,
           mediaType,
@@ -1018,9 +1328,15 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           receivedAt: now.toISOString(),
           event,
           session: inboundSession,
-          from: fromPhone || rawFrom,
+          from: isGroupChat ? (groupSenderPhone || groupJid || rawFrom) : (fromPhone || rawFrom),
           outcome: 'PROCESSED',
-          note: existingConv ? 'Pesan masuk ditambahkan ke inbox' : 'Percakapan baru dibuat di inbox',
+          note: existingConv
+            ? isGroupChat
+              ? 'Pesan grup masuk ditambahkan ke inbox'
+              : 'Pesan masuk ditambahkan ke inbox'
+            : isGroupChat
+            ? 'Percakapan grup WA baru dibuat (otomatis Non-Penilaian)'
+            : 'Percakapan baru dibuat di inbox',
         });
 
         liveEvents.emit('conversations:presence', {
@@ -1032,7 +1348,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         liveEvents.emit('conversations:update', { conversationId: convId });
         liveEvents.emit('tracking:update', { conversationId: convId });
 
-        if (body) {
+        if (body && !isGroupChat && !contact.excludeFromMetrics && !existingConv?.excludeFromMetrics) {
           void handleInboundAutomation({
             conversationId: convId,
             contact,

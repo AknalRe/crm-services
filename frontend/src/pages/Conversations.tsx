@@ -39,6 +39,9 @@ import {
   ExternalLink,
   Copy,
   BarChart2,
+  Users,
+  EyeOff,
+  RefreshCw,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -52,6 +55,7 @@ import {
   Contact,
   Conversation,
   ConversationNavigationTarget,
+  ConversationParticipantsResponse,
   CrmLabelItem,
   InteractiveButtonItem,
   LicenseInfo,
@@ -60,6 +64,7 @@ import {
   WahaSessionItem,
 } from '../types';
 import { LABEL_COLOR_MAP } from '../components/MasterDataSettings';
+import { hasPerm } from '../lib/permissions';
 
 const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls: string }> = {
   WHATSAPP: { label: 'WhatsApp', short: 'WA', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -172,6 +177,38 @@ function renderTextWithClickableLinks(text: string): React.ReactNode {
   });
 }
 
+function getConversationDisplayTitle(conv?: Conversation | null): string {
+  if (!conv) return 'WhatsApp';
+  return (
+    conv.channelDisplayName?.trim() ||
+    conv.contextTitle?.trim() ||
+    conv.pushName?.trim() ||
+    conv.contact?.nama_lengkap?.trim() ||
+    conv.contact?.nomor_whatsapp?.trim() ||
+    conv.externalThreadId ||
+    'WhatsApp'
+  );
+}
+
+const PARTICIPANT_TEXT_COLORS = [
+  'text-indigo-700',
+  'text-emerald-700',
+  'text-amber-700',
+  'text-rose-700',
+  'text-sky-700',
+  'text-violet-700',
+  'text-teal-700',
+];
+
+function getParticipantColorClass(key?: string | null): string {
+  if (!key) return PARTICIPANT_TEXT_COLORS[0];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return PARTICIPANT_TEXT_COLORS[hash % PARTICIPANT_TEXT_COLORS.length];
+}
+
 interface ConversationsProps {
   licenseInfo?: LicenseInfo | null;
   currentUser?: AuthStatus['user'] | null;
@@ -216,9 +253,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
 }) => {
   const toast = useToast();
   const canManageMaster =
-    !currentUser ||
-    currentUser.role === 'ADMIN' ||
-    (Array.isArray(currentUser.permissions) && currentUser.permissions.includes('settings'));
+    hasPerm(currentUser, 'settings.edit') || hasPerm(currentUser, 'conversations.manage');
+  const canViewAllConversations = hasPerm(currentUser, 'conversations.view_all');
+  const canReplyConversation = hasPerm(currentUser, 'conversations.reply');
+  const canManageConversation = hasPerm(currentUser, 'conversations.manage');
+  const canSendCsat = hasPerm(currentUser, 'conversations.csat');
+  const canEditContact = hasPerm(currentUser, 'contacts.edit');
   const isLiveChatUnlocked = Boolean(
     licenseInfo && !licenseInfo.isExpired && licenseInfo.features?.liveChatCrm
   );
@@ -229,6 +269,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [inputText, setInputText] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'PENDING' | 'RESOLVED'>('ALL');
+  const [metricFilter, setMetricFilter] = useState<'ALL' | 'ASSESSED' | 'EXCLUDED' | 'GROUPS'>('ALL');
   const [channelFilter, setChannelFilter] = useState<'ALL' | OmnichannelType>('ALL');
   const [channelAccounts, setChannelAccounts] = useState<ChannelAccount[]>([]);
   const [accountFilter, setAccountFilter] = useState<'ALL' | string>('ALL');
@@ -245,7 +286,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [showContactPanel, setShowContactPanel] = useState<boolean>(readContactPanelPref);
 
   // Composer enhancements: Internal note mode, Emoji picker, Product Quick Quote, Link & Interactive, File attachment
-  const [composerMode, setComposerMode] = useState<'REPLY' | 'NOTE'>('REPLY');
+  const [composerMode, setComposerMode] = useState<'REPLY' | 'NOTE'>(() =>
+    hasPerm(currentUser, 'conversations.reply')
+      ? 'REPLY'
+      : hasPerm(currentUser, 'conversations.manage')
+      ? 'NOTE'
+      : 'REPLY'
+  );
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showLinkComposer, setShowLinkComposer] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
@@ -301,7 +348,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
   // Right panel: Labels & Contact Notes
   const [newLabel, setNewLabel] = useState('');
   const [contactNotesDraft, setContactNotesDraft] = useState('');
+  const [channelDisplayNameDraft, setChannelDisplayNameDraft] = useState('');
+  const [excludeReasonDraft, setExcludeReasonDraft] = useState('');
   const [savingMeta, setSavingMeta] = useState(false);
+  const [savingChannelName, setSavingChannelName] = useState(false);
+  const [savingExclude, setSavingExclude] = useState(false);
+  const [participantsData, setParticipantsData] = useState<ConversationParticipantsResponse | null>(null);
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
+  const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const [sendingCsat, setSendingCsat] = useState(false);
   const [expandedCsatId, setExpandedCsatId] = useState<string | null>(null);
   const [highlightedCsatWindow, setHighlightedCsatWindow] = useState<{
@@ -497,10 +551,29 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   }, [selectedConversation?.id, selectedConversation?.wahaSession, sessions, defaultWahaSession]);
 
+  const fetchParticipants = useCallback(async (convId: string, sync = true) => {
+    setLoadingParticipants(true);
+    try {
+      const res = await api.getConversationParticipants(convId, sync);
+      setParticipantsData(res);
+    } catch {
+      setParticipantsData(null);
+    } finally {
+      setLoadingParticipants(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (isLiveChatUnlocked && selectedConversation) {
       fetchMessages(selectedConversation.id, false);
       setContactNotesDraft(selectedConversation.contact?.notes || '');
+      setChannelDisplayNameDraft(selectedConversation.channelDisplayName || '');
+      setExcludeReasonDraft(selectedConversation.excludeReason || 'Bukan Customer');
+      if (selectedConversation.isGroup || selectedConversation.externalThreadId?.endsWith('@g.us')) {
+        void fetchParticipants(selectedConversation.id, false);
+      } else {
+        setParticipantsData(null);
+      }
       const convId = selectedConversation.id;
       const unsub = subscribeLiveEvent('conversations:update', () => {
         void fetchMessages(convId, true);
@@ -1191,6 +1264,57 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   };
 
+  const handleSaveChannelDisplayName = async (nextName: string | null) => {
+    if (!selectedConversation || savingChannelName) return;
+    setSavingChannelName(true);
+    try {
+      const cleaned = nextName ? nextName.trim() || null : null;
+      await api.updateConversation(selectedConversation.id, {
+        channelDisplayName: cleaned,
+      });
+      setChannelDisplayNameDraft(cleaned || '');
+      setSelectedConversation((prev) =>
+        prev && prev.id === selectedConversation.id ? { ...prev, channelDisplayName: cleaned } : prev
+      );
+      toast.success(cleaned ? 'Nama tampilan kanal disimpan' : 'Nama tampilan kanal direset ke default');
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal memperbarui nama tampilan kanal');
+    } finally {
+      setSavingChannelName(false);
+    }
+  };
+
+  const handleUpdateMetricExclusion = async (nextExclude: boolean, reason?: string | null) => {
+    if (!selectedConversation || savingExclude) return;
+    setSavingExclude(true);
+    try {
+      const cleanedReason = nextExclude
+        ? (reason?.trim() || (selectedConversation.isGroup ? 'Grup WhatsApp' : 'Bukan Customer'))
+        : null;
+      await api.updateConversation(selectedConversation.id, {
+        excludeFromMetrics: nextExclude,
+        excludeReason: cleanedReason,
+      });
+      setExcludeReasonDraft(cleanedReason || 'Bukan Customer');
+      setSelectedConversation((prev) =>
+        prev && prev.id === selectedConversation.id
+          ? { ...prev, excludeFromMetrics: nextExclude, excludeReason: cleanedReason }
+          : prev
+      );
+      toast.success(
+        nextExclude
+          ? `Ditandai Non-Penilaian (${cleanedReason})`
+          : 'Dikembalikan ke daftar penilaian customer'
+      );
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal memperbarui status penilaian');
+    } finally {
+      setSavingExclude(false);
+    }
+  };
+
   const handleSendCsatCta = async () => {
     if (!selectedConversation || sendingCsat) return;
     setSendingCsat(true);
@@ -1242,6 +1366,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
     const convStatus = (c.status || 'OPEN').toUpperCase();
     const convChannel = (c.channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
     if (statusFilter !== 'ALL' && convStatus !== statusFilter) return false;
+    if (metricFilter === 'ASSESSED' && (c.excludeFromMetrics || c.isGroup)) return false;
+    if (metricFilter === 'EXCLUDED' && !c.excludeFromMetrics && !c.isGroup) return false;
+    if (metricFilter === 'GROUPS' && !c.isGroup) return false;
     if (channelFilter !== 'ALL' && convChannel !== channelFilter) return false;
     if (accountFilter !== 'ALL' && c.channelAccountId !== accountFilter) return false;
     if (assigneeFilter === 'MINE' && (!currentUser?.id || c.assignedAgentId !== currentUser.id)) {
@@ -1253,6 +1380,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
     const q = search.toLowerCase();
     if (!q) return true;
     return (
+      c.channelDisplayName?.toLowerCase().includes(q) ||
+      c.pushName?.toLowerCase().includes(q) ||
+      c.channelAccountName?.toLowerCase().includes(q) ||
       c.contact?.nama_lengkap?.toLowerCase().includes(q) ||
       c.contact?.nomor_whatsapp?.includes(q) ||
       c.lastMessage?.toLowerCase().includes(q) ||
@@ -1284,15 +1414,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 className="w-full h-9 pl-9 pr-3 bg-gray-50 border border-gray-200 rounded-md text-xs placeholder-gray-400 focus:outline-none focus:border-indigo-500"
               />
             </div>
-            <button
-              type="button"
-              onClick={() => void handleOpenNewChatModal()}
-              title="Buka Percakapan Baru"
-              className="h-9 px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Baru</span>
-            </button>
+            {canManageConversation && (
+              <button
+                type="button"
+                onClick={() => void handleOpenNewChatModal()}
+                title="Buka Percakapan Baru"
+                className="h-9 px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Baru</span>
+              </button>
+            )}
           </div>
           <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
             {(['ALL', 'OPEN', 'PENDING', 'RESOLVED'] as const).map((st) => (
@@ -1307,6 +1439,30 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 }`}
               >
                 {st === 'ALL' ? 'Semua' : st === 'OPEN' ? 'Open' : st === 'PENDING' ? 'Pending' : 'Selesai'}
+              </button>
+            ))}
+          </div>
+
+          <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[10px]">
+            {(
+              [
+                { id: 'ALL', label: 'Semua' },
+                { id: 'ASSESSED', label: 'Dinilai' },
+                { id: 'EXCLUDED', label: 'Non-Nilai' },
+                { id: 'GROUPS', label: 'Grup WA' },
+              ] as const
+            ).map((mf) => (
+              <button
+                key={mf.id}
+                type="button"
+                onClick={() => setMetricFilter(mf.id)}
+                className={`py-1 rounded font-medium transition-colors truncate px-1 ${
+                  metricFilter === mf.id
+                    ? 'bg-white text-indigo-700 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {mf.label}
               </button>
             ))}
           </div>
@@ -1337,7 +1493,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 aria-label="Filter Agent"
                 className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
               >
-                <option value="ALL">Semua Agent</option>
+                <option value="ALL">
+                  {canViewAllConversations ? 'Semua Agent' : 'Akses Saya & Terbuka'}
+                </option>
                 <option value="MINE">Milik Saya</option>
                 <option value="UNASSIGNED">Belum Ditugaskan</option>
               </select>
@@ -1395,13 +1553,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   }`}
                 >
                   <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0">
-                    {conv.contact?.nama_lengkap?.slice(0, 2).toUpperCase() || 'WA'}
+                    {getConversationDisplayTitle(conv).slice(0, 2).toUpperCase()}
                   </div>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-semibold text-gray-900 text-xs truncate">
-                        {conv.contact?.nama_lengkap || conv.contact?.nomor_whatsapp || 'WhatsApp'}
+                        {getConversationDisplayTitle(conv)}
                       </span>
                       {conv.lastMessageAt && (
                         <span className="text-[10px] text-gray-400 font-mono tabular-nums shrink-0">
@@ -1412,6 +1570,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         </span>
                       )}
                     </div>
+                    {conv.contact?.nama_lengkap &&
+                      getConversationDisplayTitle(conv).toLowerCase() !==
+                        conv.contact.nama_lengkap.trim().toLowerCase() && (
+                        <p className="text-[10px] text-indigo-600/80 truncate">
+                          Kontak: {conv.contact.nama_lengkap}
+                        </p>
+                      )}
 
                     <p className="text-[11px] text-gray-500 truncate mt-0.5">
                       {presenceByConvId[conv.id]?.status === 'typing' ? (
@@ -1437,7 +1602,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           </span>
                         );
                       })()}
-                      {conv.status === 'OPEN' &&
+                      {!conv.excludeFromMetrics &&
+                        !conv.isGroup &&
+                        conv.status === 'OPEN' &&
                         !conv.firstResponseAt &&
                         conv.firstInboundAt &&
                         Date.now() - new Date(conv.firstInboundAt).getTime() >
@@ -1450,9 +1617,29 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             SLA Terlewat
                           </span>
                         )}
+                      {conv.isGroup && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-teal-50 text-teal-700 border border-teal-200">
+                          <Users className="w-2.5 h-2.5" />
+                          Grup WA
+                        </span>
+                      )}
+                      {conv.excludeFromMetrics && (
+                        <span
+                          title={`Tidak masuk penilaian (${conv.excludeReason || 'Non-Customer'})`}
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-300"
+                        >
+                          <EyeOff className="w-2.5 h-2.5" />
+                          {conv.excludeReason || 'Non-Penilaian'}
+                        </span>
+                      )}
                       {conv.wahaSession && (
                         <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
                           {conv.wahaSession}
+                        </span>
+                      )}
+                      {conv.channelAccountName && !conv.wahaSession && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 text-slate-700 border border-slate-200 truncate max-w-[120px]">
+                          {conv.channelAccountName}
                         </span>
                       )}
                       {conv.assignedAgentName && (
@@ -1504,13 +1691,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 <ArrowLeft className="w-4 h-4" />
               </button>
               <div className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs flex items-center justify-center shrink-0">
-                {selectedConversation.contact?.nama_lengkap?.slice(0, 2).toUpperCase() || 'WA'}
+                {getConversationDisplayTitle(selectedConversation).slice(0, 2).toUpperCase()}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <h4 className="font-semibold text-gray-900 text-xs truncate">
-                    {selectedConversation.contact?.nama_lengkap}
+                    {getConversationDisplayTitle(selectedConversation)}
                   </h4>
+                  {selectedConversation.contact?.nama_lengkap &&
+                    getConversationDisplayTitle(selectedConversation).toLowerCase() !==
+                      selectedConversation.contact.nama_lengkap.trim().toLowerCase() && (
+                      <span className="text-[10px] text-gray-500 truncate">
+                        (Kontak: {selectedConversation.contact.nama_lengkap})
+                      </span>
+                    )}
                   {(() => {
                     const ch = ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
                     const meta = CHANNEL_META[ch] || CHANNEL_META.WHATSAPP;
@@ -1525,6 +1719,41 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <Smartphone className="w-2.5 h-2.5" />
                       {selectedConversation.wahaSession}
                     </span>
+                  )}
+                  {selectedConversation.channelAccountName && !selectedConversation.wahaSession && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
+                      {selectedConversation.channelAccountName}
+                    </span>
+                  )}
+                  {selectedConversation.isGroup && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowParticipantsModal(true);
+                        void fetchParticipants(selectedConversation.id, true);
+                      }}
+                      title="Lihat daftar partisipan & anggota yang mengirim pesan di grup ini"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-800 border border-teal-200 hover:bg-teal-100 shrink-0 transition-colors"
+                    >
+                      <Users className="w-3 h-3" />
+                      <span>
+                        Partisipan
+                        {participantsData && participantsData.participants.length > 0
+                          ? ` (${participantsData.participants.length})`
+                          : ''}
+                      </span>
+                    </button>
+                  )}
+                  {selectedConversation.excludeFromMetrics && (
+                    <button
+                      type="button"
+                      onClick={() => toggleContactPanel(true)}
+                      title="Percakapan ini dikecualikan dari penilaian SLA/CSAT. Klik untuk ubah di Detail Kontak."
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200 shrink-0"
+                    >
+                      <EyeOff className="w-2.5 h-2.5" />
+                      <span>Non-Penilaian: {selectedConversation.excludeReason || 'Bukan Customer'}</span>
+                    </button>
                   )}
                   {presenceByConvId[selectedConversation.id]?.status && (
                     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
@@ -1617,9 +1846,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
               {assignableAgents.length > 0 && (
                 <select
                   value={selectedConversation.assignedAgentId || ''}
+                  disabled={!canManageConversation}
                   onChange={(e) => void handleAssignAgent(e.target.value || null)}
-                  title="Tugaskan ke Agent"
-                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 flex-1 sm:flex-none min-w-[100px] sm:max-w-[140px]"
+                  title={
+                    canManageConversation
+                      ? 'Tugaskan ke Agent'
+                      : 'Role Anda tidak memiliki izin menugaskan CS'
+                  }
+                  className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 flex-1 sm:flex-none min-w-[100px] sm:max-w-[140px] disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <option value="">Belum Ditugaskan</option>
                   {assignableAgents.map((ag) => (
@@ -1632,11 +1866,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
               <select
                 value={selectedConversation.status || 'OPEN'}
+                disabled={!canManageConversation}
                 onChange={(e) =>
                   handleStatusChange(e.target.value as 'OPEN' | 'PENDING' | 'RESOLVED')
                 }
-                title="Status Percakapan"
-                className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none shrink-0 ${
+                title={
+                  canManageConversation
+                    ? 'Status Percakapan'
+                    : 'Role Anda tidak memiliki izin mengubah status percakapan'
+                }
+                className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none shrink-0 disabled:opacity-70 disabled:cursor-not-allowed ${
                   selectedConversation.status === 'RESOLVED'
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                     : selectedConversation.status === 'PENDING'
@@ -1650,56 +1889,59 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </select>
 
               <div className="flex items-center gap-1.5 shrink-0">
-                {selectedConversation.status === 'RESOLVED' ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleStatusChange('OPEN')}
-                    title="Buka kembali percakapan ini"
-                    className="h-7 px-2 sm:px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
-                  >
-                    <RotateCcw className="w-3 h-3 shrink-0" />
-                    <span>Buka Kembali</span>
-                  </button>
-                ) : (
-                  <div className="relative">
+                {canManageConversation &&
+                  (selectedConversation.status === 'RESOLVED' ? (
                     <button
                       type="button"
-                      onClick={() => setShowResolveMenu((prev) => !prev)}
-                      title="Akhiri percakapan (pilih dengan atau tanpa CSAT)"
-                      className="h-7 px-2 sm:px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
+                      onClick={() => void handleStatusChange('OPEN')}
+                      title="Buka kembali percakapan ini"
+                      className="h-7 px-2 sm:px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
                     >
-                      <CheckCircle2 className="w-3 h-3 shrink-0" />
-                      <span>Akhiri</span>
-                      <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
+                      <RotateCcw className="w-3 h-3 shrink-0" />
+                      <span>Buka Kembali</span>
                     </button>
-                    {showResolveMenu && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setShowResolveMenu(false)}
-                        />
-                        <div className="absolute right-0 mt-1 w-48 rounded-md bg-white border border-gray-200 shadow-lg py-1 z-20">
-                          <button
-                            type="button"
-                            onClick={() => void handleStatusChange('RESOLVED', true)}
-                            className="w-full text-left px-3 py-1.5 text-[11px] text-gray-800 hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-1.5 whitespace-nowrap"
-                          >
-                            <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                            <span>Akhiri &amp; Kirim CSAT</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleStatusChange('RESOLVED', false)}
-                            className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 whitespace-nowrap"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span>Akhiri Tanpa CSAT</span>
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
+                  ) : (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowResolveMenu((prev) => !prev)}
+                        title="Akhiri percakapan (pilih dengan atau tanpa CSAT)"
+                        className="h-7 px-2 sm:px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
+                      >
+                        <CheckCircle2 className="w-3 h-3 shrink-0" />
+                        <span>Akhiri</span>
+                        <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
+                      </button>
+                      {showResolveMenu && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-10"
+                            onClick={() => setShowResolveMenu(false)}
+                          />
+                          <div className="absolute right-0 mt-1 w-48 rounded-md bg-white border border-gray-200 shadow-lg py-1 z-20">
+                            {canSendCsat && (
+                              <button
+                                type="button"
+                                onClick={() => void handleStatusChange('RESOLVED', true)}
+                                className="w-full text-left px-3 py-1.5 text-[11px] text-gray-800 hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-1.5 whitespace-nowrap"
+                              >
+                                <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                <span>Akhiri &amp; Kirim CSAT</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void handleStatusChange('RESOLVED', false)}
+                              className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 whitespace-nowrap"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>Akhiri Tanpa CSAT</span>
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
 
                 <button
                   type="button"
@@ -1712,16 +1954,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   <span className="hidden lg:inline">Dibaca</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleSendCsatCta}
-                  disabled={sendingCsat}
-                  title="Kirim Tautan Rating CSAT ke Pelanggan"
-                  className="h-7 px-2.5 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-50"
-                >
-                  <Star className="w-3 h-3 fill-amber-400 text-amber-500 shrink-0" />
-                  <span className="hidden sm:inline">Kirim CSAT</span>
-                </button>
+                {canSendCsat && (
+                  <button
+                    type="button"
+                    onClick={handleSendCsatCta}
+                    disabled={sendingCsat}
+                    title="Kirim Tautan Rating CSAT ke Pelanggan"
+                    className="h-7 px-2.5 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-50"
+                  >
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-500 shrink-0" />
+                    <span className="hidden sm:inline">Kirim CSAT</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1981,6 +2225,27 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             : 'bg-white border-gray-200 text-gray-900'
                         }`}
                       >
+                        {!isOutbound &&
+                          !isCsat &&
+                          (selectedConversation.isGroup || msg.senderName || msg.senderPhone) && (
+                            <div className="flex items-center justify-between gap-2 pb-0.5 border-b border-gray-100">
+                              <span
+                                className={`text-[11px] font-semibold truncate ${getParticipantColorClass(
+                                  msg.senderJid || msg.senderPhone || msg.senderName
+                                )}`}
+                              >
+                                {msg.senderName ||
+                                  (msg.senderPhone ? `+${msg.senderPhone}` : msg.senderJid) ||
+                                  'Anggota Grup'}
+                              </span>
+                              {msg.senderPhone && msg.senderName && msg.senderName !== `+${msg.senderPhone}` && (
+                                <span className="text-[10px] font-mono text-gray-400 shrink-0">
+                                  +{msg.senderPhone}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
                         {(msg.replyToBody || msg.replyToMessageId) && (
                           <button
                             type="button"
@@ -2259,32 +2524,36 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 {msg.errorMessage ? `Gagal: ${msg.errorMessage}` : 'Gagal mengirim pesan'}
                               </span>
                             </span>
-                            <button
-                              type="button"
-                              disabled={retryingMessageId === msg.id}
-                              onClick={() => void handleRetryMessage(msg.id)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50 shrink-0"
-                            >
-                              <RotateCcw className="w-2.5 h-2.5" />
-                              <span>{retryingMessageId === msg.id ? 'Mengirim...' : 'Kirim Ulang'}</span>
-                            </button>
+                            {canReplyConversation && (
+                              <button
+                                type="button"
+                                disabled={retryingMessageId === msg.id}
+                                onClick={() => void handleRetryMessage(msg.id)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50 shrink-0"
+                              >
+                                <RotateCcw className="w-2.5 h-2.5" />
+                                <span>{retryingMessageId === msg.id ? 'Mengirim...' : 'Kirim Ulang'}</span>
+                              </button>
+                            )}
                           </div>
                         )}
 
                         <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-gray-500 font-mono tabular-nums">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setReplyingToMessage(msg);
-                              setComposerMode('REPLY');
-                              replyInputRef.current?.focus();
-                            }}
-                            title="Balas pesan ini"
-                            className="mr-auto opacity-80 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center gap-0.5 text-[10px] font-sans text-indigo-600 hover:text-indigo-800 transition-opacity"
-                          >
-                            <Reply className="w-3 h-3" />
-                            <span>Balas</span>
-                          </button>
+                          {canReplyConversation && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReplyingToMessage(msg);
+                                setComposerMode('REPLY');
+                                replyInputRef.current?.focus();
+                              }}
+                              title="Balas pesan ini"
+                              className="mr-auto opacity-80 sm:opacity-0 group-hover:opacity-100 focus:opacity-100 inline-flex items-center gap-0.5 text-[10px] font-sans text-indigo-600 hover:text-indigo-800 transition-opacity"
+                            >
+                              <Reply className="w-3 h-3" />
+                              <span>Balas</span>
+                            </button>
+                          )}
                           {msg.wahaSession && (
                             <span className="text-[9px] text-gray-400">{msg.wahaSession}</span>
                           )}
@@ -2318,38 +2587,50 @@ export const Conversations: React.FC<ConversationsProps> = ({
           </div>
 
           {/* Composer */}
+          {!canReplyConversation && !canManageConversation ? (
+            <div className="bg-amber-50 border-t border-amber-200 px-3.5 py-2.5 text-xs text-amber-900 flex items-center gap-2 shrink-0">
+              <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              <span>
+                <strong>Mode Lihat Saja:</strong> Role <strong>{currentUser?.roleName || 'Agent'}</strong> dapat membaca riwayat obrolan tanpa izin mengirim balasan atau catatan.
+              </span>
+            </div>
+          ) : (
           <div className="bg-white border-t border-gray-200 p-2.5 sm:p-3 space-y-2 shrink-0">
             <div className="flex items-center justify-between gap-2 overflow-x-auto">
               <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50 text-[11px] shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setComposerMode('REPLY')}
-                  className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
-                    composerMode === 'REPLY'
-                      ? 'bg-white text-indigo-700 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <MessageSquare className="w-3 h-3 shrink-0" />
-                  <span>Balas WhatsApp</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setComposerMode('NOTE');
-                    setPendingAttachment(null);
-                    openComposerPicker(null);
-                    stopOutboundTyping(selectedConversation.id);
-                  }}
-                  className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
-                    composerMode === 'NOTE'
-                      ? 'bg-amber-100 text-amber-900 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <StickyNote className="w-3 h-3 shrink-0" />
-                  <span>Catatan Internal</span>
-                </button>
+                {canReplyConversation && (
+                  <button
+                    type="button"
+                    onClick={() => setComposerMode('REPLY')}
+                    className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
+                      composerMode === 'REPLY'
+                        ? 'bg-white text-indigo-700 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <MessageSquare className="w-3 h-3 shrink-0" />
+                    <span>Balas WhatsApp</span>
+                  </button>
+                )}
+                {canManageConversation && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComposerMode('NOTE');
+                      setPendingAttachment(null);
+                      openComposerPicker(null);
+                      stopOutboundTyping(selectedConversation.id);
+                    }}
+                    className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
+                      composerMode === 'NOTE'
+                        ? 'bg-amber-100 text-amber-900 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <StickyNote className="w-3 h-3 shrink-0" />
+                    <span>Catatan Internal</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2379,7 +2660,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       Membalas{' '}
                       {replyingToMessage.direction === 'OUTBOUND'
                         ? 'Tim CS'
-                        : selectedConversation.contact?.nama_lengkap || 'Pelanggan'}
+                        : getConversationDisplayTitle(selectedConversation)}
                     </span>
                   </div>
                   <p className="text-[11px] text-gray-600 truncate">{replyingToMessage.body}</p>
@@ -2479,14 +2760,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           Kelola
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => setShowAddCanned((v) => !v)}
-                        className="h-6 px-2 rounded border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-medium text-indigo-700 inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
-                      >
-                        {!showAddCanned && <Plus className="w-3 h-3 shrink-0" />}
-                        <span>{showAddCanned ? 'Tutup' : 'Tambah'}</span>
-                      </button>
+                      {canManageMaster && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAddCanned((v) => !v)}
+                          className="h-6 px-2 rounded border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-medium text-indigo-700 inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors"
+                        >
+                          {!showAddCanned && <Plus className="w-3 h-3 shrink-0" />}
+                          <span>{showAddCanned ? 'Tutup' : 'Tambah'}</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => setShowCannedPicker(false)}
@@ -3211,6 +3494,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </form>
             </div>
           </div>
+          )}
         </div>
       ) : (
         <div className="hidden md:flex flex-1 flex-col items-center justify-center p-8 bg-gray-50 text-gray-400">
@@ -3246,25 +3530,261 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
           <div className="text-center pb-4 border-b border-gray-200">
             <div className="w-12 h-12 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-base flex items-center justify-center mx-auto mb-2 border border-indigo-200">
-              {selectedConversation.contact.nama_lengkap.slice(0, 2).toUpperCase()}
+              {getConversationDisplayTitle(selectedConversation).slice(0, 2).toUpperCase()}
             </div>
             <h4 className="font-semibold text-gray-900 text-sm break-words">
-              {selectedConversation.contact.nama_lengkap}
+              {getConversationDisplayTitle(selectedConversation)}
             </h4>
+            {getConversationDisplayTitle(selectedConversation).toLowerCase() !==
+              selectedConversation.contact.nama_lengkap.trim().toLowerCase() && (
+              <span className="text-[11px] text-indigo-600 font-medium block mt-0.5">
+                Kontak Utama: {selectedConversation.contact.nama_lengkap}
+              </span>
+            )}
             {selectedConversation.contact.nama_panggilan && (
               <span className="text-xs text-gray-500 block">
                 Panggilan: {selectedConversation.contact.nama_panggilan}
               </span>
             )}
-            {selectedConversation.wahaSession && (
-              <span className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 max-w-full truncate">
-                <Smartphone className="w-3 h-3 shrink-0" />
-                <span className="truncate">Sesi: {selectedConversation.wahaSession}</span>
-              </span>
-            )}
+            <div className="mt-1.5 flex items-center justify-center flex-wrap gap-1">
+              {selectedConversation.wahaSession && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 max-w-full truncate">
+                  <Smartphone className="w-3 h-3 shrink-0" />
+                  <span className="truncate">Sesi: {selectedConversation.wahaSession}</span>
+                </span>
+              )}
+              {selectedConversation.channelAccountName && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200 max-w-full truncate">
+                  <span className="truncate">Kanal: {selectedConversation.channelAccountName}</span>
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="py-4 space-y-4 flex-1 text-xs text-gray-700">
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-gray-600">
+                  Nama di Kanal/Sesi Ini
+                </span>
+                {selectedConversation.pushName && (
+                  <span
+                    title="Push name yang diterima dari pengirim di kanal/sesi ini"
+                    className="text-[10px] text-gray-500 truncate max-w-[140px]"
+                  >
+                    Push: <strong className="text-gray-700">{selectedConversation.pushName}</strong>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  disabled={!canManageConversation}
+                  value={channelDisplayNameDraft}
+                  onChange={(e) => setChannelDisplayNameDraft(e.target.value)}
+                  placeholder={selectedConversation.pushName || selectedConversation.contact.nama_lengkap}
+                  className="flex-1 min-w-0 px-2 py-1 text-xs bg-white border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
+                />
+                {canManageConversation && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={savingChannelName}
+                      onClick={() => void handleSaveChannelDisplayName(channelDisplayNameDraft)}
+                      className="px-2 py-1 text-[11px] font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 shrink-0"
+                    >
+                      {savingChannelName ? '...' : 'Simpan'}
+                    </button>
+                    {selectedConversation.channelDisplayName && (
+                      <button
+                        type="button"
+                        disabled={savingChannelName}
+                        onClick={() => void handleSaveChannelDisplayName(null)}
+                        title="Reset nama tampilan kanal ke Push Name / Kontak Utama"
+                        className="px-1.5 py-1 text-[11px] font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 shrink-0"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-400 leading-snug">
+                Hanya mengubah tampilan percakapan ini, tanpa menimpa kontak utama atau kanal lain.
+              </p>
+            </div>
+
+            {/* Penilaian & Kategori SLA/CSAT Toggle */}
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-gray-700 flex items-center gap-1">
+                  <EyeOff className="w-3 h-3 text-gray-500" />
+                  Status Penilaian (SLA &amp; CSAT)
+                </span>
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                    selectedConversation.excludeFromMetrics
+                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  }`}
+                >
+                  {selectedConversation.excludeFromMetrics ? 'Non-Penilaian' : 'Dinilai'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  disabled={savingExclude || !canManageConversation}
+                  onClick={() => void handleUpdateMetricExclusion(false, null)}
+                  className={`py-1 px-2 rounded border text-[11px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                    !selectedConversation.excludeFromMetrics
+                      ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
+                      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  Customer (Dinilai)
+                </button>
+                <button
+                  type="button"
+                  disabled={savingExclude || !canManageConversation}
+                  onClick={() =>
+                    void handleUpdateMetricExclusion(
+                      true,
+                      excludeReasonDraft || (selectedConversation.isGroup ? 'Grup WhatsApp' : 'Bukan Customer')
+                    )
+                  }
+                  className={`py-1 px-2 rounded border text-[11px] font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                    selectedConversation.excludeFromMetrics
+                      ? 'border-amber-600 bg-amber-50 text-amber-900'
+                      : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  Bukan Penilaian
+                </button>
+              </div>
+
+              {selectedConversation.excludeFromMetrics && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex flex-wrap gap-1">
+                    {['Bukan Customer', 'Internal / Tim', 'Grup WhatsApp', 'Spam / Bot', 'Lainnya'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        disabled={savingExclude || !canManageConversation}
+                        onClick={() => {
+                          setExcludeReasonDraft(preset);
+                          void handleUpdateMetricExclusion(true, preset);
+                        }}
+                        className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors disabled:opacity-60 ${
+                          (selectedConversation.excludeReason || '') === preset
+                            ? 'bg-amber-100 border-amber-400 text-amber-900 font-semibold'
+                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      disabled={!canManageConversation}
+                      value={excludeReasonDraft}
+                      onChange={(e) => setExcludeReasonDraft(e.target.value)}
+                      placeholder="Alasan / keterangan lain..."
+                      className="flex-1 min-w-0 px-2 py-1 text-[11px] bg-white border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
+                    />
+                    {canManageConversation && (
+                      <button
+                        type="button"
+                        disabled={savingExclude}
+                        onClick={() => void handleUpdateMetricExclusion(true, excludeReasonDraft)}
+                        className="px-2 py-1 text-[11px] font-medium rounded bg-gray-800 text-white hover:bg-gray-900 disabled:opacity-50 shrink-0"
+                      >
+                        Simpan
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[10px] text-gray-400 leading-snug">
+                Penanda Non-Penilaian disimpan ke profil kontak dan otomatis berlaku ke semua obrolan aktif serta percakapan baru berikutnya (dikecualikan dari analitik SLA, CSAT, peringatan telat balas, &amp; CSAT otomatis).
+              </p>
+            </div>
+
+            {selectedConversation.isGroup && (
+              <div className="bg-teal-50/50 border border-teal-200 rounded-lg p-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-teal-900 flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5 text-teal-700" />
+                    Partisipan Grup ({participantsData?.participants.length || 0})
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={loadingParticipants}
+                      onClick={() => void fetchParticipants(selectedConversation.id, true)}
+                      title="Sinkronkan daftar anggota grup dari WAHA"
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white border border-teal-200 text-[10px] font-medium text-teal-800 hover:bg-teal-100 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-2.5 h-2.5 ${loadingParticipants ? 'animate-spin' : ''}`} />
+                      Sync
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowParticipantsModal(true);
+                        void fetchParticipants(selectedConversation.id, true);
+                      }}
+                      className="text-[10px] font-semibold text-indigo-700 hover:underline"
+                    >
+                      Semua
+                    </button>
+                  </div>
+                </div>
+
+                {loadingParticipants && !participantsData ? (
+                  <p className="text-[11px] text-gray-500">Memuat partisipan grup...</p>
+                ) : !participantsData || participantsData.participants.length === 0 ? (
+                  <p className="text-[11px] text-gray-500">
+                    Partisipan akan terisi saat anggota mengirim pesan atau klik Sync.
+                  </p>
+                ) : (
+                  <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5">
+                    {participantsData.participants.slice(0, 8).map((part) => (
+                      <div
+                        key={part.jid}
+                        className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-teal-100 text-[11px]"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 truncate flex items-center gap-1">
+                            <span>{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
+                            {part.role !== 'member' && (
+                              <span className="px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                {part.role === 'superadmin' ? 'Owner' : 'Admin'}
+                              </span>
+                            )}
+                          </div>
+                          {part.phone && (
+                            <div className="text-[10px] font-mono text-gray-500 truncate">
+                              +{part.phone}
+                            </div>
+                          )}
+                        </div>
+                        {part.messageCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
+                            {part.messageCount} chat
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div>
               <span className="block text-[11px] text-gray-400 font-medium mb-0.5">WhatsApp</span>
               {selectedConversation.contact.nomor_whatsapp ? (
@@ -3273,8 +3793,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   <span>+{selectedConversation.contact.nomor_whatsapp}</span>
                 </div>
               ) : (
-                <div className="text-gray-600 text-[11px]">
-                  {(selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
+                <div className="text-gray-600 text-[11px] font-mono break-all">
+                  {selectedConversation.isGroup
+                    ? `Grup WA (${selectedConversation.externalThreadId || '@g.us'})`
+                    : (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
                     ? 'WhatsApp Privacy ID (@lid)'
                     : 'Akun Omnichannel'}
                 </div>
@@ -3339,45 +3861,50 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${badgeCls}`}
                     >
                       {lbl}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleLabel(lbl)}
-                        className="opacity-75 hover:opacity-100"
-                      >
-                        <X className="w-2.5 h-2.5" />
-                      </button>
+                      {canManageConversation && (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleLabel(lbl)}
+                          className="opacity-75 hover:opacity-100"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      )}
                     </span>
                   );
                 })}
-                {(masterLabels.length > 0 ? masterLabels.map((m) => m.name) : PRESET_LABELS)
-                  .filter((p) => !activeLabels.some((a) => a.toLowerCase() === p.toLowerCase()))
-                  .map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => handleToggleLabel(preset)}
-                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-gray-50 hover:bg-gray-100 text-gray-600 border border-dashed border-gray-300"
-                    >
-                      <Plus className="w-2.5 h-2.5" />
-                      {preset}
-                    </button>
-                  ))}
+                {canManageConversation &&
+                  (masterLabels.length > 0 ? masterLabels.map((m) => m.name) : PRESET_LABELS)
+                    .filter((p) => !activeLabels.some((a) => a.toLowerCase() === p.toLowerCase()))
+                    .map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => handleToggleLabel(preset)}
+                        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] bg-gray-50 hover:bg-gray-100 text-gray-600 border border-dashed border-gray-300"
+                      >
+                        <Plus className="w-2.5 h-2.5" />
+                        {preset}
+                      </button>
+                    ))}
               </div>
-              <form onSubmit={handleAddCustomLabel} className="flex gap-1.5">
-                <input
-                  type="text"
-                  value={newLabel}
-                  onChange={(e) => setNewLabel(e.target.value)}
-                  placeholder="Tambah label..."
-                  className="flex-1 min-w-0 h-8 sm:h-7 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="submit"
-                  className="h-8 sm:h-7 px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-[11px] font-medium shrink-0"
-                >
-                  Tambah
-                </button>
-              </form>
+              {canManageConversation && (
+                <form onSubmit={handleAddCustomLabel} className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newLabel}
+                    onChange={(e) => setNewLabel(e.target.value)}
+                    placeholder="Tambah label..."
+                    className="flex-1 min-w-0 h-8 sm:h-7 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="submit"
+                    className="h-8 sm:h-7 px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-[11px] font-medium shrink-0"
+                  >
+                    Tambah
+                  </button>
+                </form>
+              )}
             </div>
 
             {/* Contact Notes */}
@@ -3387,21 +3914,24 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </span>
               <textarea
                 rows={3}
+                disabled={!canManageConversation}
                 value={contactNotesDraft}
                 onChange={(e) => setContactNotesDraft(e.target.value)}
                 placeholder="Tambahkan catatan permanen untuk kontak ini..."
-                className="w-full p-2 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                className="w-full p-2 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500 disabled:opacity-70"
               />
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                isLoading={savingMeta}
-                onClick={handleSaveContactNotes}
-                className="w-full justify-center"
-              >
-                Simpan Catatan Kontak
-              </Button>
+              {canManageConversation && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={savingMeta}
+                  onClick={handleSaveContactNotes}
+                  className="w-full justify-center"
+                >
+                  Simpan Catatan Kontak
+                </Button>
+              )}
             </div>
 
             {/* CSAT Rating History */}
@@ -3573,14 +4103,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 <span>Buka di WhatsApp Web</span>
               </a>
             )}
-            <button
-              type="button"
-              onClick={() => void handleOpenMergeModal()}
-              className="inline-flex items-center justify-center gap-1.5 w-full h-9 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-md text-xs transition-colors"
-            >
-              <GitMerge className="w-3.5 h-3.5" />
-              <span>Gabungkan ke Kontak Lain</span>
-            </button>
+            {canManageConversation && canEditContact && (
+              <button
+                type="button"
+                onClick={() => void handleOpenMergeModal()}
+                className="inline-flex items-center justify-center gap-1.5 w-full h-9 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-md text-xs transition-colors"
+              >
+                <GitMerge className="w-3.5 h-3.5" />
+                <span>Gabungkan ke Kontak Lain</span>
+              </button>
+            )}
           </div>
         </div>
         </>
@@ -3721,6 +4253,113 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </span>
                     </button>
                   ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showParticipantsModal && selectedConversation && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4"
+          onClick={() => setShowParticipantsModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full max-h-[88dvh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 shrink-0">
+              <div className="min-w-0">
+                <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5 truncate">
+                  <Users className="w-4 h-4 text-teal-600 shrink-0" />
+                  <span className="truncate">
+                    Partisipan {participantsData?.groupName || getConversationDisplayTitle(selectedConversation)}
+                  </span>
+                </h4>
+                {participantsData?.groupJid && (
+                  <p className="text-[10px] font-mono text-gray-500 truncate mt-0.5">
+                    {participantsData.groupJid}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  disabled={loadingParticipants}
+                  onClick={() => void fetchParticipants(selectedConversation.id, true)}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-200 bg-white text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${loadingParticipants ? 'animate-spin' : ''}`} />
+                  <span>Segarkan</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowParticipantsModal(false)}
+                  className="p-1 text-gray-500 hover:text-gray-800 rounded"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 space-y-2">
+              {loadingParticipants && !participantsData ? (
+                <LoadingState message="Mengambil daftar partisipan grup dari WhatsApp..." />
+              ) : !participantsData || participantsData.participants.length === 0 ? (
+                <EmptyState
+                  title="Belum ada partisipan tercatat"
+                  description="Anggota grup yang mengirim pesan atau terbaca dari WAHA akan tampil di sini."
+                />
+              ) : (
+                <>
+                  {participantsData.syncError && (
+                    <div className="p-2 rounded bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                      {participantsData.syncError}
+                    </div>
+                  )}
+                  <div className="divide-y divide-gray-100 border border-gray-200 rounded-md">
+                    {participantsData.participants.map((part) => (
+                      <div
+                        key={part.jid}
+                        className="px-3 py-2 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-semibold text-gray-900 truncate flex items-center gap-1.5">
+                            <span>{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
+                            {part.role !== 'member' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                {part.role === 'superadmin' ? 'Owner Grup' : 'Admin Grup'}
+                              </span>
+                            )}
+                            {part.contactId && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                Di Kontak CRM
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] font-mono text-gray-500 truncate mt-0.5">
+                            {part.phone ? `+${part.phone}` : part.jid}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[11px] font-semibold">
+                            {part.messageCount} pesan
+                          </span>
+                          {part.lastMessageAt && (
+                            <div className="text-[10px] text-gray-400 mt-0.5">
+                              {new Date(part.lastMessageAt).toLocaleString('id-ID', {
+                                day: '2-digit',
+                                month: 'short',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </div>
