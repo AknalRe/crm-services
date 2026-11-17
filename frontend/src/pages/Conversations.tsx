@@ -51,6 +51,7 @@ import {
   ShoppingBag,
   SmilePlus,
   Compass,
+  User,
   UserPlus,
   AtSign,
   Forward,
@@ -104,6 +105,7 @@ const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls:
   TELEGRAM: { label: 'Telegram', short: 'TG', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
 };
 import { Button } from '../components/ui/Button';
+import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
@@ -185,12 +187,17 @@ interface ParticipantLookupEntry {
   name: string;
   phone?: string | null;
   contactId?: string | null;
+  jid?: string | null;
+  role?: string | null;
 }
 
 interface ClickableMentionTarget {
   contactId?: string | null;
   phone?: string | null;
   name?: string | null;
+  jid?: string | null;
+  role?: string | null;
+  avatarUrl?: string | null;
 }
 
 const ContactAvatar: React.FC<{
@@ -350,10 +357,12 @@ function renderTextWithClickableLinks(
                 contactId: resolvedContactId,
                 phone: resolvedPhone,
                 name: matchedName,
+                jid: fromPart?.jid || fromMsg?.jid,
+                role: fromPart?.role,
               });
             }}
             className={`${pillCls} cursor-pointer`}
-            title={`Klik untuk membuka kontak: ${matchedName}${resolvedPhone ? ` (+${resolvedPhone})` : ''}`}
+            title={`Klik untuk melihat detail kontak: ${matchedName}${resolvedPhone ? ` (+${resolvedPhone})` : ''}`}
           >
             <AtSign className="w-2.5 h-2.5 inline text-indigo-500 shrink-0" />
             <span>{matchedName}</span>
@@ -1164,6 +1173,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
           name: part.contactName || part.name || (p ? `+${p}` : part.jid),
           phone: p || null,
           contactId: part.contactId || null,
+          jid: part.jid || null,
+          role: part.role || null,
         };
         if (p) {
           map.set(p, entry);
@@ -1183,6 +1194,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       const fallbackEntry: ParticipantLookupEntry = {
         name: m.senderName || (p ? `+${p}` : jidToken),
         phone: p || null,
+        jid: m.senderJid || null,
       };
       if (p && !map.has(p)) {
         map.set(p, fallbackEntry);
@@ -1194,14 +1206,219 @@ export const Conversations: React.FC<ConversationsProps> = ({
     return map;
   }, [selectedConversation, participantsData, messages]);
 
+  // Contact Detail Modal (popup for mentions and group participants)
+  const [selectedContactModalTarget, setSelectedContactModalTarget] = useState<ClickableMentionTarget | null>(null);
+  const [modalContactData, setModalContactData] = useState<Contact | null>(null);
+  const [loadingContactModal, setLoadingContactModal] = useState<boolean>(false);
+  const [syncingModalContact, setSyncingModalContact] = useState<boolean>(false);
+  const [savingModalContact, setSavingModalContact] = useState<boolean>(false);
+
   const handleOpenMentionContact = useCallback(
     (target: ClickableMentionTarget) => {
-      if (onOpenContact) {
-        onOpenContact(target);
-      }
+      setSelectedContactModalTarget(target);
     },
-    [onOpenContact]
+    []
   );
+
+  useEffect(() => {
+    if (!selectedContactModalTarget) {
+      setModalContactData(null);
+      return;
+    }
+    let active = true;
+    setLoadingContactModal(true);
+
+    const loadTargetContact = async () => {
+      try {
+        if (selectedContactModalTarget.contactId) {
+          const c = await api.getContact(selectedContactModalTarget.contactId);
+          if (active) {
+            setModalContactData(c);
+          }
+          return;
+        }
+
+        const cleanPhone = selectedContactModalTarget.phone?.replace(/\D/g, '');
+        if (cleanPhone && cleanPhone.length >= 6) {
+          const res = await api.getContacts({ search: cleanPhone, limit: 10 });
+          const list: Contact[] = res?.data || [];
+          const exact = list.find((item: Contact) => item.nomor_whatsapp?.replace(/\D/g, '') === cleanPhone);
+          if (active) {
+            if (exact) {
+              setModalContactData(exact);
+            } else {
+              setModalContactData({
+                id: '',
+                nama_lengkap: selectedContactModalTarget.name || `+${cleanPhone}`,
+                nomor_whatsapp: cleanPhone,
+                profile_picture_url: selectedContactModalTarget.avatarUrl || null,
+                createdAt: '',
+                updatedAt: '',
+              });
+            }
+          }
+          return;
+        }
+
+        if (active) {
+          setModalContactData({
+            id: '',
+            nama_lengkap: selectedContactModalTarget.name || 'Kontak WhatsApp',
+            nomor_whatsapp: selectedContactModalTarget.phone || '',
+            profile_picture_url: selectedContactModalTarget.avatarUrl || null,
+            createdAt: '',
+            updatedAt: '',
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load contact for modal:', err);
+        if (active) {
+          setModalContactData({
+            id: selectedContactModalTarget.contactId || '',
+            nama_lengkap: selectedContactModalTarget.name || 'Kontak WhatsApp',
+            nomor_whatsapp: selectedContactModalTarget.phone || '',
+            profile_picture_url: selectedContactModalTarget.avatarUrl || null,
+            createdAt: '',
+            updatedAt: '',
+          });
+        }
+      } finally {
+        if (active) {
+          setLoadingContactModal(false);
+        }
+      }
+    };
+
+    void loadTargetContact();
+    return () => {
+      active = false;
+    };
+  }, [selectedContactModalTarget]);
+
+  const handleStartDirectChatFromModal = async () => {
+    if (!modalContactData && !selectedContactModalTarget) return;
+    const contactId = modalContactData?.id || selectedContactModalTarget?.contactId || undefined;
+    const phone = modalContactData?.nomor_whatsapp || selectedContactModalTarget?.phone || undefined;
+    const name = modalContactData?.nama_lengkap || selectedContactModalTarget?.name || undefined;
+
+    const chosenSession = (
+      newChatSession.trim() ||
+      selectedSession ||
+      defaultWahaSession ||
+      sessions.find((s) => s.status === 'WORKING')?.name ||
+      sessions[0]?.name ||
+      ''
+    ).trim() || undefined;
+
+    setOpeningContactId('modal_contact');
+    try {
+      let opened: Conversation;
+      if (contactId) {
+        opened = await api.openConversation(contactId, chosenSession);
+      } else if (phone) {
+        opened = await api.openConversation(undefined, chosenSession, phone, name);
+      } else {
+        toast.error('Tidak ada ID kontak atau nomor WhatsApp untuk membuka percakapan');
+        return;
+      }
+      setSelectedContactModalTarget(null);
+      setModalContactData(null);
+      if (
+        chosenSession &&
+        accountFilter.startsWith('WA:') &&
+        accountFilter.slice(3).toLowerCase() !== chosenSession.toLowerCase()
+      ) {
+        setAccountFilter('ALL');
+      }
+      const updated = await api.getConversations();
+      setConversations(updated);
+      const target = updated.find((c) => c.id === opened.id) || opened;
+      setSelectedConversation(target);
+      setSelectedSession(target.wahaSession || chosenSession || defaultWahaSession || '');
+      toast.success(chosenSession ? `Percakapan dibuka via sesi ${chosenSession}` : 'Percakapan langsung dibuka');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal membuka percakapan langsung');
+    } finally {
+      setOpeningContactId(null);
+    }
+  };
+
+  const handleSaveContactFromModal = async () => {
+    const rawPhone = modalContactData?.nomor_whatsapp || selectedContactModalTarget?.phone || '';
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    const name =
+      (modalContactData?.nama_lengkap || selectedContactModalTarget?.name || '').trim() ||
+      (cleanPhone ? `Kontak +${cleanPhone}` : 'Kontak Baru');
+
+    if (!cleanPhone) {
+      toast.error('Nomor WhatsApp tidak valid untuk disimpan ke CRM');
+      return;
+    }
+    setSavingModalContact(true);
+    try {
+      const created = await api.createContact({
+        nama_lengkap: name,
+        nomor_whatsapp: cleanPhone,
+      });
+      setModalContactData(created);
+      toast.success(`Kontak "${created.nama_lengkap}" berhasil disimpan ke CRM`);
+
+      const sessionToUse = selectedSession || defaultWahaSession || undefined;
+      if (sessionToUse) {
+        try {
+          const syncRes = await api.syncContactProfile(created.id, sessionToUse);
+          if (syncRes.contact) {
+            setModalContactData(syncRes.contact);
+          }
+        } catch {
+          // ignore profile sync error
+        }
+      }
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menyimpan kontak ke CRM');
+    } finally {
+      setSavingModalContact(false);
+    }
+  };
+
+  const handleSyncModalContactProfile = async () => {
+    if (!modalContactData?.id || syncingModalContact) return;
+    setSyncingModalContact(true);
+    try {
+      const sessionToUse = selectedSession || defaultWahaSession || undefined;
+      const res = await api.syncContactProfile(modalContactData.id, sessionToUse);
+      if (res.contact) {
+        setModalContactData(res.contact);
+        toast.success('Profil WhatsApp kontak berhasil disinkronkan');
+        void fetchConversations();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menyinkronkan profil kontak dari WhatsApp');
+    } finally {
+      setSyncingModalContact(false);
+    }
+  };
+
+  const handleCopyContactPhone = (num?: string | null) => {
+    if (!num) return;
+    const clean = num.replace(/\D/g, '');
+    const textToCopy = clean ? `+${clean}` : num;
+    navigator.clipboard.writeText(textToCopy);
+    toast.success(`Nomor ${textToCopy} disalin ke clipboard`);
+  };
+
+  const handleOpenInContactsTab = () => {
+    if (!onOpenContact) return;
+    const payload = {
+      contactId: modalContactData?.id || selectedContactModalTarget?.contactId,
+      phone: modalContactData?.nomor_whatsapp || selectedContactModalTarget?.phone,
+      name: modalContactData?.nama_lengkap || selectedContactModalTarget?.name,
+    };
+    setSelectedContactModalTarget(null);
+    setModalContactData(null);
+    onOpenContact(payload);
+  };
 
   const handleSyncConversationProfile = async () => {
     if (!selectedConversation || syncingProfile) return;
@@ -7112,16 +7329,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           <div
                             key={part.jid}
                             onClick={() => {
-                              if (onOpenContact && (part.contactId || part.phone)) {
-                                onOpenContact({
+                              if (part.contactId || part.phone) {
+                                handleOpenMentionContact({
                                   contactId: part.contactId,
                                   phone: part.phone,
                                   name: part.contactName || part.name,
+                                  jid: part.jid,
+                                  role: part.role,
                                 });
                               }
                             }}
                             className={`flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-teal-100 text-[11px] ${
-                              onOpenContact && (part.contactId || part.phone)
+                              part.contactId || part.phone
                                 ? 'cursor-pointer hover:bg-teal-50/70'
                                 : ''
                             }`}
@@ -7951,17 +8170,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <div
                         key={part.jid}
                         onClick={() => {
-                          if (onOpenContact && (part.contactId || part.phone)) {
+                          if (part.contactId || part.phone) {
                             setShowParticipantsModal(false);
-                            onOpenContact({
+                            handleOpenMentionContact({
                               contactId: part.contactId,
                               phone: part.phone,
                               name: part.contactName || part.name,
+                              jid: part.jid,
+                              role: part.role,
                             });
                           }
                         }}
                         className={`px-3 py-2 flex items-center justify-between gap-2 text-xs ${
-                          onOpenContact && (part.contactId || part.phone)
+                          part.contactId || part.phone
                             ? 'cursor-pointer hover:bg-gray-50'
                             : ''
                         }`}
@@ -8518,9 +8739,325 @@ export const Conversations: React.FC<ConversationsProps> = ({
         </div>
       )}
 
+      {/* Contact Detail Modal (Mention & Group Participant Popup) */}
+      <Modal
+        isOpen={Boolean(selectedContactModalTarget)}
+        onClose={() => {
+          setSelectedContactModalTarget(null);
+          setModalContactData(null);
+        }}
+        title="Detail Kontak"
+        subtitle={
+          selectedConversation?.isGroup
+            ? `Informasi anggota grup ${getConversationDisplayTitle(selectedConversation)}`
+            : 'Informasi kontak WhatsApp'
+        }
+        maxWidthClass="max-w-md"
+        footer={
+          <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 order-2 sm:order-1">
+              {onOpenContact && (
+                <button
+                  type="button"
+                  onClick={handleOpenInContactsTab}
+                  className="px-2.5 py-1.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-xs font-medium text-gray-700 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Buka data kontak di menu master kontak"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-gray-500" />
+                  <span>Menu Kontak</span>
+                </button>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 order-1 sm:order-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedContactModalTarget(null);
+                  setModalContactData(null);
+                }}
+                className="px-3 py-1.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-xs font-medium text-gray-700 transition-colors cursor-pointer"
+              >
+                Tutup
+              </button>
+              <button
+                type="button"
+                disabled={openingContactId === 'modal_contact'}
+                onClick={() => void handleStartDirectChatFromModal()}
+                className="px-3.5 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-2xs transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>
+                  {openingContactId === 'modal_contact' ? 'Membuka...' : 'Mulai Chat Pribadi'}
+                </span>
+              </button>
+            </div>
+          </div>
+        }
+      >
+        {loadingContactModal && !modalContactData ? (
+          <LoadingState message="Memuat detail kontak..." />
+        ) : (
+          <div className="space-y-4">
+            {/* Top Profile Card */}
+            <div className="text-center pb-3 border-b border-gray-200">
+              <ContactAvatar
+                url={modalContactData?.profile_picture_url || selectedContactModalTarget?.avatarUrl}
+                label={modalContactData?.nama_lengkap || selectedContactModalTarget?.name || 'Kontak'}
+                className="w-14 h-14 rounded-full bg-indigo-50 text-indigo-700 font-bold text-lg mx-auto mb-2 border-2 border-indigo-200 shadow-2xs"
+                onClick={(e) => {
+                  const pic = modalContactData?.profile_picture_url || selectedContactModalTarget?.avatarUrl;
+                  if (pic) {
+                    e.stopPropagation();
+                    handleOpenAvatarLightbox(
+                      pic,
+                      modalContactData?.nama_lengkap || selectedContactModalTarget?.name || 'Foto Profil'
+                    );
+                  }
+                }}
+                title={
+                  (modalContactData?.profile_picture_url || selectedContactModalTarget?.avatarUrl)
+                    ? 'Klik untuk melihat foto profil penuh'
+                    : undefined
+                }
+              />
+              <h4 className="font-semibold text-gray-900 text-sm break-words">
+                {modalContactData?.nama_lengkap || selectedContactModalTarget?.name || 'Kontak WhatsApp'}
+              </h4>
+              {modalContactData?.nama_panggilan && (
+                <div className="text-xs text-gray-500 mt-0.5">
+                  Panggilan: {modalContactData.nama_panggilan}
+                </div>
+              )}
+
+              {/* Badges */}
+              <div className="mt-2 flex items-center justify-center flex-wrap gap-1.5">
+                {selectedContactModalTarget?.role && (
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                      selectedContactModalTarget.role === 'superadmin'
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : selectedContactModalTarget.role === 'admin'
+                        ? 'bg-teal-50 text-teal-800 border-teal-200'
+                        : 'bg-gray-100 text-gray-700 border-gray-200'
+                    }`}
+                  >
+                    <Shield className="w-3 h-3" />
+                    <span>
+                      {selectedContactModalTarget.role === 'superadmin'
+                        ? 'Owner Grup'
+                        : selectedContactModalTarget.role === 'admin'
+                        ? 'Admin Grup'
+                        : 'Anggota Grup'}
+                    </span>
+                  </span>
+                )}
+
+                {modalContactData?.id ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <UserCheck className="w-3 h-3" />
+                    <span>Terdaftar di CRM</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                    <User className="w-3 h-3" />
+                    <span>Belum Terdaftar di CRM</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Save to CRM or Sync WA actions */}
+              <div className="mt-2.5 flex items-center justify-center gap-2 flex-wrap">
+                {!modalContactData?.id && (modalContactData?.nomor_whatsapp || selectedContactModalTarget?.phone) && (
+                  <button
+                    type="button"
+                    disabled={savingModalContact}
+                    onClick={() => void handleSaveContactFromModal()}
+                    className="px-2.5 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>{savingModalContact ? 'Menyimpan...' : 'Simpan ke CRM'}</span>
+                  </button>
+                )}
+
+                {modalContactData?.id && (
+                  <button
+                    type="button"
+                    disabled={syncingModalContact}
+                    onClick={() => void handleSyncModalContactProfile()}
+                    className="px-2.5 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50 text-[11px] font-medium text-gray-700 inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncingModalContact ? 'animate-spin' : ''}`} />
+                    <span>{syncingModalContact ? 'Menyinkronkan...' : 'Sync Profil WA'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Contact Details List */}
+            <div className="space-y-2.5 text-xs">
+              {/* WhatsApp Number */}
+              <div className="p-2.5 rounded-lg border border-gray-200 bg-gray-50/70 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-0.5">
+                    Nomor WhatsApp
+                  </span>
+                  <div className="font-mono text-gray-900 font-semibold text-xs sm:text-[13px] flex items-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span className="truncate">
+                      {(modalContactData?.nomor_whatsapp || selectedContactModalTarget?.phone)
+                        ? `+${(modalContactData?.nomor_whatsapp || selectedContactModalTarget?.phone)?.replace(/\D/g, '')}`
+                        : 'Tidak tersedia'}
+                    </span>
+                  </div>
+                </div>
+                {(modalContactData?.nomor_whatsapp || selectedContactModalTarget?.phone) && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopyContactPhone(
+                        modalContactData?.nomor_whatsapp || selectedContactModalTarget?.phone
+                      )
+                    }
+                    className="p-1.5 rounded hover:bg-gray-200/70 text-gray-500 hover:text-gray-800 transition-colors shrink-0 cursor-pointer"
+                    title="Salin nomor WhatsApp"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* JID if available */}
+              {selectedContactModalTarget?.jid && (
+                <div className="p-2 rounded-lg border border-gray-200 bg-white text-[11px]">
+                  <span className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">
+                    WhatsApp JID / ID Teknis
+                  </span>
+                  <div className="font-mono text-gray-700 break-all select-all">
+                    {selectedContactModalTarget.jid}
+                  </div>
+                </div>
+              )}
+
+              {/* Bio / Profile About */}
+              {modalContactData?.profile_about && (
+                <div className="p-2.5 rounded-lg border border-gray-200 bg-white">
+                  <span className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+                    <Info className="w-3 h-3 text-indigo-500" />
+                    <span>Info Profil / Bio</span>
+                  </span>
+                  <p className="text-[11px] text-gray-700 whitespace-pre-wrap break-words leading-relaxed">
+                    {modalContactData.profile_about}
+                  </p>
+                </div>
+              )}
+
+              {/* Birthday and Address if available */}
+              {(modalContactData?.tanggal_lahir || modalContactData?.alamat) && (
+                <div className="p-2.5 rounded-lg border border-gray-200 bg-white space-y-2">
+                  {modalContactData.tanggal_lahir && (
+                    <div>
+                      <span className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">
+                        Tanggal Lahir
+                      </span>
+                      <div className="flex items-center gap-1.5 text-gray-800">
+                        <Calendar className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>
+                          {new Date(modalContactData.tanggal_lahir).toLocaleDateString('id-ID', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {modalContactData.alamat && (
+                    <div>
+                      <span className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">
+                        Alamat
+                      </span>
+                      <div className="flex items-start gap-1.5 text-gray-800">
+                        <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
+                        <span className="leading-snug">{modalContactData.alamat}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Category, Tags, or Notes */}
+              {(modalContactData?.kategori || modalContactData?.tags || modalContactData?.notes) && (
+                <div className="p-2.5 rounded-lg border border-gray-200 bg-white space-y-1.5">
+                  {modalContactData.kategori && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                        Kategori:
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                        {modalContactData.kategori}
+                      </span>
+                    </div>
+                  )}
+                  {modalContactData.tags && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mr-1">
+                        Label:
+                      </span>
+                      {modalContactData.tags
+                        .split(',')
+                        .map((t) => t.trim())
+                        .filter(Boolean)
+                        .map((tag, tIdx) => (
+                          <span
+                            key={tIdx}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 border border-gray-200"
+                          >
+                            <Tag className="w-2.5 h-2.5 text-gray-400" />
+                            <span>{tag}</span>
+                          </span>
+                        ))}
+                    </div>
+                  )}
+                  {modalContactData.notes && (
+                    <div className="pt-1">
+                      <span className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">
+                        Catatan Internal:
+                      </span>
+                      <p className="text-[11px] text-gray-600 italic bg-gray-50 p-1.5 rounded border border-gray-100">
+                        {modalContactData.notes}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Omnichannel Identities */}
+              {Array.isArray(modalContactData?.identities) && modalContactData.identities.length > 0 && (
+                <div className="p-2.5 rounded-lg border border-gray-200 bg-white">
+                  <span className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                    Kanal Omnichannel
+                  </span>
+                  <div className="space-y-1">
+                    {modalContactData.identities.map((idItem, iIdx) => (
+                      <div
+                        key={iIdx}
+                        className="flex items-center justify-between text-[11px] px-2 py-1 rounded bg-gray-50 border border-gray-100"
+                      >
+                        <span className="font-semibold text-gray-700">{idItem.channel}</span>
+                        <span className="font-mono text-gray-600">{idItem.externalId}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {lightboxMedia && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4"
           onClick={() => setLightboxMedia(null)}
         >
           <div
