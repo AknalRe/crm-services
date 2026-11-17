@@ -35,8 +35,14 @@ const client = axios.create({
 
 export const api = {
   // Dashboard
-  getDashboardStats: async (): Promise<DashboardStats> => {
-    const res = await client.get('/dashboard/stats');
+  getDashboardStats: async (params?: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+    session?: string;
+    channel?: string;
+  }): Promise<DashboardStats> => {
+    const res = await client.get('/dashboard/stats', { params });
     return res.data.data;
   },
   getDashboardDrilldown: async (params: {
@@ -44,6 +50,11 @@ export const api = {
     filter?: string;
     value?: string;
     q?: string;
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+    session?: string;
+    channel?: string;
   }): Promise<import('../types').DashboardDrilldownResponse> => {
     const res = await client.get('/dashboard/drilldown', { params });
     return res.data.data;
@@ -863,9 +874,12 @@ export const api = {
   },
 
   // Reports Export
-  downloadDashboardExport: async (type: 'agents' | 'conversations' | 'broadcasts'): Promise<void> => {
+  downloadDashboardExport: async (
+    type: 'agents' | 'conversations' | 'broadcasts',
+    params?: { period?: string; session?: string; channel?: string }
+  ): Promise<void> => {
     const res = await client.get('/dashboard/export', {
-      params: { type },
+      params: { type, ...params },
       responseType: 'blob',
     });
     const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });

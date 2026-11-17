@@ -21,6 +21,10 @@ import {
   EyeOff,
   FolderKanban,
   ExternalLink,
+  RotateCw,
+  ArrowUpDown,
+  Filter,
+  SlidersHorizontal,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { Button } from '../components/ui/Button';
@@ -74,7 +78,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
   const toast = useToast();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<string>('all');
+  const [selectedSession, setSelectedSession] = useState<string>('all');
+  const [selectedChannel, setSelectedChannel] = useState<string>('all');
+  const [agentSortKey, setAgentSortKey] = useState<'count' | 'resolved' | 'frt' | 'res' | 'sla' | 'csat'>('count');
+  const [agentSortDir, setAgentSortDir] = useState<'asc' | 'desc'>('desc');
   const [exportingType, setExportingType] = useState<'agents' | 'conversations' | 'broadcasts' | null>(null);
   const [showCsatDetailsModal, setShowCsatDetailsModal] = useState(false);
   const [expandedCriterionKey, setExpandedCriterionKey] = useState<string | null>(null);
@@ -117,6 +127,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
         filter: opts.filter,
         value: opts.value,
         q: q || undefined,
+        period: period !== 'all' ? period : undefined,
+        session: selectedSession !== 'all' ? selectedSession : undefined,
+        channel: selectedChannel !== 'all' ? selectedChannel : undefined,
       });
       setDrilldown((prev) =>
         prev
@@ -144,7 +157,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
   const handleExport = async (type: 'agents' | 'conversations' | 'broadcasts') => {
     setExportingType(type);
     try {
-      await api.downloadDashboardExport(type);
+      await api.downloadDashboardExport(type, {
+        period: period !== 'all' ? period : undefined,
+        session: selectedSession !== 'all' ? selectedSession : undefined,
+        channel: selectedChannel !== 'all' ? selectedChannel : undefined,
+      });
       toast.success('Laporan CSV berhasil diunduh');
     } catch {
       toast.error('Gagal mengunduh laporan CSV');
@@ -153,37 +170,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
     }
   };
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setIsRefreshing(true);
     try {
-      const data = await api.getDashboardStats();
+      const data = await api.getDashboardStats({
+        period: period !== 'all' ? period : undefined,
+        session: selectedSession !== 'all' ? selectedSession : undefined,
+        channel: selectedChannel !== 'all' ? selectedChannel : undefined,
+      });
       setStats(data);
       setError(null);
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || 'Gagal memuat statistik dashboard');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
-  }, []);
+  }, [period, selectedSession, selectedChannel]);
 
   useEffect(() => {
     loadData();
     const unsubTracking = subscribeLiveEvent('tracking:update', () => {
-      void loadData();
+      void loadData(true);
     });
     const unsubConv = subscribeLiveEvent('conversations:update', () => {
-      void loadData();
+      void loadData(true);
     });
     const unsubWaha = subscribeLiveEvent('waha:status', () => {
-      void loadData();
+      void loadData(true);
     });
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
-        void loadData();
+        void loadData(true);
       }
     };
     document.addEventListener('visibilitychange', onVisible);
     const interval = window.setInterval(() => {
-      void loadData();
+      void loadData(true);
     }, 30_000);
     return () => {
       unsubTracking();
@@ -247,6 +270,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
     recentCsat: [],
     bySession: [],
   };
+
+  const availableSessions = Array.from(
+    new Set((convAnalytics.bySession || []).map((s) => s.session).filter(Boolean))
+  );
+  const availableChannels = Array.from(
+    new Set((convAnalytics.byChannel || []).map((c) => c.channel).filter(Boolean))
+  );
+
+  const periodLabelMap: Record<string, string> = {
+    all: 'Semua Waktu',
+    today: 'Hari Ini',
+    '7d': '7 Hari Terakhir',
+    '30d': '30 Hari Terakhir',
+    month: 'Bulan Ini',
+  };
+
+  const getPeriodSubtitle = (defaultText: string) => {
+    if (period === 'today') return 'Aktivitas Hari Ini (WIB)';
+    if (period === '7d') return '7 Hari Terakhir';
+    if (period === '30d') return '30 Hari Terakhir';
+    if (period === 'month') return 'Bulan Ini (WIB)';
+    return defaultText;
+  };
+
+  const handleAgentSort = (key: 'count' | 'resolved' | 'frt' | 'res' | 'sla' | 'csat') => {
+    if (agentSortKey === key) {
+      setAgentSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setAgentSortKey(key);
+      setAgentSortDir(key === 'frt' || key === 'res' ? 'asc' : 'desc');
+    }
+  };
+
+  const sortedAgents = [...(convAnalytics.byAgent || [])].sort((a, b) => {
+    let diff = 0;
+    if (agentSortKey === 'count') diff = (b.count || 0) - (a.count || 0);
+    else if (agentSortKey === 'resolved') diff = (b.resolvedCount || 0) - (a.resolvedCount || 0);
+    else if (agentSortKey === 'frt') {
+      const aVal = a.avgFrtSeconds ?? 999999;
+      const bVal = b.avgFrtSeconds ?? 999999;
+      diff = aVal - bVal;
+    } else if (agentSortKey === 'res') {
+      const aVal = a.avgResolutionSeconds ?? 999999;
+      const bVal = b.avgResolutionSeconds ?? 999999;
+      diff = aVal - bVal;
+    } else if (agentSortKey === 'sla') diff = (b.slaRate ?? -1) - (a.slaRate ?? -1);
+    else if (agentSortKey === 'csat') diff = (b.avgCsat ?? 0) - (a.avgCsat ?? 0);
+    return agentSortDir === 'asc' ? -diff : diff;
+  });
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -319,6 +391,107 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
         </div>
       </div>
 
+      {/* Operator Filter Toolbar */}
+      <div className="bg-white border border-gray-200 rounded-lg p-2.5 sm:p-3 flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Period selector */}
+          <div className="inline-flex items-center rounded-md border border-gray-200 bg-gray-50/80 p-0.5 text-xs">
+            {[
+              { id: 'all', label: 'Semua Waktu' },
+              { id: 'today', label: 'Hari Ini' },
+              { id: '7d', label: '7 Hari' },
+              { id: '30d', label: '30 Hari' },
+              { id: 'month', label: 'Bulan Ini' },
+            ].map((p) => {
+              const active = period === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPeriod(p.id)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                    active
+                      ? 'bg-white text-indigo-700 shadow-xs font-semibold'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Session filter dropdown if multiple sessions exist */}
+          {availableSessions.length > 1 && (
+            <div className="inline-flex items-center gap-1 text-xs">
+              <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <select
+                value={selectedSession}
+                onChange={(e) => setSelectedSession(e.target.value)}
+                className="h-7 px-2 py-0.5 rounded-md border border-gray-200 bg-white text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="all">Semua Sesi WA</option>
+                {availableSessions.map((s) => (
+                  <option key={s} value={s}>
+                    Sesi: {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Channel filter dropdown if multiple channels exist */}
+          {availableChannels.length > 1 && (
+            <div className="inline-flex items-center gap-1 text-xs">
+              <MessageSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <select
+                value={selectedChannel}
+                onChange={(e) => setSelectedChannel(e.target.value)}
+                className="h-7 px-2 py-0.5 rounded-md border border-gray-200 bg-white text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="all">Semua Channel</option>
+                {availableChannels.map((ch) => (
+                  <option key={ch} value={ch}>
+                    {ch}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Reset Filters button if any non-default filter is set */}
+          {(period !== 'all' || selectedSession !== 'all' || selectedChannel !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setPeriod('all');
+                setSelectedSession('all');
+                setSelectedChannel('all');
+              }}
+              className="text-xs text-rose-600 hover:text-rose-700 font-medium px-2 py-1 rounded hover:bg-rose-50 transition-colors"
+            >
+              Reset Filter
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between md:justify-end gap-2 text-xs text-gray-500">
+          <span className="text-[11px] font-mono text-gray-400">
+            {isRefreshing ? 'Memperbarui...' : 'Auto-refresh live'}
+          </span>
+          <button
+            type="button"
+            onClick={() => void loadData()}
+            disabled={isRefreshing}
+            title="Segarkan data statistik"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-indigo-600' : 'text-gray-500'}`} />
+            <span>Segarkan</span>
+          </button>
+        </div>
+      </div>
+
       {/* KPI Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-4">
         <StatCard
@@ -345,7 +518,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
         <StatCard
           title="Siaran Terkirim"
           value={summary.sent}
-          subtitle="Keluar dari server WA"
+          subtitle={getPeriodSubtitle('Keluar dari server WA')}
           icon={Send}
           color="blue"
           onClick={() =>
@@ -362,7 +535,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
         <StatCard
           title="Lead Sampai"
           value={summary.delivered}
-          subtitle={`Delivery rate ${summary.deliveryRate}%`}
+          subtitle={summary.deliveryRate > 0 ? `Delivery rate ${summary.deliveryRate}%` : getPeriodSubtitle('Penerima tersampaikan')}
           icon={CheckCircle2}
           color="emerald"
           trend={{ value: `${summary.deliveryRate}%`, positive: true }}
@@ -380,7 +553,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
         <StatCard
           title="Lead Dibaca"
           value={summary.read}
-          subtitle={`Read rate ${summary.readRate}%`}
+          subtitle={summary.readRate > 0 ? `Read rate ${summary.readRate}%` : getPeriodSubtitle('Penerima centang biru')}
           icon={Eye}
           color="purple"
           trend={{ value: `${summary.readRate}%`, positive: true }}
@@ -398,7 +571,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
         <StatCard
           title="Gagal Terkirim"
           value={summary.failed}
-          subtitle="Nomor tidak valid / error"
+          subtitle={getPeriodSubtitle('Nomor tidak valid / error')}
           icon={AlertCircle}
           color="rose"
           onClick={() =>
@@ -1089,7 +1262,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                           onClick={() =>
                             void openDrilldown({
                               title: `Percakapan Sesi WA: ${sess.session}`,
-                              subtitle: `${sess.count} obrolan dinilai • ${sess.resolvedCount} selesai`,
+                              subtitle: `${sess.count} obrolan dinilai • ${sess.resolvedCount} selesai${sess.slaRate !== null && sess.slaRate !== undefined ? ` • SLA ${sess.slaRate}%` : ''}`,
                               kind: 'conversations',
                               filter: 'session',
                               value: sess.session,
@@ -1105,8 +1278,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                               {sess.session}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 text-[11px] tabular-nums shrink-0">
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums shrink-0">
                             <span className="text-gray-700 font-semibold">{sess.count} chat</span>
+                            <span className="text-emerald-700">({sess.resolvedCount} selesai)</span>
+                            {sess.slaRate !== null && sess.slaRate !== undefined && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                SLA {sess.slaRate}%
+                              </span>
+                            )}
                             {sess.avgCsat !== null && (
                               <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
                                 <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
@@ -1134,7 +1313,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                           onClick={() =>
                             void openDrilldown({
                               title: `Percakapan Channel ${ch.channel}`,
-                              subtitle: `${ch.count} obrolan dinilai • ${ch.resolvedCount} selesai`,
+                              subtitle: `${ch.count} obrolan dinilai • ${ch.resolvedCount} selesai${ch.slaRate !== null && ch.slaRate !== undefined ? ` • SLA ${ch.slaRate}%` : ''}`,
                               kind: 'conversations',
                               filter: 'channel',
                               value: ch.channel,
@@ -1150,9 +1329,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                               {ch.channel}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 text-[11px] tabular-nums shrink-0">
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums shrink-0">
                             <span className="text-gray-700 font-semibold">{ch.count} chat</span>
-                            <span className="text-emerald-700">{ch.resolvedCount} selesai</span>
+                            <span className="text-emerald-700">({ch.resolvedCount} selesai)</span>
+                            {ch.slaRate !== null && ch.slaRate !== undefined && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                SLA {ch.slaRate}%
+                              </span>
+                            )}
                             {ch.avgCsat !== null && (
                               <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
                                 <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
@@ -1417,7 +1601,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
             </button>
           </div>
           <div className={`${isMobileSectionOpen('agents') ? 'mt-3' : 'hidden'} sm:hidden divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden`}>
-            {convAnalytics.byAgent.map((ag) => {
+            {sortedAgents.map((ag) => {
               const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
               const isOpen = expandedAgentName === ag.agentName;
               return (
@@ -1430,7 +1614,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                         onClick={() =>
                           void openDrilldown({
                             title: `Percakapan Agen: ${ag.agentName}`,
-                            subtitle: `${ag.count} obrolan dinilai`,
+                            subtitle: `${ag.count} obrolan dinilai • SLA ${ag.slaRate !== null ? `${ag.slaRate}%` : '-'}`,
                             kind: 'conversations',
                             filter: 'agent',
                             value: ag.agentName,
@@ -1454,28 +1638,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                       )}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
-                      <span className="text-gray-500">Obrolan</span>
+                  <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                    <div className="flex flex-col bg-gray-50 p-1.5 rounded">
+                      <span className="text-gray-500 text-[10px]">Obrolan</span>
                       <span className="font-mono font-semibold text-gray-900 tabular-nums">{ag.count}</span>
                     </div>
-                    <div className="flex items-center justify-between bg-emerald-50/70 px-2 py-1 rounded">
-                      <span className="text-emerald-700">Selesai</span>
+                    <div className="flex flex-col bg-emerald-50/70 p-1.5 rounded">
+                      <span className="text-emerald-700 text-[10px]">Selesai</span>
                       <span className="font-mono font-semibold text-emerald-800 tabular-nums">{ag.resolvedCount}</span>
                     </div>
-                    <div className="flex items-center justify-between bg-gray-50 px-2 py-1 rounded">
-                      <span className="text-gray-500">SLA</span>
+                    <div className="flex flex-col bg-gray-50 p-1.5 rounded">
+                      <span className="text-gray-500 text-[10px]">SLA</span>
                       <span className="font-mono font-semibold text-gray-900 tabular-nums">
                         {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
                       </span>
                     </div>
+                    <div className="flex flex-col bg-gray-50 p-1.5 rounded">
+                      <span className="text-gray-500 text-[10px]">Respon (FRT)</span>
+                      <span className="font-mono font-semibold text-gray-900 tabular-nums">
+                        {ag.avgFrtSeconds !== null && ag.avgFrtSeconds !== undefined
+                          ? formatDurationShort(ag.avgFrtSeconds)
+                          : '-'}
+                      </span>
+                    </div>
+                    <div className="flex flex-col bg-gray-50 p-1.5 rounded">
+                      <span className="text-gray-500 text-[10px]">Resolusi</span>
+                      <span className="font-mono font-semibold text-gray-900 tabular-nums">
+                        {ag.avgResolutionSeconds !== null && ag.avgResolutionSeconds !== undefined
+                          ? formatDurationShort(ag.avgResolutionSeconds)
+                          : '-'}
+                      </span>
+                    </div>
                     <div
                       onClick={() => hasCrit && setExpandedAgentName(isOpen ? null : ag.agentName)}
-                      className={`flex items-center justify-between bg-amber-50/70 px-2 py-1 rounded ${
+                      className={`flex flex-col bg-amber-50/70 p-1.5 rounded ${
                         hasCrit ? 'cursor-pointer' : ''
                       }`}
                     >
-                      <span className="text-amber-800">CSAT</span>
+                      <span className="text-amber-800 text-[10px]">CSAT</span>
                       <span className="font-mono font-semibold text-amber-900 tabular-nums">
                         {ag.avgCsat !== null ? `${ag.avgCsat}/5` : '-'}
                       </span>
@@ -1502,14 +1702,72 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
               <thead>
                 <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
                   <th className="py-2 pr-3 font-medium">Agent</th>
-                  <th className="py-2 px-3 font-medium">Total Obrolan</th>
-                  <th className="py-2 px-3 font-medium">Selesai</th>
-                  <th className="py-2 px-3 font-medium">Kepatuhan SLA</th>
-                  <th className="py-2 pl-3 font-medium text-right">Rata-rata CSAT</th>
+                  <th className="py-2 px-3 font-medium">
+                    <button
+                      type="button"
+                      onClick={() => handleAgentSort('count')}
+                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                    >
+                      <span>Total Obrolan</span>
+                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                    </button>
+                  </th>
+                  <th className="py-2 px-3 font-medium">
+                    <button
+                      type="button"
+                      onClick={() => handleAgentSort('resolved')}
+                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                    >
+                      <span>Selesai</span>
+                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                    </button>
+                  </th>
+                  <th className="py-2 px-3 font-medium">
+                    <button
+                      type="button"
+                      onClick={() => handleAgentSort('frt')}
+                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                      title="Rata-rata kecepatan respon awal agen"
+                    >
+                      <span>Respon Awal (FRT)</span>
+                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                    </button>
+                  </th>
+                  <th className="py-2 px-3 font-medium">
+                    <button
+                      type="button"
+                      onClick={() => handleAgentSort('res')}
+                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                      title="Rata-rata waktu penyelesaian percakapan"
+                    >
+                      <span>Resolusi</span>
+                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                    </button>
+                  </th>
+                  <th className="py-2 px-3 font-medium">
+                    <button
+                      type="button"
+                      onClick={() => handleAgentSort('sla')}
+                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                    >
+                      <span>Kepatuhan SLA</span>
+                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                    </button>
+                  </th>
+                  <th className="py-2 pl-3 font-medium text-right">
+                    <button
+                      type="button"
+                      onClick={() => handleAgentSort('csat')}
+                      className="inline-flex items-center justify-end gap-1 hover:text-gray-900 cursor-pointer w-full"
+                    >
+                      <span>Rata-rata CSAT</span>
+                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {convAnalytics.byAgent.map((ag) => {
+                {sortedAgents.map((ag) => {
                   const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
                   const isOpen = expandedAgentName === ag.agentName;
                   return (
@@ -1552,6 +1810,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                           </button>
                         </td>
                         <td className="py-2 px-3 font-mono text-emerald-700">{ag.resolvedCount}</td>
+                        <td className="py-2 px-3 font-mono text-gray-700">
+                          {ag.avgFrtSeconds !== null && ag.avgFrtSeconds !== undefined
+                            ? formatDurationShort(ag.avgFrtSeconds)
+                            : '-'}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-gray-700">
+                          {ag.avgResolutionSeconds !== null && ag.avgResolutionSeconds !== undefined
+                            ? formatDurationShort(ag.avgResolutionSeconds)
+                            : '-'}
+                        </td>
                         <td className="py-2 px-3 font-mono">
                           {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
                         </td>
@@ -1567,7 +1835,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                       </tr>
                       {isOpen && hasCrit && (
                         <tr className="bg-amber-50/40">
-                          <td colSpan={5} className="px-4 py-2.5">
+                          <td colSpan={7} className="px-4 py-2.5">
                             <div className="flex flex-wrap gap-2">
                               {ag.csatCriteria!.map((crit) => (
                                 <div
@@ -1852,6 +2120,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                 <h3 className="text-sm font-semibold text-gray-900 truncate">{drilldown.title}</h3>
                 {drilldown.subtitle && (
                   <p className="text-xs text-gray-500 mt-0.5 truncate">{drilldown.subtitle}</p>
+                )}
+                {(period !== 'all' || selectedSession !== 'all' || selectedChannel !== 'all') && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    {period !== 'all' && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        {periodLabelMap[period] || period}
+                      </span>
+                    )}
+                    {selectedSession !== 'all' && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">
+                        Sesi: {selectedSession}
+                      </span>
+                    )}
+                    {selectedChannel !== 'all' && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                        Channel: {selectedChannel}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">

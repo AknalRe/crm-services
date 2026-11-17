@@ -473,7 +473,10 @@ export interface ConversationAnalytics {
   bySession: Array<{
     session: string;
     count: number;
+    openCount?: number;
+    pendingCount?: number;
     resolvedCount: number;
+    slaRate?: number | null;
     csatCount?: number;
     avgCsat: number | null;
     csatCriteria?: CsatCriterionAggregate[];
@@ -481,13 +484,23 @@ export interface ConversationAnalytics {
   byChannel?: Array<{
     channel: string;
     count: number;
+    openCount?: number;
+    pendingCount?: number;
     resolvedCount: number;
+    slaRate?: number | null;
+    csatCount?: number;
     avgCsat: number | null;
+    csatCriteria?: CsatCriterionAggregate[];
   }>;
   byAgent?: Array<{
+    agentId?: string | null;
     agentName: string;
     count: number;
+    openCount?: number;
+    pendingCount?: number;
     resolvedCount: number;
+    avgFrtSeconds?: number | null;
+    avgResolutionSeconds?: number | null;
     slaRate: number | null;
     csatCount?: number;
     avgCsat: number | null;
@@ -533,6 +546,11 @@ export interface MessageTemplateItem {
 }
 
 export interface DashboardStats {
+  filters?: {
+    period: string;
+    session: string;
+    channel: string;
+  };
   summary: {
     totalContacts: number;
     groupContactsCount?: number;
