@@ -53,6 +53,7 @@ import {
   Compass,
   UserPlus,
   AtSign,
+  Forward,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -248,6 +249,68 @@ function shouldRenderMediaCaption(body?: string | null, mediaName?: string | nul
   }
 
   return true;
+}
+
+function getChatDateKey(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatChatDateLabel(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const todayKey = getChatDateKey(now.toISOString());
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  const yesterdayKey = getChatDateKey(yest.toISOString());
+  const key = getChatDateKey(iso);
+  if (key === todayKey) return 'Hari ini';
+  if (key === yesterdayKey) return 'Kemarin';
+  return d.toLocaleDateString('id-ID', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function isGenericReplySenderName(name?: string | null): boolean {
+  if (!name) return true;
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+  if (
+    /^(pelanggan|anggota grup|tim cs|whatsapp langsung|kontak baru|peserta|pesan sebelumnya|anda)$/i.test(
+      trimmed
+    )
+  ) {
+    return true;
+  }
+  if (/^kontak\s+\d{3,6}$/i.test(trimmed)) return true;
+  if (/@(lid|c\.us|s\.whatsapp\.net|g\.us)$/i.test(trimmed)) return true;
+  if (/^\+?\d{6,16}$/.test(trimmed.replace(/[\s-]/g, ''))) return true;
+  return false;
+}
+
+function pickBestReplyDisplayName(
+  contactName?: string | null,
+  pushName?: string | null,
+  fallbackPhone?: string | null
+): string | null {
+  const c = contactName?.trim() || '';
+  const p = pushName?.trim() || '';
+  if (c && !isGenericReplySenderName(c)) return c;
+  if (p && !isGenericReplySenderName(p)) return p;
+  if (c) return c;
+  if (p) return p;
+  const digits = String(fallbackPhone || '').replace(/\D/g, '');
+  return digits ? `+${digits}` : null;
 }
 
 function getConversationDisplayTitle(conv?: Conversation | null): string {
@@ -470,7 +533,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
   const [mentionAnchorIndex, setMentionAnchorIndex] = useState<number | null>(null);
+  const [floatingDateLabel, setFloatingDateLabel] = useState<string>('');
+  const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null);
+  const [forwardTargetConvId, setForwardTargetConvId] = useState<string>('');
+  const [forwardSearch, setForwardSearch] = useState<string>('');
+  const [forwardingSending, setForwardingSending] = useState(false);
 
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const msgElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastAutoScrollRef = useRef<{ convId: string; lastMsgId: string | null }>({
@@ -774,6 +843,33 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   }, [messages, selectedConversation?.id, highlightedCsatWindow]);
 
+  const updateFloatingDateLabel = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container || messages.length === 0) {
+      setFloatingDateLabel('');
+      return;
+    }
+    const containerTop = container.getBoundingClientRect().top;
+    const nodes = container.querySelectorAll<HTMLElement>('[data-chat-date]');
+    let detected = '';
+    for (let i = 0; i < nodes.length; i++) {
+      const rect = nodes[i].getBoundingClientRect();
+      if (rect.bottom > containerTop + 12) {
+        detected = nodes[i].getAttribute('data-chat-date') || '';
+        break;
+      }
+    }
+    if (!detected && messages.length > 0) {
+      detected = formatChatDateLabel(messages[messages.length - 1].createdAt);
+    }
+    setFloatingDateLabel(detected);
+  }, [messages]);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => updateFloatingDateLabel());
+    return () => cancelAnimationFrame(raf);
+  }, [updateFloatingDateLabel, selectedConversation?.id, messages.length]);
+
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -891,6 +987,129 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
     return map;
   }, [selectedConversation, participantsData, messages]);
+
+  const resolveMessageSenderName = useCallback(
+    (msg?: ChatMessage | null): string => {
+      if (!msg) return 'Pesan sebelumnya';
+      if (msg.direction === 'OUTBOUND') {
+        return msg.senderName?.trim() || 'Tim CS';
+      }
+      const cleanPhone = msg.senderPhone ? msg.senderPhone.replace(/\D/g, '') : '';
+      const jidPhone =
+        msg.senderJid && !msg.senderJid.toLowerCase().endsWith('@lid')
+          ? msg.senderJid.replace(/@.*$/, '').replace(/\D/g, '')
+          : '';
+      const lookupPhone = cleanPhone || jidPhone;
+      const fromLookup = lookupPhone ? participantsLookup.get(lookupPhone) : undefined;
+
+      if (selectedConversation?.isGroup) {
+        return (
+          pickBestReplyDisplayName(
+            fromLookup,
+            msg.senderName,
+            lookupPhone
+          ) || 'Anggota Grup'
+        );
+      }
+
+      return (
+        pickBestReplyDisplayName(
+          selectedConversation?.contact?.nama_lengkap,
+          selectedConversation?.pushName || fromLookup || msg.senderName,
+          lookupPhone || selectedConversation?.contact?.nomor_whatsapp
+        ) || 'Pelanggan'
+      );
+    },
+    [participantsLookup, selectedConversation]
+  );
+
+  const resolveReplySenderLabel = useCallback(
+    (msg: ChatMessage): string => {
+      if (msg.replyToSender && !isGenericReplySenderName(msg.replyToSender)) {
+        return msg.replyToSender;
+      }
+      if (msg.replyToMessageId) {
+        const quotedMsg = messages.find((m) => m.id === msg.replyToMessageId);
+        if (quotedMsg) {
+          return resolveMessageSenderName(quotedMsg);
+        }
+      }
+      // If replyToSender is numeric or phone, try resolving against participantsLookup (contactName/pushName)
+      if (msg.replyToSender) {
+        const digits = msg.replyToSender.replace(/\D/g, '');
+        if (digits && participantsLookup.has(digits)) {
+          return participantsLookup.get(digits)!;
+        }
+      }
+      if (!selectedConversation?.isGroup) {
+        const best = pickBestReplyDisplayName(
+          selectedConversation?.contact?.nama_lengkap,
+          selectedConversation?.pushName,
+          selectedConversation?.contact?.nomor_whatsapp
+        );
+        if (best && !isGenericReplySenderName(best) && msg.replyToSender !== 'Tim CS') {
+          return best;
+        }
+      }
+      return msg.replyToSender || 'Pesan sebelumnya';
+    },
+    [messages, participantsLookup, resolveMessageSenderName, selectedConversation]
+  );
+
+  const handleConfirmForwardMessage = async () => {
+    if (!forwardingMessage || !forwardTargetConvId || forwardingSending) return;
+    const targetConv = conversations.find((c) => c.id === forwardTargetConvId);
+    if (!targetConv) return;
+    setForwardingSending(true);
+    try {
+      const fwdMeta = parseChatMessageMeta(forwardingMessage);
+      const fromSenderLabel =
+        fwdMeta?.forwardedFromSender || resolveMessageSenderName(forwardingMessage);
+      const payload: Parameters<typeof api.sendConversationMessage>[1] = {
+        body: forwardingMessage.body || undefined,
+        session: selectedSession || targetConv.wahaSession || undefined,
+        isForwarded: true,
+        forwardedFromSender: fromSenderLabel,
+        forwardedFromChannel: fwdMeta?.forwardedFromChannel,
+      };
+      if (forwardingMessage.mediaUrl) {
+        payload.mediaUrl = forwardingMessage.mediaUrl;
+        payload.mediaName = forwardingMessage.mediaName || undefined;
+      }
+      if (fwdMeta?.kind === 'LOCATION' && fwdMeta.location) {
+        payload.messageKind = 'LOCATION';
+        payload.location = fwdMeta.location;
+      } else if (fwdMeta?.kind === 'CONTACT' && fwdMeta.sharedContacts?.length) {
+        const mappedContacts = fwdMeta.sharedContacts
+          .map((c) => ({
+            fullName: c.fullName,
+            phoneNumber: c.phones?.[0] || c.waId || '',
+            organization: c.organization,
+            email: c.email,
+          }))
+          .filter((c) => Boolean(c.phoneNumber));
+        if (mappedContacts.length > 0) {
+          payload.messageKind = 'CONTACT';
+          payload.sharedContacts = mappedContacts;
+        }
+      } else if (fwdMeta?.kind === 'STICKER' && forwardingMessage.mediaUrl) {
+        payload.messageKind = 'STICKER';
+      }
+
+      const sent = await api.sendConversationMessage(targetConv.id, payload);
+      if (selectedConversation?.id === targetConv.id) {
+        setMessages((prev) => [...prev, sent]);
+      }
+      toast.success(`Pesan diteruskan ke ${getConversationDisplayTitle(targetConv)}`);
+      setForwardingMessage(null);
+      setForwardTargetConvId('');
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal meneruskan pesan');
+    } finally {
+      setForwardingSending(false);
+    }
+  };
 
   const availableMentionCandidates = useMemo(() => {
     const list: Array<{
@@ -3044,7 +3263,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </div>
           )}
 
-          <div className="flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2 sm:space-y-2.5">
+          <div
+            ref={messagesContainerRef}
+            onScroll={updateFloatingDateLabel}
+            className="relative flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2 sm:space-y-2.5"
+          >
+            {floatingDateLabel && messages.length > 0 && !loadingMessages && (
+              <div className="sticky top-0.5 z-20 flex justify-center pointer-events-none pb-1">
+                <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/95 backdrop-blur-sm border border-gray-200 shadow-sm text-[11px] font-medium text-gray-700">
+                  {floatingDateLabel}
+                </span>
+              </div>
+            )}
             {loadingMessages && messages.length === 0 ? (
               <LoadingState message="Memuat pesan..." />
             ) : messages.length === 0 ? (
@@ -3142,6 +3372,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 const isCsatHighlighted = matchesHighlightedToken || matchesHighlightedWindow;
                 const startBanner = startBannerAtMsgIdx.get(msgIndex);
                 const closingSessions = closingSessionsAtMsgIdx.get(msgIndex) || [];
+                const msgDateKey = getChatDateKey(msg.createdAt);
+                const prevDateKey = msgIndex > 0 ? getChatDateKey(messages[msgIndex - 1].createdAt) : '';
+                const msgDateLabel = formatChatDateLabel(msg.createdAt);
+                const showDateDivider = Boolean(msgDateLabel && msgIndex > 0 && msgDateKey !== prevDateKey);
+                const dateDividerNode = showDateDivider ? (
+                  <div className="flex justify-center py-1">
+                    <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/90 border border-gray-200 text-[11px] font-medium text-gray-600 shadow-2xs">
+                      {msgDateLabel}
+                    </span>
+                  </div>
+                ) : null;
 
                 const startDividerNode = startBanner ? (
                   <div className="flex items-center gap-2 py-1.5">
@@ -3196,8 +3437,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 if (isNote) {
                   return (
                     <React.Fragment key={msg.id}>
+                      {dateDividerNode}
                       {startDividerNode}
                       <div
+                        data-chat-date={msgDateLabel}
                         ref={(el) => {
                           msgElementRefs.current[msg.id] = el;
                         }}
@@ -3250,8 +3493,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                 return (
                   <React.Fragment key={msg.id}>
+                    {dateDividerNode}
                     {startDividerNode}
                     <div
+                      data-chat-date={msgDateLabel}
                       ref={(el) => {
                         msgElementRefs.current[msg.id] = el;
                       }}
@@ -3288,17 +3533,35 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   msg.senderJid || msg.senderPhone || msg.senderName
                                 )}`}
                               >
-                                {msg.senderName ||
-                                  (msg.senderPhone ? `+${msg.senderPhone}` : msg.senderJid) ||
-                                  'Anggota Grup'}
+                                {resolveMessageSenderName(msg)}
                               </span>
-                              {msg.senderPhone && msg.senderName && msg.senderName !== `+${msg.senderPhone}` && (
-                                <span className="text-[10px] font-mono text-gray-400 shrink-0">
-                                  +{msg.senderPhone}
-                                </span>
-                              )}
+                              {msg.senderPhone &&
+                                resolveMessageSenderName(msg) !== `+${msg.senderPhone}` && (
+                                  <span className="text-[10px] font-mono text-gray-400 shrink-0">
+                                    +{msg.senderPhone}
+                                  </span>
+                                )}
                             </div>
                           )}
+
+                        {(msgMeta?.forwarded ||
+                          (msgMeta?.forwardingScore && msgMeta.forwardingScore > 0) ||
+                          msgMeta?.forwardedFromChannel ||
+                          msgMeta?.forwardedFromSender) && (
+                          <div className="flex items-center gap-1 text-[10px] italic text-gray-500 pb-0.5">
+                            <Forward className="w-3 h-3 shrink-0" />
+                            <span className="truncate">
+                              {Number(msgMeta?.forwardingScore || 1) >= 5
+                                ? 'Diteruskan berkali-kali'
+                                : 'Diteruskan'}
+                              {msgMeta?.forwardedFromChannel
+                                ? ` • dari Saluran ${msgMeta.forwardedFromChannel}`
+                                : msgMeta?.forwardedFromSender
+                                ? ` • dari ${msgMeta.forwardedFromSender}`
+                                : ''}
+                            </span>
+                          </div>
+                        )}
 
                         {(msg.replyToBody || msg.replyToMessageId) && (
                           <button
@@ -3309,7 +3572,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           >
                             <div className="font-semibold text-indigo-700 dark:text-indigo-400 truncate flex items-center gap-1">
                               <Reply className="w-3 h-3 shrink-0 inline text-indigo-500" />
-                              <span>{msg.replyToSender || 'Pesan sebelumnya'}</span>
+                              <span>{resolveReplySenderLabel(msg)}</span>
                             </div>
                             <div className="text-gray-600 dark:text-gray-300 truncate">
                               {msg.replyToBody || 'Pesan dikutip'}
@@ -3884,6 +4147,21 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 <span>Balas</span>
                               </button>
                             )}
+                            {canReplyConversation && !isCsat && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setForwardingMessage(msg);
+                                  setForwardSearch('');
+                                  setForwardTargetConvId('');
+                                }}
+                                title="Teruskan pesan ke chat lain"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-emerald-50 hover:border-emerald-200 text-gray-700 hover:text-emerald-700 font-medium transition-colors"
+                              >
+                                <Forward className="w-3 h-3" />
+                                <span>Teruskan</span>
+                              </button>
+                            )}
                             {canReplyConversation && (
                               <button
                                 type="button"
@@ -4035,10 +4313,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   <div className="text-[11px] font-semibold text-indigo-700 truncate flex items-center gap-1">
                     <Reply className="w-3 h-3 shrink-0" />
                     <span>
-                      Membalas{' '}
-                      {replyingToMessage.direction === 'OUTBOUND'
-                        ? (replyingToMessage.senderName || 'Anda')
-                        : (replyingToMessage.senderName || getConversationDisplayTitle(selectedConversation))}
+                      Membalas {resolveMessageSenderName(replyingToMessage)}
                     </span>
                   </div>
                   <p className="text-[11px] text-gray-600 truncate">{replyingToMessage.body}</p>
@@ -6651,6 +6926,107 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 onClick={() => setDeleteMessageTarget(null)}
               >
                 Batal
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {forwardingMessage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => !forwardingSending && setForwardingMessage(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-lg border border-gray-200 shadow-xl overflow-hidden flex flex-col max-h-[82vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Forward className="w-4 h-4 text-emerald-600 shrink-0" />
+                <h3 className="text-sm font-semibold text-gray-900 truncate">Teruskan Pesan</h3>
+              </div>
+              <button
+                type="button"
+                disabled={forwardingSending}
+                onClick={() => setForwardingMessage(null)}
+                className="p-1 rounded text-gray-400 hover:text-gray-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto flex-1">
+              <div className="p-2.5 rounded bg-gray-50 border border-gray-200 text-xs space-y-1">
+                <div className="text-[10px] font-semibold text-gray-500">
+                  Sumber: {resolveMessageSenderName(forwardingMessage)}
+                </div>
+                <div className="text-gray-800 line-clamp-3 whitespace-pre-wrap break-words">
+                  {forwardingMessage.body || forwardingMessage.mediaName || '[Media]'}
+                </div>
+              </div>
+
+              <div>
+                <input
+                  type="text"
+                  placeholder="Cari kontak atau grup tujuan..."
+                  value={forwardSearch}
+                  onChange={(e) => setForwardSearch(e.target.value)}
+                  className="w-full h-8 px-2.5 bg-white border border-gray-200 rounded text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="border border-gray-200 rounded-md divide-y divide-gray-100 max-h-56 overflow-y-auto">
+                {conversations
+                  .filter((c) => {
+                    const q = forwardSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    const title = getConversationDisplayTitle(c).toLowerCase();
+                    const phone = (c.contact?.nomor_whatsapp || '').toLowerCase();
+                    return title.includes(q) || phone.includes(q);
+                  })
+                  .slice(0, 40)
+                  .map((c) => {
+                    const selected = forwardTargetConvId === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setForwardTargetConvId(c.id)}
+                        className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between gap-2 transition-colors ${
+                          selected ? 'bg-indigo-50 text-indigo-900' : 'hover:bg-gray-50 text-gray-800'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{getConversationDisplayTitle(c)}</div>
+                          <div className="text-[10px] font-mono text-gray-500 truncate">
+                            {c.contact?.nomor_whatsapp || c.channel || 'WHATSAPP'}
+                          </div>
+                        </div>
+                        {selected && <Check className="w-4 h-4 text-indigo-600 shrink-0" />}
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+            <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={forwardingSending}
+                onClick={() => setForwardingMessage(null)}
+              >
+                Batal
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={!forwardTargetConvId || forwardingSending}
+                isLoading={forwardingSending}
+                onClick={() => void handleConfirmForwardMessage()}
+              >
+                Teruskan Pesan
               </Button>
             </div>
           </div>

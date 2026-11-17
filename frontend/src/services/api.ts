@@ -229,6 +229,9 @@ export const api = {
       mediaUrl?: string;
       replyToMessageId?: string;
       mentions?: string[];
+      isForwarded?: boolean;
+      forwardedFromSender?: string;
+      forwardedFromChannel?: string;
       messageKind?: 'TEXT' | 'MEDIA' | 'STICKER' | 'LOCATION' | 'CONTACT' | 'LINK_PREVIEW' | 'BUTTONS' | 'POLL';
       linkPreview?: {
         url: string;

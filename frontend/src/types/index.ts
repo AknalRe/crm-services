@@ -259,6 +259,11 @@ export interface ChatMessageMetadata {
   usedFallbackText?: boolean;
   fallbackReason?: string;
   revoked?: boolean;
+  forwarded?: boolean;
+  forwardingScore?: number;
+  forwardedFromSender?: string;
+  forwardedFromChannel?: string;
+  mentions?: string[];
   reactions?: MessageReactionItem[];
   linkPreview?: {
     url: string;

@@ -44,6 +44,7 @@ import {
   requirePermission,
 } from './auth';
 import { readUploadedMediaAsDataUri, saveBase64MediaFile } from './media';
+import { pickBestContactDisplayName } from './waha';
 import crypto from 'crypto';
 
 const VALID_STATUSES = new Set(['OPEN', 'PENDING', 'RESOLVED']);
@@ -1661,6 +1662,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       mediaUrl?: string;
       replyToMessageId?: string;
       mentions?: string[];
+      isForwarded?: boolean;
+      forwardedFromSender?: string;
+      forwardedFromChannel?: string;
       messageKind?: OutboundMessageKind;
       linkPreview?: OutboundLinkPreviewPayload;
       interactiveButtons?: OutboundButtonsPayload;
@@ -1684,6 +1688,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         mediaUrl,
         replyToMessageId,
         mentions,
+        isForwarded,
+        forwardedFromSender,
+        forwardedFromChannel,
         messageKind,
         linkPreview,
         interactiveButtons,
@@ -1832,10 +1839,37 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         if (quotedRows[0]) {
           quotedLocalId = quotedRows[0].id;
           quotedBodyText = quotedRows[0].body.slice(0, 160);
-          quotedSenderLabel =
-            quotedRows[0].direction === 'OUTBOUND'
-              ? 'Tim CS'
-              : quotedRows[0].senderName || conversation.contact.namaLengkap || 'Pelanggan';
+          if (quotedRows[0].direction === 'OUTBOUND') {
+            quotedSenderLabel =
+              pickBestContactDisplayName(quotedRows[0].senderName, null, null) || 'Tim CS';
+          } else if (conversation.conv.isGroup) {
+            let groupQuotedContactName: string | null = null;
+            const qPhone = normalizePhoneNumber(quotedRows[0].senderPhone || '');
+            if (qPhone) {
+              const variants = Array.from(
+                new Set([qPhone, `+${qPhone}`, qPhone.startsWith('62') ? `0${qPhone.slice(2)}` : ''].filter(Boolean))
+              );
+              const matchedContacts = await db
+                .select({ namaLengkap: contacts.namaLengkap })
+                .from(contacts)
+                .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
+                .limit(1);
+              groupQuotedContactName = matchedContacts[0]?.namaLengkap || null;
+            }
+            quotedSenderLabel =
+              pickBestContactDisplayName(
+                groupQuotedContactName,
+                quotedRows[0].senderName,
+                quotedRows[0].senderPhone
+              ) || 'Anggota Grup';
+          } else {
+            quotedSenderLabel =
+              pickBestContactDisplayName(
+                conversation.contact.namaLengkap,
+                conversation.conv.pushName || quotedRows[0].senderName,
+                conversation.contact.nomorWhatsapp
+              ) || 'Pelanggan';
+          }
           quotedWahaId = quotedRows[0].wahaMessageId || undefined;
         }
       }
@@ -2163,6 +2197,42 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             },
             targetSession
           );
+        } else if (mediaUrl) {
+          const loadedMedia = await readUploadedMediaAsDataUri(mediaUrl, mediaMimetype || undefined);
+          const resolvedMime = loadedMedia?.mimetype || mediaMimetype || 'application/octet-stream';
+          persistedMessageType = 'MEDIA';
+          storedMediaUrl = mediaUrl;
+          mediaType = resolvedMime.startsWith('image/')
+            ? 'image'
+            : resolvedMime.startsWith('video/')
+              ? 'video'
+              : resolvedMime.startsWith('audio/')
+                ? 'audio'
+                : 'document';
+          if (loadedMedia?.dataUri) {
+            sendResult = await wahaService.sendMediaMessage(
+              targetWa,
+              {
+                base64: loadedMedia.dataUri,
+                mimetype: resolvedMime,
+                filename: mediaName || 'attachment',
+                caption: bodyText,
+                replyTo: quotedWahaId,
+                mentions: effectiveMentions.length > 0 ? effectiveMentions : undefined,
+              },
+              targetSession
+            );
+          } else {
+            sendResult = await wahaService.sendTextMessage(
+              targetWa,
+              bodyText || mediaName || 'Lampiran Media',
+              targetSession,
+              {
+                replyTo: quotedWahaId,
+                mentions: effectiveMentions.length > 0 ? effectiveMentions : undefined,
+              }
+            );
+          }
         } else {
           sendResult = await wahaService.sendTextMessage(
             targetWa,
@@ -2178,6 +2248,15 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       if (effectiveMentions.length > 0) {
         metadataRecord = { ...(metadataRecord || {}), mentions: effectiveMentions };
+      }
+      if (isForwarded) {
+        metadataRecord = {
+          ...(metadataRecord || {}),
+          forwarded: true,
+          forwardingScore: 1,
+          ...(forwardedFromSender ? { forwardedFromSender: String(forwardedFromSender).trim() } : {}),
+          ...(forwardedFromChannel ? { forwardedFromChannel: String(forwardedFromChannel).trim() } : {}),
+        };
       }
 
       const now = new Date();

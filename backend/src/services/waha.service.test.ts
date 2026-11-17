@@ -8,7 +8,13 @@ import {
   WahaConfig,
   wahaService,
 } from './waha.service';
-import { extractInboundWahaMediaMeta, extractInboundWahaRichData } from '../routes/waha';
+import {
+  extractInboundWahaMediaMeta,
+  extractInboundWahaRichData,
+  extractWahaContextInfo,
+  extractWahaForwardingMeta,
+  pickBestContactDisplayName,
+} from '../routes/waha';
 
 function stubGetConfig(t: test.TestContext, conf: WahaConfig) {
   wahaService.invalidateExternalEngineCache();
@@ -1802,6 +1808,62 @@ test('EXTERNAL WAHA strictly requires GOWS engine across test, save assertion, s
   assert.equal(okTest.connected, true);
   assert.equal(okTest.engine, 'GOWS');
   assert.equal(okTest.isGows, true);
+});
+
+test('extractWahaContextInfo, extractWahaForwardingMeta, and pickBestContactDisplayName handle forwarded messages and contact/pushName reply priority', () => {
+  const fwdImagePayload = {
+    body: 'Cek promo ini',
+    _data: {
+      Message: {
+        imageMessage: {
+          mimetype: 'image/jpeg',
+          caption: 'Cek promo ini',
+          contextInfo: {
+            isForwarded: true,
+            forwardingScore: 6,
+            forwardedNewsletterMessageInfo: {
+              newsletterName: 'Reneo Updates',
+            },
+          },
+        },
+      },
+    },
+  };
+  const ctx = extractWahaContextInfo(fwdImagePayload);
+  assert.equal(ctx?.isForwarded, true);
+
+  const fwdMeta = extractWahaForwardingMeta(fwdImagePayload);
+  assert.deepEqual(fwdMeta, {
+    forwarded: true,
+    forwardingScore: 6,
+    forwardedFromChannel: 'Reneo Updates',
+  });
+
+  const rich = extractInboundWahaRichData(
+    fwdImagePayload,
+    extractInboundWahaMediaMeta(fwdImagePayload),
+    'Cek promo ini'
+  );
+  assert.equal(rich.metadata?.forwarded, true);
+  assert.equal(rich.metadata?.forwardingScore, 6);
+  assert.equal(rich.metadata?.forwardedFromChannel, 'Reneo Updates');
+
+  assert.equal(
+    pickBestContactDisplayName('Kontak 1234', 'Budi Santoso', '6281234561234'),
+    'Budi Santoso'
+  );
+  assert.equal(
+    pickBestContactDisplayName('PT Maju Jaya - Ani', 'AniWA', '6281234561234'),
+    'PT Maju Jaya - Ani'
+  );
+  assert.equal(
+    pickBestContactDisplayName('Pelanggan', '6281234561234@lid', '6281234567890'),
+    'Pelanggan'
+  );
+  assert.equal(
+    pickBestContactDisplayName(null, null, '6281234567890'),
+    '+6281234567890'
+  );
 });
 
 

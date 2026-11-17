@@ -79,6 +79,122 @@ export function isWahaFromMe(payload: any): boolean {
   return false;
 }
 
+export function extractWahaContextInfo(payload: any): Record<string, any> | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const containers = [
+    payload?._data?.message,
+    payload?._data?.Message,
+    payload?._data?.Info?.Message,
+    payload?._data,
+    payload,
+  ];
+  const msgKeys = [
+    'extendedTextMessage',
+    'imageMessage',
+    'videoMessage',
+    'documentMessage',
+    'documentWithCaptionMessage',
+    'audioMessage',
+    'stickerMessage',
+    'contactMessage',
+    'contactsArrayMessage',
+    'locationMessage',
+    'liveLocationMessage',
+    'buttonsResponseMessage',
+    'listResponseMessage',
+    'templateButtonReplyMessage',
+  ];
+  for (const container of containers) {
+    if (!container || typeof container !== 'object') continue;
+    const nestedViewOnce =
+      container?.viewOnceMessage?.message ||
+      container?.viewOnceMessageV2?.message ||
+      container?.viewOnceMessageV2Extension?.message;
+    if (container.contextInfo && typeof container.contextInfo === 'object') {
+      return container.contextInfo;
+    }
+    for (const key of msgKeys) {
+      const inner = container[key] || nestedViewOnce?.[key];
+      if (inner?.contextInfo && typeof inner.contextInfo === 'object') {
+        return inner.contextInfo;
+      }
+      if (inner?.message?.documentMessage?.contextInfo) {
+        return inner.message.documentMessage.contextInfo;
+      }
+    }
+  }
+  return null;
+}
+
+export function extractWahaForwardingMeta(payload: any): {
+  forwarded: boolean;
+  forwardingScore: number;
+  forwardedFromChannel?: string;
+} | null {
+  const ctxInfo = extractWahaContextInfo(payload);
+  const rawScore = Number(
+    ctxInfo?.forwardingScore ??
+      payload?.forwardingScore ??
+      payload?._data?.forwardingScore ??
+      payload?._data?.Info?.ForwardingScore ??
+      0
+  );
+  const score = Number.isFinite(rawScore) && rawScore > 0 ? Math.floor(rawScore) : 0;
+  const newsletterInfo =
+    ctxInfo?.forwardedNewsletterMessageInfo ||
+    payload?._data?.forwardedNewsletterMessageInfo ||
+    null;
+  const newsletterName = String(
+    newsletterInfo?.newsletterName || newsletterInfo?.name || ''
+  ).trim();
+  const isForwarded = Boolean(
+    ctxInfo?.isForwarded === true ||
+      payload?.isForwarded === true ||
+      payload?._data?.isForwarded === true ||
+      payload?._data?.Info?.IsForwarded === true ||
+      score > 0 ||
+      newsletterInfo
+  );
+  if (!isForwarded) return null;
+  return {
+    forwarded: true,
+    forwardingScore: score > 0 ? score : 1,
+    ...(newsletterName ? { forwardedFromChannel: newsletterName } : {}),
+  };
+}
+
+export function isGenericDisplayName(name?: string | null): boolean {
+  if (!name) return true;
+  const trimmed = name.trim();
+  if (!trimmed) return true;
+  if (
+    /^(pelanggan|anggota grup|tim cs|whatsapp langsung|kontak baru|peserta|pesan sebelumnya)$/i.test(
+      trimmed
+    )
+  ) {
+    return true;
+  }
+  if (/^kontak\s+\d{3,6}$/i.test(trimmed)) return true;
+  if (/@(lid|c\.us|s\.whatsapp\.net|g\.us)$/i.test(trimmed)) return true;
+  if (/^\+?\d{6,16}$/.test(trimmed.replace(/[\s-]/g, ''))) return true;
+  return false;
+}
+
+export function pickBestContactDisplayName(
+  contactName?: string | null,
+  pushName?: string | null,
+  fallbackPhone?: string | null
+): string | null {
+  const cleanContact = contactName?.trim() || '';
+  const cleanPush = pushName?.trim() || '';
+  if (cleanContact && !isGenericDisplayName(cleanContact)) return cleanContact;
+  if (cleanPush && !isGenericDisplayName(cleanPush)) return cleanPush;
+  if (cleanContact) return cleanContact;
+  if (cleanPush) return cleanPush;
+  const norm = normalizePhoneNumber(fallbackPhone || '');
+  return norm ? `+${norm}` : null;
+}
+
 export interface InboundWahaRichData {
   messageType: 'TEXT' | 'MEDIA' | 'LOCATION' | 'CONTACT' | 'POLL' | 'BUTTONS';
   body: string;
@@ -91,6 +207,21 @@ export interface InboundWahaRichData {
 }
 
 export function extractInboundWahaRichData(
+  payload: any,
+  mediaMeta: InboundWahaMediaMeta,
+  fallbackText?: string
+): InboundWahaRichData {
+  const base = extractBaseInboundWahaRichData(payload, mediaMeta, fallbackText);
+  if (!base.reaction && !base.revokedTargetId) {
+    const fwdMeta = extractWahaForwardingMeta(payload);
+    if (fwdMeta) {
+      base.metadata = { ...(base.metadata || {}), ...fwdMeta };
+    }
+  }
+  return base;
+}
+
+function extractBaseInboundWahaRichData(
   payload: any,
   mediaMeta: InboundWahaMediaMeta,
   fallbackText?: string
@@ -1454,22 +1585,34 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           : '[Lampiran Media]';
         const body = richData.body || (hasMedia ? mediaFallbackLabel : '');
 
+        const ctxInfo = extractWahaContextInfo(payload);
         const quotedWahaId =
           (typeof payload.replyTo === 'string' ? payload.replyTo : payload.replyTo?.id) ||
           payload._data?.quotedStanzaID ||
-          payload._data?.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-          payload._data?.Message?.extendedTextMessage?.contextInfo?.stanzaId ||
+          ctxInfo?.stanzaId ||
+          ctxInfo?.stanzaID ||
           null;
+        const quotedMsgNode = ctxInfo?.quotedMessage || payload._data?.quotedMsg || null;
         const quotedRawBody =
           payload.replyTo?.body ||
           payload._data?.quotedMsg?.body ||
-          payload._data?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.conversation ||
-          payload._data?.message?.extendedTextMessage?.contextInfo?.quotedMessage?.extendedTextMessage?.text ||
+          quotedMsgNode?.conversation ||
+          quotedMsgNode?.extendedTextMessage?.text ||
+          quotedMsgNode?.imageMessage?.caption ||
+          quotedMsgNode?.videoMessage?.caption ||
+          quotedMsgNode?.documentMessage?.caption ||
+          quotedMsgNode?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
+          (quotedMsgNode?.documentMessage?.fileName ? `[Dokumen: ${quotedMsgNode.documentMessage.fileName}]` : null) ||
+          (quotedMsgNode?.imageMessage ? '[Gambar]' : null) ||
+          (quotedMsgNode?.videoMessage ? '[Video]' : null) ||
+          (quotedMsgNode?.audioMessage ? '[Audio]' : null) ||
+          (quotedMsgNode?.stickerMessage ? '[Stiker]' : null) ||
           null;
 
         const rawMentions: string[] = [
           ...(Array.isArray(payload?.mentions) ? payload.mentions : []),
           ...(Array.isArray(payload?._data?.mentionedJidList) ? payload._data.mentionedJidList : []),
+          ...(Array.isArray(ctxInfo?.mentionedJid) ? ctxInfo.mentionedJid : []),
           ...(Array.isArray(payload?._data?.message?.extendedTextMessage?.contextInfo?.mentionedJid)
             ? payload._data.message.extendedTextMessage.contextInfo.mentionedJid
             : []),
@@ -1701,12 +1844,28 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               }
               if (!contact) throw insertErr;
             }
-          } else if (fromPhone && !contact.nomorWhatsapp) {
-            await db
-              .update(contacts)
-              .set({ nomorWhatsapp: fromPhone, updatedAt: now })
-              .where(eq(contacts.id, contact.id))
-              .catch(() => {});
+          } else {
+            const updates: Record<string, any> = {};
+            if (fromPhone && !contact.nomorWhatsapp) {
+              updates.nomorWhatsapp = fromPhone;
+            }
+            if (
+              !isFromMe &&
+              notifyName &&
+              !isGenericDisplayName(notifyName) &&
+              isGenericDisplayName(contact.namaLengkap)
+            ) {
+              updates.namaLengkap = notifyName;
+              contact.namaLengkap = notifyName;
+            }
+            if (Object.keys(updates).length > 0) {
+              updates.updatedAt = now;
+              await db
+                .update(contacts)
+                .set(updates)
+                .where(eq(contacts.id, contact.id))
+                .catch(() => {});
+            }
           }
 
           if (isLidSource && contact) {
@@ -1766,7 +1925,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             externalThreadId: isGroupChat ? groupJid : isLidSource ? rawFrom : null,
             contextTitle: isGroupChat ? (resolvedGroupSubject || contact.namaLengkap) : null,
             wahaSession: normalizedInboundSession,
-            pushName: isGroupChat ? (resolvedGroupSubject || contact.namaLengkap) : notifyName || null,
+            pushName: isGroupChat
+              ? (resolvedGroupSubject || contact.namaLengkap)
+              : (!isFromMe && notifyName ? notifyName : null),
             isGroup: isGroupChat,
             excludeFromMetrics: contactExcluded,
             excludeReason: contactExcludeReason,
@@ -1798,7 +1959,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 : existingConv.contextTitle,
               pushName: isGroupChat
                 ? (resolvedGroupSubject || existingConv.pushName || contact.namaLengkap)
-                : notifyName || existingConv.pushName,
+                : (!isFromMe && notifyName ? notifyName : existingConv.pushName),
               isGroup: isGroupChat || existingConv.isGroup,
               excludeFromMetrics: contactExcluded ? true : existingConv.excludeFromMetrics,
               excludeReason: isGroupChat
@@ -1835,6 +1996,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               body: chatMessages.body,
               direction: chatMessages.direction,
               senderName: chatMessages.senderName,
+              senderPhone: chatMessages.senderPhone,
+              senderJid: chatMessages.senderJid,
             })
             .from(chatMessages)
             .where(
@@ -1849,27 +2012,106 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               )
             )
             .limit(1);
+
+          const quotedPushName = String(
+            payload.replyTo?.notifyName ||
+            payload.replyTo?.pushName ||
+            payload.replyTo?.senderName ||
+            payload.replyTo?._data?.notifyName ||
+            payload.replyTo?._data?.pushName ||
+            payload._data?.quotedMsg?.notifyName ||
+            payload._data?.quotedMsg?.pushName ||
+            ''
+          ).trim();
+
+          const quotedParticipant = String(
+            payload.replyTo?.participantPn ||
+            payload.replyTo?.participant ||
+            payload._data?.quotedParticipant ||
+            ctxInfo?.participantPn ||
+            ctxInfo?.participant ||
+            ''
+          ).trim();
+
+          const resolveContactNameByPhoneOrJid = async (
+            rawJid?: string | null,
+            rawPhone?: string | null
+          ): Promise<{ name: string | null; phone: string | null }> => {
+            let p: string | null = normalizePhoneNumber(rawPhone || '') || null;
+            if (!p && rawJid && !rawJid.toLowerCase().endsWith('@lid')) {
+              p = normalizePhoneNumber(rawJid.replace(/@.*$/, '')) || null;
+            }
+            if (!p && rawJid && rawJid.toLowerCase().endsWith('@lid') && inboundSession) {
+              p = await wahaService
+                .resolveLidToPhone(inboundSession, rawJid)
+                .catch(() => null);
+            }
+            if (p) {
+              const variants = Array.from(
+                new Set([p, `+${p}`, p.startsWith('62') ? `0${p.slice(2)}` : ''].filter(Boolean))
+              );
+              const matched = await db
+                .select({ namaLengkap: contacts.namaLengkap })
+                .from(contacts)
+                .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
+                .limit(1);
+              if (matched[0]?.namaLengkap) {
+                return { name: matched[0].namaLengkap, phone: p };
+              }
+            }
+            return { name: null, phone: p || null };
+          };
+
           if (quotedRows[0]) {
             replyToMessageId = quotedRows[0].id;
             if (!replyToBody) replyToBody = quotedRows[0].body.slice(0, 160);
-            replyToSender =
-              quotedRows[0].direction === 'OUTBOUND'
-                ? (quotedRows[0].senderName || 'Tim CS')
-                : (quotedRows[0].senderName || (isGroupChat ? (groupSenderName || 'Anggota Grup') : (contact.namaLengkap || 'Pelanggan')));
-          } else {
-            const quotedParticipant = String(
-              payload.replyTo?.participant ||
-              payload._data?.quotedParticipant ||
-              payload._data?.message?.extendedTextMessage?.contextInfo?.participant ||
-              payload._data?.Message?.extendedTextMessage?.contextInfo?.participant ||
-              ''
-            ).trim();
-            if (quotedParticipant) {
-              const qPhone = normalizePhoneNumber(quotedParticipant.replace(/@.*$/, ''));
-              replyToSender = qPhone ? `+${qPhone}` : quotedParticipant;
+            if (quotedRows[0].direction === 'OUTBOUND') {
+              replyToSender =
+                pickBestContactDisplayName(
+                  quotedRows[0].senderName,
+                  quotedPushName,
+                  quotedRows[0].senderPhone
+                ) || 'Tim CS';
+            } else if (!isGroupChat) {
+              const convPush = !isFromMe && notifyName ? notifyName : existingConv?.pushName;
+              replyToSender =
+                pickBestContactDisplayName(
+                  contact.namaLengkap,
+                  convPush || quotedRows[0].senderName || quotedPushName,
+                  fromPhone || quotedRows[0].senderPhone
+                ) || 'Pelanggan';
             } else {
-              replyToSender = isGroupChat ? 'Anggota Grup' : (contact.namaLengkap || 'Pelanggan');
+              const resolvedQuotedContact = await resolveContactNameByPhoneOrJid(
+                quotedRows[0].senderJid || quotedParticipant,
+                quotedRows[0].senderPhone
+              );
+              replyToSender =
+                pickBestContactDisplayName(
+                  resolvedQuotedContact.name,
+                  quotedRows[0].senderName || quotedPushName,
+                  resolvedQuotedContact.phone || quotedRows[0].senderPhone
+                ) || 'Anggota Grup';
             }
+          } else if (payload.replyTo?.fromMe === true) {
+            replyToSender = pickBestContactDisplayName(quotedPushName, null, null) || 'Tim CS';
+          } else if (quotedParticipant) {
+            const resolvedQuotedContact = await resolveContactNameByPhoneOrJid(quotedParticipant, null);
+            replyToSender =
+              pickBestContactDisplayName(
+                resolvedQuotedContact.name,
+                quotedPushName || (!isGroupChat && !isFromMe ? notifyName : existingConv?.pushName),
+                resolvedQuotedContact.phone
+              ) || (isGroupChat ? 'Anggota Grup' : contact.namaLengkap || 'Pelanggan');
+          } else if (!isGroupChat) {
+            const convPush = !isFromMe && notifyName ? notifyName : existingConv?.pushName;
+            replyToSender =
+              pickBestContactDisplayName(
+                contact.namaLengkap,
+                convPush || quotedPushName,
+                fromPhone
+              ) || 'Pelanggan';
+          } else {
+            replyToSender = quotedPushName || 'Anggota Grup';
           }
         }
 
