@@ -99,29 +99,29 @@ CREATE TABLE IF NOT EXISTS "system_settings" (
 DO $$ BEGIN
  ALTER TABLE "campaign_recipients" ADD CONSTRAINT "campaign_recipients_campaign_id_campaigns_id_fk" FOREIGN KEY ("campaign_id") REFERENCES "public"."campaigns"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR foreign_key_violation THEN null;
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "campaign_recipients" ADD CONSTRAINT "campaign_recipients_contact_id_contacts_id_fk" FOREIGN KEY ("contact_id") REFERENCES "public"."contacts"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR foreign_key_violation THEN null;
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_conversation_id_conversations_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversations"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR foreign_key_violation THEN null;
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_contact_id_contacts_id_fk" FOREIGN KEY ("contact_id") REFERENCES "public"."contacts"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR foreign_key_violation THEN null;
 END $$;
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "conversations" ADD CONSTRAINT "conversations_contact_id_contacts_id_fk" FOREIGN KEY ("contact_id") REFERENCES "public"."contacts"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR foreign_key_violation THEN null;
 END $$;

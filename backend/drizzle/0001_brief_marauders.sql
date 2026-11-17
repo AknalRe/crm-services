@@ -339,9 +339,13 @@ CREATE TABLE IF NOT EXISTS "whatsapp_status_views" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "campaign_recipients" DROP CONSTRAINT IF EXISTS "campaign_recipients_waha_message_id_key";--> statement-breakpoint
 ALTER TABLE "campaign_recipients" DROP CONSTRAINT IF EXISTS "campaign_recipients_waha_message_id_unique";--> statement-breakpoint
+ALTER TABLE "chat_messages" DROP CONSTRAINT IF EXISTS "chat_messages_waha_message_id_key";--> statement-breakpoint
 ALTER TABLE "chat_messages" DROP CONSTRAINT IF EXISTS "chat_messages_waha_message_id_unique";--> statement-breakpoint
+ALTER TABLE "contacts" DROP CONSTRAINT IF EXISTS "contacts_nomor_whatsapp_key";--> statement-breakpoint
 ALTER TABLE "contacts" DROP CONSTRAINT IF EXISTS "contacts_nomor_whatsapp_unique";--> statement-breakpoint
+ALTER TABLE "conversations" DROP CONSTRAINT IF EXISTS "conversations_contact_id_key";--> statement-breakpoint
 ALTER TABLE "conversations" DROP CONSTRAINT IF EXISTS "conversations_contact_id_unique";--> statement-breakpoint
 ALTER TABLE "contacts" ALTER COLUMN "nomor_whatsapp" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "birthday_settings" ADD COLUMN IF NOT EXISTS "company_id" text DEFAULT 'company_default' NOT NULL;--> statement-breakpoint
@@ -612,4 +616,8 @@ EXCEPTION
  WHEN duplicate_object OR foreign_key_violation THEN null;
 END $$;
 --> statement-breakpoint
-ALTER TABLE "conversations" ADD CONSTRAINT "conversations_csat_token_unique" UNIQUE("csat_token");
+DO $$ BEGIN
+ ALTER TABLE "conversations" ADD CONSTRAINT "conversations_csat_token_unique" UNIQUE("csat_token");
+EXCEPTION
+ WHEN duplicate_object OR duplicate_table THEN null;
+END $$;

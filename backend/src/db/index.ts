@@ -10,13 +10,21 @@ export const queryClient = postgres(connectionString, { max: 10 });
 export const db = drizzle(queryClient, { schema });
 
 /**
- * Automatically create tables if they do not exist
+ * Automatically create tables and migrate schema safely with 100% idempotent isolation
  */
 export async function initDb() {
   const sql = queryClient;
 
-  // Always ensure companies table and default company exist first
-  try {
+  const safeExec = async (label: string, fn: () => Promise<any>) => {
+    try {
+      await fn();
+    } catch (e: any) {
+      console.warn(`[DB Init] Warning on ${label}:`, e.message);
+    }
+  };
+
+  // 1. Always ensure companies table and default company exist first
+  await safeExec('ensure default company', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS companies (
         id TEXT PRIMARY KEY,
@@ -47,11 +55,9 @@ export async function initDb() {
       VALUES ('company_default', 'Perusahaan Utama', 'default', 'ACTIVE', TRUE, NOW(), NOW())
       ON CONFLICT (id) DO NOTHING;
     `;
-  } catch (err: any) {
-    console.warn('[DB Init] Notice creating default company:', err.message);
-  }
+  });
 
-  // Run official Drizzle migrations if migration folder is found (non-blocking fallback)
+  // 2. Run official Drizzle migrations if migration folder is found (non-blocking fallback)
   try {
     const { migrate } = await import('drizzle-orm/postgres-js/migrator');
     const fs = await import('fs');
@@ -73,38 +79,46 @@ export async function initDb() {
     console.warn('[Drizzle ORM] Migrator note (falling back to idempotent init):', migErr.message);
   }
 
-  try {
-    await sql`
-      CREATE TABLE IF NOT EXISTS companies (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        slug TEXT NOT NULL UNIQUE,
-        owner_name TEXT,
-        owner_email TEXT,
-        owner_phone TEXT,
-        status TEXT NOT NULL DEFAULT 'ACTIVE',
-        is_default BOOLEAN NOT NULL DEFAULT FALSE,
-        license_key TEXT,
-        license_status TEXT NOT NULL DEFAULT 'UNLICENSED',
-        license_plan TEXT NOT NULL DEFAULT 'Belum Diaktivasi',
-        license_plan_slug TEXT,
-        license_period TEXT NOT NULL DEFAULT 'monthly',
-        license_price_amount INTEGER NOT NULL DEFAULT 0,
-        license_started_at TIMESTAMP,
-        license_expires_at TIMESTAMP,
-        license_features_json TEXT,
-        trial_used BOOLEAN NOT NULL DEFAULT FALSE,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+  // 3. Guarantee company_id column on any existing tenant-scoped tables first
+  const tenantTables = [
+    'contacts',
+    'campaigns',
+    'campaign_recipients',
+    'conversations',
+    'chat_messages',
+    'birthday_settings',
+    'crm_roles',
+    'crm_agents',
+    'canned_responses',
+    'crm_labels',
+    'message_templates',
+    'csat_responses',
+    'auto_reply_rules',
+    'products',
+    'channel_accounts',
+    'contact_identities',
+    'channel_connect_links',
+    'webhook_deliveries',
+    'scheduled_posts',
+    'whatsapp_status_views',
+    'content_ideas',
+    'social_comments',
+    'comment_automations',
+    'ai_knowledge_books',
+    'ai_knowledge_items',
+    'ai_skills',
+    'ai_mcp_servers',
+  ];
+  for (const tbl of tenantTables) {
+    await safeExec(`add company_id to ${tbl}`, async () => {
+      await sql.unsafe(
+        `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`
       );
-    `;
+    });
+  }
 
-    await sql`
-      INSERT INTO companies (id, name, slug, status, is_default, created_at, updated_at)
-      VALUES ('company_default', 'Perusahaan Utama', 'default', 'ACTIVE', TRUE, NOW(), NOW())
-      ON CONFLICT (id) DO NOTHING;
-    `;
-
+  // 4. Create and upgrade core tables with individual isolation
+  await safeExec('company_settings', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS company_settings (
         id TEXT PRIMARY KEY,
@@ -115,7 +129,9 @@ export async function initDb() {
       );
     `;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_company_settings_company_key ON company_settings (company_id, key);`;
+  });
 
+  await safeExec('contacts', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS contacts (
         id TEXT PRIMARY KEY,
@@ -132,15 +148,18 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
-
+    await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS kategori TEXT;`;
     await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS exclude_from_metrics BOOLEAN NOT NULL DEFAULT FALSE;`;
     await sql`ALTER TABLE contacts ADD COLUMN IF NOT EXISTS exclude_reason TEXT;`;
     await sql`ALTER TABLE contacts ALTER COLUMN nomor_whatsapp DROP NOT NULL;`;
+  });
 
+  await safeExec('campaigns', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS campaigns (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         title TEXT NOT NULL,
         message_template TEXT NOT NULL,
         type TEXT NOT NULL DEFAULT 'IMMEDIATE',
@@ -150,6 +169,8 @@ export async function initDb() {
         interval_seconds INTEGER NOT NULL DEFAULT 30,
         batch_size INTEGER NOT NULL DEFAULT 10,
         filter_tags TEXT,
+        channel TEXT NOT NULL DEFAULT 'WHATSAPP',
+        channel_account_id TEXT,
         total_count INTEGER NOT NULL DEFAULT 0,
         sent_count INTEGER NOT NULL DEFAULT 0,
         delivered_count INTEGER NOT NULL DEFAULT 0,
@@ -161,13 +182,20 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
-
+    await sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
     await sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
+    await sql`ALTER TABLE campaigns ALTER COLUMN scheduled_at DROP NOT NULL;`;
+    await sql`ALTER TABLE campaigns ALTER COLUMN batch_size SET DEFAULT 10;`;
+    await sql`ALTER TABLE campaigns ALTER COLUMN delay_seconds SET DEFAULT 5;`;
+    await sql`ALTER TABLE campaigns ALTER COLUMN interval_seconds SET DEFAULT 30;`;
+  });
 
+  await safeExec('campaign_recipients', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS campaign_recipients (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
         contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         phone TEXT NOT NULL,
@@ -183,29 +211,57 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+    await sql`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_key;`;
+    await sql`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_unique;`;
+  });
 
+  await safeExec('conversations', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+        channel TEXT NOT NULL DEFAULT 'WHATSAPP',
+        channel_account_id TEXT,
+        external_thread_id TEXT,
+        context_title TEXT,
+        push_name TEXT,
+        channel_display_name TEXT,
         waha_session TEXT,
-        status TEXT NOT NULL DEFAULT 'OPEN',
-        labels TEXT,
         last_message TEXT,
         last_message_at TIMESTAMP,
         unread_count INTEGER NOT NULL DEFAULT 0,
+        is_group BOOLEAN NOT NULL DEFAULT FALSE,
+        exclude_from_metrics BOOLEAN NOT NULL DEFAULT FALSE,
+        exclude_reason TEXT,
+        assigned_agent_id TEXT,
+        assigned_agent_name TEXT,
+        status TEXT NOT NULL DEFAULT 'OPEN',
+        labels TEXT,
         first_inbound_at TIMESTAMP,
+        last_inbound_at TIMESTAMP,
         first_response_at TIMESTAMP,
+        session_started_at TIMESTAMP,
         resolved_at TIMESTAMP,
-        csat_token TEXT UNIQUE,
+        csat_token TEXT,
         csat_rating INTEGER,
+        csat_overall_score DOUBLE PRECISION,
         csat_feedback TEXT,
         csat_submitted_at TIMESTAMP,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_group BOOLEAN NOT NULL DEFAULT FALSE;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS push_name TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_display_name TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS external_thread_id TEXT;`;
+    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context_title TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_agent_id TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_agent_name TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'OPEN';`;
@@ -219,31 +275,37 @@ export async function initDb() {
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_overall_score DOUBLE PRECISION;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_feedback TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_submitted_at TIMESTAMP;`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS external_thread_id TEXT;`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context_title TEXT;`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS push_name TEXT;`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_display_name TEXT;`;
-    await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_group BOOLEAN NOT NULL DEFAULT FALSE;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS exclude_from_metrics BOOLEAN NOT NULL DEFAULT FALSE;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS exclude_reason TEXT;`;
     await sql`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS session_started_at TIMESTAMP;`;
     await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_key;`;
     await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_unique;`;
+  });
 
+  await safeExec('chat_messages', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS chat_messages (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         direction TEXT NOT NULL,
         message_type TEXT NOT NULL DEFAULT 'TEXT',
+        channel TEXT NOT NULL DEFAULT 'WHATSAPP',
+        external_message_id TEXT,
         waha_session TEXT,
+        sender_jid TEXT,
+        sender_phone TEXT,
+        sender_name TEXT,
         body TEXT NOT NULL,
         media_url TEXT,
         media_type TEXT,
         media_name TEXT,
+        reply_to_message_id TEXT,
+        reply_to_body TEXT,
+        reply_to_sender TEXT,
+        metadata_json TEXT,
+        error_message TEXT,
         waha_message_id TEXT,
         status TEXT NOT NULL DEFAULT 'PENDING',
         ack_status INTEGER NOT NULL DEFAULT 0,
@@ -253,24 +315,30 @@ export async function initDb() {
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS message_type TEXT NOT NULL DEFAULT 'TEXT';`;
-    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
-    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_type TEXT;`;
-    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_message_id TEXT;`;
-    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS error_message TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_jid TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_phone TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_name TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_type TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_name TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_message_id TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_body TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to_sender TEXT;`;
     await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS metadata_json TEXT;`;
-    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_jid TEXT;`;
-    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_phone TEXT;`;
-    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sender_name TEXT;`;
+    await sql`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS error_message TEXT;`;
+    await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_key;`;
+    await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_unique;`;
+  });
 
+  await safeExec('channel_accounts', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS channel_accounts (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         channel TEXT NOT NULL,
         name TEXT NOT NULL,
         account_id TEXT NOT NULL,
@@ -283,22 +351,31 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE channel_accounts ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('contact_identities', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS contact_identities (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         channel TEXT NOT NULL,
         external_id TEXT NOT NULL,
         handle TEXT,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        UNIQUE (channel, external_id)
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE contact_identities ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+    await sql`ALTER TABLE contact_identities DROP CONSTRAINT IF EXISTS contact_identities_channel_external_id_key;`;
+    await sql`ALTER TABLE contact_identities DROP CONSTRAINT IF EXISTS contact_identities_channel_external_id_unique;`;
+  });
 
+  await safeExec('channel_connect_links', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS channel_connect_links (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         token TEXT NOT NULL UNIQUE,
         channel TEXT NOT NULL,
         label TEXT,
@@ -308,10 +385,14 @@ export async function initDb() {
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE channel_connect_links ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('webhook_deliveries', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS webhook_deliveries (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         event TEXT NOT NULL,
         target_url TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -321,7 +402,10 @@ export async function initDb() {
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('birthday_settings', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS birthday_settings (
         id TEXT PRIMARY KEY DEFAULT 'default',
@@ -337,10 +421,19 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'WHATSAPP';`;
     await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS channel_account_id TEXT;`;
     await sql`ALTER TABLE birthday_settings ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
 
+    await sql`
+      INSERT INTO birthday_settings (id, company_id, is_enabled, send_time, message_template, delay_seconds, updated_at)
+      VALUES ('default', 'company_default', TRUE, '08:00', 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!', 5, NOW())
+      ON CONFLICT (id) DO NOTHING;
+    `;
+  });
+
+  await safeExec('system_settings', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS system_settings (
         key TEXT PRIMARY KEY,
@@ -348,11 +441,14 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+  });
 
+  await safeExec('crm_roles', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS crm_roles (
         id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
+        name TEXT NOT NULL,
         description TEXT,
         permissions TEXT NOT NULL DEFAULT '[]',
         is_system BOOLEAN NOT NULL DEFAULT FALSE,
@@ -360,27 +456,39 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE crm_roles ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+    await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_key;`;
+    await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_unique;`;
+  });
 
+  await safeExec('crm_agents', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS crm_agents (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'AGENT',
         role_id TEXT,
         permissions TEXT NOT NULL DEFAULT '["dashboard","conversations","contacts"]',
+        is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE crm_agents ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`ALTER TABLE crm_agents ADD COLUMN IF NOT EXISTS role_id TEXT;`;
+    await sql`ALTER TABLE crm_agents ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE;`;
+  });
 
+  await safeExec('canned_responses', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS canned_responses (
         id TEXT PRIMARY KEY,
-        short_code TEXT NOT NULL UNIQUE,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
+        short_code TEXT NOT NULL,
         title TEXT NOT NULL,
         category TEXT NOT NULL DEFAULT 'Umum',
         content TEXT NOT NULL,
@@ -389,12 +497,18 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE canned_responses ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`ALTER TABLE canned_responses ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Umum';`;
     await sql`ALTER TABLE canned_responses ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;`;
+    await sql`ALTER TABLE canned_responses DROP CONSTRAINT IF EXISTS canned_responses_short_code_key;`;
+    await sql`ALTER TABLE canned_responses DROP CONSTRAINT IF EXISTS canned_responses_short_code_unique;`;
+  });
 
+  await safeExec('crm_labels', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS crm_labels (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         scope TEXT NOT NULL DEFAULT 'CONVERSATION_LABEL',
         name TEXT NOT NULL,
         color TEXT NOT NULL DEFAULT 'slate',
@@ -405,10 +519,14 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE crm_labels ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('message_templates', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS message_templates (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         name TEXT NOT NULL,
         category TEXT NOT NULL DEFAULT 'Umum',
         channel TEXT NOT NULL DEFAULT 'ALL',
@@ -418,10 +536,14 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE message_templates ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('csat_responses', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS csat_responses (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
         waha_session TEXT,
@@ -436,10 +558,13 @@ export async function initDb() {
         rating INTEGER,
         overall_score DOUBLE PRECISION,
         feedback TEXT,
+        conversation_started_at TIMESTAMP,
+        conversation_resolved_at TIMESTAMP,
         sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
         submitted_at TIMESTAMP
       );
     `;
+    await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS profile_id TEXT;`;
     await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS profile_name TEXT;`;
     await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS snapshot_json TEXT;`;
@@ -447,10 +572,13 @@ export async function initDb() {
     await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS overall_score DOUBLE PRECISION;`;
     await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS conversation_started_at TIMESTAMP;`;
     await sql`ALTER TABLE csat_responses ADD COLUMN IF NOT EXISTS conversation_resolved_at TIMESTAMP;`;
+  });
 
+  await safeExec('auto_reply_rules', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS auto_reply_rules (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         keyword TEXT NOT NULL,
         match_type TEXT NOT NULL DEFAULT 'CONTAINS',
         reply_text TEXT NOT NULL,
@@ -460,11 +588,15 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE auto_reply_rules ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('products', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS products (
         id TEXT PRIMARY KEY,
-        sku TEXT NOT NULL UNIQUE,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
+        sku TEXT NOT NULL,
         name TEXT NOT NULL,
         category TEXT,
         price INTEGER NOT NULL DEFAULT 0,
@@ -475,10 +607,16 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+    await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_key;`;
+    await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_unique;`;
+  });
 
+  await safeExec('scheduled_posts', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS scheduled_posts (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         channel TEXT NOT NULL,
         channel_account_id TEXT REFERENCES channel_accounts(id) ON DELETE CASCADE,
         waha_session TEXT,
@@ -498,16 +636,20 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`ALTER TABLE scheduled_posts ALTER COLUMN channel_account_id DROP NOT NULL;`;
     await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS waha_session TEXT;`;
     await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS post_type TEXT NOT NULL DEFAULT 'FEED';`;
     await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS target_contacts_json TEXT;`;
     await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS status_style_json TEXT;`;
     await sql`ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS viewer_count INTEGER NOT NULL DEFAULT 0;`;
+  });
 
+  await safeExec('whatsapp_status_views', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS whatsapp_status_views (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         post_id TEXT NOT NULL REFERENCES scheduled_posts(id) ON DELETE CASCADE,
         viewer_jid TEXT NOT NULL,
         viewer_phone TEXT,
@@ -518,11 +660,15 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE whatsapp_status_views ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_wa_status_view_post_viewer ON whatsapp_status_views (post_id, viewer_jid);`;
+  });
 
+  await safeExec('content_ideas', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS content_ideas (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         title TEXT NOT NULL,
         notes TEXT,
         channel TEXT NOT NULL DEFAULT 'INSTAGRAM',
@@ -531,10 +677,14 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE content_ideas ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('social_comments', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS social_comments (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         channel TEXT NOT NULL,
         channel_account_id TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
         post_id TEXT,
@@ -549,10 +699,14 @@ export async function initDb() {
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE social_comments ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('comment_automations', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS comment_automations (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         name TEXT NOT NULL,
         channel TEXT NOT NULL DEFAULT 'ALL',
         keyword TEXT NOT NULL,
@@ -566,10 +720,14 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE comment_automations ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('ai_knowledge_books', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS ai_knowledge_books (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         title TEXT NOT NULL,
         description TEXT,
         category TEXT NOT NULL DEFAULT 'GENERAL',
@@ -580,10 +738,14 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE ai_knowledge_books ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
+  await safeExec('ai_knowledge_items', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS ai_knowledge_items (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         book_id TEXT REFERENCES ai_knowledge_books(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
         category TEXT NOT NULL DEFAULT 'FAQ',
@@ -594,16 +756,16 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE ai_knowledge_items ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+    await sql`ALTER TABLE ai_knowledge_items ADD COLUMN IF NOT EXISTS book_id TEXT REFERENCES ai_knowledge_books(id) ON DELETE CASCADE;`;
+  });
 
-    await sql`
-      ALTER TABLE ai_knowledge_items
-      ADD COLUMN IF NOT EXISTS book_id TEXT REFERENCES ai_knowledge_books(id) ON DELETE CASCADE;
-    `;
-
+  await safeExec('ai_skills', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS ai_skills (
         id TEXT PRIMARY KEY,
-        slug TEXT NOT NULL UNIQUE,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
+        slug TEXT NOT NULL,
         name TEXT NOT NULL,
         description TEXT,
         category TEXT NOT NULL DEFAULT 'CUSTOM',
@@ -617,10 +779,16 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE ai_skills ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+    await sql`ALTER TABLE ai_skills DROP CONSTRAINT IF EXISTS ai_skills_slug_key;`;
+    await sql`ALTER TABLE ai_skills DROP CONSTRAINT IF EXISTS ai_skills_slug_unique;`;
+  });
 
+  await safeExec('ai_mcp_servers', async () => {
     await sql`
       CREATE TABLE IF NOT EXISTS ai_mcp_servers (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT 'company_default',
         name TEXT NOT NULL,
         description TEXT,
         transport TEXT NOT NULL DEFAULT 'HTTP',
@@ -637,102 +805,37 @@ export async function initDb() {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE ai_mcp_servers ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`;
+  });
 
-    // Add company_id across all tenant-scoped tables and migrate global unique constraints to per-company indexes
-    const tenantTables = [
-      'contacts',
-      'campaigns',
-      'campaign_recipients',
-      'conversations',
-      'chat_messages',
-      'birthday_settings',
-      'crm_roles',
-      'crm_agents',
-      'canned_responses',
-      'crm_labels',
-      'message_templates',
-      'csat_responses',
-      'auto_reply_rules',
-      'products',
-      'channel_accounts',
-      'contact_identities',
-      'channel_connect_links',
-      'webhook_deliveries',
-      'scheduled_posts',
-      'whatsapp_status_views',
-      'content_ideas',
-      'social_comments',
-      'comment_automations',
-      'ai_knowledge_books',
-      'ai_knowledge_items',
-      'ai_skills',
-      'ai_mcp_servers',
-    ];
-    for (const tbl of tenantTables) {
-      try {
-        await sql.unsafe(
-          `ALTER TABLE ${tbl} ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT 'company_default';`
-        );
-      } catch (err: any) {
-        console.warn(`[Drizzle ORM] Warn adding company_id to ${tbl}:`, err.message);
-      }
-    }
-    try {
-      await sql`ALTER TABLE crm_agents ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE;`;
-    } catch (err: any) {
-      console.warn('[Drizzle ORM] Warn adding is_platform_admin to crm_agents:', err.message);
-    }
+  // 5. Create multi-tenant compound unique indexes defensively
+  await safeExec('idx_contacts_company_phone', () => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_company_phone ON contacts (company_id, nomor_whatsapp) WHERE nomor_whatsapp IS NOT NULL;
+  `);
+  await safeExec('idx_campaign_rec_company_waha_msg', () => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_rec_company_waha_msg ON campaign_recipients (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;
+  `);
+  await safeExec('idx_chat_msg_company_waha_msg', () => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_msg_company_waha_msg ON chat_messages (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;
+  `);
+  await safeExec('idx_crm_roles_company_name', () => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_roles_company_name ON crm_roles (company_id, LOWER(name));
+  `);
+  await safeExec('idx_canned_company_code', () => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_canned_company_code ON canned_responses (company_id, LOWER(short_code));
+  `);
+  await safeExec('idx_products_company_sku', () => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_sku ON products (company_id, LOWER(sku));
+  `);
+  await safeExec('idx_contact_id_company_ch_ext', () => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_id_company_ch_ext ON contact_identities (company_id, channel, external_id);
+  `);
+  await safeExec('idx_ai_skills_company_slug', () => sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_skills_company_slug ON ai_skills (company_id, slug);
+  `);
 
-    // Ensure default birthday row exists after company_id column is guaranteed
-    try {
-      await sql`
-        INSERT INTO birthday_settings (id, company_id, is_enabled, send_time, message_template, delay_seconds, updated_at)
-        VALUES ('default', 'company_default', TRUE, '08:00', 'Halo {nama_panggilan}! Selamat ulang tahun 🎉🎂 Semoga panjang umur, sehat selalu, berkah, dan sukses selalu!', 5, NOW())
-        ON CONFLICT (id) DO NOTHING;
-      `;
-    } catch (err: any) {
-      console.warn('[Drizzle ORM] Warn inserting default birthday row:', err.message);
-    }
-
-    // Drop legacy global single-column unique constraints in favor of per-company compound uniqueness
-    try {
-      await sql`ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_nomor_whatsapp_key;`;
-      await sql`ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_nomor_whatsapp_unique;`;
-      await sql`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_key;`;
-      await sql`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_unique;`;
-      await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_key;`;
-      await sql`ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_waha_message_id_unique;`;
-      await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_key;`;
-    await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_unique;`;
-      await sql`ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_contact_id_unique;`;
-      await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_key;`;
-      await sql`ALTER TABLE crm_roles DROP CONSTRAINT IF EXISTS crm_roles_name_unique;`;
-      await sql`ALTER TABLE canned_responses DROP CONSTRAINT IF EXISTS canned_responses_short_code_key;`;
-      await sql`ALTER TABLE canned_responses DROP CONSTRAINT IF EXISTS canned_responses_short_code_unique;`;
-      await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_key;`;
-      await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_unique;`;
-      await sql`ALTER TABLE contact_identities DROP CONSTRAINT IF EXISTS contact_identities_channel_external_id_key;`;
-      await sql`ALTER TABLE contact_identities DROP CONSTRAINT IF EXISTS contact_identities_channel_external_id_unique;`;
-      await sql`ALTER TABLE ai_skills DROP CONSTRAINT IF EXISTS ai_skills_slug_key;`;
-      await sql`ALTER TABLE ai_skills DROP CONSTRAINT IF EXISTS ai_skills_slug_unique;`;
-    } catch (err: any) {
-      console.warn('[Drizzle ORM] Warn dropping legacy constraints:', err.message);
-    }
-
-    try {
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_company_phone ON contacts (company_id, nomor_whatsapp) WHERE nomor_whatsapp IS NOT NULL;`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_rec_company_waha_msg ON campaign_recipients (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_msg_company_waha_msg ON chat_messages (company_id, waha_message_id) WHERE waha_message_id IS NOT NULL;`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_roles_company_name ON crm_roles (company_id, LOWER(name));`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_canned_company_code ON canned_responses (company_id, LOWER(short_code));`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_sku ON products (company_id, LOWER(sku));`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_id_company_ch_ext ON contact_identities (company_id, channel, external_id);`;
-      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_skills_company_slug ON ai_skills (company_id, slug);`;
-    } catch (err: any) {
-      console.warn('[Drizzle ORM] Warn creating compound indexes:', err.message);
-    }
-
-    // Migrate legacy single-tenant settings and license into company_default once
+  // 6. Migrate legacy single-tenant settings and license into company_default once
+  await safeExec('migration_multi_tenant_v1', async () => {
     const migratedRows = await sql`
       SELECT value FROM system_settings WHERE key = 'migration_multi_tenant_v1' LIMIT 1;
     `;
@@ -777,7 +880,7 @@ export async function initDb() {
         await sql`
           INSERT INTO company_settings (id, company_id, key, value, updated_at)
           VALUES (${settingId}, 'company_default', ${r.key}, ${r.value}, ${r.updated_at || new Date()})
-          ON CONFLICT (company_id, key) DO NOTHING;
+          ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at;
         `;
       }
 
@@ -810,7 +913,7 @@ export async function initDb() {
           UPDATE crm_agents
           SET is_platform_admin = TRUE
           WHERE id = (
-            SELECT id FROM crm_agents WHERE company_id = 'company_default' AND role = 'ADMIN' ORDER BY created_at ASC LIMIT 1
+            SELECT id FROM crm_agents WHERE company_id = 'company_default' AND UPPER(role) = 'ADMIN' ORDER BY created_at ASC LIMIT 1
           );
         `;
       }
@@ -821,8 +924,10 @@ export async function initDb() {
         ON CONFLICT (key) DO NOTHING;
       `;
     }
+  });
 
-    // One-time idempotent seed for Master Labels & Contact Categories
+  // 7. One-time idempotent seed for Master Labels & Contact Categories
+  await safeExec('master_labels_seeded', async () => {
     const seededRows = await sql`
       SELECT value FROM system_settings WHERE key = 'master_labels_seeded' LIMIT 1;
     `;
@@ -844,8 +949,8 @@ export async function initDb() {
         ];
         for (const item of defaultLabels) {
           await sql`
-            INSERT INTO crm_labels (id, scope, name, color, sort_order, is_active, created_at, updated_at)
-            VALUES (${item.id}, ${item.scope}, ${item.name}, ${item.color}, ${item.sort}, TRUE, NOW(), NOW())
+            INSERT INTO crm_labels (id, company_id, scope, name, color, sort_order, is_active, created_at, updated_at)
+            VALUES (${item.id}, 'company_default', ${item.scope}, ${item.name}, ${item.color}, ${item.sort}, TRUE, NOW(), NOW())
             ON CONFLICT (id) DO NOTHING;
           `;
         }
@@ -856,12 +961,9 @@ export async function initDb() {
         ON CONFLICT (key) DO NOTHING;
       `;
     }
+  });
 
-    console.log('[Drizzle ORM] PostgreSQL Database schema initialized successfully.');
-  } catch (err: any) {
-    console.error('[Drizzle ORM] Failed to initialize DB tables:', err.message);
-  }
+  console.log('[Drizzle ORM] PostgreSQL Database schema initialized successfully.');
 }
 
 export default db;
-
