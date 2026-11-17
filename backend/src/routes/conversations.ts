@@ -609,15 +609,15 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         const activeOnly = req.query?.activeOnly === 'true';
         const list = activeOnly
           ? await db
-              .select()
-              .from(cannedResponses)
-              .where(and(eq(cannedResponses.companyId, companyId), eq(cannedResponses.isActive, true)))
-              .orderBy(asc(cannedResponses.shortCode))
+            .select()
+            .from(cannedResponses)
+            .where(and(eq(cannedResponses.companyId, companyId), eq(cannedResponses.isActive, true)))
+            .orderBy(asc(cannedResponses.shortCode))
           : await db
-              .select()
-              .from(cannedResponses)
-              .where(eq(cannedResponses.companyId, companyId))
-              .orderBy(asc(cannedResponses.shortCode));
+            .select()
+            .from(cannedResponses)
+            .where(eq(cannedResponses.companyId, companyId))
+            .orderBy(asc(cannedResponses.shortCode));
         return reply.send({ success: true, data: list });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });
@@ -778,8 +778,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const rows = canViewAll
         ? allRows
         : allRows.filter(
-            (r) => !r.conv.assignedAgentId || (authUser?.id && r.conv.assignedAgentId === authUser.id)
-          );
+          (r) => !r.conv.assignedAgentId || (authUser?.id && r.conv.assignedAgentId === authUser.id)
+        );
 
       const csatRows = await db
         .select()
@@ -856,17 +856,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         updatedAt: r.conv.updatedAt,
         contact: r.contact
           ? {
-              id: r.contact.id,
-              nama_lengkap: r.contact.namaLengkap,
-              nama_panggilan: r.contact.namaPanggilan,
-              tanggal_lahir: r.contact.tanggalLahir,
-              nomor_whatsapp: r.contact.nomorWhatsapp,
-              tags: r.contact.tags,
-              notes: r.contact.notes,
-              alamat: r.contact.alamat,
-              exclude_from_metrics: Boolean(r.contact.excludeFromMetrics),
-              exclude_reason: r.contact.excludeReason || null,
-            }
+            id: r.contact.id,
+            nama_lengkap: r.contact.namaLengkap,
+            nama_panggilan: r.contact.namaPanggilan,
+            tanggal_lahir: r.contact.tanggalLahir,
+            nomor_whatsapp: r.contact.nomorWhatsapp,
+            tags: r.contact.tags,
+            notes: r.contact.notes,
+            alamat: r.contact.alamat,
+            exclude_from_metrics: Boolean(r.contact.excludeFromMetrics),
+            exclude_reason: r.contact.excludeReason || null,
+          }
           : undefined,
       }));
 
@@ -925,7 +925,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               row.contact,
               messages,
               req.query?.forceSeen === '1'
-            ).catch(() => {});
+            ).catch(() => { });
           }
         }
       }
@@ -1040,7 +1040,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
                   .update(conversations)
                   .set({ contextTitle: grpInfo.subject, pushName: grpInfo.subject, updatedAt: new Date() })
                   .where(eq(conversations.id, row.conv.id))
-                  .catch(() => {});
+                  .catch(() => { });
               }
             }
             for (const gp of grpInfo.participants) {
@@ -1275,7 +1275,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const requestedSession = req.body?.session?.trim() || null;
       const matchedExisting = requestedSession
         ? existingRows.find((c) => c.wahaSession === requestedSession) ||
-          existingRows.find((c) => !c.wahaSession)
+        existingRows.find((c) => !c.wahaSession)
         : existingRows[0];
       const targetSession = requestedSession || matchedExisting?.wahaSession || null;
 
@@ -1485,7 +1485,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               : existing.excludeFromMetrics;
           const nextReason = nextExcl
             ? (convUpdate.excludeReason !== undefined ? convUpdate.excludeReason : existing.excludeReason) ||
-              (existing.isGroup ? 'Grup WhatsApp' : 'Bukan Customer')
+            (existing.isGroup ? 'Grup WhatsApp' : 'Bukan Customer')
             : null;
           contactUpdate.excludeFromMetrics = nextExcl;
           contactUpdate.excludeReason = nextReason;
@@ -1710,16 +1710,16 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         (linkPreview
           ? 'LINK_PREVIEW'
           : interactiveButtons
-          ? 'BUTTONS'
-          : poll
-          ? 'POLL'
-          : location
-          ? 'LOCATION'
-          : Array.isArray(sharedContacts) && sharedContacts.length > 0
-          ? 'CONTACT'
-          : mediaBase64 || mediaUrl
-          ? 'MEDIA'
-          : 'TEXT');
+            ? 'BUTTONS'
+            : poll
+              ? 'POLL'
+              : location
+                ? 'LOCATION'
+                : Array.isArray(sharedContacts) && sharedContacts.length > 0
+                  ? 'CONTACT'
+                  : mediaBase64 || mediaUrl
+                    ? 'MEDIA'
+                    : 'TEXT');
 
       if (inferredKind === 'LINK_PREVIEW') {
         const rawUrl = String(linkPreview?.url || '').trim();
@@ -2131,10 +2131,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           mediaType = mediaMimetype.startsWith('image/')
             ? 'image'
             : mediaMimetype.startsWith('video/')
-            ? 'video'
-            : mediaMimetype.startsWith('audio/')
-            ? 'audio'
-            : 'document';
+              ? 'video'
+              : mediaMimetype.startsWith('audio/')
+                ? 'audio'
+                : 'document';
           try {
             const savedMedia = await saveBase64MediaFile({
               base64: mediaBase64,
@@ -2418,10 +2418,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const sendErrorMsg = sendResult.success ? null : (sendResult.error || 'Gagal mengirim ulang pesan WhatsApp');
       const nextMetaJson = parsedMeta
         ? JSON.stringify({
-            ...parsedMeta,
-            ...(sendResult.usedFallbackText ? { usedFallbackText: true } : {}),
-            ...(sendResult.fallbackReason ? { fallbackReason: sendResult.fallbackReason } : {}),
-          })
+          ...parsedMeta,
+          ...(sendResult.usedFallbackText ? { usedFallbackText: true } : {}),
+          ...(sendResult.fallbackReason ? { fallbackReason: sendResult.fallbackReason } : {}),
+        })
         : msg.metadataJson;
 
       const [updated] = await db
