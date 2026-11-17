@@ -412,8 +412,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
           const targeted = data.find((c) => c.id === targetConvIdRef.current);
           if (targeted) return targeted;
         }
-        if (!prev) return data.length > 0 ? data[0] : null;
-        return data.find((c) => c.id === prev.id) || (data.length > 0 ? data[0] : null);
+        if (!prev) return null;
+        return data.find((c) => c.id === prev.id) || null;
       });
     } catch (err: any) {
       setListError(err.response?.data?.error || err.message || 'Gagal memuat daftar percakapan');
