@@ -296,6 +296,11 @@ export interface ChatMessageMetadata {
   revokedAt?: string;
   revokedBy?: string;
   revokeScope?: 'ME' | 'EVERYONE';
+  isPinned?: boolean;
+  pinnedAt?: string | null;
+  pinnedBy?: string | null;
+  isStarred?: boolean;
+  starredAt?: string | null;
   forwarded?: boolean;
   forwardingScore?: number;
   forwardedFromSender?: string;

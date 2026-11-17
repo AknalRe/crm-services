@@ -1512,6 +1512,7 @@ export class WahaService {
     }
 
     const requiredEvents = [
+      'message',
       'message.any',
       'message.ack',
       'session.status',
@@ -1643,6 +1644,7 @@ export class WahaService {
           {
             url: resolvedWebhook.url,
             events: [
+              'message',
               'message.any',
               'message.ack',
               'session.status',
@@ -2155,6 +2157,44 @@ export class WahaService {
             '/api/messages/delete',
             { session: targetSession, chatId, messageId: cleanMsgId },
             { timeout: 12000 }
+          );
+          return fallbackRes.data;
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Forward a WhatsApp message natively to another chat via WAHA
+   */
+  public async forwardMessage(
+    phoneOrJid: string,
+    wahaMessageId: string,
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanMsgId = String(wahaMessageId || '').trim();
+    if (!cleanMsgId) {
+      return {
+        success: false,
+        error: 'ID pesan WhatsApp tidak ditemukan untuk diteruskan.',
+      };
+    }
+    return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.post(
+          '/api/forwardMessage',
+          { session: targetSession, chatId, messageId: cleanMsgId },
+          { timeout: 15000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501) {
+          const fallbackRes = await client.post(
+            `/api/${encodeURIComponent(targetSession)}/forward-message`,
+            { chatId, messageId: cleanMsgId },
+            { timeout: 15000 }
           );
           return fallbackRes.data;
         }
@@ -3413,6 +3453,203 @@ export class WahaService {
       );
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Update Group Subject (Name)
+   */
+  public async updateGroupSubject(
+    groupJid: string,
+    subject: string,
+    sessionName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanJid = String(groupJid || '').trim();
+    const cleanSubject = String(subject || '').trim();
+    if (!cleanJid || !cleanJid.toLowerCase().endsWith('@g.us')) {
+      return { success: false, error: 'Target bukan JID grup WhatsApp valid.' };
+    }
+    if (!cleanSubject) {
+      return { success: false, error: 'Nama grup tidak boleh kosong.' };
+    }
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const encodedSession = encodeURIComponent(targetSession);
+      const encodedGroup = encodeURIComponent(cleanJid);
+      await client.put(
+        `/api/${encodedSession}/groups/${encodedGroup}/subject`,
+        { subject: cleanSubject },
+        { timeout: 10000 }
+      );
+      return { success: true };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.response?.data?.message || err?.message || 'Gagal mengubah nama grup WhatsApp.',
+      };
+    }
+  }
+
+  /**
+   * Update Group Description
+   */
+  public async updateGroupDescription(
+    groupJid: string,
+    description: string,
+    sessionName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanJid = String(groupJid || '').trim();
+    if (!cleanJid || !cleanJid.toLowerCase().endsWith('@g.us')) {
+      return { success: false, error: 'Target bukan JID grup WhatsApp valid.' };
+    }
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const encodedSession = encodeURIComponent(targetSession);
+      const encodedGroup = encodeURIComponent(cleanJid);
+      await client.put(
+        `/api/${encodedSession}/groups/${encodedGroup}/description`,
+        { description: String(description || '').trim() },
+        { timeout: 10000 }
+      );
+      return { success: true };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.response?.data?.message || err?.message || 'Gagal mengubah deskripsi grup WhatsApp.',
+      };
+    }
+  }
+
+  /**
+   * Update Group Picture (Avatar)
+   */
+  public async updateGroupPicture(
+    groupJid: string,
+    fileUrlOrBase64: string,
+    sessionName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanJid = String(groupJid || '').trim();
+    if (!cleanJid || !cleanJid.toLowerCase().endsWith('@g.us')) {
+      return { success: false, error: 'Target bukan JID grup WhatsApp valid.' };
+    }
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const encodedSession = encodeURIComponent(targetSession);
+      const encodedGroup = encodeURIComponent(cleanJid);
+      const isUrl = /^https?:\/\//i.test(fileUrlOrBase64);
+      const payload = isUrl
+        ? { file: { url: fileUrlOrBase64 } }
+        : { file: { data: fileUrlOrBase64 } };
+      await client.put(
+        `/api/${encodedSession}/groups/${encodedGroup}/picture`,
+        payload,
+        { timeout: 15000 }
+      );
+      return { success: true };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.response?.data?.message || err?.message || 'Gagal memperbarui foto profil grup WhatsApp.',
+      };
+    }
+  }
+
+  /**
+   * Get Group Invite Code / Link
+   */
+  public async getGroupInviteCode(
+    groupJid: string,
+    sessionName?: string
+  ): Promise<{ success: boolean; code?: string; link?: string; error?: string }> {
+    const cleanJid = String(groupJid || '').trim();
+    if (!cleanJid || !cleanJid.toLowerCase().endsWith('@g.us')) {
+      return { success: false, error: 'Target bukan JID grup WhatsApp valid.' };
+    }
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const encodedSession = encodeURIComponent(targetSession);
+      const encodedGroup = encodeURIComponent(cleanJid);
+      const res = await client.get(`/api/${encodedSession}/groups/${encodedGroup}/invite-code`, {
+        timeout: 10000,
+      });
+      const code = String(res?.data?.code || res?.data || '').trim();
+      const link = code ? (code.startsWith('http') ? code : `https://chat.whatsapp.com/${code}`) : undefined;
+      return { success: true, code, link };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.response?.data?.message || err?.message || 'Gagal mengambil tautan undangan grup.',
+      };
+    }
+  }
+
+  /**
+   * Revoke Group Invite Code
+   */
+  public async revokeGroupInviteCode(
+    groupJid: string,
+    sessionName?: string
+  ): Promise<{ success: boolean; code?: string; link?: string; error?: string }> {
+    const cleanJid = String(groupJid || '').trim();
+    if (!cleanJid || !cleanJid.toLowerCase().endsWith('@g.us')) {
+      return { success: false, error: 'Target bukan JID grup WhatsApp valid.' };
+    }
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const encodedSession = encodeURIComponent(targetSession);
+      const encodedGroup = encodeURIComponent(cleanJid);
+      const res = await client.post(`/api/${encodedSession}/groups/${encodedGroup}/invite-code/revoke`, {}, {
+        timeout: 10000,
+      });
+      const code = String(res?.data?.code || res?.data || '').trim();
+      const link = code ? (code.startsWith('http') ? code : `https://chat.whatsapp.com/${code}`) : undefined;
+      return { success: true, code, link };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.response?.data?.message || err?.message || 'Gagal mengatur ulang tautan undangan grup.',
+      };
+    }
+  }
+
+  /**
+   * Add Participants to Group
+   */
+  public async addGroupParticipants(
+    groupJid: string,
+    participants: string[],
+    sessionName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanJid = String(groupJid || '').trim();
+    if (!cleanJid || !cleanJid.toLowerCase().endsWith('@g.us')) {
+      return { success: false, error: 'Target bukan JID grup WhatsApp valid.' };
+    }
+    const cleanList = participants
+      .map((p) => {
+        const trimmed = String(p || '').trim();
+        if (!trimmed) return '';
+        if (isPhoneWahaJid(trimmed) || trimmed.endsWith('@lid')) return trimmed;
+        return toWahaChatId(trimmed);
+      })
+      .filter(Boolean);
+    if (cleanList.length === 0) {
+      return { success: false, error: 'Daftar nomor atau JID anggota tidak boleh kosong.' };
+    }
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const encodedSession = encodeURIComponent(targetSession);
+      const encodedGroup = encodeURIComponent(cleanJid);
+      await client.post(
+        `/api/${encodedSession}/groups/${encodedGroup}/participants/add`,
+        { participants: cleanList.map((id) => ({ id })) },
+        { timeout: 15000 }
+      );
+      return { success: true };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.response?.data?.message || err?.message || 'Gagal menambahkan anggota ke grup WhatsApp.',
+      };
     }
   }
 }

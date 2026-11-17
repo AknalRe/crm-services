@@ -54,6 +54,9 @@ import {
   UserPlus,
   AtSign,
   Forward,
+  Pin,
+  PinOff,
+  Shield,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -194,7 +197,9 @@ const ContactAvatar: React.FC<{
   url?: string | null;
   label: string;
   className?: string;
-}> = ({ url, label, className = '' }) => {
+  onClick?: (e: React.MouseEvent) => void;
+  title?: string;
+}> = ({ url, label, className = '', onClick, title }) => {
   const [failed, setFailed] = useState(false);
   const resolved = url ? resolveMediaUrl(url) : '';
   useEffect(() => {
@@ -206,17 +211,73 @@ const ContactAvatar: React.FC<{
       <img
         src={resolved}
         alt={label}
+        title={title}
+        onClick={onClick}
         onError={() => setFailed(true)}
-        className={`object-cover shrink-0 ${className}`}
+        className={`object-cover shrink-0 ${onClick ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''} ${className}`}
       />
     );
   }
   return (
-    <div className={`flex items-center justify-center shrink-0 ${className}`}>
+    <div
+      onClick={onClick}
+      title={title}
+      className={`flex items-center justify-center shrink-0 ${onClick ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''} ${className}`}
+    >
       {(label || 'WA').slice(0, 2).toUpperCase()}
     </div>
   );
 };
+
+function formatMentionPlainText(
+  text: string,
+  mySessionPhones?: Set<string>,
+  contactsByPhone?: Map<string, string>,
+  participantsLookup?: Map<string, ParticipantLookupEntry>
+): string {
+  if (!text) return '';
+  return text.replace(/@(\d{6,20}|[a-zA-Z0-9_.-]+)/g, (match, rawTarget) => {
+    const cleanDigits = rawTarget.replace(/\D/g, '');
+    if (cleanDigits && mySessionPhones?.has(cleanDigits)) {
+      return '@Anda';
+    }
+    const fromPart = cleanDigits ? participantsLookup?.get(cleanDigits) : participantsLookup?.get(rawTarget.toLowerCase());
+    if (fromPart?.name) {
+      return `@${fromPart.name}`;
+    }
+    if (cleanDigits && contactsByPhone?.has(cleanDigits)) {
+      return `@${contactsByPhone.get(cleanDigits)}`;
+    }
+    if (cleanDigits && cleanDigits.length >= 7 && cleanDigits.length <= 15) {
+      return `@+${cleanDigits}`;
+    }
+    return match;
+  });
+}
+
+function formatConversationPreview(
+  text: string | null | undefined,
+  mySessionPhones: Set<string>,
+  contactsByPhone: Map<string, string>
+): { previewText: string; isMentionedMe: boolean } {
+  if (!text) return { previewText: 'Tidak ada pesan terbaru', isMentionedMe: false };
+  let isMentionedMe = false;
+  const previewText = text.replace(/@(\d{6,20}|[a-zA-Z0-9_.-]+)/g, (match, rawTarget) => {
+    const cleanDigits = rawTarget.replace(/\D/g, '');
+    if (cleanDigits && mySessionPhones.has(cleanDigits)) {
+      isMentionedMe = true;
+      return '@Anda';
+    }
+    if (cleanDigits && contactsByPhone.has(cleanDigits)) {
+      return `@${contactsByPhone.get(cleanDigits)}`;
+    }
+    if (cleanDigits && cleanDigits.length >= 7 && cleanDigits.length <= 15) {
+      return `@+${cleanDigits}`;
+    }
+    return match;
+  });
+  return { previewText, isMentionedMe };
+}
 
 function renderTextWithClickableLinks(
   text: string,
@@ -493,6 +554,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [inputText, setInputText] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'PENDING' | 'RESOLVED'>('ALL');
+  const [chatTypeFilter, setChatTypeFilter] = useState<'ALL' | 'PERSONAL' | 'GROUP' | 'UNREAD'>('ALL');
   const [metricFilter, setMetricFilter] = useState<'ALL' | 'ASSESSED' | 'EXCLUDED' | 'GROUPS'>('ALL');
   const [channelFilter, setChannelFilter] = useState<'ALL' | OmnichannelType>('ALL');
   const [channelAccounts, setChannelAccounts] = useState<ChannelAccount[]>([]);
@@ -512,6 +574,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [showListFilters, setShowListFilters] = useState(false);
   const [showMobileChatActions, setShowMobileChatActions] = useState(false);
   const [showComposerTools, setShowComposerTools] = useState(false);
+
+  // Group Admin Modal & Profile About toggle states
+  const [expandProfileAbout, setExpandProfileAbout] = useState(false);
+  const [showGroupManageModal, setShowGroupManageModal] = useState(false);
+  const [groupManageTab, setGroupManageTab] = useState<'INFO' | 'INVITE' | 'ADD_MEMBER'>('INFO');
+  const [groupSubjectDraft, setGroupSubjectDraft] = useState('');
+  const [groupDescDraft, setGroupDescDraft] = useState('');
+  const [savingGroupInfo, setSavingGroupInfo] = useState(false);
+  const [groupInviteCode, setGroupInviteCode] = useState('');
+  const [groupInviteLink, setGroupInviteLink] = useState('');
+  const [loadingGroupInvite, setLoadingGroupInvite] = useState(false);
+  const [newMemberPhone, setNewMemberPhone] = useState('');
+  const [addingMember, setAddingMember] = useState(false);
   const [openProfileSections, setOpenProfileSections] = useState<Record<string, boolean>>({});
 
   const toggleProfileSection = (key: string) => {
@@ -1243,41 +1318,53 @@ export const Conversations: React.FC<ConversationsProps> = ({
     if (!targetConv) return;
     setForwardingSending(true);
     try {
-      const fwdMeta = parseChatMessageMeta(forwardingMessage);
-      const fromSenderLabel =
-        fwdMeta?.forwardedFromSender || resolveMessageSenderName(forwardingMessage);
-      const payload: Parameters<typeof api.sendConversationMessage>[1] = {
-        body: forwardingMessage.body || undefined,
-        session: selectedSession || targetConv.wahaSession || undefined,
-        isForwarded: true,
-        forwardedFromSender: fromSenderLabel,
-        forwardedFromChannel: fwdMeta?.forwardedFromChannel,
-      };
-      if (forwardingMessage.mediaUrl) {
-        payload.mediaUrl = forwardingMessage.mediaUrl;
-        payload.mediaName = forwardingMessage.mediaName || undefined;
-      }
-      if (fwdMeta?.kind === 'LOCATION' && fwdMeta.location) {
-        payload.messageKind = 'LOCATION';
-        payload.location = fwdMeta.location;
-      } else if (fwdMeta?.kind === 'CONTACT' && fwdMeta.sharedContacts?.length) {
-        const mappedContacts = fwdMeta.sharedContacts
-          .map((c) => ({
-            fullName: c.fullName,
-            phoneNumber: c.phones?.[0] || c.waId || '',
-            organization: c.organization,
-            email: c.email,
-          }))
-          .filter((c) => Boolean(c.phoneNumber));
-        if (mappedContacts.length > 0) {
-          payload.messageKind = 'CONTACT';
-          payload.sharedContacts = mappedContacts;
+      let sent: ChatMessage;
+      try {
+        // Native WAHA forward via backend endpoint
+        sent = await api.forwardConversationMessage(targetConv.id, {
+          sourceMessageId: forwardingMessage.id,
+          targetConversationId: targetConv.id,
+          session: selectedSession || targetConv.wahaSession || undefined,
+        });
+      } catch (nativeErr) {
+        // Fallback to sending copy with forwarded metadata
+        const fwdMeta = parseChatMessageMeta(forwardingMessage);
+        const fromSenderLabel =
+          fwdMeta?.forwardedFromSender || resolveMessageSenderName(forwardingMessage);
+        const payload: Parameters<typeof api.sendConversationMessage>[1] = {
+          body: forwardingMessage.body || undefined,
+          session: selectedSession || targetConv.wahaSession || undefined,
+          isForwarded: true,
+          forwardedFromSender: fromSenderLabel,
+          forwardedFromChannel: fwdMeta?.forwardedFromChannel,
+        };
+        if (forwardingMessage.mediaUrl) {
+          payload.mediaUrl = forwardingMessage.mediaUrl;
+          payload.mediaName = forwardingMessage.mediaName || undefined;
         }
-      } else if (fwdMeta?.kind === 'STICKER' && forwardingMessage.mediaUrl) {
-        payload.messageKind = 'STICKER';
+        if (fwdMeta?.kind === 'LOCATION' && fwdMeta.location) {
+          payload.messageKind = 'LOCATION';
+          payload.location = fwdMeta.location;
+        } else if (fwdMeta?.kind === 'CONTACT' && fwdMeta.sharedContacts?.length) {
+          const mappedContacts = fwdMeta.sharedContacts
+            .map((c) => ({
+              fullName: c.fullName,
+              phoneNumber: c.phones?.[0] || c.waId || '',
+              organization: c.organization,
+              email: c.email,
+            }))
+            .filter((c) => Boolean(c.phoneNumber));
+          if (mappedContacts.length > 0) {
+            payload.messageKind = 'CONTACT';
+            payload.sharedContacts = mappedContacts;
+          }
+        } else if (fwdMeta?.kind === 'STICKER' && forwardingMessage.mediaUrl) {
+          payload.messageKind = 'STICKER';
+        }
+
+        sent = await api.sendConversationMessage(targetConv.id, payload);
       }
 
-      const sent = await api.sendConversationMessage(targetConv.id, payload);
       if (selectedConversation?.id === targetConv.id) {
         setMessages((prev) => [...prev, sent]);
       }
@@ -2058,6 +2145,201 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [mergeSearch, setMergeSearch] = useState('');
   const [mergingContactId, setMergingContactId] = useState<string | null>(null);
 
+  const mySessionPhones = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sessions) {
+      if (s.me?.id) {
+        const p = s.me.id.replace(/@.*$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
+        if (p) set.add(p);
+      }
+    }
+    return set;
+  }, [sessions]);
+
+  const contactsByPhone = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of conversations) {
+      if (c.contact?.nomor_whatsapp) {
+        const p = c.contact.nomor_whatsapp.replace(/\D/g, '');
+        if (p) map.set(p, c.contact.nama_lengkap || c.contact.nama_panggilan || p);
+      }
+    }
+    for (const c of contactsList) {
+      if (c.nomor_whatsapp) {
+        const p = c.nomor_whatsapp.replace(/\D/g, '');
+        if (p && !map.has(p)) map.set(p, c.nama_lengkap || c.nama_panggilan || p);
+      }
+    }
+    return map;
+  }, [conversations, contactsList]);
+
+  const pinnedMessages = useMemo(() => {
+    return messages.filter((m) => {
+      const meta = parseChatMessageMeta(m);
+      return Boolean(meta?.isPinned);
+    });
+  }, [messages]);
+
+  const handleOpenAvatarLightbox = (picUrl?: string | null, name?: string) => {
+    if (!picUrl) return;
+    setLightboxMedia({
+      url: resolveMediaUrl(picUrl),
+      name: name ? `Foto Profil - ${name}` : 'Foto Profil',
+    });
+  };
+
+  const handleTogglePinMessage = async (msg: ChatMessage) => {
+    if (!selectedConversation) return;
+    try {
+      const res = await api.pinConversationMessage(selectedConversation.id, msg.id);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msg.id ? res.data : m))
+      );
+      toast.success(res.isPinned ? 'Pesan disematkan' : 'Sematan pesan dilepas');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal mengubah status sematan pesan');
+    }
+  };
+
+  const handleToggleStarMessage = async (msg: ChatMessage) => {
+    if (!selectedConversation) return;
+    try {
+      const res = await api.starConversationMessage(selectedConversation.id, msg.id);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msg.id ? res.data : m))
+      );
+      toast.success(res.isStarred ? 'Pesan dibintangi' : 'Bintang pesan dihapus');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal mengubah bintang pesan');
+    }
+  };
+
+  const handleOpenGroupManageModal = (initialTab: 'INFO' | 'INVITE' | 'ADD_MEMBER' = 'INFO') => {
+    if (!selectedConversation || !selectedConversation.isGroup) return;
+    setGroupManageTab(initialTab);
+    setGroupSubjectDraft(selectedConversation.contact?.nama_lengkap || '');
+    setGroupDescDraft(selectedConversation.contact?.profile_about || '');
+    setShowGroupManageModal(true);
+    if (initialTab === 'INVITE') {
+      void fetchGroupInvite();
+    }
+  };
+
+  const fetchGroupInvite = async () => {
+    if (!selectedConversation) return;
+    setLoadingGroupInvite(true);
+    try {
+      const res = await api.getGroupInviteCode(
+        selectedConversation.id,
+        selectedSession || selectedConversation.wahaSession || undefined
+      );
+      setGroupInviteCode(res.code || '');
+      setGroupInviteLink(res.link || (res.code ? `https://chat.whatsapp.com/${res.code}` : ''));
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal mengambil tautan undangan grup');
+    } finally {
+      setLoadingGroupInvite(false);
+    }
+  };
+
+  const handleRevokeGroupInvite = async () => {
+    if (!selectedConversation) return;
+    setLoadingGroupInvite(true);
+    try {
+      const res = await api.revokeGroupInviteCode(
+        selectedConversation.id,
+        selectedSession || selectedConversation.wahaSession || undefined
+      );
+      setGroupInviteCode(res.code || '');
+      setGroupInviteLink(res.link || (res.code ? `https://chat.whatsapp.com/${res.code}` : ''));
+      toast.success('Tautan undangan lama ditarik dan tautan baru dibuat');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal memperbarui tautan undangan');
+    } finally {
+      setLoadingGroupInvite(false);
+    }
+  };
+
+  const handleSaveGroupSubject = async () => {
+    if (!selectedConversation || !groupSubjectDraft.trim() || savingGroupInfo) return;
+    setSavingGroupInfo(true);
+    try {
+      await api.updateGroupSubject(
+        selectedConversation.id,
+        groupSubjectDraft.trim(),
+        selectedSession || selectedConversation.wahaSession || undefined
+      );
+      setSelectedConversation((prev) =>
+        prev
+          ? {
+              ...prev,
+              contact: {
+                ...prev.contact,
+                nama_lengkap: groupSubjectDraft.trim(),
+              },
+            }
+          : null
+      );
+      toast.success('Nama grup berhasil diperbarui');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal mengubah nama grup');
+    } finally {
+      setSavingGroupInfo(false);
+    }
+  };
+
+  const handleSaveGroupDesc = async () => {
+    if (!selectedConversation || savingGroupInfo) return;
+    setSavingGroupInfo(true);
+    try {
+      await api.updateGroupDescription(
+        selectedConversation.id,
+        groupDescDraft.trim(),
+        selectedSession || selectedConversation.wahaSession || undefined
+      );
+      setSelectedConversation((prev) =>
+        prev
+          ? {
+              ...prev,
+              contact: {
+                ...prev.contact,
+                profile_about: groupDescDraft.trim(),
+              },
+            }
+          : null
+      );
+      toast.success('Deskripsi grup berhasil diperbarui');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal mengubah deskripsi grup');
+    } finally {
+      setSavingGroupInfo(false);
+    }
+  };
+
+  const handleAddGroupMember = async () => {
+    if (!selectedConversation || !newMemberPhone.trim() || addingMember) return;
+    const clean = newMemberPhone.replace(/\D/g, '');
+    if (!clean || clean.length < 7) {
+      toast.error('Masukkan nomor WhatsApp yang valid (contoh: 628123456789)');
+      return;
+    }
+    setAddingMember(true);
+    try {
+      await api.addGroupParticipants(
+        selectedConversation.id,
+        [clean],
+        selectedSession || selectedConversation.wahaSession || undefined
+      );
+      toast.success(`Anggota +${clean} berhasil ditambahkan`);
+      setNewMemberPhone('');
+      void fetchParticipants(selectedConversation.id, true);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menambahkan anggota ke grup');
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
   // Agent assignment & Canned responses
   const [assignableAgents, setAssignableAgents] = useState<
     Array<{ id: string; name: string; email: string; role: string }>
@@ -2603,6 +2885,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
     const convStatus = (c.status || 'OPEN').toUpperCase();
     const convChannel = (c.channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
     if (statusFilter !== 'ALL' && convStatus !== statusFilter) return false;
+    if (chatTypeFilter === 'PERSONAL' && c.isGroup) return false;
+    if (chatTypeFilter === 'GROUP' && !c.isGroup) return false;
+    if (chatTypeFilter === 'UNREAD' && !(c.unreadCount && c.unreadCount > 0)) return false;
     if (metricFilter === 'ASSESSED' && (c.excludeFromMetrics || c.isGroup)) return false;
     if (metricFilter === 'EXCLUDED' && !c.excludeFromMetrics && !c.isGroup) return false;
     if (metricFilter === 'GROUPS' && !c.isGroup) return false;
@@ -2705,6 +2990,31 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 <span className="hidden sm:inline">Baru</span>
               </button>
             )}
+          </div>
+
+          {/* Chat Type Filter Pills: Semua, Chat Pribadi, Grup, Belum Dibaca */}
+          <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
+            {(
+              [
+                { id: 'ALL', label: 'Semua' },
+                { id: 'PERSONAL', label: 'Pribadi' },
+                { id: 'GROUP', label: 'Grup' },
+                { id: 'UNREAD', label: 'Belum Dibaca' },
+              ] as const
+            ).map((ct) => (
+              <button
+                key={ct.id}
+                type="button"
+                onClick={() => setChatTypeFilter(ct.id)}
+                className={`py-1 rounded font-medium transition-colors truncate px-0.5 ${
+                  chatTypeFilter === ct.id
+                    ? 'bg-white text-indigo-700 shadow-sm font-semibold'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {ct.label}
+              </button>
+            ))}
           </div>
 
           <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
@@ -2855,24 +3165,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 )}
               </div>
 
-              {unifiedSessionOptions.length > 0 && (
-                <select
-                  value={accountFilter}
-                  onChange={(e) => setAccountFilter(e.target.value)}
-                  aria-label="Filter Sesi atau Akun Kanal"
-                  className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="ALL">
-                    Semua Sesi / Akun ({filteredUnifiedSessionOptions.length})
-                  </option>
-                  {filteredUnifiedSessionOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-
               <div className="flex items-center justify-between text-[11px] pt-0.5">
                 <button
                   type="button"
@@ -2938,43 +3230,70 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     url={conv.contact?.profile_picture_url}
                     label={getConversationDisplayTitle(conv)}
                     className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs mt-0.5"
+                    onClick={(e) => {
+                      if (conv.contact?.profile_picture_url) {
+                        e.stopPropagation();
+                        handleOpenAvatarLightbox(conv.contact.profile_picture_url, getConversationDisplayTitle(conv));
+                      }
+                    }}
+                    title={conv.contact?.profile_picture_url ? "Klik untuk melihat foto profil" : undefined}
                   />
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-gray-900 text-xs truncate">
-                        {getConversationDisplayTitle(conv)}
-                      </span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {conv.unreadCount > 0 && (
-                          <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-indigo-600 text-white tabular-nums">
-                            {conv.unreadCount}
-                          </span>
-                        )}
-                        {conv.lastMessageAt && (
-                          <span className="text-[10px] text-gray-400 font-mono tabular-nums">
-                            {new Date(conv.lastMessageAt).toLocaleTimeString('id-ID', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    {(() => {
+                      const { previewText, isMentionedMe } = formatConversationPreview(
+                        conv.lastMessage,
+                        mySessionPhones,
+                        contactsByPhone
+                      );
+                      return (
+                        <>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-gray-900 text-xs truncate">
+                              {getConversationDisplayTitle(conv)}
+                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isMentionedMe && (
+                                <span
+                                  title="Anda disebut dalam percakapan ini"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-full font-bold bg-amber-100 text-amber-800 border border-amber-300 text-[9px] shrink-0"
+                                >
+                                  <AtSign className="w-2.5 h-2.5 text-amber-600" />
+                                  <span>Disebut</span>
+                                </span>
+                              )}
+                              {conv.unreadCount > 0 && (
+                                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-indigo-600 text-white tabular-nums">
+                                  {conv.unreadCount}
+                                </span>
+                              )}
+                              {conv.lastMessageAt && (
+                                <span className="text-[10px] text-gray-400 font-mono tabular-nums">
+                                  {new Date(conv.lastMessageAt).toLocaleTimeString('id-ID', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              )}
+                            </div>
+                          </div>
 
-                    <p className="text-[11px] text-gray-500 truncate mt-0.5">
-                      {presenceByConvId[conv.id]?.status === 'typing' ? (
-                        <span className="text-emerald-600 font-medium italic">
-                          Sedang mengetik...
-                        </span>
-                      ) : presenceByConvId[conv.id]?.status === 'recording' ? (
-                        <span className="text-emerald-600 font-medium italic">
-                          Merekam pesan suara...
-                        </span>
-                      ) : (
-                        conv.lastMessage || 'Tidak ada pesan terbaru'
-                      )}
-                    </p>
+                          <p className="text-[11px] text-gray-500 truncate mt-0.5">
+                            {presenceByConvId[conv.id]?.status === 'typing' ? (
+                              <span className="text-emerald-600 font-medium italic">
+                                Sedang mengetik...
+                              </span>
+                            ) : presenceByConvId[conv.id]?.status === 'recording' ? (
+                              <span className="text-emerald-600 font-medium italic">
+                                Merekam pesan suara...
+                              </span>
+                            ) : (
+                              previewText
+                            )}
+                          </p>
+                        </>
+                      );
+                    })()}
 
                     <div className="flex items-center gap-1.5 mt-1 text-[10px] overflow-hidden">
                       {(() => {
@@ -3083,6 +3402,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       url={selectedConversation.contact?.profile_picture_url}
                       label={getConversationDisplayTitle(selectedConversation)}
                       className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs"
+                      onClick={(e) => {
+                        if (selectedConversation.contact?.profile_picture_url) {
+                          e.stopPropagation();
+                          handleOpenAvatarLightbox(
+                            selectedConversation.contact.profile_picture_url,
+                            getConversationDisplayTitle(selectedConversation)
+                          );
+                        }
+                      }}
+                      title={selectedConversation.contact?.profile_picture_url ? "Klik untuk melihat foto profil lebih jelas" : undefined}
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -3667,6 +3996,46 @@ export const Conversations: React.FC<ConversationsProps> = ({
             onScroll={updateFloatingDateLabel}
             className="relative flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2 sm:space-y-2.5"
           >
+            {pinnedMessages.length > 0 && !loadingMessages && (
+              <div className="sticky top-0.5 z-30 mb-2">
+                <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-indigo-50/95 backdrop-blur-sm border border-indigo-200/90 shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lastPinned = pinnedMessages[pinnedMessages.length - 1];
+                      handleJumpToMessage(lastPinned.id, lastPinned.body);
+                    }}
+                    className="min-w-0 flex-1 flex items-center gap-2 text-left hover:opacity-85 transition-opacity cursor-pointer"
+                    title="Klik untuk melompat ke pesan yang disematkan"
+                  >
+                    <Pin className="w-3.5 h-3.5 text-indigo-600 shrink-0 rotate-45" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>Pesan Disematkan</span>
+                        {pinnedMessages.length > 1 && (
+                          <span className="px-1.5 py-0.2 rounded-full bg-indigo-200 text-indigo-800 text-[9px] font-mono">
+                            {pinnedMessages.length}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-indigo-950 truncate font-medium">
+                        {pinnedMessages[pinnedMessages.length - 1].body ||
+                          pinnedMessages[pinnedMessages.length - 1].mediaName ||
+                          '[Media]'}
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleTogglePinMessage(pinnedMessages[pinnedMessages.length - 1])}
+                    title="Lepas sematan pesan ini"
+                    className="p-1 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100/70 transition-colors shrink-0"
+                  >
+                    <PinOff className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
             {floatingDateLabel && messages.length > 0 && !loadingMessages && (
               <div className="sticky top-0.5 z-20 flex justify-center pointer-events-none pb-1">
                 <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/95 backdrop-blur-sm border border-gray-200 shadow-sm text-[11px] font-medium text-gray-700">
@@ -3997,7 +4366,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               <span>{resolveReplySenderLabel(msg)}</span>
                             </div>
                             <div className="text-gray-600 dark:text-gray-300 truncate">
-                              {msg.replyToBody || 'Pesan dikutip'}
+                              {formatMentionPlainText(
+                                msg.replyToBody || 'Pesan dikutip',
+                                mySessionPhones,
+                                contactsByPhone,
+                                participantsLookup
+                              )}
                             </div>
                           </button>
                         )}
@@ -4632,8 +5006,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         )}
 
                         <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-gray-500 font-mono tabular-nums">
-                          {msg.wahaSession && (
-                            <span className="text-[9px] text-gray-400">{msg.wahaSession}</span>
+                          {msgMeta?.isPinned && (
+                            <span title="Pesan disematkan" className="inline-flex">
+                              <Pin className="w-3 h-3 text-indigo-500 fill-indigo-400 rotate-45 shrink-0" />
+                            </span>
+                          )}
+                          {msgMeta?.isStarred && (
+                            <span title="Pesan berbintang" className="inline-flex">
+                              <Star className="w-3 h-3 text-amber-500 fill-amber-400 shrink-0" />
+                            </span>
                           )}
                           <span>
                             {new Date(msg.createdAt).toLocaleTimeString('id-ID', {
@@ -4656,7 +5037,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         </div>
                         </div>
 
-                        {/* Directly Accessible Outside Message Actions (Balas, Reaksi, Hapus) */}
+                        {/* Directly Accessible Outside Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) */}
                         {(canReplyConversation || canManageConversation) && (
                           <div className="mt-1 flex flex-wrap items-center gap-1.5 px-0.5 text-[11px]">
                             {canReplyConversation && (
@@ -4687,6 +5068,36 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               >
                                 <Forward className="w-3 h-3" />
                                 <span>Teruskan</span>
+                              </button>
+                            )}
+                            {canReplyConversation && (
+                              <button
+                                type="button"
+                                onClick={() => void handleTogglePinMessage(msg)}
+                                title={msgMeta?.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-medium transition-colors ${
+                                  msgMeta?.isPinned
+                                    ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                                    : 'border-gray-200 bg-white hover:bg-indigo-50 text-gray-600 hover:text-indigo-700'
+                                }`}
+                              >
+                                {msgMeta?.isPinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+                                <span>{msgMeta?.isPinned ? 'Lepas Pin' : 'Pin'}</span>
+                              </button>
+                            )}
+                            {canReplyConversation && (
+                              <button
+                                type="button"
+                                onClick={() => void handleToggleStarMessage(msg)}
+                                title={msgMeta?.isStarred ? 'Hapus bintang' : 'Beri bintang'}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-medium transition-colors ${
+                                  msgMeta?.isStarred
+                                    ? 'bg-amber-50 border-amber-300 text-amber-800'
+                                    : 'border-gray-200 bg-white hover:bg-amber-50 text-gray-600 hover:text-amber-700'
+                                }`}
+                              >
+                                <Star className={`w-3 h-3 ${msgMeta?.isStarred ? 'fill-amber-400 text-amber-500' : ''}`} />
+                                <span>{msgMeta?.isStarred ? 'Favorit' : 'Bintang'}</span>
                               </button>
                             )}
                             {canReplyConversation && (
@@ -4845,7 +5256,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       Membalas {resolveMessageSenderName(replyingToMessage)}
                     </span>
                   </div>
-                  <p className="text-[11px] text-gray-600 truncate">{replyingToMessage.body}</p>
+                  <p className="text-[11px] text-gray-600 truncate">
+                    {formatMentionPlainText(
+                      replyingToMessage.body || '',
+                      mySessionPhones,
+                      contactsByPhone,
+                      participantsLookup
+                    )}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -6328,6 +6746,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
               url={selectedConversation.contact?.profile_picture_url}
               label={getConversationDisplayTitle(selectedConversation)}
               className="w-12 h-12 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-base mx-auto mb-2 border border-indigo-200"
+              onClick={(e) => {
+                if (selectedConversation.contact?.profile_picture_url) {
+                  e.stopPropagation();
+                  handleOpenAvatarLightbox(
+                    selectedConversation.contact.profile_picture_url,
+                    getConversationDisplayTitle(selectedConversation)
+                  );
+                }
+              }}
+              title={selectedConversation.contact?.profile_picture_url ? "Klik untuk melihat foto profil penuh" : undefined}
             />
             <h4 className="font-semibold text-gray-900 text-sm break-words">
               {getConversationDisplayTitle(selectedConversation)}
@@ -6344,9 +6772,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </span>
             )}
             {selectedConversation.contact?.profile_about && (
-              <p className="text-[11px] text-gray-500 mt-1 px-2 line-clamp-2 break-words">
-                {selectedConversation.contact.profile_about}
-              </p>
+              <div className="mt-1 px-2 text-left bg-gray-50/70 p-2 rounded border border-gray-100">
+                <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">
+                  {selectedConversation.isGroup ? 'Deskripsi Grup' : 'Info Profil / Bio'}
+                </div>
+                <p className={`text-[11px] text-gray-600 whitespace-pre-wrap break-words leading-relaxed ${expandProfileAbout ? '' : 'line-clamp-2'}`}>
+                  {selectedConversation.contact.profile_about}
+                </p>
+                {selectedConversation.contact.profile_about.length > 60 && (
+                  <button
+                    type="button"
+                    onClick={() => setExpandProfileAbout((v) => !v)}
+                    className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline mt-1 inline-block cursor-pointer"
+                  >
+                    {expandProfileAbout ? 'Sembunyikan' : 'Lihat selengkapnya'}
+                  </button>
+                )}
+              </div>
             )}
             <div className="mt-1.5 flex items-center justify-center flex-wrap gap-1">
               {selectedConversation.wahaSession && (
@@ -6366,6 +6808,36 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </span>
               )}
             </div>
+
+            {selectedConversation.isGroup && (
+              <div className="mt-2.5 flex items-center justify-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => void handleOpenGroupManageModal('INFO')}
+                  className="px-2.5 py-1 rounded bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <Shield className="w-3.5 h-3.5 text-teal-600" />
+                  <span>Kelola Grup</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowParticipantsModal(true);
+                    void fetchParticipants(selectedConversation.id, true);
+                  }}
+                  className="px-2.5 py-1 rounded bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <Users className="w-3.5 h-3.5 text-gray-500" />
+                  <span>
+                    Anggota
+                    {participantsData && participantsData.participants.length > 0
+                      ? ` (${participantsData.participants.length})`
+                      : ''}
+                  </span>
+                </button>
+              </div>
+            )}
+
             {(selectedConversation.channel || 'WHATSAPP').toUpperCase() === 'WHATSAPP' && (
               <div className="mt-2 flex items-center justify-center gap-1.5">
                 <button
@@ -7440,6 +7912,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    setShowParticipantsModal(false);
+                    handleOpenGroupManageModal('INFO');
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-teal-200 bg-teal-50 text-xs text-teal-800 hover:bg-teal-100 font-medium"
+                >
+                  <Shield className="w-3 h-3 text-teal-600" />
+                  <span>Kelola Grup</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowParticipantsModal(false)}
                   className="p-1 text-gray-500 hover:text-gray-800 rounded"
                 >
@@ -7520,6 +8003,289 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     ))}
                   </div>
                 </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGroupManageModal && selectedConversation && selectedConversation.isGroup && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-3 sm:p-4"
+          onClick={() => !savingGroupInfo && !loadingGroupInvite && !addingMember && setShowGroupManageModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-md w-full max-h-[88dvh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-md bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
+                  <Shield className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-gray-900 truncate">Kelola Grup WhatsApp</h3>
+                  <p className="text-[10px] text-gray-500 truncate">
+                    {getConversationDisplayTitle(selectedConversation)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={savingGroupInfo || loadingGroupInvite || addingMember}
+                onClick={() => setShowGroupManageModal(false)}
+                className="p-1 rounded text-gray-400 hover:text-gray-700 disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="border-b border-gray-200 bg-white px-4 flex gap-4 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setGroupManageTab('INFO')}
+                className={`py-2.5 border-b-2 transition-colors ${
+                  groupManageTab === 'INFO'
+                    ? 'border-teal-600 text-teal-800 font-semibold'
+                    : 'border-transparent text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Info &amp; Profil
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupManageTab('INVITE');
+                  if (!groupInviteLink) void fetchGroupInvite();
+                }}
+                className={`py-2.5 border-b-2 transition-colors ${
+                  groupManageTab === 'INVITE'
+                    ? 'border-teal-600 text-teal-800 font-semibold'
+                    : 'border-transparent text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Tautan Undangan
+              </button>
+              <button
+                type="button"
+                onClick={() => setGroupManageTab('ADD_MEMBER')}
+                className={`py-2.5 border-b-2 transition-colors ${
+                  groupManageTab === 'ADD_MEMBER'
+                    ? 'border-teal-600 text-teal-800 font-semibold'
+                    : 'border-transparent text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Undang Anggota
+              </button>
+            </div>
+
+            {/* Tab Content */}
+            <div className="p-4 overflow-y-auto flex-1 space-y-4 text-xs">
+              {groupManageTab === 'INFO' && (
+                <div className="space-y-3.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                      Nama / Subjek Grup
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={groupSubjectDraft}
+                        onChange={(e) => setGroupSubjectDraft(e.target.value)}
+                        placeholder="Masukkan nama grup..."
+                        className="flex-1 h-8 px-2.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-teal-500"
+                      />
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={savingGroupInfo || !groupSubjectDraft.trim()}
+                        isLoading={savingGroupInfo}
+                        onClick={() => void handleSaveGroupSubject()}
+                      >
+                        Simpan
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                      Deskripsi Grup
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={groupDescDraft}
+                      onChange={(e) => setGroupDescDraft(e.target.value)}
+                      placeholder="Masukkan deskripsi grup..."
+                      className="w-full p-2 border border-gray-300 rounded text-xs focus:outline-none focus:border-teal-500"
+                    />
+                    <div className="mt-1 flex justify-end">
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={savingGroupInfo}
+                        isLoading={savingGroupInfo}
+                        onClick={() => void handleSaveGroupDesc()}
+                      >
+                        Simpan Deskripsi
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-gray-100">
+                    <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                      Ganti Foto Profil Grup
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={savingGroupInfo}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file || !selectedConversation) return;
+                        setSavingGroupInfo(true);
+                        try {
+                          const reader = new FileReader();
+                          reader.onload = async () => {
+                            try {
+                              const base64 = reader.result as string;
+                              await api.updateGroupPicture(
+                                selectedConversation.id,
+                                base64,
+                                selectedSession || selectedConversation.wahaSession || undefined
+                              );
+                              toast.success('Foto profil grup berhasil diperbarui');
+                              void handleSyncConversationProfile();
+                            } catch (err: any) {
+                              toast.error(err?.response?.data?.error || 'Gagal mengubah foto profil grup');
+                            } finally {
+                              setSavingGroupInfo(false);
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        } catch {
+                          setSavingGroupInfo(false);
+                        }
+                      }}
+                      className="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-medium file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer"
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Pilih file gambar JPEG atau PNG untuk foto profil grup.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {groupManageTab === 'INVITE' && (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-gray-600">
+                    Siapa pun yang memiliki tautan ini dapat bergabung ke grup WhatsApp ini.
+                  </p>
+
+                  {loadingGroupInvite ? (
+                    <LoadingState message="Mengambil tautan undangan grup..." />
+                  ) : (
+                    <>
+                      <div className="p-2.5 bg-gray-50 rounded border border-gray-200 space-y-1.5 font-mono text-xs">
+                        <div className="text-[10px] uppercase font-bold text-gray-500 font-sans">
+                          Tautan Undangan Aktif
+                        </div>
+                        <div className="break-all text-teal-800 select-all font-semibold">
+                          {groupInviteLink || 'Tautan belum dibuat atau tidak tersedia'}
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={!groupInviteLink}
+                          onClick={() => {
+                            if (groupInviteLink) {
+                              void navigator.clipboard.writeText(groupInviteLink);
+                              toast.success('Tautan undangan disalin ke clipboard');
+                            }
+                          }}
+                          className="flex-1 inline-flex items-center justify-center gap-1"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Salin Tautan</span>
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          disabled={loadingGroupInvite}
+                          isLoading={loadingGroupInvite}
+                          onClick={() => void handleRevokeGroupInvite()}
+                          title="Tarik tautan lama dan buat tautan undangan baru"
+                        >
+                          Reset / Tarik Tautan
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {groupManageTab === 'ADD_MEMBER' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                      Nomor WhatsApp Anggota Baru
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newMemberPhone}
+                        onChange={(e) => setNewMemberPhone(e.target.value)}
+                        placeholder="Contoh: 628123456789"
+                        className="flex-1 h-8 px-2.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-teal-500"
+                      />
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={addingMember || !newMemberPhone.trim()}
+                        isLoading={addingMember}
+                        onClick={() => void handleAddGroupMember()}
+                      >
+                        Tambahkan
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Format internasional tanpa tanda plus atau spasi, contoh: 628123456789.
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-gray-100">
+                    <div className="text-[11px] font-semibold text-gray-700 mb-1.5">
+                      Pilih Cepat dari Kontak CRM
+                    </div>
+                    <div className="max-h-40 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded">
+                      {contactsList
+                        .filter((c) => Boolean(c.nomor_whatsapp))
+                        .slice(0, 15)
+                        .map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setNewMemberPhone(c.nomor_whatsapp || '')}
+                            className="w-full px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 flex items-center justify-between"
+                          >
+                            <span className="font-medium text-gray-800 truncate">{c.nama_lengkap}</span>
+                            <span className="text-[10px] font-mono text-gray-500 shrink-0">
+                              +{c.nomor_whatsapp}
+                            </span>
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </div>

@@ -361,6 +361,93 @@ export const api = {
     });
     return res.data.data;
   },
+  forwardConversationMessage: async (
+    conversationId: string,
+    payload: {
+      sourceMessageId: string;
+      targetConversationId?: string;
+      session?: string;
+    }
+  ): Promise<ChatMessage> => {
+    const res = await client.post(`/conversations/${conversationId}/messages/forward`, payload);
+    return res.data.data;
+  },
+  pinConversationMessage: async (
+    conversationId: string,
+    messageId: string
+  ): Promise<{ success: boolean; isPinned: boolean; data: ChatMessage }> => {
+    const res = await client.post(`/conversations/${conversationId}/messages/${messageId}/pin`);
+    return res.data;
+  },
+  starConversationMessage: async (
+    conversationId: string,
+    messageId: string
+  ): Promise<{ success: boolean; isStarred: boolean; data: ChatMessage }> => {
+    const res = await client.post(`/conversations/${conversationId}/messages/${messageId}/star`);
+    return res.data;
+  },
+  updateGroupSubject: async (
+    conversationId: string,
+    subject: string,
+    session?: string
+  ): Promise<{ success: boolean; subject: string }> => {
+    const res = await client.put(`/conversations/${conversationId}/group/subject`, {
+      subject,
+      ...(session ? { session } : {}),
+    });
+    return res.data;
+  },
+  updateGroupDescription: async (
+    conversationId: string,
+    description: string,
+    session?: string
+  ): Promise<{ success: boolean; description: string }> => {
+    const res = await client.put(`/conversations/${conversationId}/group/description`, {
+      description,
+      ...(session ? { session } : {}),
+    });
+    return res.data;
+  },
+  updateGroupPicture: async (
+    conversationId: string,
+    file: string,
+    session?: string
+  ): Promise<{ success: boolean }> => {
+    const res = await client.post(`/conversations/${conversationId}/group/picture`, {
+      file,
+      ...(session ? { session } : {}),
+    });
+    return res.data;
+  },
+  getGroupInviteCode: async (
+    conversationId: string,
+    session?: string
+  ): Promise<{ success: boolean; code?: string; link?: string }> => {
+    const res = await client.get(`/conversations/${conversationId}/group/invite-code`, {
+      params: session ? { session } : {},
+    });
+    return res.data;
+  },
+  revokeGroupInviteCode: async (
+    conversationId: string,
+    session?: string
+  ): Promise<{ success: boolean; code?: string; link?: string }> => {
+    const res = await client.post(`/conversations/${conversationId}/group/invite-code/revoke`, {
+      session,
+    });
+    return res.data;
+  },
+  addGroupParticipants: async (
+    conversationId: string,
+    participants: string[],
+    session?: string
+  ): Promise<{ success: boolean }> => {
+    const res = await client.post(`/conversations/${conversationId}/group/participants/add`, {
+      participants,
+      session,
+    });
+    return res.data;
+  },
   updateConversation: async (
     id: string,
     payload: {

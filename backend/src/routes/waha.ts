@@ -692,20 +692,30 @@ export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta 
   };
 }
 
-export function extractPhoneCandidatesFromWahaPayload(payload: any): string[] {
-  const raw = [
-    payload?.to,
-    payload?.from,
-    payload?.chatId,
-    payload?._data?.Info?.SenderAlt,
-    payload?._data?.Info?.Chat,
-    payload?._data?.Info?.RecipientAlt,
-    payload?._data?.key?.remoteJidAlt,
-    payload?._data?.key?.remoteJid,
-    payload?._data?.key?.senderPn,
-    payload?._data?.key?.participantPn,
-    payload?.participant,
-  ];
+export function extractPhoneCandidatesFromWahaPayload(payload: any, isFromMe?: boolean): string[] {
+  const fromMeFlag = isFromMe !== undefined ? isFromMe : isWahaFromMe(payload);
+  const raw = fromMeFlag
+    ? [
+        payload?._data?.key?.remoteJid,
+        payload?.chatId,
+        payload?.to,
+        payload?._data?.Info?.Chat,
+        payload?._data?.key?.remoteJidAlt,
+        payload?._data?.Info?.RecipientAlt,
+      ]
+    : [
+        payload?.to,
+        payload?.from,
+        payload?.chatId,
+        payload?._data?.Info?.SenderAlt,
+        payload?._data?.Info?.Chat,
+        payload?._data?.Info?.RecipientAlt,
+        payload?._data?.key?.remoteJidAlt,
+        payload?._data?.key?.remoteJid,
+        payload?._data?.key?.senderPn,
+        payload?._data?.key?.participantPn,
+        payload?.participant,
+      ];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const candidate of raw) {
@@ -2523,7 +2533,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             (groupSenderPhone ? `+${groupSenderPhone}` : groupSenderJid ? fromWahaChatId(groupSenderJid) : null);
         } else {
           isLidSource = lowerFrom.endsWith('@lid');
-          fromPhone = extractPhoneCandidatesFromWahaPayload(payload)[0] || null;
+          fromPhone = isPhoneWahaJid(rawFrom)
+            ? normalizePhoneNumber(fromWahaChatId(rawFrom))
+            : extractPhoneCandidatesFromWahaPayload(payload, isFromMe)[0] || null;
           if (!fromPhone && isLidSource) {
             fromPhone = await wahaService.resolveLidToPhone(inboundSession, rawFrom);
           }
