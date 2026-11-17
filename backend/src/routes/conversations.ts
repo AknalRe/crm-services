@@ -51,6 +51,23 @@ const VALID_STATUSES = new Set(['OPEN', 'PENDING', 'RESOLVED']);
 const DEFAULT_CSAT_TEMPLATE =
   'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}';
 
+export function selectWhatsAppConversationForSession<
+  T extends { wahaSession?: string | null; isGroup?: boolean | null; externalThreadId?: string | null }
+>(existingRows: T[], requestedSession?: string | null): T | undefined {
+  const directRows = existingRows.filter(
+    (c) => !c.isGroup && !(c.externalThreadId || '').toLowerCase().endsWith('@g.us')
+  );
+  const pool = directRows.length > 0 ? directRows : existingRows;
+  const cleanReq = String(requestedSession || '').trim().toLowerCase();
+  if (!cleanReq) {
+    return pool[0];
+  }
+  return (
+    pool.find((c) => (c.wahaSession || '').trim().toLowerCase() === cleanReq) ||
+    pool.find((c) => !(c.wahaSession || '').trim())
+  );
+}
+
 function resolveRequestAppBaseUrl(req: FastifyRequest): string {
   const rawPrefix = String(req.headers['x-forwarded-prefix'] || '').split(',')[0].trim();
   const fwdPrefix =
@@ -550,14 +567,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           )
           .orderBy(desc(conversations.updatedAt));
         const requestedSession = req.body?.session?.trim() || null;
-        const matched = requestedSession
-          ? convList.find((c) => c.wahaSession === requestedSession) || convList.find((c) => !c.wahaSession)
-          : convList[0];
+        const matched = selectWhatsAppConversationForSession(convList, requestedSession);
+        const targetSession = requestedSession || matched?.wahaSession || null;
         const now = new Date();
         if (matched) {
           const [upd] = await db
             .update(conversations)
-            .set({ status: 'OPEN', updatedAt: now })
+            .set({ status: 'OPEN', wahaSession: targetSession, updatedAt: now })
             .where(eq(conversations.id, matched.id))
             .returning();
           conversationRow = upd;
@@ -1298,10 +1314,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .orderBy(desc(conversations.updatedAt));
 
       const requestedSession = req.body?.session?.trim() || null;
-      const matchedExisting = requestedSession
-        ? existingRows.find((c) => c.wahaSession === requestedSession) ||
-        existingRows.find((c) => !c.wahaSession)
-        : existingRows[0];
+      const matchedExisting = selectWhatsAppConversationForSession(existingRows, requestedSession);
       const targetSession = requestedSession || matchedExisting?.wahaSession || null;
 
       let convRow: typeof conversations.$inferSelect;

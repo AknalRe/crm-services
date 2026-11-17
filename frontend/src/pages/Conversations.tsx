@@ -1853,6 +1853,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
   };
 
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [newChatSession, setNewChatSession] = useState<string>('');
+  const [loadingNewChatSessions, setLoadingNewChatSessions] = useState(false);
   const [contactsList, setContactsList] = useState<Contact[]>([]);
   const [contactsTotal, setContactsTotal] = useState(0);
   const [contactSearch, setContactSearch] = useState('');
@@ -2036,9 +2038,30 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setConvDisplayLimit(100);
   }, [search, statusFilter, metricFilter, channelFilter, accountFilter, assigneeFilter]);
 
-  const handleOpenNewChatModal = () => {
+  const handleOpenNewChatModal = async () => {
     setContactSearch('');
+    const filterSession = accountFilter.startsWith('WA:') ? accountFilter.slice(3).trim() : '';
+    const pickInitialSession = (list: WahaSessionItem[]) => {
+      if (filterSession && list.some((s) => s.name === filterSession)) return filterSession;
+      if (list.length === 1) return list[0].name;
+      return '';
+    };
+    setNewChatSession(pickInitialSession(sessions));
     setShowNewChatModal(true);
+    setLoadingNewChatSessions(true);
+    try {
+      const res = await api.getWahaSessions();
+      const freshList = res.sessions || [];
+      setSessions(freshList);
+      setNewChatSession((prev) => {
+        if (prev && freshList.some((s) => s.name === prev)) return prev;
+        return pickInitialSession(freshList);
+      });
+    } catch {
+      // keep existing session list if refresh fails
+    } finally {
+      setLoadingNewChatSessions(false);
+    }
   };
 
   const handleOpenMergeModal = () => {
@@ -2062,15 +2085,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
   };
 
   const handleStartConversationWithContact = async (contactId: string) => {
+    if (sessions.length > 0 && !newChatSession.trim()) {
+      toast.error('Pilih sesi WhatsApp pengirim terlebih dahulu');
+      return;
+    }
     setOpeningContactId(contactId);
     try {
-      const opened = await api.openConversation(contactId, selectedSession || undefined);
+      const chosenSession = newChatSession.trim() || undefined;
+      const opened = await api.openConversation(contactId, chosenSession);
       setShowNewChatModal(false);
+      if (
+        chosenSession &&
+        accountFilter.startsWith('WA:') &&
+        accountFilter.slice(3).toLowerCase() !== chosenSession.toLowerCase()
+      ) {
+        setAccountFilter('ALL');
+      }
       const updated = await api.getConversations();
       setConversations(updated);
       const target = updated.find((c) => c.id === opened.id) || opened;
       setSelectedConversation(target);
-      toast.success('Percakapan dibuka');
+      setSelectedSession(target.wahaSession || chosenSession || defaultWahaSession || '');
+      toast.success(chosenSession ? `Percakapan dibuka via sesi ${chosenSession}` : 'Percakapan dibuka');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal membuka percakapan');
     } finally {
@@ -2079,15 +2115,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
   };
 
   const handleStartConversationWithPhone = async (phone: string) => {
+    if (sessions.length > 0 && !newChatSession.trim()) {
+      toast.error('Pilih sesi WhatsApp pengirim terlebih dahulu');
+      return;
+    }
     setOpeningContactId('new_phone');
     try {
-      const opened = await api.openConversation(undefined, selectedSession || undefined, phone);
+      const chosenSession = newChatSession.trim() || undefined;
+      const opened = await api.openConversation(undefined, chosenSession, phone);
       setShowNewChatModal(false);
+      if (
+        chosenSession &&
+        accountFilter.startsWith('WA:') &&
+        accountFilter.slice(3).toLowerCase() !== chosenSession.toLowerCase()
+      ) {
+        setAccountFilter('ALL');
+      }
       const updated = await api.getConversations();
       setConversations(updated);
       const target = updated.find((c) => c.id === opened.id) || opened;
       setSelectedConversation(target);
-      toast.success('Percakapan baru dibuka');
+      setSelectedSession(target.wahaSession || chosenSession || defaultWahaSession || '');
+      toast.success(chosenSession ? `Percakapan baru dibuka via sesi ${chosenSession}` : 'Percakapan baru dibuka');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal membuka percakapan dengan nomor baru');
     } finally {
@@ -6748,11 +6797,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
       {showNewChatModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-lg border border-gray-200 shadow-lg w-full max-w-md overflow-hidden flex flex-col max-h-[80vh]">
+          <div className="bg-white rounded-lg border border-gray-200 shadow-lg w-full max-w-md overflow-hidden flex flex-col max-h-[85vh]">
             <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-gray-900">Buka Percakapan Baru</h3>
-                <p className="text-[11px] text-gray-500">Pilih kontak pelanggan untuk memulai obrolan</p>
+                <p className="text-[11px] text-gray-500">
+                  Pilih sesi WhatsApp pengirim terlebih dahulu, lalu pilih kontak tujuan
+                </p>
               </div>
               <button
                 type="button"
@@ -6763,100 +6814,207 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </button>
             </div>
 
-            <div className="p-3 border-b border-gray-100">
-              <div className="relative">
-                <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={contactSearch}
-                  onChange={(e) => setContactSearch(e.target.value)}
-                  placeholder="Cari nama atau nomor WhatsApp..."
-                  className="w-full h-9 pl-9 pr-3 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
-                />
+            {/* Step 1: Select WhatsApp Session */}
+            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50/80 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                  1. Pilih Sesi WhatsApp
+                </span>
+                {loadingNewChatSessions && (
+                  <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    Memuat...
+                  </span>
+                )}
               </div>
-            </div>
 
-            <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
-              {(() => {
-                const searchDigits = contactSearch.replace(/\D/g, '');
-                if (searchDigits.length >= 7) {
-                  const normalizedSearch = searchDigits.startsWith('0')
-                    ? `62${searchDigits.slice(1)}`
-                    : searchDigits;
-                  return (
-                    <button
-                      type="button"
-                      disabled={openingContactId === 'new_phone'}
-                      onClick={() => void handleStartConversationWithPhone(normalizedSearch)}
-                      className="w-full px-4 py-2.5 text-left bg-indigo-50/70 hover:bg-indigo-100/80 border-b border-indigo-100 flex items-center justify-between gap-3 transition-colors"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
-                          <MessageSquare className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-indigo-950 truncate">
-                            Mulai Chat ke Nomor Baru
-                          </div>
-                          <div className="text-[11px] text-indigo-700 font-mono">
-                            +{normalizedSearch}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="text-[11px] font-semibold text-indigo-700 bg-white px-2 py-1 rounded border border-indigo-200 shrink-0">
-                        {openingContactId === 'new_phone' ? 'Membuka...' : 'Mulai Chat'}
-                      </span>
-                    </button>
-                  );
-                }
-                return null;
-              })()}
-
-              {loadingContacts ? (
-                <div className="p-6 text-center text-xs text-gray-500">Memuat kontak...</div>
-              ) : contactsList.length === 0 ? (
-                <div className="p-6 text-center text-xs text-gray-500">
-                  Tidak ada kontak yang cocok dengan pencarian.
+              {sessions.length === 0 ? (
+                <div className="px-2.5 py-2 rounded-md border border-amber-200 bg-amber-50 text-[11px] text-amber-800">
+                  Belum ada sesi WhatsApp tersambung di WAHA. Anda tetap dapat membuka ruang percakapan.
                 </div>
               ) : (
-                contactsList
-                  .filter((c) => {
-                    const q = contactSearch.trim().toLowerCase();
-                    if (!q) return true;
-                    return (
-                      c.nama_lengkap.toLowerCase().includes(q) ||
-                      (c.nama_panggilan || '').toLowerCase().includes(q) ||
-                      (c.nomor_whatsapp || '').includes(q)
-                    );
-                  })
-                  .map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      disabled={openingContactId === c.id}
-                      onClick={() => void handleStartConversationWithContact(c.id)}
-                      className="w-full px-4 py-2.5 text-left hover:bg-gray-50 flex items-center justify-between gap-3 transition-colors disabled:opacity-50"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-gray-900 truncate">
-                          {c.nama_lengkap}
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto">
+                    {sessions.map((s) => {
+                      const isSelected = newChatSession === s.name;
+                      const isWorking = s.status === 'WORKING';
+                      const waNum = s.me?.id ? String(s.me.id).split('@')[0].replace(/\D/g, '') : '';
+                      return (
+                        <button
+                          key={s.name}
+                          type="button"
+                          onClick={() => setNewChatSession(s.name)}
+                          className={`text-left px-2.5 py-2 rounded-md border transition-colors ${
+                            isSelected
+                              ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500'
+                              : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="inline-flex items-center gap-1 min-w-0">
+                              <Smartphone
+                                className={`w-3.5 h-3.5 shrink-0 ${
+                                  isSelected ? 'text-indigo-600' : 'text-gray-400'
+                                }`}
+                              />
+                              <span className="text-xs font-mono font-semibold text-gray-900 truncate">
+                                {s.name}
+                              </span>
+                            </span>
+                            <span
+                              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${
+                                isWorking
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}
+                            >
+                              {isWorking ? 'Aktif' : s.status}
+                            </span>
+                          </div>
+                          {(s.me?.pushName || waNum) && (
+                            <div className="mt-0.5 text-[10px] text-gray-500 truncate pl-4">
+                              {[s.me?.pushName, waNum ? `+${waNum}` : ''].filter(Boolean).join(' • ')}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(() => {
+                    const picked = sessions.find((s) => s.name === newChatSession);
+                    if (picked && picked.status !== 'WORKING') {
+                      return (
+                        <div className="px-2.5 py-1.5 rounded bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                          Sesi <span className="font-mono font-semibold">{picked.name}</span> berstatus{' '}
+                          <span className="font-mono">{picked.status}</span>. Pesan baru dapat dikirim setelah
+                          sesi aktif.
                         </div>
-                        <div className="text-[11px] text-gray-500 font-mono">
-                          {c.nomor_whatsapp ? `+${c.nomor_whatsapp}` : 'Tanpa nomor WhatsApp'}
-                        </div>
-                      </div>
-                      <span className="text-[11px] font-medium text-indigo-600 shrink-0">
-                        {openingContactId === c.id ? 'Membuka...' : 'Buka Chat'}
-                      </span>
-                    </button>
-                  ))
+                      );
+                    }
+                    return null;
+                  })()}
+                </>
               )}
             </div>
-            {contactsTotal > contactsList.length && (
-              <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 tabular-nums">
-                Menampilkan {contactsList.length} dari {contactsTotal.toLocaleString('id-ID')} kontak.
-                Ketik di kolom pencarian untuk mencari lebih spesifik.
+
+            {sessions.length > 0 && !newChatSession ? (
+              <div className="p-6 text-center space-y-1.5">
+                <div className="text-xs font-semibold text-gray-800">
+                  Pilih Sesi WhatsApp Terlebih Dahulu
+                </div>
+                <p className="text-[11px] text-gray-500">
+                  Klik salah satu sesi WhatsApp di atas untuk memilih nomor pengirim sebelum memilih kontak
+                  atau memulai chat baru.
+                </p>
               </div>
+            ) : (
+              <>
+                <div className="px-3 pt-2.5 pb-3 border-b border-gray-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                      2. Pilih Kontak / Nomor Tujuan
+                    </span>
+                    {newChatSession && (
+                      <span className="text-[10px] font-mono font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded">
+                        via {newChatSession}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={contactSearch}
+                      onChange={(e) => setContactSearch(e.target.value)}
+                      placeholder="Cari nama atau nomor WhatsApp..."
+                      className="w-full h-9 pl-9 pr-3 bg-gray-50 border border-gray-200 rounded-md text-xs focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+                  {(() => {
+                    const searchDigits = contactSearch.replace(/\D/g, '');
+                    if (searchDigits.length >= 7) {
+                      const normalizedSearch = searchDigits.startsWith('0')
+                        ? `62${searchDigits.slice(1)}`
+                        : searchDigits;
+                      return (
+                        <button
+                          type="button"
+                          disabled={openingContactId === 'new_phone'}
+                          onClick={() => void handleStartConversationWithPhone(normalizedSearch)}
+                          className="w-full px-4 py-2.5 text-left bg-indigo-50/70 hover:bg-indigo-100/80 border-b border-indigo-100 flex items-center justify-between gap-3 transition-colors"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                              <MessageSquare className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-indigo-950 truncate">
+                                Mulai Chat ke Nomor Baru
+                              </div>
+                              <div className="text-[11px] text-indigo-700 font-mono">
+                                +{normalizedSearch}
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-semibold text-indigo-700 bg-white px-2 py-1 rounded border border-indigo-200 shrink-0">
+                            {openingContactId === 'new_phone' ? 'Membuka...' : 'Mulai Chat'}
+                          </span>
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  {loadingContacts ? (
+                    <div className="p-6 text-center text-xs text-gray-500">Memuat kontak...</div>
+                  ) : contactsList.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-gray-500">
+                      Tidak ada kontak yang cocok dengan pencarian.
+                    </div>
+                  ) : (
+                    contactsList
+                      .filter((c) => {
+                        const q = contactSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        return (
+                          c.nama_lengkap.toLowerCase().includes(q) ||
+                          (c.nama_panggilan || '').toLowerCase().includes(q) ||
+                          (c.nomor_whatsapp || '').includes(q)
+                        );
+                      })
+                      .map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          disabled={openingContactId === c.id}
+                          onClick={() => void handleStartConversationWithContact(c.id)}
+                          className="w-full px-4 py-2.5 text-left hover:bg-gray-50 flex items-center justify-between gap-3 transition-colors disabled:opacity-50"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-gray-900 truncate">
+                              {c.nama_lengkap}
+                            </div>
+                            <div className="text-[11px] text-gray-500 font-mono">
+                              {c.nomor_whatsapp ? `+${c.nomor_whatsapp}` : 'Tanpa nomor WhatsApp'}
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-medium text-indigo-600 shrink-0">
+                            {openingContactId === c.id ? 'Membuka...' : 'Buka Chat'}
+                          </span>
+                        </button>
+                      ))
+                  )}
+                </div>
+                {contactsTotal > contactsList.length && (
+                  <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 tabular-nums">
+                    Menampilkan {contactsList.length} dari {contactsTotal.toLocaleString('id-ID')} kontak.
+                    Ketik di kolom pencarian untuk mencari lebih spesifik.
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
