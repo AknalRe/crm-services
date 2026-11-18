@@ -2204,6 +2204,185 @@ export class WahaService {
   }
 
   /**
+   * Pin a WhatsApp message in chat via WAHA
+   * duration in seconds: 86400 (24h), 604800 (7d - default), 2592000 (30d)
+   */
+  public async pinMessage(
+    phoneOrJid: string,
+    wahaMessageId: string,
+    durationSeconds: number = 604800,
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanMsgId = String(wahaMessageId || '').trim();
+    if (!cleanMsgId) {
+      return {
+        success: false,
+        error: 'ID pesan WhatsApp tidak ditemukan untuk disematkan.',
+      };
+    }
+    return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.post(
+          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(cleanMsgId)}/pin`,
+          { duration: durationSeconds },
+          { timeout: 12000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501) {
+          const fallbackRes = await client.post(
+            '/api/pinMessage',
+            { session: targetSession, chatId, messageId: cleanMsgId, duration: durationSeconds },
+            { timeout: 12000 }
+          );
+          return fallbackRes.data;
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Unpin a WhatsApp message in chat via WAHA
+   */
+  public async unpinMessage(
+    phoneOrJid: string,
+    wahaMessageId: string,
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanMsgId = String(wahaMessageId || '').trim();
+    if (!cleanMsgId) {
+      return {
+        success: false,
+        error: 'ID pesan WhatsApp tidak ditemukan untuk dilepas sematannya.',
+      };
+    }
+    return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.post(
+          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(cleanMsgId)}/unpin`,
+          {},
+          { timeout: 12000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501) {
+          const fallbackRes = await client.post(
+            '/api/unpinMessage',
+            { session: targetSession, chatId, messageId: cleanMsgId },
+            { timeout: 12000 }
+          );
+          return fallbackRes.data;
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Star or unstar a WhatsApp message via WAHA
+   */
+  public async starMessage(
+    phoneOrJid: string,
+    wahaMessageId: string,
+    star: boolean,
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanMsgId = String(wahaMessageId || '').trim();
+    if (!cleanMsgId) {
+      return {
+        success: false,
+        error: 'ID pesan WhatsApp tidak ditemukan untuk dibintangi.',
+      };
+    }
+    return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const res = await client.put(
+          '/api/star',
+          { session: targetSession, chatId, messageId: cleanMsgId, star },
+          { timeout: 12000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        const st = err?.response?.status;
+        if (st === 404 || st === 405 || st === 501) {
+          const fallbackRes = await client.put(
+            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(cleanMsgId)}/star`,
+            { star },
+            { timeout: 12000 }
+          );
+          return fallbackRes.data;
+        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Sync WhatsApp Business labels for a chat via WAHA
+   */
+  public async syncChatLabels(
+    phoneOrJid: string,
+    labelNames: string[],
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
+      try {
+        const existingRes = await client
+          .get(`/api/${encodeURIComponent(targetSession)}/labels`, {
+            timeout: 10000,
+          })
+          .catch(() => null);
+
+        const existingLabels: Array<{ id: string; name: string }> = Array.isArray(existingRes?.data)
+          ? existingRes.data
+          : [];
+        const existingMap = new Map<string, string>();
+        for (const lbl of existingLabels) {
+          if (lbl?.name) existingMap.set(lbl.name.trim().toLowerCase(), String(lbl.id));
+        }
+
+        const targetLabelIds: string[] = [];
+        for (const rawName of labelNames) {
+          const trimmed = rawName.trim();
+          if (!trimmed) continue;
+          const key = trimmed.toLowerCase();
+          if (existingMap.has(key)) {
+            targetLabelIds.push(existingMap.get(key)!);
+          } else {
+            try {
+              const created = await client.post(
+                `/api/${encodeURIComponent(targetSession)}/labels`,
+                { name: trimmed, color: 1 },
+                { timeout: 10000 }
+              );
+              const newId = String(created?.data?.id || created?.data?.labelId || '');
+              if (newId) {
+                existingMap.set(key, newId);
+                targetLabelIds.push(newId);
+              }
+            } catch (createErr: any) {
+              console.warn(`[WahaService] Could not auto-create WAHA label "${trimmed}":`, createErr?.message);
+            }
+          }
+        }
+
+        const res = await client.put(
+          `/api/${encodeURIComponent(targetSession)}/labels/chats/${encodeURIComponent(chatId)}`,
+          { labels: targetLabelIds.map((id) => ({ id })) },
+          { timeout: 12000 }
+        );
+        return res.data;
+      } catch (err: any) {
+        console.warn(`[WahaService] syncChatLabels notice for ${chatId}:`, err?.response?.data || err?.message);
+        return { success: false, error: err?.response?.data?.message || err?.message };
+      }
+    });
+  }
+
+  /**
    * Send startTyping or stopTyping indicator to customer WhatsApp via WAHA
    */
   public async setTyping(

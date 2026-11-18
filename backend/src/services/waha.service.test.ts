@@ -2178,6 +2178,67 @@ test('multi-session helpers, profile display name resolution, and getWhatsAppPro
   assert.equal(groupProf?.pictureUrl, 'https://pps.whatsapp.net/grup.jpg');
 });
 
+test('pinMessage, unpinMessage, starMessage, and syncChatLabels dispatch accurate WAHA endpoints and payloads', async (t) => {
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha-gows.example.com',
+    apiKey: 'test-key',
+    session: 'sales',
+  });
+
+  const calls: Array<{ method: string; url: string; data?: any }> = [];
+  const origCreate = axios.create;
+  (axios as any).create = () => ({
+    get: async (url: string) => {
+      calls.push({ method: 'GET', url });
+      if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      if (url === '/api/sessions') return { data: [{ name: 'sales', status: 'WORKING' }] };
+      if (url.includes('/labels')) return { data: [{ id: '10', name: 'VIP' }] };
+      return { data: {} };
+    },
+    post: async (url: string, data?: any) => {
+      calls.push({ method: 'POST', url, data });
+      if (url.endsWith('/labels')) return { data: { id: '11', name: 'Leads' } };
+      return { data: { success: true } };
+    },
+    put: async (url: string, data?: any) => {
+      calls.push({ method: 'PUT', url, data });
+      return { data: { success: true } };
+    },
+  });
+  t.after(() => {
+    (axios as any).create = origCreate;
+  });
+
+  // 1. pinMessage
+  const pinRes = await wahaService.pinMessage('081234567890', 'msg_pin_1', 86400, 'sales');
+  assert.equal(pinRes.success, true);
+  const pinCall = calls.find((c) => c.method === 'POST' && c.url.includes('/pin'));
+  assert.ok(pinCall);
+  assert.equal(pinCall?.data?.duration, 86400);
+
+  // 2. unpinMessage
+  const unpinRes = await wahaService.unpinMessage('081234567890', 'msg_pin_1', 'sales');
+  assert.equal(unpinRes.success, true);
+  const unpinCall = calls.find((c) => c.method === 'POST' && c.url.includes('/unpin'));
+  assert.ok(unpinCall);
+
+  // 3. starMessage
+  const starRes = await wahaService.starMessage('081234567890', 'msg_star_1', true, 'sales');
+  assert.equal(starRes.success, true);
+  const starCall = calls.find((c) => c.method === 'PUT' && c.url === '/api/star');
+  assert.ok(starCall);
+  assert.equal(starCall?.data?.star, true);
+  assert.equal(starCall?.data?.messageId, 'msg_star_1');
+
+  // 4. syncChatLabels
+  const labelRes = await wahaService.syncChatLabels('081234567890', ['VIP', 'Leads'], 'sales');
+  assert.equal(labelRes.success, true);
+  const labelPutCall = calls.find((c) => c.method === 'PUT' && c.url.includes('/labels/chats/'));
+  assert.ok(labelPutCall);
+  assert.deepEqual(labelPutCall?.data?.labels, [{ id: '10' }, { id: '11' }]);
+});
+
 
 
 

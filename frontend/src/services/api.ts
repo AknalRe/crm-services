@@ -385,15 +385,16 @@ export const api = {
   },
   pinConversationMessage: async (
     conversationId: string,
-    messageId: string
-  ): Promise<{ success: boolean; isPinned: boolean; data: ChatMessage }> => {
-    const res = await client.post(`/conversations/${conversationId}/messages/${messageId}/pin`);
+    messageId: string,
+    payload?: { duration?: number; unpin?: boolean }
+  ): Promise<{ success: boolean; isPinned: boolean; data: ChatMessage; warning?: string }> => {
+    const res = await client.post(`/conversations/${conversationId}/messages/${messageId}/pin`, payload || {});
     return res.data;
   },
   starConversationMessage: async (
     conversationId: string,
     messageId: string
-  ): Promise<{ success: boolean; isStarred: boolean; data: ChatMessage }> => {
+  ): Promise<{ success: boolean; isStarred: boolean; data: ChatMessage; warning?: string }> => {
     const res = await client.post(`/conversations/${conversationId}/messages/${messageId}/star`);
     return res.data;
   },

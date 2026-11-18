@@ -299,6 +299,8 @@ export interface ChatMessageMetadata {
   isPinned?: boolean;
   pinnedAt?: string | null;
   pinnedBy?: string | null;
+  pinDuration?: number | null;
+  pinExpiresAt?: string | null;
   isStarred?: boolean;
   starredAt?: string | null;
   forwarded?: boolean;

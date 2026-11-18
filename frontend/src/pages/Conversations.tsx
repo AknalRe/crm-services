@@ -44,6 +44,7 @@ import {
   RefreshCw,
   SlidersHorizontal,
   MoreVertical,
+  ChevronLeft,
   ChevronRight,
   Send,
   Info,
@@ -440,6 +441,18 @@ function formatChatDateLabel(iso?: string | null): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+function formatPinExpiry(iso?: string | null): string {
+  if (!iso) return '';
+  const exp = new Date(iso).getTime();
+  if (isNaN(exp)) return '';
+  const diffMs = exp - Date.now();
+  if (diffMs <= 0) return 'Kedaluwarsa';
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (diffHours < 24) return `Sisa ${diffHours} jam`;
+  const diffDays = Math.ceil(diffHours / 24);
+  return `Sisa ${diffDays} hari`;
 }
 
 function isGenericReplySenderName(name?: string | null): boolean {
@@ -2390,12 +2403,30 @@ export const Conversations: React.FC<ConversationsProps> = ({
     return map;
   }, [conversations, contactsList]);
 
+  const [activePinIndex, setActivePinIndex] = useState<number>(0);
+  const [showPinAllDropdown, setShowPinAllDropdown] = useState<boolean>(false);
+  const [pinningMessageTarget, setPinningMessageTarget] = useState<ChatMessage | null>(null);
+  const [pinDurationSeconds, setPinDurationSeconds] = useState<number>(604800); // 7 days default
+  const [submittingPin, setSubmittingPin] = useState<boolean>(false);
+
   const pinnedMessages = useMemo(() => {
+    const now = Date.now();
     return messages.filter((m) => {
       const meta = parseChatMessageMeta(m);
-      return Boolean(meta?.isPinned);
+      if (!meta?.isPinned) return false;
+      if (meta.pinExpiresAt) {
+        const exp = new Date(meta.pinExpiresAt).getTime();
+        if (!isNaN(exp) && exp < now) return false;
+      }
+      return true;
     });
   }, [messages]);
+
+  useEffect(() => {
+    if (activePinIndex >= pinnedMessages.length && pinnedMessages.length > 0) {
+      setActivePinIndex(pinnedMessages.length - 1);
+    }
+  }, [pinnedMessages.length, activePinIndex]);
 
   const handleOpenAvatarLightbox = (picUrl?: string | null, name?: string) => {
     if (!picUrl) return;
@@ -2405,17 +2436,54 @@ export const Conversations: React.FC<ConversationsProps> = ({
     });
   };
 
-  const handleTogglePinMessage = async (msg: ChatMessage) => {
+  const handleStartPinMessage = (msg: ChatMessage) => {
+    const meta = parseChatMessageMeta(msg);
+    if (meta?.isPinned) {
+      void handleUnpinMessage(msg);
+    } else {
+      setPinningMessageTarget(msg);
+      setPinDurationSeconds(604800);
+    }
+  };
+
+  const handleUnpinMessage = async (msg: ChatMessage) => {
     if (!selectedConversation) return;
     try {
-      const res = await api.pinConversationMessage(selectedConversation.id, msg.id);
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msg.id ? res.data : m))
-      );
-      toast.success(res.isPinned ? 'Pesan disematkan' : 'Sematan pesan dilepas');
+      const res = await api.pinConversationMessage(selectedConversation.id, msg.id, { unpin: true });
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? res.data : m)));
+      if (res.warning) {
+        toast.info(res.warning);
+      } else {
+        toast.success('Sematan pesan dilepas');
+      }
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Gagal mengubah status sematan pesan');
+      toast.error(err?.response?.data?.error || 'Gagal melepas sematan pesan');
     }
+  };
+
+  const handleConfirmPinMessage = async () => {
+    if (!selectedConversation || !pinningMessageTarget || submittingPin) return;
+    setSubmittingPin(true);
+    try {
+      const res = await api.pinConversationMessage(selectedConversation.id, pinningMessageTarget.id, {
+        duration: pinDurationSeconds,
+      });
+      setMessages((prev) => prev.map((m) => (m.id === pinningMessageTarget.id ? res.data : m)));
+      if (res.warning) {
+        toast.info(res.warning);
+      } else {
+        toast.success('Pesan berhasil disematkan');
+      }
+      setPinningMessageTarget(null);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menyematkan pesan');
+    } finally {
+      setSubmittingPin(false);
+    }
+  };
+
+  const handleTogglePinMessage = async (msg: ChatMessage) => {
+    handleStartPinMessage(msg);
   };
 
   const handleToggleStarMessage = async (msg: ChatMessage) => {
@@ -2425,7 +2493,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setMessages((prev) =>
         prev.map((m) => (m.id === msg.id ? res.data : m))
       );
-      toast.success(res.isStarred ? 'Pesan dibintangi' : 'Bintang pesan dihapus');
+      if (res.warning) {
+        toast.info(res.warning);
+      } else {
+        toast.success(res.isStarred ? 'Pesan dibintangi' : 'Bintang pesan dihapus');
+      }
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Gagal mengubah bintang pesan');
     }
@@ -4208,53 +4280,160 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </div>
           )}
 
+          {/* Pinned Messages Bar - fixed above scroll container so date labels (Kemarin / Hari ini) are never obscured */}
+          {pinnedMessages.length > 0 && !loadingMessages && (() => {
+            const safeIdx = Math.min(activePinIndex, pinnedMessages.length - 1);
+            const curMsg = pinnedMessages[safeIdx] || pinnedMessages[0];
+            const curMeta = parseChatMessageMeta(curMsg);
+            const expiryText = curMeta?.pinExpiresAt ? formatPinExpiry(curMeta.pinExpiresAt) : '';
+
+            return (
+              <div className="shrink-0 px-3 py-1.5 bg-gradient-to-r from-indigo-50/95 via-sky-50/90 to-indigo-50/95 border-b border-indigo-200/90 shadow-2xs z-10 transition-all">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleJumpToMessage(curMsg.id, curMsg.body)}
+                      className="min-w-0 flex-1 flex items-center gap-2 text-left hover:opacity-85 transition-opacity cursor-pointer"
+                      title="Klik untuk melompat ke pesan yang disematkan"
+                    >
+                      <Pin className="w-3.5 h-3.5 text-indigo-600 shrink-0 rotate-45" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
+                          <span>Pesan Disematkan</span>
+                          {pinnedMessages.length > 1 && (
+                            <span className="px-1.5 py-0.2 rounded-full bg-indigo-200 text-indigo-800 text-[9px] font-mono font-medium">
+                              {safeIdx + 1}/{pinnedMessages.length}
+                            </span>
+                          )}
+                          {expiryText && (
+                            <span className="text-[9px] font-medium text-indigo-600/80 normal-case bg-white/70 px-1.5 py-0.2 rounded border border-indigo-100">
+                              {expiryText}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-indigo-950 truncate font-medium">
+                          {curMsg.body || curMsg.mediaName || '[Media / Lampiran]'}
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {pinnedMessages.length > 1 && (
+                      <div className="flex items-center gap-0.5 mr-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActivePinIndex((prev) => (prev > 0 ? prev - 1 : pinnedMessages.length - 1));
+                          }}
+                          className="p-1 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100/70 transition-colors cursor-pointer"
+                          title="Sematan sebelumnya"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <div className="flex items-center gap-1 px-1">
+                          {pinnedMessages.map((_, i) => (
+                            <span
+                              key={i}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActivePinIndex(i);
+                              }}
+                              className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                                i === safeIdx ? 'w-3 bg-indigo-600' : 'w-1.5 bg-indigo-300 hover:bg-indigo-400'
+                              }`}
+                              title={`Ke sematan ${i + 1}`}
+                            />
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActivePinIndex((prev) => (prev + 1 < pinnedMessages.length ? prev + 1 : 0));
+                          }}
+                          className="p-1 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100/70 transition-colors cursor-pointer"
+                          title="Sematan berikutnya"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    {pinnedMessages.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPinAllDropdown((prev) => !prev)}
+                        className="px-2 py-0.5 rounded text-[11px] font-medium text-indigo-700 bg-white/80 hover:bg-white border border-indigo-200/80 transition-colors cursor-pointer"
+                        title="Tampilkan daftar semua pesan disematkan"
+                      >
+                        Semua ({pinnedMessages.length})
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleUnpinMessage(curMsg)}
+                      title="Lepas sematan pesan ini"
+                      className="p-1 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100/70 transition-colors cursor-pointer"
+                    >
+                      <PinOff className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Dropdown list of all pinned messages */}
+                {showPinAllDropdown && pinnedMessages.length > 1 && (
+                  <div className="mt-2 pt-2 border-t border-indigo-200/60 space-y-1 max-h-48 overflow-y-auto pr-0.5">
+                    {pinnedMessages.map((pMsg, pIdx) => {
+                      const pMeta = parseChatMessageMeta(pMsg);
+                      const pExp = pMeta?.pinExpiresAt ? formatPinExpiry(pMeta.pinExpiresAt) : '';
+                      const isCur = pIdx === safeIdx;
+                      return (
+                        <div
+                          key={pMsg.id}
+                          className={`flex items-center justify-between gap-2 p-1.5 rounded text-xs transition-colors ${
+                            isCur ? 'bg-indigo-100/80 text-indigo-900 font-medium' : 'bg-white/70 hover:bg-white text-gray-700'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActivePinIndex(pIdx);
+                              handleJumpToMessage(pMsg.id, pMsg.body);
+                            }}
+                            className="min-w-0 flex-1 text-left flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <span className="font-mono text-[10px] text-indigo-600">#{pIdx + 1}</span>
+                            <span className="truncate flex-1">{pMsg.body || pMsg.mediaName || '[Media]'}</span>
+                            {pExp && (
+                              <span className="text-[10px] text-gray-400 shrink-0">({pExp})</span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleUnpinMessage(pMsg)}
+                            title="Lepas pin pesan ini"
+                            className="p-1 text-gray-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                          >
+                            <PinOff className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <div
             ref={messagesContainerRef}
             onScroll={updateFloatingDateLabel}
             className="relative flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2 sm:space-y-2.5"
           >
-            {pinnedMessages.length > 0 && !loadingMessages && (
-              <div className="sticky top-0.5 z-30 mb-2">
-                <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-indigo-50/95 backdrop-blur-sm border border-indigo-200/90 shadow-xs">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const lastPinned = pinnedMessages[pinnedMessages.length - 1];
-                      handleJumpToMessage(lastPinned.id, lastPinned.body);
-                    }}
-                    className="min-w-0 flex-1 flex items-center gap-2 text-left hover:opacity-85 transition-opacity cursor-pointer"
-                    title="Klik untuk melompat ke pesan yang disematkan"
-                  >
-                    <Pin className="w-3.5 h-3.5 text-indigo-600 shrink-0 rotate-45" />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
-                        <span>Pesan Disematkan</span>
-                        {pinnedMessages.length > 1 && (
-                          <span className="px-1.5 py-0.2 rounded-full bg-indigo-200 text-indigo-800 text-[9px] font-mono">
-                            {pinnedMessages.length}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-indigo-950 truncate font-medium">
-                        {pinnedMessages[pinnedMessages.length - 1].body ||
-                          pinnedMessages[pinnedMessages.length - 1].mediaName ||
-                          '[Media]'}
-                      </p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleTogglePinMessage(pinnedMessages[pinnedMessages.length - 1])}
-                    title="Lepas sematan pesan ini"
-                    className="p-1 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100/70 transition-colors shrink-0"
-                  >
-                    <PinOff className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
             {floatingDateLabel && messages.length > 0 && !loadingMessages && (
-              <div className="sticky top-0.5 z-20 flex justify-center pointer-events-none pb-1">
+              <div className="sticky top-1 z-20 flex justify-center pointer-events-none pb-1">
                 <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/95 backdrop-blur-sm border border-gray-200 shadow-sm text-[11px] font-medium text-gray-700">
                   {floatingDateLabel}
                 </span>
@@ -5290,7 +5469,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             {canReplyConversation && (
                               <button
                                 type="button"
-                                onClick={() => void handleTogglePinMessage(msg)}
+                                onClick={() => void handleStartPinMessage(msg)}
                                 title={msgMeta?.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-medium transition-colors ${
                                   msgMeta?.isPinned
@@ -8738,6 +8917,103 @@ export const Conversations: React.FC<ConversationsProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Pilihan Durasi Pin Pesan */}
+      <Modal
+        isOpen={Boolean(pinningMessageTarget)}
+        onClose={() => setPinningMessageTarget(null)}
+        title="Sematkan Pesan"
+        subtitle="Pilih durasi sematan pesan di obrolan CRM dan WhatsApp"
+        maxWidthClass="max-w-md"
+        footer={
+          <div className="flex items-center justify-end gap-2 w-full">
+            <button
+              type="button"
+              onClick={() => setPinningMessageTarget(null)}
+              className="px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-medium cursor-pointer"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              disabled={submittingPin}
+              onClick={() => void handleConfirmPinMessage()}
+              className="px-3.5 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium inline-flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              <Pin className="w-3.5 h-3.5" />
+              <span>{submittingPin ? 'Menyematkan...' : 'Sematkan Pesan'}</span>
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3.5 py-1">
+          {pinningMessageTarget && (
+            <div className="p-2.5 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 space-y-1">
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                Pratinjau Pesan
+              </div>
+              <p className="line-clamp-3 italic text-gray-800">
+                "{pinningMessageTarget.body || pinningMessageTarget.mediaName || '[Pesan Media]'}"
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-800 mb-2">
+              Pilih Durasi Sematan
+            </label>
+            <div className="space-y-2">
+              {[
+                {
+                  seconds: 86400,
+                  label: '24 Jam',
+                  desc: 'Pesan akan disematkan selama 1 hari',
+                },
+                {
+                  seconds: 604800,
+                  label: '7 Hari',
+                  desc: 'Standar rekomendasi WhatsApp (1 minggu)',
+                },
+                {
+                  seconds: 2592000,
+                  label: '30 Hari',
+                  desc: 'Pesan disematkan selama 1 bulan penuh',
+                },
+              ].map((opt) => (
+                <label
+                  key={opt.seconds}
+                  onClick={() => setPinDurationSeconds(opt.seconds)}
+                  className={`flex items-start gap-3 p-2.5 rounded-lg border transition-all cursor-pointer ${
+                    pinDurationSeconds === opt.seconds
+                      ? 'border-indigo-500 bg-indigo-50/70 shadow-2xs'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="pinDuration"
+                    value={opt.seconds}
+                    checked={pinDurationSeconds === opt.seconds}
+                    onChange={() => setPinDurationSeconds(opt.seconds)}
+                    className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-900">{opt.label}</span>
+                      {opt.seconds === 604800 && (
+                        <span className="px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 text-[9px] font-medium">
+                          Rekomendasi
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-500">{opt.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       {/* Contact Detail Modal (Mention & Group Participant Popup) */}
       <Modal

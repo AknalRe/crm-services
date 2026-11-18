@@ -1699,6 +1699,27 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       if (req.body?.labels !== undefined) {
         convUpdate.labels = req.body.labels ? String(req.body.labels).trim() || null : null;
+        if (existing.channel === 'WHATSAPP') {
+          let targetChat = existing.externalThreadId;
+          if (!targetChat && existing.contactId) {
+            const cRows = await db
+              .select({ nomorWhatsapp: contacts.nomorWhatsapp })
+              .from(contacts)
+              .where(eq(contacts.id, existing.contactId))
+              .limit(1);
+            targetChat = cRows[0]?.nomorWhatsapp || null;
+          }
+          if (targetChat) {
+            const labelList = convUpdate.labels
+              ? convUpdate.labels.split(',').map((x: string) => x.trim()).filter(Boolean)
+              : [];
+            wahaService
+              .syncChatLabels(targetChat, labelList, convUpdate.wahaSession || existing.wahaSession || undefined)
+              .catch((err) => {
+                console.warn('[WahaService] syncChatLabels background error:', err?.message);
+              });
+          }
+        }
       }
 
       if (req.body?.channelDisplayName !== undefined) {
@@ -3229,39 +3250,56 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // POST Toggle Pin message in conversation
+  // POST Toggle Pin message in conversation with duration & WhatsApp sync
   fastify.post('/:id/messages/:messageId/pin', async (req: FastifyRequest<{
     Params: { id: string; messageId: string };
+    Body?: { duration?: number; unpin?: boolean };
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
       const currentUser = await getCurrentAuthUser(req);
-      const msgRows = await db
-        .select()
-        .from(chatMessages)
-        .where(
-          and(
-            eq(chatMessages.id, req.params.messageId),
-            eq(chatMessages.conversationId, req.params.id),
-            eq(chatMessages.companyId, companyId)
+      const [msgRows, convRows] = await Promise.all([
+        db
+          .select()
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.id, req.params.messageId),
+              eq(chatMessages.conversationId, req.params.id),
+              eq(chatMessages.companyId, companyId)
+            )
           )
-        )
-        .limit(1);
+          .limit(1),
+        db
+          .select({ conv: conversations, contact: contacts })
+          .from(conversations)
+          .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+          .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
+          .limit(1),
+      ]);
       const msg = msgRows[0];
       if (!msg) {
         return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
       }
+      const convRow = convRows[0];
 
       let meta: any = {};
       if (msg.metadataJson) {
         try { meta = JSON.parse(msg.metadataJson); } catch {}
       }
-      const isPinned = !Boolean(meta.isPinned);
+
+      const explicitUnpin = req.body?.unpin === true;
+      const isPinned = explicitUnpin ? false : (req.body?.duration ? true : !Boolean(meta.isPinned));
+      const durationSeconds = req.body?.duration && req.body.duration > 0 ? Number(req.body.duration) : 604800; // default 7 days
+      const pinExpiresAt = isPinned ? new Date(Date.now() + durationSeconds * 1000).toISOString() : null;
+
       const updatedMeta = {
         ...meta,
         isPinned,
         pinnedAt: isPinned ? new Date().toISOString() : null,
         pinnedBy: isPinned ? currentUser?.name || 'CS' : null,
+        pinDuration: isPinned ? durationSeconds : null,
+        pinExpiresAt,
       };
 
       const [updatedMsg] = await db
@@ -3270,34 +3308,67 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .where(eq(chatMessages.id, msg.id))
         .returning();
 
+      // Sync to WhatsApp via WAHA if message has wahaMessageId and channel is WHATSAPP
+      let wahaWarning: string | undefined;
+      if (convRow?.conv?.channel === 'WHATSAPP' && msg.wahaMessageId) {
+        const targetChat = convRow.conv.externalThreadId || convRow.contact?.nomorWhatsapp;
+        const session = msg.wahaSession || convRow.conv.wahaSession || undefined;
+        if (targetChat) {
+          try {
+            if (isPinned) {
+              const pinRes = await wahaService.pinMessage(targetChat, msg.wahaMessageId, durationSeconds, session);
+              if (!pinRes.success) {
+                wahaWarning = `Pesan disematkan di CRM, namun sinkronisasi WhatsApp gagal: ${pinRes.error}`;
+              }
+            } else {
+              const unpinRes = await wahaService.unpinMessage(targetChat, msg.wahaMessageId, session);
+              if (!unpinRes.success) {
+                wahaWarning = `Sematan dilepas di CRM, namun sinkronisasi WhatsApp gagal: ${unpinRes.error}`;
+              }
+            }
+          } catch (syncErr: any) {
+            wahaWarning = `Sinkronisasi sematan WhatsApp mengalami kendala: ${syncErr?.message}`;
+          }
+        }
+      }
+
       liveEvents.emit('conversations:update', { conversationId: req.params.id }, companyId);
-      return reply.send({ success: true, isPinned, data: updatedMsg });
+      return reply.send({ success: true, isPinned, data: updatedMsg, warning: wahaWarning });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
     }
   });
 
-  // POST Toggle Star message in conversation
+  // POST Toggle Star message in conversation with WhatsApp sync
   fastify.post('/:id/messages/:messageId/star', async (req: FastifyRequest<{
     Params: { id: string; messageId: string };
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const msgRows = await db
-        .select()
-        .from(chatMessages)
-        .where(
-          and(
-            eq(chatMessages.id, req.params.messageId),
-            eq(chatMessages.conversationId, req.params.id),
-            eq(chatMessages.companyId, companyId)
+      const [msgRows, convRows] = await Promise.all([
+        db
+          .select()
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.id, req.params.messageId),
+              eq(chatMessages.conversationId, req.params.id),
+              eq(chatMessages.companyId, companyId)
+            )
           )
-        )
-        .limit(1);
+          .limit(1),
+        db
+          .select({ conv: conversations, contact: contacts })
+          .from(conversations)
+          .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+          .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
+          .limit(1),
+      ]);
       const msg = msgRows[0];
       if (!msg) {
         return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
       }
+      const convRow = convRows[0];
 
       let meta: any = {};
       if (msg.metadataJson) {
@@ -3316,8 +3387,25 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .where(eq(chatMessages.id, msg.id))
         .returning();
 
+      // Sync star to WhatsApp via WAHA if message has wahaMessageId and channel is WHATSAPP
+      let wahaWarning: string | undefined;
+      if (convRow?.conv?.channel === 'WHATSAPP' && msg.wahaMessageId) {
+        const targetChat = convRow.conv.externalThreadId || convRow.contact?.nomorWhatsapp;
+        const session = msg.wahaSession || convRow.conv.wahaSession || undefined;
+        if (targetChat) {
+          try {
+            const starRes = await wahaService.starMessage(targetChat, msg.wahaMessageId, isStarred, session);
+            if (!starRes.success) {
+              wahaWarning = `Status bintang di CRM diperbarui, namun sinkronisasi WhatsApp gagal: ${starRes.error}`;
+            }
+          } catch (syncErr: any) {
+            wahaWarning = `Sinkronisasi bintang WhatsApp mengalami kendala: ${syncErr?.message}`;
+          }
+        }
+      }
+
       liveEvents.emit('conversations:update', { conversationId: req.params.id }, companyId);
-      return reply.send({ success: true, isStarred, data: updatedMsg });
+      return reply.send({ success: true, isStarred, data: updatedMsg, warning: wahaWarning });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
     }

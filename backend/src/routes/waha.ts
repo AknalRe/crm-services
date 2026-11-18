@@ -2095,6 +2095,57 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         }
       }
 
+      // 1e. Label Updates from WhatsApp (label.chat.added / label.chat.deleted)
+      if ((event === 'label.chat.added' || event === 'label.chat.deleted') && payload) {
+        const rawChatId = String(payload?.chatId || payload?.chat_id || payload?.id || '').trim();
+        const labelName = String(payload?.label?.name || payload?.name || '').trim();
+        if (rawChatId) {
+          const cleanPhone = rawChatId.replace(/\D/g, '');
+          const convRows = await db
+            .select({ conv: conversations, contact: contacts })
+            .from(conversations)
+            .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+            .where(
+              and(
+                eq(conversations.companyId, companyId),
+                or(
+                  eq(conversations.externalThreadId, rawChatId),
+                  cleanPhone ? eq(contacts.nomorWhatsapp, cleanPhone) : sql`false`
+                )
+              )
+            )
+            .limit(1);
+          const row = convRows[0];
+          if (row?.conv) {
+            const currentLabels = (row.conv.labels || '')
+              .split(',')
+              .map((x) => x.trim())
+              .filter(Boolean);
+            let updatedLabels: string[];
+            if (event === 'label.chat.added') {
+              if (labelName && !currentLabels.some((l) => l.toLowerCase() === labelName.toLowerCase())) {
+                updatedLabels = [...currentLabels, labelName];
+              } else {
+                updatedLabels = currentLabels;
+              }
+            } else {
+              updatedLabels = labelName
+                ? currentLabels.filter((l) => l.toLowerCase() !== labelName.toLowerCase())
+                : currentLabels;
+            }
+            const nextLabelsStr = updatedLabels.length > 0 ? updatedLabels.join(', ') : null;
+            if (nextLabelsStr !== row.conv.labels) {
+              await db
+                .update(conversations)
+                .set({ labels: nextLabelsStr, updatedAt: new Date() })
+                .where(eq(conversations.id, row.conv.id));
+              liveEvents.emit('conversations:update', { conversationId: row.conv.id }, companyId);
+            }
+          }
+        }
+        return reply.send({ success: true, message: `${event} processed` });
+      }
+
       // 2. Incoming & Direct Outgoing Messages (message / message.any)
       const isInboundMessageEvent = event === 'message' || event === 'message.any';
       const isFromMe = isWahaFromMe(payload);
