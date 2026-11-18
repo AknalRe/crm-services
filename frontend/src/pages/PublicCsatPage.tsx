@@ -13,9 +13,9 @@ const DEFAULT_SCALE_LABELS: Record<string, string> = {
 };
 
 const DEFAULT_TEXTS: CsatTextConfig = {
-  brandName: 'Layanan Pelanggan',
-  title: 'Penilaian Layanan Pelanggan',
-  subtitle: 'Customer Satisfaction (CSAT)',
+  brandName: 'Survei Kepuasan',
+  title: 'Penilaian Layanan',
+  subtitle: 'Masukan Anda membantu kami menjaga kualitas layanan.',
   greetingText: 'Halo, bagaimana pengalaman Anda dengan layanan kami?',
   scaleLabels: DEFAULT_SCALE_LABELS,
   feedbackLabel: 'Saran atau Masukan (Opsional)',
@@ -57,7 +57,12 @@ export const PublicCsatPage: React.FC = () => {
       .then((data) => {
         setContactName(data.contactName || 'Pelanggan');
         setAgentName(data.agentName || null);
-        if (data.texts) setTexts(data.texts);
+        if (data.texts) {
+          setTexts(data.texts);
+          if (typeof document !== 'undefined') {
+            document.title = data.texts.title || 'Penilaian Layanan';
+          }
+        }
         const crits = Array.isArray(data.criteria) && data.criteria.length > 0
           ? data.criteria
           : [
@@ -130,25 +135,39 @@ export const PublicCsatPage: React.FC = () => {
   };
 
   const scaleMap = texts.scaleLabels || DEFAULT_SCALE_LABELS;
+  const brandNorm = String(texts.brandName || '').trim();
+  const titleNorm = String(texts.title || '').trim();
+  const showBrandKicker = Boolean(
+    brandNorm && !titleNorm.toLowerCase().includes(brandNorm.toLowerCase())
+  );
+  const greetingMentionsContact = Boolean(
+    contactName && String(texts.greetingText || '').toLowerCase().includes(contactName.toLowerCase())
+  );
 
   return (
-    <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-gray-50 flex items-center justify-center p-3 sm:p-4">
-      <div className="w-full max-w-lg bg-white border border-gray-200 rounded-xl shadow-sm p-4 sm:p-6 space-y-4 sm:space-y-5">
+    <div className="w-full min-h-screen supports-[height:100dvh]:min-h-dvh bg-slate-50 flex items-center justify-center p-3 sm:p-6">
+      <div className="w-full max-w-lg mx-auto bg-white border border-gray-200 rounded-xl shadow-sm p-4 sm:p-6 space-y-4 sm:space-y-5">
         <div className="pb-4 border-b border-gray-200">
-          {texts.brandName && (
+          {showBrandKicker && (
             <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-0.5">
-              {texts.brandName}
+              {brandNorm}
             </div>
           )}
-          <h1 className="text-base font-semibold text-gray-900">{texts.title}</h1>
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-0.5">
-            <p className="text-xs text-gray-500">{texts.subtitle}</p>
-            {agentName && (
-              <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px] font-medium border border-gray-200">
-                Dilayani oleh: {agentName}
-              </span>
-            )}
-          </div>
+          <h1 className="text-base font-semibold text-gray-900">{titleNorm || 'Penilaian Layanan'}</h1>
+          {(texts.subtitle || agentName) && (
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-0.5">
+              {texts.subtitle ? (
+                <p className="text-xs text-gray-500">{texts.subtitle}</p>
+              ) : (
+                <span />
+              )}
+              {agentName && (
+                <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-[11px] font-medium border border-gray-200">
+                  Dilayani oleh: {agentName}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -312,8 +331,9 @@ export const PublicCsatPage: React.FC = () => {
               {texts.submitButtonText || 'Kirim Penilaian'}
             </Button>
 
-            <div className="text-[10px] text-center text-gray-400">
-              Kepada {contactName} • Skala 1 (Terendah) hingga 5 (Terbaik)
+            <div className="text-[11px] text-center text-gray-400">
+              {!greetingMentionsContact && contactName ? `Kepada ${contactName} • ` : ''}
+              Skala 1 (Terendah) hingga 5 (Terbaik)
             </div>
           </form>
         )}

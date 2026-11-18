@@ -15,7 +15,83 @@ import {
 } from '../services/csat.service';
 import { getSettingMap } from './auth';
 
+function escapeHtml(raw: string): string {
+  return String(raw || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export default async function publicCsatRouter(fastify: FastifyInstance) {
+  // GET clean HTML link-preview metadata for WhatsApp and messaging crawlers
+  fastify.get('/preview', async (req: FastifyRequest<{ Querystring: { token?: string } }>, reply: FastifyReply) => {
+    const token = String(req.query?.token || '').trim();
+    let title = 'Penilaian Layanan';
+    let description = 'Mohon luangkan waktu sejenak untuk memberikan penilaian atas layanan kami.';
+
+    if (token) {
+      try {
+        const settings = await getSettingMap();
+        const surveyConfig = parseCsatSurveyConfig(settings.csat_survey_config);
+        const csatRows = await db
+          .select({ csat: csatResponses, contact: contacts })
+          .from(csatResponses)
+          .leftJoin(contacts, eq(csatResponses.contactId, contacts.id))
+          .where(eq(csatResponses.token, token))
+          .limit(1);
+
+        if (csatRows[0]) {
+          const item = csatRows[0];
+          const contactName = item.contact?.namaPanggilan || item.contact?.namaLengkap || 'Pelanggan';
+          const snapshot = parseCsatSnapshot(item.csat.snapshotJson, surveyConfig);
+          const rendered = renderCsatTexts(snapshot.texts, contactName);
+          title = rendered.title || title;
+          description = rendered.greetingText || rendered.subtitle || description;
+        } else {
+          const convRows = await db
+            .select({ conv: conversations, contact: contacts })
+            .from(conversations)
+            .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+            .where(eq(conversations.csatToken, token))
+            .limit(1);
+          if (convRows[0]) {
+            const row = convRows[0];
+            const contactName = row.contact?.namaPanggilan || row.contact?.namaLengkap || 'Pelanggan';
+            const profile = resolveCsatProfileForConversation(surveyConfig, row.conv);
+            const snapshot = buildCsatSnapshot(profile);
+            const rendered = renderCsatTexts(snapshot.texts, contactName);
+            title = rendered.title || title;
+            description = rendered.greetingText || rendered.subtitle || description;
+          }
+        }
+      } catch {
+        // Fallback to default survey metadata cleanly
+      }
+    }
+
+    const safeTitle = escapeHtml(title);
+    const safeDesc = escapeHtml(description);
+    const html = `<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>${safeTitle}</title>
+  <meta name="description" content="${safeDesc}" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="${safeTitle}" />
+  <meta property="og:description" content="${safeDesc}" />
+</head>
+<body>
+  <h1>${safeTitle}</h1>
+  <p>${safeDesc}</p>
+</body>
+</html>`;
+    reply.header('Content-Type', 'text/html; charset=utf-8');
+    return reply.send(html);
+  });
+
   // GET CSAT details by public token (no panel auth required)
   fastify.get('/:token', async (req: FastifyRequest<{ Params: { token: string } }>, reply: FastifyReply) => {
     try {

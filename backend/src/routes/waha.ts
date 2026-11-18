@@ -98,13 +98,70 @@ export function resolveRequestPublicBase(req: FastifyRequest): string | null {
 export function isWahaFromMe(payload: any): boolean {
   if (!payload || typeof payload !== 'object') return false;
   if (payload.fromMe === true || payload.fromMe === 'true') return true;
-  if (payload._data?.key?.fromMe === true || payload._data?.Info?.IsFromMe === true) return true;
+  if (
+    payload._data?.key?.fromMe === true ||
+    payload._data?.Info?.IsFromMe === true ||
+    payload._data?.Info?.MessageSource?.IsFromMe === true
+  ) {
+    return true;
+  }
   if (typeof payload.id === 'string' && payload.id.startsWith('true_')) return true;
   if (typeof payload.id?._serialized === 'string' && payload.id._serialized.startsWith('true_')) {
     return true;
   }
   if (payload.id?.fromMe === true) return true;
   return false;
+}
+
+export function unwrapWahaProtoMessage(rawMsg: any): Record<string, any> {
+  let cur = rawMsg;
+  for (let depth = 0; depth < 6 && cur && typeof cur === 'object'; depth++) {
+    const inner =
+      cur.deviceSentMessage?.message ||
+      cur.deviceSentMessage?.Message ||
+      cur.ephemeralMessage?.message ||
+      cur.ephemeralMessage?.Message ||
+      cur.viewOnceMessage?.message ||
+      cur.viewOnceMessage?.Message ||
+      cur.viewOnceMessageV2?.message ||
+      cur.viewOnceMessageV2?.Message ||
+      cur.viewOnceMessageV2Extension?.message ||
+      cur.documentWithCaptionMessage?.message ||
+      cur.editedMessage?.message?.protocolMessage?.editedMessage ||
+      cur.editedMessage?.message;
+    if (inner && typeof inner === 'object') {
+      cur = inner;
+      continue;
+    }
+    break;
+  }
+  return cur && typeof cur === 'object' ? cur : {};
+}
+
+export function extractWahaProtoMessage(payload: any): Record<string, any> {
+  const raw =
+    payload?._data?.message ||
+    payload?._data?.Message ||
+    payload?._data?.Info?.Message ||
+    payload?.message;
+  return unwrapWahaProtoMessage(raw);
+}
+
+export function extractDeviceSentDestinationJid(payload: any): string {
+  const roots = [
+    payload?._data?.message,
+    payload?._data?.Message,
+    payload?._data?.Info?.Message,
+    payload?.message,
+  ];
+  for (const root of roots) {
+    const dest =
+      root?.deviceSentMessage?.destinationJid ||
+      root?.deviceSentMessage?.DestinationJID ||
+      root?.ephemeralMessage?.message?.deviceSentMessage?.destinationJid;
+    if (typeof dest === 'string' && dest.trim()) return dest.trim();
+  }
+  return '';
 }
 
 export function detectWahaOutboundOrigin(payload: any): {
@@ -186,15 +243,12 @@ export function extractWahaContextInfo(payload: any): Record<string, any> | null
   ];
   for (const container of containers) {
     if (!container || typeof container !== 'object') continue;
-    const nestedViewOnce =
-      container?.viewOnceMessage?.message ||
-      container?.viewOnceMessageV2?.message ||
-      container?.viewOnceMessageV2Extension?.message;
+    const unwrapped = unwrapWahaProtoMessage(container);
     if (container.contextInfo && typeof container.contextInfo === 'object') {
       return container.contextInfo;
     }
     for (const key of msgKeys) {
-      const inner = container[key] || nestedViewOnce?.[key];
+      const inner = container[key] || unwrapped?.[key];
       if (inner?.contextInfo && typeof inner.contextInfo === 'object') {
         return inner.contextInfo;
       }
@@ -368,7 +422,7 @@ function extractBaseInboundWahaRichData(
   mediaMeta: InboundWahaMediaMeta,
   fallbackText?: string
 ): InboundWahaRichData {
-  const msg = payload?._data?.message || payload?._data?.Message || {};
+  const msg = extractWahaProtoMessage(payload);
 
   // 1. Reaction (inline reactionMessage OR message.reaction payload)
   const reactionPayload = payload?.reaction || msg?.reactionMessage;
@@ -656,11 +710,7 @@ function extractBaseInboundWahaRichData(
 }
 
 export function extractInboundWahaText(payload: any): string {
-  const msg = payload?._data?.message || payload?._data?.Message || {};
-  const viewOnceMsg =
-    msg?.viewOnceMessage?.message ||
-    msg?.viewOnceMessageV2?.message ||
-    msg?.viewOnceMessageV2Extension?.message;
+  const msg = extractWahaProtoMessage(payload);
   const docWithCaptionMsg = msg?.documentWithCaptionMessage?.message?.documentMessage;
   const candidates = [
     payload?.body,
@@ -673,9 +723,6 @@ export function extractInboundWahaText(payload: any): string {
     msg?.videoMessage?.caption,
     msg?.documentMessage?.caption,
     docWithCaptionMsg?.caption,
-    viewOnceMsg?.imageMessage?.caption,
-    viewOnceMsg?.videoMessage?.caption,
-    viewOnceMsg?.documentMessage?.caption,
     msg?.buttonsResponseMessage?.selectedDisplayText,
     msg?.listResponseMessage?.title,
     msg?.templateButtonReplyMessage?.selectedDisplayText,
@@ -708,16 +755,11 @@ export interface InboundWahaMediaMeta {
 }
 
 export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta {
-  const msg = payload?._data?.message || payload?._data?.Message || {};
-  const viewOnceMsg =
-    msg?.viewOnceMessage?.message ||
-    msg?.viewOnceMessageV2?.message ||
-    msg?.viewOnceMessageV2Extension?.message ||
-    {};
+  const msg = extractWahaProtoMessage(payload);
   const docMsg = msg?.documentWithCaptionMessage?.message?.documentMessage || msg?.documentMessage;
-  const imgMsg = viewOnceMsg?.imageMessage || msg?.imageMessage;
-  const vidMsg = viewOnceMsg?.videoMessage || msg?.videoMessage;
-  const audMsg = msg?.audioMessage || viewOnceMsg?.audioMessage;
+  const imgMsg = msg?.imageMessage;
+  const vidMsg = msg?.videoMessage;
+  const audMsg = msg?.audioMessage;
   const stickerMsg = msg?.stickerMessage;
 
   const rawMediaUrl =
@@ -795,8 +837,10 @@ export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta 
 
 export function extractPhoneCandidatesFromWahaPayload(payload: any, isFromMe?: boolean): string[] {
   const fromMeFlag = isFromMe !== undefined ? isFromMe : isWahaFromMe(payload);
+  const deviceDest = fromMeFlag ? extractDeviceSentDestinationJid(payload) : '';
   const raw = fromMeFlag
     ? [
+        deviceDest,
         payload?._data?.key?.remoteJid,
         payload?.chatId,
         payload?.to,
@@ -1236,9 +1280,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   });
 
   // GET all WAHA sessions
-  fastify.get('/sessions', { preHandler: requireWahaRead }, async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/sessions', { preHandler: requireWahaRead }, async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const data = await wahaService.listSessions();
+      const data = await wahaService.listSessions(resolveRequestPublicBase(req));
       return reply.send({ success: true, data });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
@@ -1397,9 +1441,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   // WAHA Webhook Receiver
   fastify.post('/webhook', async (req: FastifyRequest<{
     Querystring: { companyId?: string };
-    Body: { event: string; session?: string; payload: any };
+    Body: { event: string; session?: string; me?: { id?: string; pushName?: string }; payload: any };
   }>, reply: FastifyReply) => {
     const { event, session: webhookSession, payload } = req.body || {};
+    const reqPublicBase = resolveRequestPublicBase(req);
     const queryCompanyId = String(req.query?.companyId || '').trim();
     const sessionHint = webhookSession
       ? String(webhookSession).trim()
@@ -1411,6 +1456,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     return await runWithCompany(companyId, async () => {
     try {
       console.log(`[WAHA Webhook][${companyId}] Received event: ${event}`);
+
+      if (sessionHint && (event === 'message' || event === 'session.status')) {
+        void wahaService
+          .ensureSessionHasFullWebhooks(sessionHint, reqPublicBase, companyId)
+          .catch(() => {});
+      }
 
       try {
         await wahaService.verifyActiveExternalGowsIfNeeded();
@@ -2332,16 +2383,31 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       const isFromMe = isWahaFromMe(payload);
       const rawTarget = isFromMe
         ? (() => {
+            const selfJid = String(req.body?.me?.id || '').trim().toLowerCase();
+            const selfDigits = selfJid ? normalizePhoneNumber(fromWahaChatId(selfJid)) : '';
+            const deviceDest = extractDeviceSentDestinationJid(payload);
             const candidates = [
+              deviceDest,
               payload?.chatId,
               payload?._data?.Info?.Chat,
               payload?._data?.key?.remoteJid,
               payload?.to,
+              payload?._data?.Info?.RecipientAlt,
+              payload?._data?.key?.remoteJidAlt,
               payload?.from,
             ]
               .map((v) => String(v || '').trim())
               .filter((v) => v && v.toLowerCase() !== 'me');
-            return candidates.find((v) => v.toLowerCase().endsWith('@g.us')) || candidates[0] || '';
+            const groupCandidate = candidates.find((v) => v.toLowerCase().endsWith('@g.us'));
+            if (groupCandidate) return groupCandidate;
+            const nonSelfCandidate = candidates.find((v) => {
+              const lower = v.toLowerCase();
+              if (selfJid && lower === selfJid) return false;
+              const candDigits = isPhoneWahaJid(v) ? normalizePhoneNumber(fromWahaChatId(v)) : '';
+              if (selfDigits && candDigits && candDigits === selfDigits) return false;
+              return true;
+            });
+            return nonSelfCandidate || candidates[0] || '';
           })()
         : String(
             payload?.from ||
@@ -2883,6 +2949,26 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 .from(contacts)
                 .where(and(eq(contacts.id, identityRows[0].contactId), eq(contacts.companyId, companyId)));
               contact = byId[0];
+            }
+            if (!contact) {
+              const convRowsByLid = await db
+                .select({ contactId: conversations.contactId })
+                .from(conversations)
+                .where(
+                  and(
+                    eq(conversations.companyId, companyId),
+                    eq(conversations.channel, 'WHATSAPP'),
+                    eq(conversations.externalThreadId, rawFrom)
+                  )
+                )
+                .limit(1);
+              if (convRowsByLid[0]?.contactId) {
+                const byConv = await db
+                  .select()
+                  .from(contacts)
+                  .where(and(eq(contacts.id, convRowsByLid[0].contactId), eq(contacts.companyId, companyId)));
+                contact = byConv[0];
+              }
             }
           }
 

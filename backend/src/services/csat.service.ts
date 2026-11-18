@@ -57,9 +57,9 @@ export const DEFAULT_CSAT_CTA_TEMPLATE =
 
 export function createDefaultCsatTexts(): CsatTextConfig {
   return {
-    brandName: 'Layanan Pelanggan',
-    title: 'Penilaian Layanan Pelanggan',
-    subtitle: 'Customer Satisfaction (CSAT)',
+    brandName: 'Survei Kepuasan',
+    title: 'Penilaian Layanan',
+    subtitle: 'Masukan Anda membantu kami menjaga kualitas layanan.',
     greetingText: 'Halo {nama_panggilan}, bagaimana pengalaman Anda dengan layanan kami?',
     scaleLabels: {
       '1': 'Sangat Kurang',

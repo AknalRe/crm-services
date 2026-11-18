@@ -70,9 +70,9 @@ const CHANNEL_OPTIONS = ['WHATSAPP', 'WHATSAPP_CLOUD', 'INSTAGRAM', 'FACEBOOK', 
 
 function createEmptyTexts() {
   return {
-    brandName: 'Layanan Pelanggan',
-    title: 'Penilaian Layanan Pelanggan',
-    subtitle: 'Customer Satisfaction (CSAT)',
+    brandName: 'Survei Kepuasan',
+    title: 'Penilaian Layanan',
+    subtitle: 'Masukan Anda membantu kami menjaga kualitas layanan.',
     greetingText: 'Halo {nama_panggilan}, bagaimana pengalaman Anda dengan layanan kami?',
     scaleLabels: { ...DEFAULT_SCALE_LABELS },
     feedbackLabel: 'Saran atau Masukan (Opsional)',

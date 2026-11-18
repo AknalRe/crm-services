@@ -2349,6 +2349,52 @@ test('detectWahaOutboundOrigin distinguishes WhatsApp Web, HP (iOS/Android), and
   );
 });
 
+test('unwrapWahaProtoMessage, extractInboundWahaText, and extractPhoneCandidates handle linked-device deviceSentMessage & ephemeral fromMe payloads', async () => {
+  const {
+    isWahaFromMe,
+    extractInboundWahaText,
+    extractDeviceSentDestinationJid,
+    extractPhoneCandidatesFromWahaPayload,
+  } = await import('../routes/waha');
+
+  const linkedDevicePayload = {
+    from: '628111111111@c.us',
+    _data: {
+      Info: {
+        Chat: '628999888777@s.whatsapp.net',
+        MessageSource: { IsFromMe: true },
+      },
+      Message: {
+        deviceSentMessage: {
+          destinationJid: '628999888777@s.whatsapp.net',
+          message: {
+            ephemeralMessage: {
+              message: {
+                extendedTextMessage: {
+                  text: 'Siap kak, paket sudah diproses dari WA Web',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  assert.equal(isWahaFromMe(linkedDevicePayload), true);
+  assert.equal(
+    extractInboundWahaText(linkedDevicePayload),
+    'Siap kak, paket sudah diproses dari WA Web'
+  );
+  assert.equal(
+    extractDeviceSentDestinationJid(linkedDevicePayload),
+    '628999888777@s.whatsapp.net'
+  );
+  assert.deepEqual(extractPhoneCandidatesFromWahaPayload(linkedDevicePayload, true), [
+    '628999888777',
+  ]);
+});
+
 
 
 

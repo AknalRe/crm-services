@@ -1774,14 +1774,59 @@ export class WahaService {
     }
   }
 
+  public async ensureSessionHasFullWebhooks(
+    sessionName?: string | null,
+    requestBaseUrl?: string | null,
+    companyId?: string
+  ): Promise<void> {
+    const cleanSession = String(sessionName || '').trim();
+    if (!cleanSession) return;
+    const cid = getActiveCompanyId(companyId);
+    const cacheKey = `${cid}::${cleanSession.toLowerCase()}`;
+    const lastAttempt = this.webhookSyncAt.get(cacheKey) || 0;
+    if (Date.now() - lastAttempt < 5 * 60_000) return;
+
+    try {
+      const conf = await this.getConfig(false, cid);
+      const resolved = await this.resolveEffectiveWebhookUrl(conf, requestBaseUrl, cid);
+      const reachable = conf.mode !== 'EXTERNAL' || resolved.isPublic;
+      if (!reachable || !resolved.url) return;
+      const { client, ownerPrefix } = await this.getClient();
+      if (!this.isOwnedSession(cleanSession, ownerPrefix)) return;
+      await this.ensureSessionWebhook(client, cleanSession, undefined, {
+        mode: conf.mode,
+        targetUrl: resolved.url,
+      });
+    } catch {
+      // Non-fatal background upgrade
+    }
+  }
+
   /**
    * List sessions belonging to this CRM instance (scoped in shared internal WAHA mode)
    */
-  public async listSessions(): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
+  public async listSessions(requestBaseUrl?: string | null): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
     const conf = await this.getConfig();
     const { client, session, ownerPrefix } = await this.getClient();
+    const resolvedWebhook = await this.resolveEffectiveWebhookUrl(conf, requestBaseUrl);
+    const webhookReachableForExternal = conf.mode !== 'EXTERNAL' || resolvedWebhook.isPublic;
     try {
       const rawList = await this.fetchRawSessionList(client);
+      if (webhookReachableForExternal) {
+        for (const item of rawList) {
+          const itemName = String(item?.name || 'default');
+          const itemStatus = String(item?.status || 'UNKNOWN');
+          if (
+            this.isOwnedSession(itemName, ownerPrefix) &&
+            (itemStatus === 'WORKING' || itemStatus === 'SCAN_QR_CODE')
+          ) {
+            void this.ensureSessionWebhook(client, itemName, item, {
+              mode: conf.mode,
+              targetUrl: resolvedWebhook.url,
+            });
+          }
+        }
+      }
       const sessions: WahaSessionInfo[] = rawList
         .map((item: any) => ({
           name: String(item.name || 'default'),
