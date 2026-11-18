@@ -545,6 +545,80 @@ export async function initDb() {
   await safeExec('idx_chat_msg_company_session_waha_msg', () => _queryClient`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_msg_company_session_waha_msg ON chat_messages (company_id, COALESCE(waha_session, ''), waha_message_id) WHERE waha_message_id IS NOT NULL;
   `);
+  // Merge any historical duplicate WHATSAPP conversations (same company, contact, and session) caused by concurrent message/message.any webhooks
+  await safeExec('deduplicate_whatsapp_conversations', async () => {
+    const dupRows = await _queryClient`
+      SELECT
+        c.id,
+        c.company_id,
+        c.contact_id,
+        COALESCE(LOWER(TRIM(c.waha_session)), '') AS norm_session,
+        c.assigned_agent_id,
+        c.assigned_agent_name,
+        c.labels,
+        c.last_message,
+        c.last_message_at,
+        c.unread_count,
+        c.created_at,
+        c.updated_at,
+        (SELECT COUNT(*)::int FROM chat_messages m WHERE m.conversation_id = c.id) AS msg_count
+      FROM conversations c
+      WHERE c.channel = 'WHATSAPP'
+        AND (c.company_id, c.contact_id, COALESCE(LOWER(TRIM(c.waha_session)), '')) IN (
+          SELECT company_id, contact_id, COALESCE(LOWER(TRIM(waha_session)), '')
+          FROM conversations
+          WHERE channel = 'WHATSAPP'
+          GROUP BY 1, 2, 3
+          HAVING COUNT(*) > 1
+        )
+      ORDER BY c.company_id, c.contact_id, norm_session;
+    `;
+    if (dupRows.length > 0) {
+      const mergeGroups = planWhatsAppConversationDedup(
+        dupRows.map((r: any) => ({
+          id: String(r.id),
+          companyId: String(r.company_id),
+          contactId: String(r.contact_id),
+          normSession: String(r.norm_session || ''),
+          assignedAgentId: r.assigned_agent_id ? String(r.assigned_agent_id) : null,
+          assignedAgentName: r.assigned_agent_name ? String(r.assigned_agent_name) : null,
+          labels: r.labels ? String(r.labels) : null,
+          msgCount: Number(r.msg_count || 0),
+          updatedAt: r.updated_at ? new Date(r.updated_at) : new Date(0),
+          createdAt: r.created_at ? new Date(r.created_at) : new Date(0),
+        }))
+      );
+      for (const grp of mergeGroups) {
+        for (const dupId of grp.dupIds) {
+          await _queryClient`
+            UPDATE chat_messages SET conversation_id = ${grp.canonicalId} WHERE conversation_id = ${dupId};
+          `;
+          await _queryClient`
+            UPDATE csat_responses SET conversation_id = ${grp.canonicalId} WHERE conversation_id = ${dupId};
+          `;
+          await _queryClient`
+            DELETE FROM conversations WHERE id = ${dupId};
+          `;
+        }
+        if (grp.mergedLabels !== undefined || grp.fallbackAgentId) {
+          await _queryClient`
+            UPDATE conversations
+            SET
+              labels = COALESCE(${grp.mergedLabels ?? null}, labels),
+              assigned_agent_id = COALESCE(assigned_agent_id, ${grp.fallbackAgentId ?? null}),
+              assigned_agent_name = COALESCE(assigned_agent_name, ${grp.fallbackAgentName ?? null})
+            WHERE id = ${grp.canonicalId};
+          `;
+        }
+      }
+      console.log(`[DB Init] Merged ${mergeGroups.length} duplicate WhatsApp conversation group(s)`);
+    }
+  });
+  await safeExec('idx_conversations_wa_unique', () => _queryClient`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_wa_unique
+    ON conversations (company_id, contact_id, COALESCE(LOWER(TRIM(waha_session)), ''))
+    WHERE channel = 'WHATSAPP';
+  `);
   await safeExec('idx_crm_roles_company_name', () => _queryClient`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_roles_company_name ON crm_roles (company_id, LOWER(name));
   `);
@@ -696,6 +770,72 @@ export async function initDb() {
   }
 
   console.log(`[Drizzle ORM] PostgreSQL Database schema initialized successfully (schema: ${activeSchema}).`);
+}
+
+export interface WhatsAppConversationDedupCandidate {
+  id: string;
+  companyId: string;
+  contactId: string;
+  normSession: string;
+  assignedAgentId: string | null;
+  assignedAgentName: string | null;
+  labels: string | null;
+  msgCount: number;
+  updatedAt: Date;
+  createdAt: Date;
+}
+
+export interface WhatsAppConversationMergePlan {
+  canonicalId: string;
+  dupIds: string[];
+  mergedLabels?: string | null;
+  fallbackAgentId: string | null;
+  fallbackAgentName: string | null;
+}
+
+export function planWhatsAppConversationDedup(
+  rows: WhatsAppConversationDedupCandidate[]
+): WhatsAppConversationMergePlan[] {
+  const byKey = new Map<string, WhatsAppConversationDedupCandidate[]>();
+  for (const row of rows) {
+    const key = `${row.companyId}::${row.contactId}::${row.normSession}`;
+    const list = byKey.get(key) || [];
+    list.push(row);
+    byKey.set(key, list);
+  }
+
+  const plans: WhatsAppConversationMergePlan[] = [];
+  for (const group of byKey.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort((a, b) => {
+      if (b.msgCount !== a.msgCount) return b.msgCount - a.msgCount;
+      const agentDiff = (b.assignedAgentId ? 1 : 0) - (a.assignedAgentId ? 1 : 0);
+      if (agentDiff !== 0) return agentDiff;
+      const updDiff = b.updatedAt.getTime() - a.updatedAt.getTime();
+      if (updDiff !== 0) return updDiff;
+      const crtDiff = a.createdAt.getTime() - b.createdAt.getTime();
+      if (crtDiff !== 0) return crtDiff;
+      return a.id.localeCompare(b.id);
+    });
+
+    const canonical = sorted[0];
+    const dups = sorted.slice(1);
+    const labelSet = new Set<string>();
+    for (const item of sorted) {
+      for (const lbl of String(item.labels || '').split(',').map((s) => s.trim()).filter(Boolean)) {
+        labelSet.add(lbl);
+      }
+    }
+    const fallbackAgent = dups.find((d) => Boolean(d.assignedAgentId));
+    plans.push({
+      canonicalId: canonical.id,
+      dupIds: dups.map((d) => d.id),
+      mergedLabels: labelSet.size > 0 ? Array.from(labelSet).join(', ') : undefined,
+      fallbackAgentId: !canonical.assignedAgentId ? fallbackAgent?.assignedAgentId || null : null,
+      fallbackAgentName: !canonical.assignedAgentId ? fallbackAgent?.assignedAgentName || null : null,
+    });
+  }
+  return plans;
 }
 
 export default db;

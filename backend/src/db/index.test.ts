@@ -4,6 +4,7 @@ import {
   buildForeignKeyStatements,
   buildSchemaSyncStatements,
   detectPublicSchemaTypeConflict,
+  planWhatsAppConversationDedup,
 } from './index';
 
 test('buildSchemaSyncStatements creates all 30 tables on an empty schema', () => {
@@ -62,4 +63,53 @@ test('buildForeignKeyStatements generates schema-relative foreign key constraint
   const contactsCompanyFk = fks.find((f) => f.label.includes('contacts_company_id_companies_id_fk'));
   assert.ok(contactsCompanyFk, 'contacts -> companies FK should exist');
   assert.ok(contactsCompanyFk.sqlText.includes('REFERENCES "companies" ("id") ON DELETE CASCADE'));
+});
+
+test('planWhatsAppConversationDedup selects canonical conversation and merges labels/agent', () => {
+  const plans = planWhatsAppConversationDedup([
+    {
+      id: 'dup-empty',
+      companyId: 'c1',
+      contactId: 'cnt1',
+      normSession: 'hris_hr',
+      assignedAgentId: 'agent-1',
+      assignedAgentName: 'Budi',
+      labels: 'VIP',
+      msgCount: 0,
+      updatedAt: new Date('2026-11-18T14:11:05Z'),
+      createdAt: new Date('2026-11-18T14:11:05Z'),
+    },
+    {
+      id: 'main-no-agent',
+      companyId: 'c1',
+      contactId: 'cnt1',
+      normSession: 'hris_hr',
+      assignedAgentId: null,
+      assignedAgentName: null,
+      labels: 'Prospek',
+      msgCount: 5,
+      updatedAt: new Date('2026-11-18T14:11:00Z'),
+      createdAt: new Date('2026-11-18T14:10:00Z'),
+    },
+    {
+      id: 'other-session',
+      companyId: 'c1',
+      contactId: 'cnt1',
+      normSession: 'wa_test',
+      assignedAgentId: null,
+      assignedAgentName: null,
+      labels: null,
+      msgCount: 2,
+      updatedAt: new Date('2026-11-18T14:00:00Z'),
+      createdAt: new Date('2026-11-18T14:00:00Z'),
+    },
+  ]);
+
+  assert.equal(plans.length, 1);
+  // Row with existing message history stays canonical while inheriting agent & labels from duplicate
+  assert.equal(plans[0].canonicalId, 'main-no-agent');
+  assert.deepEqual(plans[0].dupIds, ['dup-empty']);
+  assert.equal(plans[0].fallbackAgentId, 'agent-1');
+  assert.equal(plans[0].fallbackAgentName, 'Budi');
+  assert.equal(plans[0].mergedLabels, 'Prospek, VIP');
 });

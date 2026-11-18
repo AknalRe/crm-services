@@ -32,6 +32,33 @@ import { saveBase64MediaFile, saveMediaBufferFile } from './media';
 import { syncWhatsAppProfile } from '../services/profile.service';
 import crypto from 'crypto';
 
+const webhookKeyLocks = new Map<string, Promise<void>>();
+
+async function withWebhookKeyLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = webhookKeyLocks.get(key) || Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((res) => {
+    release = res;
+  });
+  const chained = prev.then(() => gate);
+  webhookKeyLocks.set(key, chained);
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (webhookKeyLocks.get(key) === chained) {
+      webhookKeyLocks.delete(key);
+    }
+  }
+}
+
+function isPgUniqueViolation(err: any): boolean {
+  const code = String(err?.code || err?.cause?.code || '');
+  const msg = String(err?.message || err?.cause?.message || '').toLowerCase();
+  return code === '23505' || msg.includes('duplicate key value violates unique constraint');
+}
+
 export function resolveRequestPublicBase(req: FastifyRequest): string | null {
   const fwdHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
   const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
@@ -1982,28 +2009,48 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 : convList[0]) || undefined;
             if (!convRow) {
               const isLidChat = lowerChatJid.endsWith('@lid');
-              const [createdConv] = await db
-                .insert(conversations)
-                .values({
-                  id: crypto.randomUUID(),
-                  companyId,
-                  contactId: contact.id,
-                  channel: 'WHATSAPP',
-                  externalThreadId: isGroupFallback ? fallbackChatJid : isLidChat ? fallbackChatJid : null,
-                  contextTitle: isGroupFallback ? contact.namaLengkap : null,
-                  wahaSession: normalizedInboundSession,
-                  pushName: !isGroupFallback && !voteInfo.fromMe ? voteInfo.voterName : contact.namaLengkap,
-                  isGroup: isGroupFallback,
-                  excludeFromMetrics: Boolean(isGroupFallback || contact.excludeFromMetrics),
-                  excludeReason: isGroupFallback ? 'Grup WhatsApp' : contact.excludeReason || null,
-                  status: 'OPEN',
-                  sessionStartedAt: now,
-                  unreadCount: 0,
-                  createdAt: now,
-                  updatedAt: now,
-                })
-                .returning();
-              convRow = createdConv;
+              try {
+                const [createdConv] = await db
+                  .insert(conversations)
+                  .values({
+                    id: crypto.randomUUID(),
+                    companyId,
+                    contactId: contact.id,
+                    channel: 'WHATSAPP',
+                    externalThreadId: isGroupFallback ? fallbackChatJid : isLidChat ? fallbackChatJid : null,
+                    contextTitle: isGroupFallback ? contact.namaLengkap : null,
+                    wahaSession: normalizedInboundSession,
+                    pushName: !isGroupFallback && !voteInfo.fromMe ? voteInfo.voterName : contact.namaLengkap,
+                    isGroup: isGroupFallback,
+                    excludeFromMetrics: Boolean(isGroupFallback || contact.excludeFromMetrics),
+                    excludeReason: isGroupFallback ? 'Grup WhatsApp' : contact.excludeReason || null,
+                    status: 'OPEN',
+                    sessionStartedAt: now,
+                    unreadCount: 0,
+                    createdAt: now,
+                    updatedAt: now,
+                  })
+                  .returning();
+                convRow = createdConv;
+              } catch (convInsErr: any) {
+                if (!isPgUniqueViolation(convInsErr)) throw convInsErr;
+                const retryList = await db
+                  .select()
+                  .from(conversations)
+                  .where(
+                    and(
+                      eq(conversations.companyId, companyId),
+                      eq(conversations.contactId, contact.id),
+                      eq(conversations.channel, 'WHATSAPP')
+                    )
+                  )
+                  .orderBy(desc(conversations.updatedAt));
+                convRow =
+                  (normalizedInboundSession
+                    ? retryList.find((c) => c.wahaSession === normalizedInboundSession) || retryList[0]
+                    : retryList[0]) || undefined;
+                if (!convRow) throw convInsErr;
+              }
             }
           }
         }
@@ -2340,7 +2387,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         const inboundSession = webhookSession ? String(webhookSession).trim() : null;
         const { exactIds } = extractWahaMessageIds(payload);
         const msgId = exactIds[0] || null;
+        const webhookLockKey = msgId
+          ? `msg:${companyId}:${(inboundSession || '').toLowerCase()}:${msgId}`
+          : `chat:${companyId}:${(inboundSession || '').toLowerCase()}:${rawFrom.toLowerCase()}`;
 
+        return await withWebhookKeyLock(webhookLockKey, async () => {
         // Dedup scoped by wahaSession so multiple sessions in the same group or thread never shadow each other
         if (msgId) {
           const dedupConditions = inboundSession
@@ -2920,14 +2971,14 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           )
           .orderBy(desc(conversations.updatedAt));
 
-        const existingConv = normalizedInboundSession
+        let existingConv = normalizedInboundSession
           ? convList.find(
               (c) =>
                 (c.wahaSession || '').trim().toLowerCase() ===
                 normalizedInboundSession.toLowerCase()
             ) || convList.find((c) => !(c.wahaSession || '').trim())
           : convList[0];
-        let convId: string;
+        let convId!: string;
 
         const contactExcluded = Boolean(isGroupChat || contact.excludeFromMetrics);
         const contactExcludeReason = isGroupChat
@@ -2936,34 +2987,61 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           ? (contact.excludeReason || 'Bukan Customer')
           : null;
 
+        let createdConversation = false;
         if (!existingConv) {
           convId = crypto.randomUUID();
-          await db.insert(conversations).values({
-            id: convId,
-            companyId,
-            contactId: contact.id,
-            channel: 'WHATSAPP',
-            externalThreadId: isGroupChat ? groupJid : isLidSource ? rawFrom : null,
-            contextTitle: isGroupChat ? (resolvedGroupSubject || contact.namaLengkap) : null,
-            wahaSession: normalizedInboundSession,
-            pushName: isGroupChat
-              ? (resolvedGroupSubject || contact.namaLengkap)
-              : (!isFromMe && notifyName ? notifyName : null),
-            isGroup: isGroupChat,
-            excludeFromMetrics: contactExcluded,
-            excludeReason: contactExcludeReason,
-            status: 'OPEN',
-            lastMessage: effectiveConversationPreview,
-            lastMessageAt: now,
-            firstInboundAt: isFromMe ? null : now,
-            firstResponseAt: isFromMe ? now : null,
-            lastInboundAt: isFromMe ? null : now,
-            sessionStartedAt: now,
-            unreadCount: isFromMe ? 0 : 1,
-            createdAt: now,
-            updatedAt: now,
-          });
-        } else {
+          try {
+            await db.insert(conversations).values({
+              id: convId,
+              companyId,
+              contactId: contact.id,
+              channel: 'WHATSAPP',
+              externalThreadId: isGroupChat ? groupJid : isLidSource ? rawFrom : null,
+              contextTitle: isGroupChat ? (resolvedGroupSubject || contact.namaLengkap) : null,
+              wahaSession: normalizedInboundSession,
+              pushName: isGroupChat
+                ? (resolvedGroupSubject || contact.namaLengkap)
+                : (!isFromMe && notifyName ? notifyName : null),
+              isGroup: isGroupChat,
+              excludeFromMetrics: contactExcluded,
+              excludeReason: contactExcludeReason,
+              status: 'OPEN',
+              lastMessage: effectiveConversationPreview,
+              lastMessageAt: now,
+              firstInboundAt: isFromMe ? null : now,
+              firstResponseAt: isFromMe ? now : null,
+              lastInboundAt: isFromMe ? null : now,
+              sessionStartedAt: now,
+              unreadCount: isFromMe ? 0 : 1,
+              createdAt: now,
+              updatedAt: now,
+            });
+            createdConversation = true;
+          } catch (convInsErr: any) {
+            if (!isPgUniqueViolation(convInsErr)) throw convInsErr;
+            const retryConvList = await db
+              .select()
+              .from(conversations)
+              .where(
+                and(
+                  eq(conversations.companyId, companyId),
+                  eq(conversations.contactId, contact.id),
+                  eq(conversations.channel, 'WHATSAPP')
+                )
+              )
+              .orderBy(desc(conversations.updatedAt));
+            existingConv =
+              (normalizedInboundSession
+                ? retryConvList.find(
+                    (c) =>
+                      (c.wahaSession || '').trim().toLowerCase() ===
+                      normalizedInboundSession.toLowerCase()
+                  ) || retryConvList[0]
+                : retryConvList[0]) || undefined;
+            if (!existingConv) throw convInsErr;
+          }
+        }
+        if (!createdConversation && existingConv) {
           convId = existingConv.id;
           const isReopeningFromResolved = existingConv.status === 'RESOLVED';
           await db
@@ -3236,10 +3314,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               inboundBody: body,
               externalThreadId: isLidSource ? rawFrom : existingConv?.externalThreadId || null,
               sessionName: inboundSession || existingConv?.wahaSession || null,
-              isNewConversation: !existingConv,
+              isNewConversation: createdConversation,
             })
           );
         }
+        return reply.send({ success: true, message: 'Webhook processed' });
+        });
       } else if (
         event &&
         event !== 'message.ack' &&

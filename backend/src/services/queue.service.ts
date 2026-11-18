@@ -174,23 +174,58 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
             )
           );
 
-        let convId = convList[0]?.id;
+        const matchedConv = effectiveSession
+          ? convList.find(
+              (c) => (c.wahaSession || '').trim().toLowerCase() === effectiveSession.trim().toLowerCase()
+            ) || convList.find((c) => !(c.wahaSession || '').trim())
+          : convList[0];
+        let convId = matchedConv?.id;
 
         if (!convId) {
           convId = crypto.randomUUID();
-          await db.insert(conversations).values({
-            id: convId,
-            companyId: resolvedCompanyId,
-            contactId,
-            channel: targetChannel,
-            channelAccountId: targetChannel === 'WHATSAPP' ? null : channelAccountId,
-            wahaSession: effectiveSession,
-            lastMessage: message,
-            lastMessageAt: now,
-            unreadCount: 0,
-            createdAt: now,
-            updatedAt: now,
-          });
+          try {
+            await db.insert(conversations).values({
+              id: convId,
+              companyId: resolvedCompanyId,
+              contactId,
+              channel: targetChannel,
+              channelAccountId: targetChannel === 'WHATSAPP' ? null : channelAccountId,
+              wahaSession: effectiveSession,
+              lastMessage: message,
+              lastMessageAt: now,
+              unreadCount: 0,
+              createdAt: now,
+              updatedAt: now,
+            });
+          } catch (convErr: any) {
+            const code = String(convErr?.code || convErr?.cause?.code || '');
+            if (code !== '23505') throw convErr;
+            const retryList = await db
+              .select()
+              .from(conversations)
+              .where(
+                and(
+                  eq(conversations.companyId, resolvedCompanyId),
+                  eq(conversations.contactId, contactId),
+                  eq(conversations.channel, targetChannel)
+                )
+              );
+            const fallbackConv = effectiveSession
+              ? retryList.find(
+                  (c) => (c.wahaSession || '').trim().toLowerCase() === effectiveSession.trim().toLowerCase()
+                ) || retryList[0]
+              : retryList[0];
+            if (!fallbackConv) throw convErr;
+            convId = fallbackConv.id;
+            await db
+              .update(conversations)
+              .set({
+                lastMessage: message,
+                lastMessageAt: now,
+                updatedAt: now,
+              })
+              .where(eq(conversations.id, convId));
+          }
         } else {
           await db
             .update(conversations)

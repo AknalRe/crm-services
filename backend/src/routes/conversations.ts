@@ -847,22 +847,41 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             .returning();
           conversationRow = upd;
         } else {
-          const [insConv] = await db
-            .insert(conversations)
-            .values({
-              id: crypto.randomUUID(),
-              companyId,
-              contactId: contactRow.id,
-              channel: 'WHATSAPP',
-              wahaSession: requestedSession,
-              pushName: contactRow.namaLengkap,
-              status: 'OPEN',
-              sessionStartedAt: now,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .returning();
-          conversationRow = insConv;
+          try {
+            const [insConv] = await db
+              .insert(conversations)
+              .values({
+                id: crypto.randomUUID(),
+                companyId,
+                contactId: contactRow.id,
+                channel: 'WHATSAPP',
+                wahaSession: requestedSession,
+                pushName: contactRow.namaLengkap,
+                status: 'OPEN',
+                sessionStartedAt: now,
+                createdAt: now,
+                updatedAt: now,
+              })
+              .returning();
+            conversationRow = insConv;
+          } catch (convErr: any) {
+            const code = String(convErr?.code || convErr?.cause?.code || '');
+            if (code !== '23505') throw convErr;
+            const retryList = await db
+              .select()
+              .from(conversations)
+              .where(
+                and(
+                  eq(conversations.companyId, companyId),
+                  eq(conversations.contactId, contactRow.id),
+                  eq(conversations.channel, 'WHATSAPP')
+                )
+              )
+              .orderBy(desc(conversations.updatedAt));
+            const fallbackRow = selectWhatsAppConversationForSession(retryList, requestedSession) || retryList[0];
+            if (!fallbackRow) throw convErr;
+            conversationRow = fallbackRow;
+          }
         }
         liveEvents.emit('conversations:update', { conversationId: conversationRow.id }, companyId);
       }
@@ -1747,24 +1766,43 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         convRow = updated[0];
         liveEvents.emit('conversations:update', { conversationId: matchedExisting.id }, companyId);
       } else {
-        const created = await db
-          .insert(conversations)
-          .values({
-            id: crypto.randomUUID(),
-            companyId,
-            contactId: contact.id,
-            channel: 'WHATSAPP',
-            status: 'OPEN',
-            excludeFromMetrics: Boolean(contact.excludeFromMetrics),
-            excludeReason: contact.excludeFromMetrics ? (contact.excludeReason || 'Bukan Customer') : null,
-            sessionStartedAt: now,
-            wahaSession: targetSession,
-            unreadCount: 0,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .returning();
-        convRow = created[0];
+        try {
+          const created = await db
+            .insert(conversations)
+            .values({
+              id: crypto.randomUUID(),
+              companyId,
+              contactId: contact.id,
+              channel: 'WHATSAPP',
+              status: 'OPEN',
+              excludeFromMetrics: Boolean(contact.excludeFromMetrics),
+              excludeReason: contact.excludeFromMetrics ? (contact.excludeReason || 'Bukan Customer') : null,
+              sessionStartedAt: now,
+              wahaSession: targetSession,
+              unreadCount: 0,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
+          convRow = created[0];
+        } catch (convErr: any) {
+          const code = String(convErr?.code || convErr?.cause?.code || '');
+          if (code !== '23505') throw convErr;
+          const retryRows = await db
+            .select()
+            .from(conversations)
+            .where(
+              and(
+                eq(conversations.companyId, companyId),
+                eq(conversations.contactId, contact.id),
+                eq(conversations.channel, 'WHATSAPP')
+              )
+            )
+            .orderBy(desc(conversations.updatedAt));
+          const winner = selectWhatsAppConversationForSession(retryRows, requestedSession) || retryRows[0];
+          if (!winner) throw convErr;
+          convRow = winner;
+        }
         liveEvents.emit('conversations:update', { conversationId: convRow.id }, companyId);
       }
 

@@ -886,7 +886,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [listError, setListError] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
-  const [showResolveMenu, setShowResolveMenu] = useState(false);
+  const [showResolveConfirmModal, setShowResolveConfirmModal] = useState(false);
+  const [resolvingStatus, setResolvingStatus] = useState(false);
 
   const [sessions, setSessions] = useState<WahaSessionItem[]>([]);
   const [defaultWahaSession, setDefaultWahaSession] = useState<string>('');
@@ -978,7 +979,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState<string[]>(['Pilihan 1', 'Pilihan 2']);
   const [pollMultiple, setPollMultiple] = useState(false);
-  const [markingRead, setMarkingRead] = useState(false);
   const [lightboxMedia, setLightboxMedia] = useState<{ url: string; name?: string | null } | null>(null);
   const [presenceByConvId, setPresenceByConvId] = useState<
     Record<string, { status: 'typing' | 'recording' | 'online' | 'paused'; expiresAt: number }>
@@ -1026,7 +1026,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [participantsData, setParticipantsData] = useState<ConversationParticipantsResponse | null>(null);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
-  const [sendingCsat, setSendingCsat] = useState(false);
   const [expandedCsatId, setExpandedCsatId] = useState<string | null>(null);
   const [highlightedCsatWindow, setHighlightedCsatWindow] = useState<{
     token?: string | null;
@@ -1070,7 +1069,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const fetchConversations = useCallback(async () => {
     if (!isLiveChatUnlocked) return;
     try {
-      const data = await api.getConversations();
+      const rawData = await api.getConversations();
+      const data = Array.from(new Map(rawData.map((c) => [c.id, c])).values());
       setConversations(data);
       setListError(null);
       setSelectedConversation((prev) => {
@@ -2256,32 +2256,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }, 3000);
   };
 
-  const handleMarkRead = async () => {
-    if (!selectedConversation || markingRead) return;
-    setMarkingRead(true);
-    try {
-      const res = await api.markConversationRead(selectedConversation.id);
-      if ((selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP') {
-        if (res.seenSent) {
-          toast.success('Pesan ditandai dibaca & tanda seen dikirim ke WhatsApp');
-        } else if (res.skippedByPrivacy) {
-          toast.info(res.error || 'Unread CRM direset (centang biru dinonaktifkan di pengaturan privasi)');
-        } else if (res.error) {
-          toast.error(`Unread CRM direset, namun WhatsApp seen gagal: ${res.error}`);
-        } else {
-          toast.success('Percakapan ditandai sudah dibaca');
-        }
-      } else {
-        toast.success('Percakapan ditandai sudah dibaca');
-      }
-      void fetchConversations();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Gagal menandai dibaca');
-    } finally {
-      setMarkingRead(false);
-    }
-  };
-
   const handleSendLinkMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isLiveChatUnlocked || !selectedConversation || sending) return;
@@ -3451,22 +3425,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
     nextStatus: 'OPEN' | 'PENDING' | 'RESOLVED',
     sendCsat?: boolean
   ) => {
-    if (!selectedConversation) return;
-    setShowResolveMenu(false);
+    if (!selectedConversation || resolvingStatus) return;
+    setResolvingStatus(true);
     try {
       const res = await api.updateConversation(selectedConversation.id, {
         status: nextStatus,
         sendCsat,
         baseUrl: getAppBaseUrl(),
       });
+      setShowResolveConfirmModal(false);
       if (res?.csatSent) {
-        toast.success('Percakapan diakhiri & tautan CSAT dikirim');
+        toast.success('Percakapan diselesaikan & tautan CSAT dikirim');
       } else {
         toast.success(
           nextStatus === 'RESOLVED'
             ? sendCsat === false
-              ? 'Percakapan diakhiri tanpa mengirim CSAT'
-              : 'Percakapan diakhiri (Resolved)'
+              ? 'Percakapan diselesaikan tanpa mengirim CSAT'
+              : 'Percakapan diselesaikan (Resolved)'
             : nextStatus === 'OPEN'
             ? 'Percakapan dibuka kembali (Open)'
             : 'Status percakapan diubah ke Pending'
@@ -3478,7 +3453,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
       }
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal memperbarui status');
+    } finally {
+      setResolvingStatus(false);
     }
+  };
+
+  const handleSelectConversationStatus = (nextStatus: 'OPEN' | 'PENDING' | 'RESOLVED') => {
+    if (!selectedConversation || resolvingStatus) return;
+    if (
+      nextStatus === 'RESOLVED' &&
+      selectedConversation.status !== 'RESOLVED' &&
+      !selectedConversation.excludeFromMetrics &&
+      canSendCsat
+    ) {
+      setShowResolveConfirmModal(true);
+      return;
+    }
+    void handleStatusChange(nextStatus, nextStatus === 'RESOLVED' ? false : undefined);
   };
 
   const getLabelList = (conv: Conversation | null): string[] => {
@@ -3655,24 +3646,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
       toast.error(err.response?.data?.error || 'Gagal memperbarui status penilaian');
     } finally {
       setSavingExclude(false);
-    }
-  };
-
-  const handleSendCsatCta = async () => {
-    if (!selectedConversation || sendingCsat) return;
-    setSendingCsat(true);
-    try {
-      const res = await api.sendConversationCsatCta(selectedConversation.id, {
-        session: selectedSession || undefined,
-        baseUrl: getAppBaseUrl(),
-      });
-      setMessages((prev) => [...prev, res.message]);
-      toast.success('Tautan rating CSAT berhasil dikirim ke pelanggan');
-      void fetchConversations();
-    } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Gagal mengirim tautan CSAT');
-    } finally {
-      setSendingCsat(false);
     }
   };
 
@@ -4603,21 +4576,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     </button>
                   )}
 
-                  {sessions.length > 0 && ch === 'WHATSAPP' && (
-                    <select
-                      value={selectedSession}
-                      onChange={(e) => setSelectedSession(e.target.value)}
-                      title="Pilih sesi WAHA pengirim"
-                      className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] font-mono text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[160px]"
-                    >
-                      {sessions.map((s) => (
-                        <option key={s.name} value={s.name}>
-                          {s.name} • {s.status === 'WORKING' ? 'Aktif' : s.status}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
                   {!isExcludedConv && assignableAgents.length > 0 && (
                     <select
                       value={selectedConversation.assignedAgentId || ''}
@@ -4628,7 +4586,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           ? 'Tugaskan ke Agent'
                           : 'Role Anda tidak memiliki izin menugaskan CS'
                       }
-                      className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[130px] disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[140px] disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       <option value="">Belum Ditugaskan</option>
                       {assignableAgents.map((ag) => (
@@ -4642,9 +4600,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   {!isExcludedConv && (
                     <select
                       value={selectedConversation.status || 'OPEN'}
-                      disabled={!canManageConversation}
+                      disabled={!canManageConversation || resolvingStatus}
                       onChange={(e) =>
-                        handleStatusChange(e.target.value as 'OPEN' | 'PENDING' | 'RESOLVED')
+                        handleSelectConversationStatus(e.target.value as 'OPEN' | 'PENDING' | 'RESOLVED')
                       }
                       title={
                         canManageConversation
@@ -4663,85 +4621,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <option value="PENDING">Pending</option>
                       <option value="RESOLVED">Resolved</option>
                     </select>
-                  )}
-
-                  {!isExcludedConv &&
-                    canManageConversation &&
-                    (selectedConversation.status === 'RESOLVED' ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleStatusChange('OPEN')}
-                        title="Buka kembali percakapan ini"
-                        className="h-7 px-2.5 rounded-md border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
-                      >
-                        <RotateCcw className="w-3 h-3 shrink-0" />
-                        <span>Buka Kembali</span>
-                      </button>
-                    ) : (
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => setShowResolveMenu((prev) => !prev)}
-                          title="Akhiri percakapan (pilih dengan atau tanpa CSAT)"
-                          className="h-7 px-2.5 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors"
-                        >
-                          <CheckCircle2 className="w-3 h-3 shrink-0" />
-                          <span>Akhiri</span>
-                          <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
-                        </button>
-                        {showResolveMenu && (
-                          <>
-                            <div
-                              className="fixed inset-0 z-10"
-                              onClick={() => setShowResolveMenu(false)}
-                            />
-                            <div className="absolute right-0 mt-1 w-48 rounded-md bg-white border border-gray-200 shadow-lg py-1 z-20">
-                              {canSendCsat && (
-                                <button
-                                  type="button"
-                                  onClick={() => void handleStatusChange('RESOLVED', true)}
-                                  className="w-full text-left px-3 py-1.5 text-[11px] text-gray-800 hover:bg-emerald-50 hover:text-emerald-800 flex items-center gap-1.5 whitespace-nowrap"
-                                >
-                                  <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                  <span>Akhiri &amp; Kirim CSAT</span>
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => void handleStatusChange('RESOLVED', false)}
-                                className="w-full text-left px-3 py-1.5 text-[11px] text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 whitespace-nowrap"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                <span>Akhiri Tanpa CSAT</span>
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
-
-                  <button
-                    type="button"
-                    onClick={handleMarkRead}
-                    disabled={markingRead}
-                    title="Tandai Dibaca & Kirim Centang Biru (Seen) ke WhatsApp"
-                    className="h-7 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 hover:text-indigo-700 text-[11px] font-medium inline-flex items-center gap-1 shrink-0 transition-colors disabled:opacity-50"
-                  >
-                    <CheckCheck className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                    <span className="hidden xl:inline">Dibaca</span>
-                  </button>
-
-                  {!isExcludedConv && canSendCsat && (
-                    <button
-                      type="button"
-                      onClick={handleSendCsatCta}
-                      disabled={sendingCsat}
-                      title="Kirim Tautan Rating CSAT ke Pelanggan"
-                      className="h-7 px-2.5 rounded-md border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-50"
-                    >
-                      <Star className="w-3 h-3 fill-amber-400 text-amber-500 shrink-0" />
-                      <span>Kirim CSAT</span>
-                    </button>
                   )}
 
                   <button
@@ -4781,7 +4660,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <button
                       type="button"
                       onClick={() => setShowMobileChatActions((v) => !v)}
-                      title="Aksi Percakapan (Status, Agent, Sesi, CSAT)"
+                      title="Aksi Percakapan (Status, Agent)"
                       className={`h-8 px-2 rounded-md border text-[11px] font-semibold inline-flex items-center gap-1 transition-colors ${
                         !isExcludedConv
                           ? selectedConversation.status === 'RESOLVED'
@@ -4795,7 +4674,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <span>
                         {!isExcludedConv
                           ? selectedConversation.status === 'RESOLVED'
-                            ? 'Selesai'
+                            ? 'Resolved'
                             : selectedConversation.status === 'PENDING'
                             ? 'Pending'
                             : 'Open'
@@ -4857,25 +4736,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             );
                           })()}
 
-                          {sessions.length > 0 && ch === 'WHATSAPP' && (
-                            <div className="space-y-1">
-                              <span className="block text-[10px] font-medium text-gray-500">
-                                Sesi WAHA Pengirim
-                              </span>
-                              <select
-                                value={selectedSession}
-                                onChange={(e) => setSelectedSession(e.target.value)}
-                                className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono text-gray-700"
-                              >
-                                {sessions.map((s) => (
-                                  <option key={s.name} value={s.name}>
-                                    {s.name} • {s.status === 'WORKING' ? 'Aktif' : s.status}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-
                           {!isExcludedConv && assignableAgents.length > 0 && (
                             <div className="space-y-1">
                               <span className="block text-[10px] font-medium text-gray-500">
@@ -4910,10 +4770,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   <button
                                     key={st}
                                     type="button"
-                                    disabled={!canManageConversation}
+                                    disabled={!canManageConversation || resolvingStatus}
                                     onClick={() => {
-                                      void handleStatusChange(st);
                                       setShowMobileChatActions(false);
+                                      handleSelectConversationStatus(st);
                                     }}
                                     className={`h-7 rounded border text-[11px] font-medium transition-colors disabled:opacity-60 ${
                                       selectedConversation.status === st
@@ -4929,77 +4789,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           )}
 
                           <div className="pt-1 border-t border-gray-100 space-y-1">
-                            {!isExcludedConv &&
-                              canManageConversation &&
-                              (selectedConversation.status === 'RESOLVED' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    void handleStatusChange('OPEN');
-                                    setShowMobileChatActions(false);
-                                  }}
-                                  className="w-full h-8 px-2.5 rounded border border-blue-200 bg-blue-50 text-blue-700 text-[11px] font-medium flex items-center gap-2"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                  <span>Buka Kembali Percakapan</span>
-                                </button>
-                              ) : (
-                                <>
-                                  {canSendCsat && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleStatusChange('RESOLVED', true);
-                                        setShowMobileChatActions(false);
-                                      }}
-                                      className="w-full h-8 px-2.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-800 text-[11px] font-medium flex items-center gap-2"
-                                    >
-                                      <Star className="w-3.5 h-3.5 text-amber-500" />
-                                      <span>Akhiri &amp; Kirim CSAT</span>
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      void handleStatusChange('RESOLVED', false);
-                                      setShowMobileChatActions(false);
-                                    }}
-                                    className="w-full h-8 px-2.5 rounded border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-[11px] font-medium flex items-center gap-2"
-                                  >
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                    <span>Akhiri Tanpa CSAT</span>
-                                  </button>
-                                </>
-                              ))}
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void handleMarkRead();
-                                setShowMobileChatActions(false);
-                              }}
-                              disabled={markingRead}
-                              className="w-full h-8 px-2.5 rounded border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-[11px] font-medium flex items-center gap-2 disabled:opacity-50"
-                            >
-                              <CheckCheck className="w-3.5 h-3.5 text-sky-600" />
-                              <span>Tandai Dibaca (Centang Biru)</span>
-                            </button>
-
-                            {!isExcludedConv && canSendCsat && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void handleSendCsatCta();
-                                  setShowMobileChatActions(false);
-                                }}
-                                disabled={sendingCsat}
-                                className="w-full h-8 px-2.5 rounded border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-medium flex items-center gap-2 disabled:opacity-50"
-                              >
-                                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                                <span>Kirim Tautan Rating CSAT</span>
-                              </button>
-                            )}
-
                             <button
                               type="button"
                               onClick={() => {
@@ -9087,7 +8876,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <p className="text-[11px] text-gray-400">
                       {selectedConversation.excludeFromMetrics || selectedConversation.isGroup
                         ? 'Obrolan ini bertanda Non-Penilaian (tidak menggunakan Status, Penugasan CS, atau survei CSAT).'
-                        : 'Belum ada penilaian. Gunakan tombol "Kirim CSAT" atau pilih "Akhiri & Kirim CSAT".'}
+                        : 'Belum ada penilaian. Ubah status percakapan ke Resolved lalu pilih kirim tautan CSAT.'}
                     </p>
                   )}
                 </div>
@@ -10584,6 +10373,55 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        isOpen={showResolveConfirmModal}
+        onClose={() => !resolvingStatus && setShowResolveConfirmModal(false)}
+        title="Selesaikan Percakapan (Resolved)"
+        subtitle="Pilih apakah tautan survei kepuasan (CSAT) dikirim ke pelanggan atau tidak."
+        maxWidthClass="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg bg-emerald-50/70 border border-emerald-200 text-xs text-emerald-950 leading-relaxed">
+            Status percakapan dengan{' '}
+            <span className="font-semibold">
+              {selectedConversation?.contact?.nama_lengkap || selectedConversation?.pushName || 'pelanggan'}
+            </span>{' '}
+            akan diubah menjadi <span className="font-semibold">Resolved</span>. Apakah ingin sekalian mengirim tautan penilaian CSAT?
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={resolvingStatus}
+              onClick={() => setShowResolveConfirmModal(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              isLoading={resolvingStatus}
+              onClick={() => void handleStatusChange('RESOLVED', false)}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Selesaikan Tanpa CSAT</span>
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              isLoading={resolvingStatus}
+              onClick={() => void handleStatusChange('RESOLVED', true)}
+            >
+              <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-200" />
+              <span>Selesaikan &amp; Kirim CSAT</span>
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <MediaLibraryPickerModal
