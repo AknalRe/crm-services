@@ -974,6 +974,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [loadingGroupInvite, setLoadingGroupInvite] = useState(false);
   const [newMemberPhone, setNewMemberPhone] = useState('');
   const [addingMember, setAddingMember] = useState(false);
+  const [quickMemberSearch, setQuickMemberSearch] = useState('');
+  const [quickMemberContacts, setQuickMemberContacts] = useState<Contact[]>([]);
+  const [quickMemberPage, setQuickMemberPage] = useState(1);
+  const [quickMemberLimit, setQuickMemberLimit] = useState(25);
+  const [quickMemberTotal, setQuickMemberTotal] = useState(0);
+  const [quickMemberTotalPages, setQuickMemberTotalPages] = useState(1);
+  const [loadingQuickMemberContacts, setLoadingQuickMemberContacts] = useState(false);
   const [openProfileSections, setOpenProfileSections] = useState<Record<string, boolean>>({});
 
   const toggleProfileSection = (key: string) => {
@@ -3234,16 +3241,62 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   };
 
+  const loadQuickMemberContacts = useCallback(
+    async (opts?: { search?: string; page?: number; limit?: number }) => {
+      const targetPage = opts?.page ?? quickMemberPage;
+      const targetLimit = opts?.limit ?? quickMemberLimit;
+      const targetSearch = opts?.search ?? quickMemberSearch;
+      setLoadingQuickMemberContacts(true);
+      try {
+        const res = await api.getContacts({
+          search: targetSearch.trim() || undefined,
+          hasWhatsapp: true,
+          page: targetPage,
+          limit: targetLimit,
+        });
+        const list = (Array.isArray(res) ? res : res?.data || []).filter((c) => Boolean(c.nomor_whatsapp));
+        const pagination = !Array.isArray(res) ? res?.pagination : undefined;
+        setQuickMemberContacts(list);
+        setQuickMemberTotal(pagination?.total ?? list.length);
+        setQuickMemberTotalPages(Math.max(1, pagination?.totalPages ?? 1));
+      } catch {
+        toast.error('Gagal memuat daftar kontak CRM');
+      } finally {
+        setLoadingQuickMemberContacts(false);
+      }
+    },
+    [quickMemberPage, quickMemberLimit, quickMemberSearch, toast]
+  );
+
+  useEffect(() => {
+    if (!showGroupManageModal || groupManageTab !== 'ADD_MEMBER') return;
+    const delay = quickMemberSearch.trim() ? 250 : 0;
+    const timer = window.setTimeout(() => {
+      void loadQuickMemberContacts({
+        search: quickMemberSearch,
+        page: quickMemberPage,
+        limit: quickMemberLimit,
+      });
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [
+    showGroupManageModal,
+    groupManageTab,
+    quickMemberSearch,
+    quickMemberPage,
+    quickMemberLimit,
+    loadQuickMemberContacts,
+  ]);
+
   const handleOpenGroupManageModal = (initialTab: 'INFO' | 'INVITE' | 'ADD_MEMBER' = 'INFO') => {
     if (!selectedConversation || !selectedConversation.isGroup) return;
     setGroupManageTab(initialTab);
     setGroupSubjectDraft(selectedConversation.contact?.nama_lengkap || '');
     setGroupDescDraft(selectedConversation.contact?.profile_about || '');
     setGroupInviteError(null);
+    setQuickMemberSearch('');
+    setQuickMemberPage(1);
     setShowGroupManageModal(true);
-    if (contactsList.length === 0) {
-      void loadModalContacts();
-    }
     if (initialTab === 'INVITE') {
       void fetchGroupInvite();
     }
@@ -3290,57 +3343,50 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
   };
 
-  const handleSaveGroupSubject = async () => {
-    if (!selectedConversation || !groupSubjectDraft.trim() || savingGroupInfo) return;
-    setSavingGroupInfo(true);
-    try {
-      await api.updateGroupSubject(
-        selectedConversation.id,
-        groupSubjectDraft.trim(),
-        selectedSession || selectedConversation.wahaSession || undefined
-      );
-      setSelectedConversation((prev) =>
-        prev
-          ? {
-              ...prev,
-              contact: {
-                ...prev.contact,
-                nama_lengkap: groupSubjectDraft.trim(),
-              },
-            }
-          : null
-      );
-      toast.success('Nama grup berhasil diperbarui');
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Gagal mengubah nama grup');
-    } finally {
-      setSavingGroupInfo(false);
-    }
-  };
-
-  const handleSaveGroupDesc = async () => {
+  const handleSaveGroupInfo = async () => {
     if (!selectedConversation || savingGroupInfo) return;
+    const nextSubject = groupSubjectDraft.trim();
+    const nextDesc = groupDescDraft.trim();
+    const prevSubject = (selectedConversation.contact?.nama_lengkap || '').trim();
+    const prevDesc = (selectedConversation.contact?.profile_about || '').trim();
+
+    if (!nextSubject) {
+      toast.error('Nama grup tidak boleh kosong');
+      return;
+    }
+
+    const subjectChanged = nextSubject !== prevSubject;
+    const descChanged = nextDesc !== prevDesc;
+    if (!subjectChanged && !descChanged) {
+      toast.info('Tidak ada perubahan nama atau deskripsi grup');
+      return;
+    }
+
+    const session = selectedSession || selectedConversation.wahaSession || undefined;
     setSavingGroupInfo(true);
     try {
-      await api.updateGroupDescription(
-        selectedConversation.id,
-        groupDescDraft.trim(),
-        selectedSession || selectedConversation.wahaSession || undefined
-      );
+      if (subjectChanged) {
+        await api.updateGroupSubject(selectedConversation.id, nextSubject, session);
+      }
+      if (descChanged) {
+        await api.updateGroupDescription(selectedConversation.id, nextDesc, session);
+      }
       setSelectedConversation((prev) =>
         prev
           ? {
               ...prev,
+              contextTitle: subjectChanged ? nextSubject : prev.contextTitle,
               contact: {
                 ...prev.contact,
-                profile_about: groupDescDraft.trim(),
+                nama_lengkap: subjectChanged ? nextSubject : prev.contact.nama_lengkap,
+                profile_about: descChanged ? nextDesc : prev.contact.profile_about,
               },
             }
           : null
       );
-      toast.success('Deskripsi grup berhasil diperbarui');
+      toast.success('Informasi grup berhasil diperbarui');
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Gagal mengubah deskripsi grup');
+      toast.error(err?.response?.data?.error || 'Gagal memperbarui informasi grup');
     } finally {
       setSavingGroupInfo(false);
     }
@@ -5712,23 +5758,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         )}
                         {!isOutbound &&
                           !isCsat &&
-                          (!selectedConversation.isGroup || isFirstInSenderRun) &&
-                          (selectedConversation.isGroup || msg.senderName || msg.senderPhone) && (() => {
+                          selectedConversation.isGroup &&
+                          isFirstInSenderRun && (() => {
                             const senderDisplayName = resolveMessageSenderName(msg);
                             const cleanPhone = msg.senderPhone ? msg.senderPhone.replace(/\D/g, '') : '';
                             const jidToken = msg.senderJid ? msg.senderJid.replace(/@.*$/, '').toLowerCase() : '';
                             const lookup =
                               (cleanPhone ? participantsLookup.get(cleanPhone) : undefined) ||
                               (jidToken ? participantsLookup.get(jidToken) : undefined);
-                            const avatarUrl =
-                              msg.senderAvatarUrl ||
-                              lookup?.avatarUrl ||
-                              (!selectedConversation.isGroup ? selectedConversation.contact?.profile_picture_url : null) ||
-                              null;
-                            const targetContactId =
-                              lookup?.contactId ||
-                              (!selectedConversation.isGroup ? selectedConversation.contact?.id : null) ||
-                              null;
+                            const avatarUrl = msg.senderAvatarUrl || lookup?.avatarUrl || null;
+                            const targetContactId = lookup?.contactId || null;
                             return (
                               <div className="flex items-center gap-2 pb-1 border-b border-gray-100">
                                 <button
@@ -9946,25 +9985,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <label className="block text-[11px] font-semibold text-gray-700 mb-1">
                       Nama / Subjek Grup
                     </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={groupSubjectDraft}
-                        onChange={(e) => setGroupSubjectDraft(e.target.value)}
-                        placeholder="Masukkan nama grup..."
-                        className="flex-1 h-8 px-2.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500"
-                      />
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        disabled={savingGroupInfo || !groupSubjectDraft.trim()}
-                        isLoading={savingGroupInfo}
-                        onClick={() => void handleSaveGroupSubject()}
-                      >
-                        Simpan
-                      </Button>
-                    </div>
+                    <input
+                      type="text"
+                      value={groupSubjectDraft}
+                      onChange={(e) => setGroupSubjectDraft(e.target.value)}
+                      placeholder="Masukkan nama grup..."
+                      className="w-full h-8 px-2.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500"
+                    />
                   </div>
 
                   <div>
@@ -9978,18 +10005,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       placeholder="Masukkan deskripsi grup..."
                       className="w-full p-2 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500"
                     />
-                    <div className="mt-1 flex justify-end">
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        disabled={savingGroupInfo}
-                        isLoading={savingGroupInfo}
-                        onClick={() => void handleSaveGroupDesc()}
-                      >
-                        Simpan Deskripsi
-                      </Button>
-                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      disabled={savingGroupInfo || !groupSubjectDraft.trim()}
+                      isLoading={savingGroupInfo}
+                      onClick={() => void handleSaveGroupInfo()}
+                    >
+                      Simpan
+                    </Button>
                   </div>
 
                   <div className="pt-2 border-t border-gray-100">
@@ -10145,35 +10173,108 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     </p>
                   </div>
 
-                  <div className="pt-2 border-t border-gray-100">
-                    <div className="text-[11px] font-semibold text-gray-700 mb-1.5">
-                      Pilih Cepat dari Kontak CRM
+                  <div className="pt-2 border-t border-gray-100 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold text-gray-700">
+                        Pilih Cepat dari Kontak CRM
+                      </div>
+                      <label className="inline-flex items-center gap-1 text-[10px] text-gray-500">
+                        <span>Tampil</span>
+                        <select
+                          value={quickMemberLimit}
+                          onChange={(e) => {
+                            setQuickMemberLimit(Number(e.target.value) || 25);
+                            setQuickMemberPage(1);
+                          }}
+                          className="h-6 px-1.5 border border-gray-200 rounded bg-white text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value={15}>15</option>
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                        </select>
+                      </label>
                     </div>
-                    <div className="max-h-40 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded">
-                      {loadingContacts && contactsList.length === 0 ? (
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={quickMemberSearch}
+                        onChange={(e) => {
+                          setQuickMemberSearch(e.target.value);
+                          setQuickMemberPage(1);
+                        }}
+                        placeholder="Cari nama atau nomor WA kontak..."
+                        className="w-full h-8 pl-8 pr-2.5 border border-gray-200 rounded text-[11px] bg-gray-50 focus:bg-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="max-h-52 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded">
+                      {loadingQuickMemberContacts && quickMemberContacts.length === 0 ? (
                         <div className="p-3 text-center text-[11px] text-gray-500">Memuat kontak CRM...</div>
-                      ) : contactsList.filter((c) => Boolean(c.nomor_whatsapp)).length === 0 ? (
+                      ) : quickMemberContacts.length === 0 ? (
                         <div className="p-3 text-center text-[11px] text-gray-400">
-                          Belum ada kontak dengan nomor WhatsApp tersimpan.
+                          {quickMemberSearch.trim()
+                            ? 'Tidak ada kontak dengan nomor WhatsApp yang cocok.'
+                            : 'Belum ada kontak dengan nomor WhatsApp tersimpan.'}
                         </div>
                       ) : (
-                        contactsList
-                          .filter((c) => Boolean(c.nomor_whatsapp))
-                          .slice(0, 15)
-                          .map((c) => (
+                        quickMemberContacts.map((c) => {
+                          const isChosen = newMemberPhone.replace(/\D/g, '') === (c.nomor_whatsapp || '').replace(/\D/g, '');
+                          return (
                             <button
                               key={c.id}
                               type="button"
                               onClick={() => setNewMemberPhone(c.nomor_whatsapp || '')}
-                              className="w-full px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 flex items-center justify-between"
+                              className={`w-full px-2.5 py-1.5 text-left text-xs flex items-center justify-between gap-2 transition-colors ${
+                                isChosen ? 'bg-indigo-50/70' : 'hover:bg-gray-50'
+                              }`}
                             >
-                              <span className="font-medium text-gray-800 truncate">{c.nama_lengkap}</span>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <ContactAvatar
+                                  url={c.profile_picture_url}
+                                  label={c.nama_lengkap}
+                                  className="w-6 h-6 rounded-full bg-slate-600 text-white font-semibold text-[9px] shrink-0"
+                                />
+                                <span className="font-medium text-gray-800 truncate">{c.nama_lengkap}</span>
+                              </div>
                               <span className="text-[10px] font-mono text-gray-500 shrink-0">
                                 +{c.nomor_whatsapp}
                               </span>
                             </button>
-                          ))
+                          );
+                        })
                       )}
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px] text-gray-500 tabular-nums">
+                      <span>
+                        {quickMemberTotal > 0
+                          ? `${(quickMemberPage - 1) * quickMemberLimit + 1}-${Math.min(
+                              quickMemberPage * quickMemberLimit,
+                              quickMemberTotal
+                            )} dari ${quickMemberTotal.toLocaleString('id-ID')} kontak`
+                          : '0 kontak'}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={loadingQuickMemberContacts || quickMemberPage <= 1}
+                          onClick={() => setQuickMemberPage((p) => Math.max(1, p - 1))}
+                          className="px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-gray-700"
+                        >
+                          Sebelumnya
+                        </button>
+                        <span className="px-1.5 font-mono text-gray-700">
+                          Hal {quickMemberPage}/{quickMemberTotalPages}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={loadingQuickMemberContacts || quickMemberPage >= quickMemberTotalPages}
+                          onClick={() => setQuickMemberPage((p) => Math.min(quickMemberTotalPages, p + 1))}
+                          className="px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-gray-700"
+                        >
+                          Berikutnya
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

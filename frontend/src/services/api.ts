@@ -66,6 +66,7 @@ export const api = {
     tag?: string;
     kategori?: string;
     excludeFromMetrics?: 'ALL' | 'ASSESSED' | 'EXCLUDED';
+    hasWhatsapp?: boolean;
     page?: number;
     limit?: number;
   }): Promise<{ data: Contact[]; pagination: PaginationMeta }> => {

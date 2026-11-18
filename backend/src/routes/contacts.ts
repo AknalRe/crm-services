@@ -61,6 +61,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       tag?: string;
       kategori?: string;
       excludeFromMetrics?: string;
+      hasWhatsapp?: string;
       idsOnly?: string;
       page?: string;
       limit?: string;
@@ -73,6 +74,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         tag,
         kategori,
         excludeFromMetrics,
+        hasWhatsapp,
         idsOnly,
         page = '1',
         limit = '50',
@@ -113,6 +115,12 @@ export default async function contactsRouter(fastify: FastifyInstance) {
         conditions.push(eq(contacts.excludeFromMetrics, true));
       } else if (metricFilter === 'ASSESSED') {
         conditions.push(or(eq(contacts.excludeFromMetrics, false), isNull(contacts.excludeFromMetrics)));
+      }
+
+      if (hasWhatsapp === '1' || hasWhatsapp === 'true') {
+        conditions.push(
+          sql`${contacts.nomorWhatsapp} IS NOT NULL AND TRIM(${contacts.nomorWhatsapp}) <> '' AND ${contacts.nomorWhatsapp} NOT ILIKE '%@g.us%'`
+        );
       }
 
       const whereClause = and(...conditions);
