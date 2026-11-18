@@ -686,10 +686,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'PENDING' | 'RESOLVED'>('ALL');
   const [chatTypeFilter, setChatTypeFilter] = useState<'ALL' | 'PERSONAL' | 'GROUP' | 'UNREAD'>('ALL');
-  const [metricFilter, setMetricFilter] = useState<'ALL' | 'ASSESSED' | 'EXCLUDED' | 'GROUPS'>('ALL');
+  const [metricFilter, setMetricFilter] = useState<'ALL' | 'ASSESSED' | 'EXCLUDED' | 'GROUPS' | 'SLA_BREACH'>('ALL');
   const [channelFilter, setChannelFilter] = useState<'ALL' | OmnichannelType>('ALL');
   const [channelAccounts, setChannelAccounts] = useState<ChannelAccount[]>([]);
   const [accountFilter, setAccountFilter] = useState<'ALL' | string>('ALL');
+  const [labelFilter, setLabelFilter] = useState<'ALL' | string>('ALL');
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -1097,6 +1098,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setStatusFilter('ALL');
     setChannelFilter('ALL');
     setAccountFilter('ALL');
+    setLabelFilter('ALL');
+    setAssigneeFilter('ALL');
+    setMetricFilter('ALL');
     setSearch('');
     setSelectedConversation(match);
     if (targetConversation.csatToken || targetConversation.csatStartedAt || targetConversation.csatResolvedAt) {
@@ -2871,7 +2875,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [assignableAgents, setAssignableAgents] = useState<
     Array<{ id: string; name: string; email: string; role: string }>
   >([]);
-  const [assigneeFilter, setAssigneeFilter] = useState<'ALL' | 'MINE' | 'UNASSIGNED'>('ALL');
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('ALL');
   const [cannedList, setCannedList] = useState<CannedResponse[]>([]);
   const [masterLabels, setMasterLabels] = useState<CrmLabelItem[]>([]);
   const [showCannedPicker, setShowCannedPicker] = useState(false);
@@ -3037,7 +3041,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
   useEffect(() => {
     setConvDisplayLimit(100);
-  }, [search, statusFilter, metricFilter, channelFilter, accountFilter, assigneeFilter]);
+  }, [search, statusFilter, chatTypeFilter, metricFilter, channelFilter, accountFilter, assigneeFilter, labelFilter]);
 
   const handleOpenNewChatModal = async () => {
     setContactSearch('');
@@ -3186,6 +3190,76 @@ export const Conversations: React.FC<ConversationsProps> = ({
       .map((s) => s.trim())
       .filter(Boolean);
   };
+
+  const getLabelStyle = useCallback(
+    (labelName: string) => {
+      const clean = labelName.trim().toLowerCase();
+      const matched = masterLabels.find((m) => m.name.toLowerCase() === clean);
+      if (matched && matched.color && LABEL_COLOR_MAP[matched.color]) {
+        return {
+          ...LABEL_COLOR_MAP[matched.color],
+          colorKey: matched.color,
+        };
+      }
+      const colorKeys: (keyof typeof LABEL_COLOR_MAP)[] = [
+        'indigo',
+        'emerald',
+        'amber',
+        'rose',
+        'sky',
+        'violet',
+        'slate',
+      ];
+      let hash = 0;
+      for (let i = 0; i < clean.length; i++) {
+        hash = (hash * 31 + clean.charCodeAt(i)) % colorKeys.length;
+      }
+      const fallbackColor = colorKeys[Math.abs(hash)];
+      return {
+        ...LABEL_COLOR_MAP[fallbackColor],
+        colorKey: fallbackColor,
+      };
+    },
+    [masterLabels]
+  );
+
+  const availableFilterLabels = useMemo(() => {
+    const map = new Map<string, { name: string; count: number }>();
+
+    for (const ml of masterLabels) {
+      if (ml.name) {
+        const key = ml.name.trim().toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, { name: ml.name.trim(), count: 0 });
+        }
+      }
+    }
+
+    for (const pl of PRESET_LABELS) {
+      const key = pl.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, { name: pl, count: 0 });
+      }
+    }
+
+    for (const c of conversations) {
+      const list = getLabelList(c);
+      for (const l of list) {
+        const key = l.toLowerCase();
+        const existing = map.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          map.set(key, { name: l, count: 1 });
+        }
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.name.localeCompare(b.name);
+    });
+  }, [masterLabels, conversations]);
 
   const handleToggleLabel = async (label: string) => {
     if (!selectedConversation) return;
@@ -3418,6 +3492,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
     if (metricFilter === 'ASSESSED' && (c.excludeFromMetrics || c.isGroup)) return false;
     if (metricFilter === 'EXCLUDED' && !c.excludeFromMetrics && !c.isGroup) return false;
     if (metricFilter === 'GROUPS' && !c.isGroup) return false;
+    if (metricFilter === 'SLA_BREACH') {
+      const isBreached =
+        !c.excludeFromMetrics &&
+        !c.isGroup &&
+        convStatus === 'OPEN' &&
+        !c.firstResponseAt &&
+        c.firstInboundAt &&
+        Date.now() - new Date(c.firstInboundAt).getTime() > slaTargetMinutes * 60_000;
+      if (!isBreached) return false;
+    }
     if (channelFilter !== 'ALL' && convChannel !== channelFilter) return false;
     if (accountFilter !== 'ALL') {
       if (accountFilter.startsWith('WA:')) {
@@ -3437,8 +3521,24 @@ export const Conversations: React.FC<ConversationsProps> = ({
     if (assigneeFilter === 'UNASSIGNED' && c.assignedAgentId) {
       return false;
     }
-    const q = search.toLowerCase();
+    if (assigneeFilter.startsWith('AGENT:')) {
+      const targetAgentId = assigneeFilter.slice(6);
+      if (c.assignedAgentId !== targetAgentId) return false;
+    }
+    if (labelFilter !== 'ALL') {
+      const convLabels = getLabelList(c);
+      if (labelFilter === '__NO_LABEL__') {
+        if (convLabels.length > 0) return false;
+      } else {
+        const target = labelFilter.toLowerCase();
+        if (!convLabels.some((l) => l.toLowerCase() === target)) {
+          return false;
+        }
+      }
+    }
+    const q = search.toLowerCase().trim();
     if (!q) return true;
+    const cleanQ = q.startsWith('#') ? q.slice(1).trim() : q;
     return (
       c.channelDisplayName?.toLowerCase().includes(q) ||
       c.pushName?.toLowerCase().includes(q) ||
@@ -3446,7 +3546,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       c.contact?.nama_lengkap?.toLowerCase().includes(q) ||
       c.contact?.nomor_whatsapp?.includes(q) ||
       c.lastMessage?.toLowerCase().includes(q) ||
-      c.labels?.toLowerCase().includes(q) ||
+      c.labels?.toLowerCase().includes(cleanQ) ||
       c.wahaSession?.toLowerCase().includes(q) ||
       c.assignedAgentName?.toLowerCase().includes(q)
     );
@@ -3457,7 +3557,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
     (metricFilter !== 'ALL' ? 1 : 0) +
     (channelFilter !== 'ALL' ? 1 : 0) +
     (accountFilter !== 'ALL' ? 1 : 0) +
-    (assigneeFilter !== 'ALL' ? 1 : 0);
+    (assigneeFilter !== 'ALL' ? 1 : 0) +
+    (labelFilter !== 'ALL' ? 1 : 0);
 
   return (
     <div className="relative bg-white rounded-none border-t border-gray-200 sm:rounded-lg sm:border overflow-hidden flex-1 min-h-0 h-full flex flex-col md:flex-row">
@@ -3601,16 +3702,25 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       ? 'Dinilai'
                       : metricFilter === 'EXCLUDED'
                       ? 'Non-Nilai'
+                      : metricFilter === 'SLA_BREACH'
+                      ? 'Lewat SLA'
                       : 'Grup WA'
                     : null,
                   channelFilter !== 'ALL' ? CHANNEL_META[channelFilter]?.short || channelFilter : null,
                   assigneeFilter !== 'ALL'
                     ? assigneeFilter === 'MINE'
                       ? 'Milik Saya'
-                      : 'Belum Ditugaskan'
+                      : assigneeFilter === 'UNASSIGNED'
+                      ? 'Belum Ditugaskan'
+                      : assignableAgents.find((a) => `AGENT:${a.id}` === assigneeFilter)?.name || 'Agent'
                     : null,
                   accountFilter !== 'ALL'
                     ? unifiedSessionOptions.find((o) => o.value === accountFilter)?.label || 'Sesi/Akun Khusus'
+                    : null,
+                  labelFilter !== 'ALL'
+                    ? labelFilter === '__NO_LABEL__'
+                      ? 'Tanpa Label'
+                      : `#${labelFilter}`
                     : null,
                 ]
                   .filter(Boolean)
@@ -3623,6 +3733,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   setChannelFilter('ALL');
                   setAssigneeFilter('ALL');
                   setAccountFilter('ALL');
+                  setLabelFilter('ALL');
                 }}
                 className="font-semibold text-indigo-700 hover:underline shrink-0"
               >
@@ -3633,13 +3744,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
           {showListFilters && (
             <div className="pt-2 border-t border-gray-100 space-y-2">
+              {/* Metric & SLA Tabs */}
               <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[10px]">
                 {(
                   [
                     { id: 'ALL', label: 'Semua' },
                     { id: 'ASSESSED', label: 'Dinilai' },
                     { id: 'EXCLUDED', label: 'Non-Nilai' },
-                    { id: 'GROUPS', label: 'Grup WA' },
+                    { id: 'SLA_BREACH', label: 'Lewat SLA' },
                   ] as const
                 ).map((mf) => (
                   <button
@@ -3648,7 +3760,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     onClick={() => setMetricFilter(mf.id)}
                     className={`py-1 rounded font-medium transition-colors truncate px-1 ${
                       metricFilter === mf.id
-                        ? 'bg-white text-indigo-700 shadow-sm'
+                        ? 'bg-white text-indigo-700 shadow-sm font-semibold'
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -3657,6 +3769,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 ))}
               </div>
 
+              {/* Channel & Agent Dropdowns */}
               <div className={`grid gap-1.5 ${assignableAgents.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <select
                   value={channelFilter}
@@ -3679,7 +3792,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 {assignableAgents.length > 0 && (
                   <select
                     value={assigneeFilter}
-                    onChange={(e) => setAssigneeFilter(e.target.value as any)}
+                    onChange={(e) => setAssigneeFilter(e.target.value)}
                     aria-label="Filter Agent"
                     className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
                   >
@@ -3688,7 +3801,97 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     </option>
                     <option value="MINE">Milik Saya</option>
                     <option value="UNASSIGNED">Belum Ditugaskan</option>
+                    <optgroup label="Spesifik Agent">
+                      {assignableAgents.map((ag) => (
+                        <option key={ag.id} value={`AGENT:${ag.id}`}>
+                          {ag.name}
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
+                )}
+              </div>
+
+              {/* Dedicated Label Filter Section */}
+              <div className="space-y-1.5 bg-white p-2 rounded-md border border-gray-200">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-gray-700 flex items-center gap-1">
+                    <Tag className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Filter Label / Tag Obrolan:</span>
+                  </span>
+                  {labelFilter !== 'ALL' && (
+                    <button
+                      type="button"
+                      onClick={() => setLabelFilter('ALL')}
+                      className="text-[10px] text-indigo-600 hover:underline font-semibold"
+                    >
+                      Reset Label
+                    </button>
+                  )}
+                </div>
+
+                <select
+                  value={labelFilter}
+                  onChange={(e) => setLabelFilter(e.target.value)}
+                  aria-label="Pilih Filter Label"
+                  className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500"
+                >
+                  <option value="ALL">Semua Label ({availableFilterLabels.reduce((acc, curr) => acc + curr.count, 0)} obrolan berlabel)</option>
+                  <option value="__NO_LABEL__">Tanpa Label</option>
+                  {availableFilterLabels.map((item) => (
+                    <option key={item.name} value={item.name}>
+                      #{item.name} {item.count > 0 ? `(${item.count})` : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {availableFilterLabels.length > 0 && (
+                  <div className="flex items-center gap-1 overflow-x-auto pt-1 pb-0.5 scrollbar-thin">
+                    <button
+                      type="button"
+                      onClick={() => setLabelFilter('ALL')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium shrink-0 transition-colors ${
+                        labelFilter === 'ALL'
+                          ? 'bg-indigo-600 text-white font-semibold'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Semua
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLabelFilter(labelFilter === '__NO_LABEL__' ? 'ALL' : '__NO_LABEL__')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium shrink-0 transition-colors ${
+                        labelFilter === '__NO_LABEL__'
+                          ? 'bg-indigo-600 text-white font-semibold'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Tanpa Label
+                    </button>
+                    {availableFilterLabels.map((item) => {
+                      const style = getLabelStyle(item.name);
+                      const isSelected = labelFilter.toLowerCase() === item.name.toLowerCase();
+                      return (
+                        <button
+                          key={item.name}
+                          type="button"
+                          onClick={() => setLabelFilter(isSelected ? 'ALL' : item.name)}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border shrink-0 transition-all ${
+                            isSelected
+                              ? `ring-2 ring-indigo-500 ring-offset-1 font-bold ${style.badge}`
+                              : `hover:opacity-90 bg-white ${style.badge}`
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                          <span>#{item.name}</span>
+                          {item.count > 0 && (
+                            <span className="text-[9px] opacity-75 font-mono">({item.count})</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 
@@ -3700,10 +3903,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     setChannelFilter('ALL');
                     setAssigneeFilter('ALL');
                     setAccountFilter('ALL');
+                    setLabelFilter('ALL');
                   }}
                   className="text-gray-500 hover:text-gray-800"
                 >
-                  Reset Filter
+                  Reset Semua Filter
                 </button>
                 <button
                   type="button"
@@ -3716,6 +3920,29 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </div>
           )}
         </div>
+
+        {labelFilter !== 'ALL' && (
+          <div className="flex items-center justify-between gap-1.5 px-3 py-1.5 bg-indigo-50/90 border-b border-indigo-100 text-[11px] text-indigo-900 shrink-0">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <Tag className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span className="text-gray-600">Filter Label:</span>
+              <span className="font-bold underline truncate">
+                {labelFilter === '__NO_LABEL__' ? 'Tanpa Label' : `#${labelFilter}`}
+              </span>
+              <span className="text-[10px] text-indigo-600 font-mono">
+                ({filteredConversations.length})
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setLabelFilter('ALL')}
+              title="Hapus filter label"
+              className="p-0.5 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100 shrink-0 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto divide-y divide-gray-200">
           {loadingList && conversations.length === 0 ? (
@@ -3822,12 +4049,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       );
                     })()}
 
-                    <div className="flex items-center gap-1.5 mt-1 text-[10px] overflow-hidden">
+                    <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px]">
                       {(() => {
                         const ch = ((conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
                         const meta = CHANNEL_META[ch] || CHANNEL_META.WHATSAPP;
                         return (
-                          <span className={`inline-flex items-center px-1.5 py-0.2 rounded font-semibold border shrink-0 ${meta.cls}`}>
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded font-semibold border shrink-0 ${meta.cls}`}>
                             {meta.short}
                             {conv.wahaSession ? ` • ${conv.wahaSession}` : ''}
                           </span>
@@ -3842,32 +4069,60 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           slaTargetMinutes * 60_000 && (
                           <span
                             title={`Belum dibalas melebihi target SLA ${slaTargetMinutes} menit`}
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded font-semibold bg-red-50 text-red-700 border border-red-200 shrink-0"
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-semibold bg-rose-50 text-rose-700 border border-rose-200 shrink-0"
                           >
                             <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
                             SLA
                           </span>
                         )}
                       {conv.isGroup ? (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded font-medium bg-teal-50 text-teal-700 border border-teal-200 shrink-0">
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium bg-teal-50 text-teal-700 border border-teal-200 shrink-0">
                           Grup
                         </span>
                       ) : conv.excludeFromMetrics ? (
                         <span
                           title={`Tidak masuk penilaian (${conv.excludeReason || 'Non-Customer'})`}
-                          className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded font-medium bg-gray-100 text-gray-600 border border-gray-300 shrink-0"
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium bg-gray-100 text-gray-600 border border-gray-300 shrink-0"
                         >
                           Non-Nilai
                         </span>
                       ) : conv.assignedAgentName ? (
-                        <span className="text-sky-700 font-medium truncate">
+                        <span
+                          title={`Ditugaskan ke: ${conv.assignedAgentName}`}
+                          className="inline-flex items-center px-1.5 py-0.5 rounded font-medium bg-sky-50 text-sky-700 border border-sky-200 shrink-0 truncate max-w-[90px]"
+                        >
                           • {conv.assignedAgentName}
                         </span>
                       ) : null}
-                      {convLabels.length > 0 && (
-                        <span className="text-indigo-700 font-medium truncate ml-auto shrink-0">
-                          #{convLabels[0]}
-                          {convLabels.length > 1 ? ` +${convLabels.length - 1}` : ''}
+
+                      {/* Clear, Beautiful Label Badges with Colors from Master Data */}
+                      {convLabels.map((lbl, idx) => {
+                        if (idx >= 2) return null;
+                        const style = getLabelStyle(lbl);
+                        const isFiltered = labelFilter.toLowerCase() === lbl.toLowerCase();
+                        return (
+                          <span
+                            key={lbl}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLabelFilter((prev) => (prev.toLowerCase() === lbl.toLowerCase() ? 'ALL' : lbl));
+                            }}
+                            title={`Label: #${lbl} (Klik untuk ${isFiltered ? 'lepas filter' : 'filter obrolan ini'})`}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0 transition-all hover:scale-102 cursor-pointer shadow-2xs ${
+                              style.badge
+                            } ${isFiltered ? 'ring-1.5 ring-indigo-500 font-bold' : ''}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+                            <span className="truncate max-w-[85px]">#{lbl}</span>
+                          </span>
+                        );
+                      })}
+                      {convLabels.length > 2 && (
+                        <span
+                          title={`Label lainnya: ${convLabels.slice(2).map((l) => `#${l}`).join(', ')}`}
+                          className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-gray-100 text-gray-700 border border-gray-200 shrink-0"
+                        >
+                          +{convLabels.length - 2}
                         </span>
                       )}
                     </div>
@@ -3954,6 +4209,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-300 shrink-0">
                             <EyeOff className="w-2.5 h-2.5" />
                             <span className="hidden sm:inline">Non-Penilaian</span>
+                          </span>
+                        )}
+                        {/* Active Labels in Chat Header */}
+                        {activeLabels.map((lbl, idx) => {
+                          if (idx >= 3) return null;
+                          const style = getLabelStyle(lbl);
+                          return (
+                            <span
+                              key={lbl}
+                              className={`hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0 shadow-2xs ${style.badge}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+                              #{lbl}
+                            </span>
+                          );
+                        })}
+                        {activeLabels.length > 3 && (
+                          <span
+                            title={activeLabels.slice(3).map((l) => `#${l}`).join(', ')}
+                            className="hidden md:inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-gray-100 text-gray-700 border border-gray-200 shrink-0"
+                          >
+                            +{activeLabels.length - 3}
                           </span>
                         )}
                         {(ch === 'INSTAGRAM' || ch === 'FACEBOOK') && (() => {
@@ -8061,23 +8338,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   )}
                   <div className="flex flex-wrap gap-1">
                     {activeLabels.map((lbl) => {
-                      const matched = masterLabels.find(
-                        (m) => m.name.toLowerCase() === lbl.toLowerCase()
-                      );
-                      const badgeCls =
-                        (matched && LABEL_COLOR_MAP[matched.color]?.badge) ||
-                        'bg-indigo-50 text-indigo-700 border-indigo-200';
+                      const style = getLabelStyle(lbl);
                       return (
                         <span
                           key={lbl}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${badgeCls}`}
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium border shadow-2xs ${style.badge}`}
                         >
-                          {lbl}
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+                          #{lbl}
                           {canManageConversation && (
                             <button
                               type="button"
                               onClick={() => handleToggleLabel(lbl)}
-                              className="opacity-75 hover:opacity-100"
+                              className="opacity-70 hover:opacity-100 hover:text-rose-600 transition-colors ml-0.5"
+                              title={`Hapus label #${lbl}`}
                             >
                               <X className="w-2.5 h-2.5" />
                             </button>
