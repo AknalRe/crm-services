@@ -3764,6 +3764,51 @@ export class WahaService {
     }
   }
 
+  private extractGroupActionError(err: any, fallback: string, permissionHint: string): string {
+    const status = err?.response?.status;
+    const raw = this.extractWahaError(err);
+    const lower = raw.toLowerCase();
+    if (
+      status === 403 ||
+      status === 500 ||
+      /not-authorized|not authorized|not an admin|admin|forbidden|permission/i.test(lower)
+    ) {
+      if (lower.includes('status code 500') || lower === 'internal server error') {
+        return permissionHint;
+      }
+      return `${permissionHint} (${raw})`;
+    }
+    if (status === 404 || /not found|participant|group/i.test(lower)) {
+      return `${fallback} (${raw})`;
+    }
+    return raw || fallback;
+  }
+
+  private parseInviteCodeResponse(data: any): { code?: string; link?: string } {
+    if (!data) return {};
+    const rawCode =
+      typeof data === 'string'
+        ? data.trim()
+        : String(data.code || data.inviteCode || data.invite || '').trim();
+    const rawLink =
+      typeof data === 'object' ? String(data.link || data.url || '').trim() : '';
+
+    if (rawCode && rawCode !== '[object Object]') {
+      const codeOnly = rawCode.includes('chat.whatsapp.com/')
+        ? rawCode.split('chat.whatsapp.com/').pop() || rawCode
+        : rawCode;
+      const link = rawLink || (rawCode.startsWith('http') ? rawCode : `https://chat.whatsapp.com/${codeOnly}`);
+      return { code: codeOnly, link };
+    }
+    if (rawLink && /^https?:\/\//i.test(rawLink)) {
+      const codeOnly = rawLink.includes('chat.whatsapp.com/')
+        ? rawLink.split('chat.whatsapp.com/').pop()
+        : undefined;
+      return { code: codeOnly, link: rawLink };
+    }
+    return {};
+  }
+
   /**
    * Update Group Subject (Name)
    */
@@ -3793,7 +3838,11 @@ export class WahaService {
     } catch (err: any) {
       return {
         success: false,
-        error: err?.response?.data?.message || err?.message || 'Gagal mengubah nama grup WhatsApp.',
+        error: this.extractGroupActionError(
+          err,
+          'Gagal mengubah nama grup WhatsApp.',
+          'Gagal mengubah nama grup: pastikan akun WhatsApp sesi ini menjadi Admin grup.'
+        ),
       };
     }
   }
@@ -3823,7 +3872,11 @@ export class WahaService {
     } catch (err: any) {
       return {
         success: false,
-        error: err?.response?.data?.message || err?.message || 'Gagal mengubah deskripsi grup WhatsApp.',
+        error: this.extractGroupActionError(
+          err,
+          'Gagal mengubah deskripsi grup WhatsApp.',
+          'Gagal mengubah deskripsi grup: pastikan akun WhatsApp sesi ini menjadi Admin grup.'
+        ),
       };
     }
   }
@@ -3844,10 +3897,16 @@ export class WahaService {
       const { client, targetSession } = await this.resolveReadableSession(sessionName);
       const encodedSession = encodeURIComponent(targetSession);
       const encodedGroup = encodeURIComponent(cleanJid);
-      const isUrl = /^https?:\/\//i.test(fileUrlOrBase64);
-      const payload = isUrl
-        ? { file: { url: fileUrlOrBase64 } }
-        : { file: { data: fileUrlOrBase64 } };
+      const rawInput = String(fileUrlOrBase64 || '').trim();
+      const dataUriMatch = rawInput.match(/^data:([^;]+);base64,(.*)$/is);
+      const payload = /^https?:\/\//i.test(rawInput)
+        ? { file: { url: rawInput } }
+        : {
+            file: {
+              mimetype: dataUriMatch?.[1] || 'image/jpeg',
+              data: dataUriMatch?.[2] || rawInput,
+            },
+          };
       await client.put(
         `/api/${encodedSession}/groups/${encodedGroup}/picture`,
         payload,
@@ -3857,7 +3916,11 @@ export class WahaService {
     } catch (err: any) {
       return {
         success: false,
-        error: err?.response?.data?.message || err?.message || 'Gagal memperbarui foto profil grup WhatsApp.',
+        error: this.extractGroupActionError(
+          err,
+          'Gagal memperbarui foto profil grup WhatsApp.',
+          'Gagal mengubah foto grup: pastikan format gambar JPEG/PNG dan sesi WhatsApp ini menjadi Admin grup.'
+        ),
       };
     }
   }
@@ -3880,13 +3943,16 @@ export class WahaService {
       const res = await client.get(`/api/${encodedSession}/groups/${encodedGroup}/invite-code`, {
         timeout: 10000,
       });
-      const code = String(res?.data?.code || res?.data || '').trim();
-      const link = code ? (code.startsWith('http') ? code : `https://chat.whatsapp.com/${code}`) : undefined;
-      return { success: true, code, link };
+      const parsed = this.parseInviteCodeResponse(res?.data);
+      return { success: true, ...parsed };
     } catch (err: any) {
       return {
         success: false,
-        error: err?.response?.data?.message || err?.message || 'Gagal mengambil tautan undangan grup.',
+        error: this.extractGroupActionError(
+          err,
+          'Gagal mengambil tautan undangan grup.',
+          'Tautan undangan tidak dapat diambil: pastikan akun WhatsApp sesi ini menjadi Admin grup tersebut.'
+        ),
       };
     }
   }
@@ -3909,13 +3975,16 @@ export class WahaService {
       const res = await client.post(`/api/${encodedSession}/groups/${encodedGroup}/invite-code/revoke`, {}, {
         timeout: 10000,
       });
-      const code = String(res?.data?.code || res?.data || '').trim();
-      const link = code ? (code.startsWith('http') ? code : `https://chat.whatsapp.com/${code}`) : undefined;
-      return { success: true, code, link };
+      const parsed = this.parseInviteCodeResponse(res?.data);
+      return { success: true, ...parsed };
     } catch (err: any) {
       return {
         success: false,
-        error: err?.response?.data?.message || err?.message || 'Gagal mengatur ulang tautan undangan grup.',
+        error: this.extractGroupActionError(
+          err,
+          'Gagal mengatur ulang tautan undangan grup.',
+          'Gagal mereset tautan undangan: pastikan akun WhatsApp sesi ini menjadi Admin grup tersebut.'
+        ),
       };
     }
   }
@@ -3947,16 +4016,33 @@ export class WahaService {
       const { client, targetSession } = await this.resolveReadableSession(sessionName);
       const encodedSession = encodeURIComponent(targetSession);
       const encodedGroup = encodeURIComponent(cleanJid);
-      await client.post(
-        `/api/${encodedSession}/groups/${encodedGroup}/participants/add`,
-        { participants: cleanList.map((id) => ({ id })) },
-        { timeout: 15000 }
-      );
+      try {
+        await client.post(
+          `/api/${encodedSession}/groups/${encodedGroup}/participants/add`,
+          { participants: cleanList.map((id) => ({ id })) },
+          { timeout: 15000 }
+        );
+      } catch (firstErr: any) {
+        const firstStatus = firstErr?.response?.status;
+        if (firstStatus === 400 || firstStatus === 422 || firstStatus === 500) {
+          await client.post(
+            `/api/${encodedSession}/groups/${encodedGroup}/participants/add`,
+            { participants: cleanList },
+            { timeout: 15000 }
+          );
+        } else {
+          throw firstErr;
+        }
+      }
       return { success: true };
     } catch (err: any) {
       return {
         success: false,
-        error: err?.response?.data?.message || err?.message || 'Gagal menambahkan anggota ke grup WhatsApp.',
+        error: this.extractGroupActionError(
+          err,
+          'Gagal menambahkan anggota ke grup WhatsApp.',
+          'Gagal menambahkan anggota: pastikan nomor terdaftar di WhatsApp, mengizinkan undangan grup, dan sesi ini menjadi Admin grup.'
+        ),
       };
     }
   }

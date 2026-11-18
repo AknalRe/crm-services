@@ -969,6 +969,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [savingGroupInfo, setSavingGroupInfo] = useState(false);
   const [groupInviteCode, setGroupInviteCode] = useState('');
   const [groupInviteLink, setGroupInviteLink] = useState('');
+  const [groupInviteError, setGroupInviteError] = useState<string | null>(null);
   const [loadingGroupInvite, setLoadingGroupInvite] = useState(false);
   const [newMemberPhone, setNewMemberPhone] = useState('');
   const [addingMember, setAddingMember] = useState(false);
@@ -1340,6 +1341,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
       pendingInitialScrollRef.current = true;
       isAtBottomRef.current = true;
       setPendingNewMsgCount(0);
+      setGroupInviteCode('');
+      setGroupInviteLink('');
+      setGroupInviteError(null);
       fetchMessages(selectedConversation.id, false);
       setContactNotesDraft(selectedConversation.contact?.notes || '');
       setChannelDisplayNameDraft(selectedConversation.channelDisplayName || '');
@@ -3159,7 +3163,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setGroupManageTab(initialTab);
     setGroupSubjectDraft(selectedConversation.contact?.nama_lengkap || '');
     setGroupDescDraft(selectedConversation.contact?.profile_about || '');
+    setGroupInviteError(null);
     setShowGroupManageModal(true);
+    if (contactsList.length === 0) {
+      void loadModalContacts();
+    }
     if (initialTab === 'INVITE') {
       void fetchGroupInvite();
     }
@@ -3168,6 +3176,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const fetchGroupInvite = async () => {
     if (!selectedConversation) return;
     setLoadingGroupInvite(true);
+    setGroupInviteError(null);
     try {
       const res = await api.getGroupInviteCode(
         selectedConversation.id,
@@ -3176,7 +3185,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setGroupInviteCode(res.code || '');
       setGroupInviteLink(res.link || (res.code ? `https://chat.whatsapp.com/${res.code}` : ''));
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Gagal mengambil tautan undangan grup');
+      const errMsg = err?.response?.data?.error || 'Gagal mengambil tautan undangan grup';
+      setGroupInviteError(errMsg);
+      toast.error(errMsg);
     } finally {
       setLoadingGroupInvite(false);
     }
@@ -3185,6 +3196,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const handleRevokeGroupInvite = async () => {
     if (!selectedConversation) return;
     setLoadingGroupInvite(true);
+    setGroupInviteError(null);
     try {
       const res = await api.revokeGroupInviteCode(
         selectedConversation.id,
@@ -3194,7 +3206,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setGroupInviteLink(res.link || (res.code ? `https://chat.whatsapp.com/${res.code}` : ''));
       toast.success('Tautan undangan lama ditarik dan tautan baru dibuat');
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Gagal memperbarui tautan undangan');
+      const errMsg = err?.response?.data?.error || 'Gagal memperbarui tautan undangan';
+      setGroupInviteError(errMsg);
+      toast.error(errMsg);
     } finally {
       setLoadingGroupInvite(false);
     }
@@ -8422,7 +8436,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   <span className="truncate">Kanal: {selectedConversation.channelAccountName}</span>
                 </span>
               )}
-              {selectedConversation.contextTitle && (
+              {selectedConversation.contextTitle &&
+                selectedConversation.contextTitle.trim().toLowerCase() !==
+                  getConversationDisplayTitle(selectedConversation).trim().toLowerCase() && (
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-gray-100 text-gray-700 border border-gray-200 max-w-full truncate">
                   {selectedConversation.contextTitle}
                 </span>
@@ -8780,7 +8796,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </div>
             )}
 
-            {/* 4. Info Profil & Alamat */}
+            {/* 4. Info Profil & Alamat (disembunyikan untuk Grup WA) */}
+            {!selectedConversation.isGroup && (
             <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
               <button
                 type="button"
@@ -8814,9 +8831,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </div>
                     ) : (
                       <div className="text-gray-600 text-[11px] font-mono break-all">
-                        {selectedConversation.isGroup
-                          ? `Grup WA (${selectedConversation.externalThreadId || '@g.us'})`
-                          : (selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
+                        {(selectedConversation.channel || 'WHATSAPP') === 'WHATSAPP'
                           ? 'WhatsApp Privacy ID (@lid)'
                           : 'Akun Omnichannel'}
                       </div>
@@ -8852,6 +8867,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               )}
             </div>
+            )}
 
             {/* 5. Label Percakapan */}
             <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
@@ -8994,7 +9010,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
               )}
             </div>
 
-            {/* 7. Riwayat Penilaian CSAT */}
+            {/* 7. Riwayat Penilaian CSAT (disembunyikan untuk Grup WA) */}
+            {!selectedConversation.isGroup && (
             <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
               <button
                 type="button"
@@ -9165,6 +9182,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               )}
             </div>
+            )}
 
             {/* 8. Linimasa Aktivitas Percakapan */}
             {(() => {
@@ -9809,7 +9827,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         value={groupSubjectDraft}
                         onChange={(e) => setGroupSubjectDraft(e.target.value)}
                         placeholder="Masukkan nama grup..."
-                        className="flex-1 h-8 px-2.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-teal-500"
+                        className="flex-1 h-8 px-2.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500"
                       />
                       <Button
                         type="button"
@@ -9833,7 +9851,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       value={groupDescDraft}
                       onChange={(e) => setGroupDescDraft(e.target.value)}
                       placeholder="Masukkan deskripsi grup..."
-                      className="w-full p-2 border border-gray-300 rounded text-xs focus:outline-none focus:border-teal-500"
+                      className="w-full p-2 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500"
                     />
                     <div className="mt-1 flex justify-end">
                       <Button
@@ -9916,6 +9934,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <LoadingState message="Mengambil tautan undangan grup..." />
                   ) : (
                     <>
+                      {groupInviteError && (
+                        <div className="p-2.5 rounded-md bg-rose-50 border border-rose-200 text-[11px] text-rose-800 flex items-start justify-between gap-2">
+                          <span>{groupInviteError}</span>
+                          <button
+                            type="button"
+                            onClick={() => void fetchGroupInvite()}
+                            className="font-semibold text-rose-900 underline shrink-0"
+                          >
+                            Coba Lagi
+                          </button>
+                        </div>
+                      )}
                       <div className="p-2.5 bg-gray-50 rounded border border-gray-200 space-y-1.5 font-mono text-xs">
                         <div className="text-[10px] uppercase font-bold text-gray-500 font-sans">
                           Tautan Undangan Aktif
@@ -9972,7 +10002,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         value={newMemberPhone}
                         onChange={(e) => setNewMemberPhone(e.target.value)}
                         placeholder="Contoh: 628123456789"
-                        className="flex-1 h-8 px-2.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-teal-500"
+                        className="flex-1 h-8 px-2.5 border border-gray-300 rounded text-xs focus:outline-none focus:border-indigo-500"
                       />
                       <Button
                         type="button"
@@ -9995,22 +10025,30 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       Pilih Cepat dari Kontak CRM
                     </div>
                     <div className="max-h-40 overflow-y-auto divide-y divide-gray-100 border border-gray-200 rounded">
-                      {contactsList
-                        .filter((c) => Boolean(c.nomor_whatsapp))
-                        .slice(0, 15)
-                        .map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => setNewMemberPhone(c.nomor_whatsapp || '')}
-                            className="w-full px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 flex items-center justify-between"
-                          >
-                            <span className="font-medium text-gray-800 truncate">{c.nama_lengkap}</span>
-                            <span className="text-[10px] font-mono text-gray-500 shrink-0">
-                              +{c.nomor_whatsapp}
-                            </span>
-                          </button>
-                        ))}
+                      {loadingContacts && contactsList.length === 0 ? (
+                        <div className="p-3 text-center text-[11px] text-gray-500">Memuat kontak CRM...</div>
+                      ) : contactsList.filter((c) => Boolean(c.nomor_whatsapp)).length === 0 ? (
+                        <div className="p-3 text-center text-[11px] text-gray-400">
+                          Belum ada kontak dengan nomor WhatsApp tersimpan.
+                        </div>
+                      ) : (
+                        contactsList
+                          .filter((c) => Boolean(c.nomor_whatsapp))
+                          .slice(0, 15)
+                          .map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => setNewMemberPhone(c.nomor_whatsapp || '')}
+                              className="w-full px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 flex items-center justify-between"
+                            >
+                              <span className="font-medium text-gray-800 truncate">{c.nama_lengkap}</span>
+                              <span className="text-[10px] font-mono text-gray-500 shrink-0">
+                                +{c.nomor_whatsapp}
+                              </span>
+                            </button>
+                          ))
+                      )}
                     </div>
                   </div>
                 </div>

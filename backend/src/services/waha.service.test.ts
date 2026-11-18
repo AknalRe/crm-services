@@ -2395,6 +2395,83 @@ test('unwrapWahaProtoMessage, extractInboundWahaText, and extractPhoneCandidates
   ]);
 });
 
+test('group management helpers strip data URI prefix, parse invite objects, and surface admin permission errors cleanly', async (t) => {
+  const origGetClient = (wahaService as any).getClient.bind(wahaService);
+  t.after(() => {
+    (wahaService as any).getClient = origGetClient;
+  });
+
+  let putPicPayload: any = null;
+  let addPayloads: any[] = [];
+  (wahaService as any).getClient = async () => ({
+    session: 'WA_TEST',
+    ownerPrefix: '',
+    client: {
+      get: async (url: string) => {
+        if (url.includes('/invite-code')) {
+          return { data: { inviteCode: 'AbC123XyZ' } };
+        }
+        return { data: {} };
+      },
+      put: async (url: string, body: any) => {
+        if (url.includes('/picture')) putPicPayload = body;
+        return { data: {} };
+      },
+      post: async (url: string, body: any) => {
+        if (url.includes('/participants/add')) {
+          addPayloads.push(body);
+          if (addPayloads.length === 1) {
+            const err: any = new Error('Request failed with status code 400');
+            err.response = { status: 400, data: {} };
+            throw err;
+          }
+          return { data: { ok: true } };
+        }
+        return { data: {} };
+      },
+    },
+  });
+
+  const picRes = await wahaService.updateGroupPicture(
+    '12036300112233@g.us',
+    'data:image/png;base64,iVBORw0KGgo=',
+    'WA_TEST'
+  );
+  assert.equal(picRes.success, true);
+  assert.deepEqual(putPicPayload, {
+    file: { mimetype: 'image/png', data: 'iVBORw0KGgo=' },
+  });
+
+  const invRes = await wahaService.getGroupInviteCode('12036300112233@g.us', 'WA_TEST');
+  assert.equal(invRes.success, true);
+  assert.equal(invRes.code, 'AbC123XyZ');
+  assert.equal(invRes.link, 'https://chat.whatsapp.com/AbC123XyZ');
+
+  const addRes = await wahaService.addGroupParticipants(
+    '12036300112233@g.us',
+    ['08123456789'],
+    'WA_TEST'
+  );
+  assert.equal(addRes.success, true);
+  assert.equal(addPayloads.length, 2);
+  assert.deepEqual(addPayloads[1], { participants: ['628123456789@c.us'] });
+
+  (wahaService as any).getClient = async () => ({
+    session: 'WA_TEST',
+    ownerPrefix: '',
+    client: {
+      get: async () => {
+        const err: any = new Error('Request failed with status code 500');
+        err.response = { status: 500, data: {} };
+        throw err;
+      },
+    },
+  });
+  const permErr = await wahaService.getGroupInviteCode('12036300112233@g.us', 'WA_TEST');
+  assert.equal(permErr.success, false);
+  assert.match(permErr.error || '', /Admin grup/i);
+});
+
 
 
 

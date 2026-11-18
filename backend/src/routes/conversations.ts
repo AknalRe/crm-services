@@ -3942,6 +3942,53 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
+  async function resolveGroupContext(
+    conversationId: string,
+    companyId: string,
+    requestedSession?: string
+  ) {
+    const convRows = await db
+      .select({ conv: conversations, contact: contacts })
+      .from(conversations)
+      .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+      .where(and(eq(conversations.id, conversationId), eq(conversations.companyId, companyId)))
+      .limit(1);
+    const row = convRows[0];
+    if (!row?.conv) {
+      return { ok: false as const, error: 'Percakapan tidak ditemukan', status: 404 as const };
+    }
+    let groupJid = row.conv.externalThreadId?.trim() || '';
+    if (!groupJid && row.contact?.id) {
+      const idRows = await db
+        .select({ externalId: contactIdentities.externalId })
+        .from(contactIdentities)
+        .where(
+          and(
+            eq(contactIdentities.companyId, companyId),
+            eq(contactIdentities.contactId, row.contact.id),
+            eq(contactIdentities.channel, 'WHATSAPP'),
+            ilike(contactIdentities.externalId, '%@g.us')
+          )
+        )
+        .limit(1);
+      groupJid = idRows[0]?.externalId?.trim() || '';
+    }
+    const isGroup = Boolean(row.conv.isGroup || groupJid.toLowerCase().endsWith('@g.us'));
+    if (!isGroup) {
+      return { ok: false as const, error: 'Percakapan bukan grup WhatsApp', status: 400 as const };
+    }
+    if (!groupJid.toLowerCase().endsWith('@g.us')) {
+      return { ok: false as const, error: 'JID grup WhatsApp (@g.us) belum tersimpan pada percakapan ini', status: 400 as const };
+    }
+    return {
+      ok: true as const,
+      conv: row.conv,
+      contact: row.contact,
+      groupJid,
+      session: requestedSession?.trim() || row.conv.wahaSession || undefined,
+    };
+  }
+
   // PUT update group subject
   fastify.put('/:id/group/subject', async (req: FastifyRequest<{
     Params: { id: string };
@@ -3949,28 +3996,18 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const convRows = await db
-        .select({ conv: conversations, contact: contacts })
-        .from(conversations)
-        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
-        .limit(1);
-      const row = convRows[0];
-      if (!row?.conv || !row.conv.isGroup) {
-        return reply.status(400).send({ success: false, error: 'Percakapan bukan grup' });
-      }
-      const groupJid = row.conv.externalThreadId || '';
-      const session = req.body?.session?.trim() || row.conv.wahaSession || undefined;
+      const ctx = await resolveGroupContext(req.params.id, companyId, req.body?.session);
+      if (!ctx.ok) return reply.status(ctx.status).send({ success: false, error: ctx.error });
       const subject = String(req.body?.subject || '').trim();
-      const res = await wahaService.updateGroupSubject(groupJid, subject, session);
+      const res = await wahaService.updateGroupSubject(ctx.groupJid, subject, ctx.session);
       if (!res.success) {
         return reply.status(400).send({ success: false, error: res.error });
       }
-      await db.update(conversations).set({ contextTitle: subject, pushName: subject, updatedAt: new Date() }).where(eq(conversations.id, row.conv.id));
-      if (row.contact) {
-        await db.update(contacts).set({ namaLengkap: subject, updatedAt: new Date() }).where(eq(contacts.id, row.contact.id));
+      await db.update(conversations).set({ contextTitle: subject, pushName: subject, updatedAt: new Date() }).where(eq(conversations.id, ctx.conv.id));
+      if (ctx.contact) {
+        await db.update(contacts).set({ namaLengkap: subject, updatedAt: new Date() }).where(eq(contacts.id, ctx.contact.id));
       }
-      liveEvents.emit('conversations:update', { conversationId: row.conv.id }, companyId);
+      liveEvents.emit('conversations:update', { conversationId: ctx.conv.id }, companyId);
       return reply.send({ success: true, subject });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
@@ -3984,27 +4021,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const convRows = await db
-        .select({ conv: conversations, contact: contacts })
-        .from(conversations)
-        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
-        .limit(1);
-      const row = convRows[0];
-      if (!row?.conv || !row.conv.isGroup) {
-        return reply.status(400).send({ success: false, error: 'Percakapan bukan grup' });
-      }
-      const groupJid = row.conv.externalThreadId || '';
-      const session = req.body?.session?.trim() || row.conv.wahaSession || undefined;
+      const ctx = await resolveGroupContext(req.params.id, companyId, req.body?.session);
+      if (!ctx.ok) return reply.status(ctx.status).send({ success: false, error: ctx.error });
       const desc = String(req.body?.description || '').trim();
-      const res = await wahaService.updateGroupDescription(groupJid, desc, session);
+      const res = await wahaService.updateGroupDescription(ctx.groupJid, desc, ctx.session);
       if (!res.success) {
         return reply.status(400).send({ success: false, error: res.error });
       }
-      if (row.contact) {
-        await db.update(contacts).set({ profileAbout: desc, updatedAt: new Date() }).where(eq(contacts.id, row.contact.id));
+      if (ctx.contact) {
+        await db.update(contacts).set({ profileAbout: desc, updatedAt: new Date() }).where(eq(contacts.id, ctx.contact.id));
       }
-      liveEvents.emit('conversations:update', { conversationId: row.conv.id }, companyId);
+      liveEvents.emit('conversations:update', { conversationId: ctx.conv.id }, companyId);
       return reply.send({ success: true, description: desc });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
@@ -4018,25 +4045,15 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const convRows = await db
-        .select({ conv: conversations, contact: contacts })
-        .from(conversations)
-        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
-        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
-        .limit(1);
-      const row = convRows[0];
-      if (!row?.conv || !row.conv.isGroup) {
-        return reply.status(400).send({ success: false, error: 'Percakapan bukan grup' });
-      }
-      const groupJid = row.conv.externalThreadId || '';
-      const session = req.body?.session?.trim() || row.conv.wahaSession || undefined;
+      const ctx = await resolveGroupContext(req.params.id, companyId, req.body?.session);
+      if (!ctx.ok) return reply.status(ctx.status).send({ success: false, error: ctx.error });
       const file = String(req.body?.file || '').trim();
       if (!file) return reply.status(400).send({ success: false, error: 'Berkas gambar wajib diisi' });
-      const res = await wahaService.updateGroupPicture(groupJid, file, session);
+      const res = await wahaService.updateGroupPicture(ctx.groupJid, file, ctx.session);
       if (!res.success) {
         return reply.status(400).send({ success: false, error: res.error });
       }
-      liveEvents.emit('conversations:update', { conversationId: row.conv.id }, companyId);
+      liveEvents.emit('conversations:update', { conversationId: ctx.conv.id }, companyId);
       return reply.send({ success: true });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
@@ -4050,18 +4067,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const convRows = await db
-        .select({ conv: conversations })
-        .from(conversations)
-        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
-        .limit(1);
-      const row = convRows[0];
-      if (!row?.conv || !row.conv.isGroup) {
-        return reply.status(400).send({ success: false, error: 'Percakapan bukan grup' });
-      }
-      const groupJid = row.conv.externalThreadId || '';
-      const session = req.query?.session?.trim() || row.conv.wahaSession || undefined;
-      const res = await wahaService.getGroupInviteCode(groupJid, session);
+      const ctx = await resolveGroupContext(req.params.id, companyId, req.query?.session);
+      if (!ctx.ok) return reply.status(ctx.status).send({ success: false, error: ctx.error });
+      const res = await wahaService.getGroupInviteCode(ctx.groupJid, ctx.session);
       if (!res.success) {
         return reply.status(400).send({ success: false, error: res.error });
       }
@@ -4078,18 +4086,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const convRows = await db
-        .select({ conv: conversations })
-        .from(conversations)
-        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
-        .limit(1);
-      const row = convRows[0];
-      if (!row?.conv || !row.conv.isGroup) {
-        return reply.status(400).send({ success: false, error: 'Percakapan bukan grup' });
-      }
-      const groupJid = row.conv.externalThreadId || '';
-      const session = req.body?.session?.trim() || row.conv.wahaSession || undefined;
-      const res = await wahaService.revokeGroupInviteCode(groupJid, session);
+      const ctx = await resolveGroupContext(req.params.id, companyId, req.body?.session);
+      if (!ctx.ok) return reply.status(ctx.status).send({ success: false, error: ctx.error });
+      const res = await wahaService.revokeGroupInviteCode(ctx.groupJid, ctx.session);
       if (!res.success) {
         return reply.status(400).send({ success: false, error: res.error });
       }
@@ -4106,23 +4105,14 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const convRows = await db
-        .select({ conv: conversations })
-        .from(conversations)
-        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
-        .limit(1);
-      const row = convRows[0];
-      if (!row?.conv || !row.conv.isGroup) {
-        return reply.status(400).send({ success: false, error: 'Percakapan bukan grup' });
-      }
-      const groupJid = row.conv.externalThreadId || '';
-      const session = req.body?.session?.trim() || row.conv.wahaSession || undefined;
+      const ctx = await resolveGroupContext(req.params.id, companyId, req.body?.session);
+      if (!ctx.ok) return reply.status(ctx.status).send({ success: false, error: ctx.error });
       const parts = Array.isArray(req.body?.participants) ? req.body.participants : [];
-      const res = await wahaService.addGroupParticipants(groupJid, parts, session);
+      const res = await wahaService.addGroupParticipants(ctx.groupJid, parts, ctx.session);
       if (!res.success) {
         return reply.status(400).send({ success: false, error: res.error });
       }
-      liveEvents.emit('conversations:update', { conversationId: row.conv.id }, companyId);
+      liveEvents.emit('conversations:update', { conversationId: ctx.conv.id }, companyId);
       return reply.send({ success: true });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
