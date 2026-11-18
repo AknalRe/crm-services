@@ -407,6 +407,7 @@ export interface ChatMessage {
   senderJid?: string | null;
   senderPhone?: string | null;
   senderName?: string | null;
+  senderAvatarUrl?: string | null;
   mentionedContacts?: ResolvedMentionItem[];
   status: string;
   ackStatus: number;
@@ -423,6 +424,7 @@ export interface ConversationParticipantItem {
   name: string | null;
   contactId: string | null;
   contactName: string | null;
+  avatarUrl?: string | null;
   role: 'superadmin' | 'admin' | 'member';
   messageCount: number;
   lastMessageAt: string | null;

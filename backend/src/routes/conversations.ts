@@ -1320,9 +1320,46 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         companyId,
         messages,
       });
+
+      const senderPhones = Array.from(
+        new Set(
+          messages
+            .filter((m) => m.direction === 'INBOUND' && m.senderPhone)
+            .map((m) => normalizePhoneNumber(m.senderPhone!))
+            .filter(Boolean)
+        )
+      );
+      const avatarByPhone = new Map<string, string>();
+      if (senderPhones.length > 0) {
+        const phoneVariants = Array.from(
+          new Set(
+            senderPhones.flatMap((p) => [p, `+${p}`, p.startsWith('62') ? `0${p.slice(2)}` : ''].filter(Boolean))
+          )
+        );
+        const senderContactRows = await db
+          .select({
+            nomorWhatsapp: contacts.nomorWhatsapp,
+            profilePictureUrl: contacts.profilePictureUrl,
+          })
+          .from(contacts)
+          .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phoneVariants)));
+        for (const sc of senderContactRows) {
+          if (sc.nomorWhatsapp && sc.profilePictureUrl) {
+            avatarByPhone.set(normalizePhoneNumber(sc.nomorWhatsapp), sc.profilePictureUrl);
+          }
+        }
+      }
+
       const enriched = messages.map((m) => {
         const mentioned = mentionMap.get(m.id);
-        return mentioned && mentioned.length > 0 ? { ...m, mentionedContacts: mentioned } : m;
+        const normSenderPhone = m.senderPhone ? normalizePhoneNumber(m.senderPhone) : '';
+        const senderAvatarUrl =
+          m.direction === 'INBOUND' && normSenderPhone ? avatarByPhone.get(normSenderPhone) || null : null;
+        return {
+          ...m,
+          ...(mentioned && mentioned.length > 0 ? { mentionedContacts: mentioned } : {}),
+          ...(senderAvatarUrl ? { senderAvatarUrl } : {}),
+        };
       });
 
       return reply.send({ success: true, data: enriched });
@@ -1375,6 +1412,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         name: string | null;
         contactId: string | null;
         contactName: string | null;
+        avatarUrl?: string | null;
         role: 'superadmin' | 'admin' | 'member';
         messageCount: number;
         lastMessageAt: string | null;
@@ -1480,7 +1518,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           )
         );
         const matchedContacts = await db
-          .select({ id: contacts.id, namaLengkap: contacts.namaLengkap, nomorWhatsapp: contacts.nomorWhatsapp })
+          .select({
+            id: contacts.id,
+            namaLengkap: contacts.namaLengkap,
+            nomorWhatsapp: contacts.nomorWhatsapp,
+            profilePictureUrl: contacts.profilePictureUrl,
+          })
           .from(contacts)
           .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phoneVariants)));
         const contactByPhone = new Map(
@@ -1495,6 +1538,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               ...entry,
               contactId: matched.id,
               contactName: matched.namaLengkap,
+              avatarUrl: matched.profilePictureUrl || entry.avatarUrl || null,
             });
           }
         }
@@ -1985,10 +2029,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .set(convUpdate)
         .where(eq(conversations.id, existing.id));
 
-      // Propagate Non-Penilaian marking to the master Contact and all its sibling/future non-group conversations by default
+      // Only propagate metric exclusion to contact/other sessions if explicitly requested (applyToContact === true)
       const shouldPropagateMetricExclusion =
         (typeof req.body?.excludeFromMetrics === 'boolean' || req.body?.excludeReason !== undefined) &&
-        req.body?.applyToContact !== false;
+        req.body?.applyToContact === true;
 
       if (
         req.body?.contactNotes !== undefined ||

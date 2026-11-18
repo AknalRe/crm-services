@@ -111,6 +111,33 @@ const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls:
   THREADS: { label: 'Threads', short: 'Threads', cls: 'bg-gray-100 text-gray-800 border-gray-300' },
   TELEGRAM: { label: 'Telegram', short: 'TG', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
 };
+
+const WAHA_SESSION_BADGE_PALETTE = [
+  'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'bg-sky-50 text-sky-700 border-sky-200',
+  'bg-violet-50 text-violet-700 border-violet-200',
+  'bg-indigo-50 text-indigo-700 border-indigo-200',
+  'bg-cyan-50 text-cyan-800 border-cyan-200',
+  'bg-rose-50 text-rose-700 border-rose-200',
+];
+
+function getWahaSessionBadgeClass(
+  sessionName: string | null | undefined,
+  sessionList: Array<{ name: string }>,
+  fallbackCls: string
+): string {
+  const clean = String(sessionName || '').trim();
+  if (!clean) return fallbackCls;
+  const idx = sessionList.findIndex((s) => s.name.toLowerCase() === clean.toLowerCase());
+  if (idx >= 0) {
+    return WAHA_SESSION_BADGE_PALETTE[idx % WAHA_SESSION_BADGE_PALETTE.length];
+  }
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) % WAHA_SESSION_BADGE_PALETTE.length;
+  }
+  return WAHA_SESSION_BADGE_PALETTE[Math.abs(hash)];
+}
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import {
@@ -283,6 +310,7 @@ interface ParticipantLookupEntry {
   contactId?: string | null;
   jid?: string | null;
   role?: string | null;
+  avatarUrl?: string | null;
 }
 
 interface ClickableMentionTarget {
@@ -813,6 +841,35 @@ function getParticipantColorClass(key?: string | null): string {
     hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
   }
   return PARTICIPANT_TEXT_COLORS[hash % PARTICIPANT_TEXT_COLORS.length];
+}
+
+const PARTICIPANT_AVATAR_BG_COLORS = [
+  'bg-indigo-600',
+  'bg-emerald-600',
+  'bg-amber-600',
+  'bg-rose-600',
+  'bg-sky-600',
+  'bg-violet-600',
+  'bg-teal-600',
+];
+
+function getParticipantAvatarBgClass(key?: string | null): string {
+  if (!key) return PARTICIPANT_AVATAR_BG_COLORS[0];
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return PARTICIPANT_AVATAR_BG_COLORS[hash % PARTICIPANT_AVATAR_BG_COLORS.length];
+}
+
+function getMessageSenderGroupKey(m: ChatMessage | null): string {
+  if (!m) return '';
+  if (m.direction === 'OUTBOUND') return 'OUTBOUND';
+  const phoneDigits = m.senderPhone ? m.senderPhone.replace(/\D/g, '') : '';
+  if (phoneDigits) return `p:${phoneDigits}`;
+  const cleanJid = m.senderJid ? m.senderJid.trim().toLowerCase() : '';
+  if (cleanJid) return `j:${cleanJid}`;
+  return `n:${String(m.senderName || '').trim().toLowerCase()}`;
 }
 
 interface ConversationsProps {
@@ -1653,6 +1710,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
           contactId: part.contactId || null,
           jid: part.jid || null,
           role: part.role || null,
+          avatarUrl: part.avatarUrl || null,
         };
         if (p) {
           map.set(p, entry);
@@ -1673,9 +1731,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
         name: m.senderName || (p ? `+${p}` : jidToken),
         phone: p || null,
         jid: m.senderJid || null,
+        avatarUrl: m.senderAvatarUrl || null,
       };
       if (p && !map.has(p)) {
         map.set(p, fallbackEntry);
+      } else if (p && m.senderAvatarUrl && !map.get(p)?.avatarUrl) {
+        const cur = map.get(p)!;
+        map.set(p, { ...cur, avatarUrl: m.senderAvatarUrl });
       }
       if (jidToken && !map.has(jidToken)) {
         map.set(jidToken, fallbackEntry);
@@ -3624,6 +3686,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       await api.updateConversation(selectedConversation.id, {
         excludeFromMetrics: nextExclude,
         excludeReason: cleanedReason,
+        applyToContact: false,
       });
       setExcludeReasonDraft(cleanedReason || 'Bukan Customer');
       setSelectedConversation((prev) =>
@@ -4303,8 +4366,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       {(() => {
                         const ch = ((conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
                         const meta = CHANNEL_META[ch] || CHANNEL_META.WHATSAPP;
+                        const badgeCls =
+                          ch === 'WHATSAPP' && conv.wahaSession
+                            ? getWahaSessionBadgeClass(conv.wahaSession, sessions, meta.cls)
+                            : meta.cls;
                         return (
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded font-semibold border shrink-0 ${meta.cls}`}>
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded font-semibold border shrink-0 ${badgeCls}`}>
                             {meta.short}
                             {conv.wahaSession ? ` • ${conv.wahaSession}` : ''}
                           </span>
@@ -4332,18 +4399,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       ) : conv.excludeFromMetrics ? (
                         <span
                           title={`Tidak masuk penilaian (${conv.excludeReason || 'Non-Customer'})`}
-                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium bg-gray-100 text-gray-600 border border-gray-300 shrink-0"
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-800 border border-amber-200 shrink-0"
                         >
                           Non-Nilai
                         </span>
-                      ) : conv.assignedAgentName ? (
-                        <span
-                          title={`Ditugaskan ke: ${conv.assignedAgentName}`}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded font-medium bg-sky-50 text-sky-700 border border-sky-200 shrink-0 truncate max-w-[90px]"
-                        >
-                          • {conv.assignedAgentName}
-                        </span>
-                      ) : null}
+                      ) : (
+                        <>
+                          <span
+                            title="Percakapan pada sesi ini masuk penilaian SLA & CSAT"
+                            className="inline-flex items-center px-1.5 py-0.5 rounded font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
+                          >
+                            Dinilai
+                          </span>
+                          {conv.assignedAgentName && (
+                            <span
+                              title={`Ditugaskan ke: ${conv.assignedAgentName}`}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded font-medium bg-sky-50 text-sky-700 border border-sky-200 shrink-0 truncate max-w-[90px]"
+                            >
+                              • {conv.assignedAgentName}
+                            </span>
+                          )}
+                        </>
+                      )}
 
                       {/* Clear, Beautiful Label Badges with Colors from Master Data */}
                       {convLabels.map((lbl, idx) => {
@@ -4451,16 +4528,25 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           {getConversationDisplayTitle(selectedConversation)}
                         </h4>
                         <span
-                          className={`hidden sm:inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold border shrink-0 ${channelMeta.cls}`}
+                          className={`hidden sm:inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold border shrink-0 ${
+                            ch === 'WHATSAPP' && selectedConversation.wahaSession
+                              ? getWahaSessionBadgeClass(selectedConversation.wahaSession, sessions, channelMeta.cls)
+                              : channelMeta.cls
+                          }`}
                         >
                           {channelMeta.short}
+                          {selectedConversation.wahaSession ? ` • ${selectedConversation.wahaSession}` : ''}
                         </span>
-                        {selectedConversation.excludeFromMetrics && (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-300 shrink-0">
+                        {selectedConversation.excludeFromMetrics ? (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
                             <EyeOff className="w-2.5 h-2.5" />
                             <span className="hidden sm:inline">Non-Penilaian</span>
                           </span>
-                        )}
+                        ) : !selectedConversation.isGroup ? (
+                          <span className="hidden sm:inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                            Dinilai
+                          </span>
+                        ) : null}
                         {/* Active Labels in Chat Header */}
                         {activeLabels.map((lbl, idx) => {
                           if (idx >= 3) return null;
@@ -5133,17 +5219,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 const prevDateKey = prevMsg ? getChatDateKey(prevMsg.createdAt) : '';
                 const msgDateLabel = formatChatDateLabel(msg.createdAt);
                 const showDateDivider = Boolean(msgDateLabel && msgIndex > 0 && msgDateKey !== prevDateKey);
-                const isSenderSwitch = Boolean(
-                  prevMsg &&
-                    !showDateDivider &&
-                    !startBanner &&
-                    (prevMsg.messageType === 'ACTIVITY' ||
-                      prevMsg.messageType === 'NOTE' ||
-                      prevMsg.direction !== msg.direction ||
-                      (selectedConversation.isGroup &&
-                        (prevMsg.senderJid || prevMsg.senderPhone || prevMsg.senderName) !==
-                          (msg.senderJid || msg.senderPhone || msg.senderName)))
+                const isFirstInSenderRun = Boolean(
+                  !prevMsg ||
+                    showDateDivider ||
+                    startBanner ||
+                    prevMsg.messageType === 'ACTIVITY' ||
+                    prevMsg.messageType === 'NOTE' ||
+                    prevMsg.direction !== msg.direction ||
+                    (selectedConversation.isGroup &&
+                      getMessageSenderGroupKey(prevMsg) !== getMessageSenderGroupKey(msg))
                 );
+                const isSenderSwitch = Boolean(prevMsg && isFirstInSenderRun);
+                const isGroupInbound = Boolean(selectedConversation.isGroup && !isOutbound && !isCsat);
                 const dateDividerNode = showDateDivider ? (
                   <div className="flex justify-center py-1">
                     <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/90 border border-gray-200 text-[11px] font-medium text-gray-600 shadow-2xs">
@@ -5311,12 +5398,57 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       ref={(el) => {
                         msgElementRefs.current[msg.id] = el;
                       }}
-                      className={`group relative flex ${isOutbound ? 'justify-end' : 'justify-start'} ${
-                        isSenderSwitch ? 'mt-2' : ''
+                      className={`group relative flex ${
+                        isOutbound ? 'justify-end' : 'justify-start items-start'
+                      } ${isGroupInbound ? 'gap-2' : ''} ${
+                        isSenderSwitch ? 'mt-2.5' : ''
                       }`}
                     >
+                      {isGroupInbound && (() => {
+                        if (!isFirstInSenderRun) {
+                          return <div className="w-7 shrink-0" aria-hidden="true" />;
+                        }
+                        const cleanPhone = msg.senderPhone ? msg.senderPhone.replace(/\D/g, '') : '';
+                        const jidToken = msg.senderJid ? msg.senderJid.replace(/@.*$/, '').toLowerCase() : '';
+                        const lookup =
+                          (cleanPhone ? participantsLookup.get(cleanPhone) : undefined) ||
+                          (jidToken ? participantsLookup.get(jidToken) : undefined);
+                        const avatarUrl = msg.senderAvatarUrl || lookup?.avatarUrl || null;
+                        const senderDisplayName = resolveMessageSenderName(msg);
+                        const colorSeed = msg.senderJid || msg.senderPhone || msg.senderName || senderDisplayName;
+                        return (
+                          <div className="w-7 shrink-0 pt-0.5">
+                            <ContactAvatar
+                              url={avatarUrl}
+                              label={senderDisplayName}
+                              className={`w-7 h-7 rounded-full text-white font-semibold text-[10px] shadow-2xs ${getParticipantAvatarBgClass(
+                                colorSeed
+                              )}`}
+                              title={
+                                avatarUrl
+                                  ? `${senderDisplayName} (klik untuk lihat foto profil)`
+                                  : senderDisplayName
+                              }
+                              onClick={() => {
+                                if (avatarUrl) {
+                                  handleOpenAvatarLightbox(avatarUrl, senderDisplayName);
+                                } else {
+                                  handleOpenMentionContact({
+                                    name: senderDisplayName,
+                                    phone: cleanPhone || null,
+                                    jid: msg.senderJid || null,
+                                    contactId: lookup?.contactId || null,
+                                  });
+                                }
+                              }}
+                            />
+                          </div>
+                        );
+                      })()}
                       <div
-                        className={`relative flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[90%] sm:max-w-[80%] md:max-w-[540px] lg:max-w-[580px] xl:max-w-[620px] min-w-0 transition-all duration-300 ${
+                        className={`relative flex flex-col ${isOutbound ? 'items-end' : 'items-start'} ${
+                          isGroupInbound ? 'max-w-[calc(100%-2.5rem)]' : 'max-w-[90%]'
+                        } sm:max-w-[80%] md:max-w-[540px] lg:max-w-[580px] xl:max-w-[620px] min-w-0 transition-all duration-300 ${
                           highlightedMessageId === msg.id
                             ? 'scale-[1.02] ring-2 ring-indigo-500 ring-offset-2 rounded-lg'
                             : ''
@@ -5364,6 +5496,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         )}
                         {!isOutbound &&
                           !isCsat &&
+                          (!selectedConversation.isGroup || isFirstInSenderRun) &&
                           (selectedConversation.isGroup || msg.senderName || msg.senderPhone) && (
                             <div className="flex items-center gap-2 pb-1 border-b border-gray-100">
                               <span
@@ -8341,6 +8474,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       Bukan Penilaian
                     </button>
                   </div>
+                  <p className="text-[10px] text-gray-500 leading-snug">
+                    Berlaku khusus pada percakapan sesi ini (tidak mengubah status penilaian kontak pada sesi WhatsApp lainnya).
+                  </p>
 
                   {selectedConversation.excludeFromMetrics && (
                     <div className="space-y-1.5 pt-1">

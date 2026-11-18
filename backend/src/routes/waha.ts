@@ -2980,10 +2980,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           : convList[0];
         let convId!: string;
 
-        const contactExcluded = Boolean(isGroupChat || contact.excludeFromMetrics);
+        const hasOtherAssessedSession = convList.some((c) => !c.isGroup && !c.excludeFromMetrics);
+        const contactExcluded = Boolean(isGroupChat || (contact.excludeFromMetrics && !hasOtherAssessedSession));
         const contactExcludeReason = isGroupChat
           ? 'Grup WhatsApp'
-          : contact.excludeFromMetrics
+          : contactExcluded
           ? (contact.excludeReason || 'Bukan Customer')
           : null;
 
@@ -3060,11 +3061,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 ? (resolvedGroupSubject || existingConv.pushName || contact.namaLengkap)
                 : (!isFromMe && notifyName ? notifyName : existingConv.pushName),
               isGroup: isGroupChat || existingConv.isGroup,
-              excludeFromMetrics: contactExcluded ? true : existingConv.excludeFromMetrics,
+              excludeFromMetrics: isGroupChat ? true : existingConv.excludeFromMetrics,
               excludeReason: isGroupChat
                 ? (existingConv.excludeReason || 'Grup WhatsApp')
-                : contactExcluded
-                ? (contactExcludeReason || existingConv.excludeReason || 'Bukan Customer')
                 : existingConv.excludeReason,
               status: isReopeningFromResolved ? 'OPEN' : existingConv.status,
               sessionStartedAt: isReopeningFromResolved
@@ -3305,7 +3304,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         liveEvents.emit('conversations:update', { conversationId: convId }, companyId);
         liveEvents.emit('tracking:update', { conversationId: convId }, companyId);
 
-        if (body && !isFromMe && !isGroupChat && !contact.excludeFromMetrics && !existingConv?.excludeFromMetrics) {
+        const convIsExcludedNow = existingConv ? Boolean(existingConv.excludeFromMetrics) : contactExcluded;
+        if (body && !isFromMe && !isGroupChat && !convIsExcludedNow) {
           void runWithCompany(companyId, () =>
             handleInboundAutomation({
               conversationId: convId,
