@@ -19,6 +19,7 @@ import {
   Plus,
   FileText,
   Smartphone,
+  Monitor,
   CheckCircle2,
   RotateCcw,
   UserCheck,
@@ -5583,14 +5584,88 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               >
                                 {resolveMessageSenderName(msg)}
                               </span>
-                              {msg.senderPhone &&
-                                resolveMessageSenderName(msg) !== `+${msg.senderPhone}` && (
-                                  <span className="text-[10px] sm:text-[11px] font-mono text-gray-400 shrink-0">
-                                    +{msg.senderPhone}
-                                  </span>
-                                )}
+                                {msg.senderPhone &&
+                                  resolveMessageSenderName(msg) !== `+${msg.senderPhone}` && (
+                                    <span className="text-[10px] sm:text-[11px] font-mono text-gray-400 shrink-0">
+                                      +{msg.senderPhone}
+                                    </span>
+                                  )}
                             </div>
                           )}
+
+                        {isOutbound && !isCsat && (() => {
+                          const sentVia = msgMeta?.sentVia;
+                          const isExternalDevice =
+                            sentVia === 'WHATSAPP_WEB' ||
+                            sentVia === 'WHATSAPP_PHONE' ||
+                            sentVia === 'WHATSAPP_DEVICE' ||
+                            sentVia === 'WHATSAPP_API' ||
+                            msg.senderName === 'WhatsApp Langsung';
+                          const isAiBot = sentVia === 'AI_BOT';
+                          const isBroadcast = sentVia === 'BROADCAST';
+
+                          if (isExternalDevice) {
+                            const originLabel =
+                              msgMeta?.sentViaLabel ||
+                              (sentVia === 'WHATSAPP_WEB'
+                                ? 'WhatsApp Web'
+                                : sentVia === 'WHATSAPP_PHONE'
+                                ? 'WhatsApp HP'
+                                : 'WhatsApp HP / Web');
+                            return (
+                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-indigo-200/60">
+                                <span
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100/80 border border-emerald-200 text-emerald-800 text-[10px] font-medium"
+                                  title="Pesan dikirim langsung dari perangkat/sesi WhatsApp di luar CRM"
+                                >
+                                  {sentVia === 'WHATSAPP_WEB' ? (
+                                    <Monitor className="w-2.5 h-2.5 shrink-0" />
+                                  ) : (
+                                    <Smartphone className="w-2.5 h-2.5 shrink-0" />
+                                  )}
+                                  <span>{originLabel}</span>
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          if (isAiBot) {
+                            return (
+                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-indigo-200/60">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-700">
+                                  <Sparkles className="w-2.5 h-2.5 shrink-0" />
+                                  <span>{msgMeta?.sentViaLabel || msg.senderName || 'Bot AI'}</span>
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          if (isBroadcast) {
+                            return (
+                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-indigo-200/60">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-sky-700">
+                                  <Send className="w-2.5 h-2.5 shrink-0" />
+                                  <span>{msgMeta?.sentViaLabel || msg.senderName || 'Siaran Terjadwal'}</span>
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          if (sentVia === 'CRM' || msg.senderName) {
+                            return (
+                              <div className="flex items-center justify-end gap-1.5 pb-1 border-b border-indigo-200/60 text-[10px] text-indigo-800/80">
+                                <span className="font-semibold truncate max-w-[180px]">
+                                  {msg.senderName || msgMeta?.actorName || 'Tim CS'}
+                                </span>
+                                <span className="px-1 py-0.2 rounded bg-white/80 border border-indigo-200 text-[9px] font-mono text-indigo-700 shrink-0">
+                                  CRM
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          return null;
+                        })()}
 
                         {(msgMeta?.forwarded ||
                           (msgMeta?.forwardingScore && msgMeta.forwardingScore > 0) ||
@@ -6308,13 +6383,21 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         </div>
                         </div>
 
-                        {/* Directly Accessible Outside Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) - Muncul halus saat kursor diarahkan ke pesan */}
+                        {/* Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) — muncul di bawah bubble dengan membuka ruang tanpa menimpa pesan lain */}
                         {!isRevoked && (canReplyConversation || canManageConversation) && (
                           <div
-                            className={`mt-1 flex flex-wrap items-center gap-1 px-0.5 text-[10px] md:hidden md:group-hover:inline-flex md:group-focus-within:inline-flex md:flex-nowrap md:whitespace-nowrap md:absolute md:-top-3 ${
-                              isOutbound ? 'md:right-2' : 'md:left-2'
-                            } md:z-20 md:mt-0 md:bg-white/95 md:backdrop-blur-xs md:rounded-md md:p-0.5 md:border md:border-gray-200 md:shadow-sm`}
+                            className={`w-full grid transition-[grid-template-rows,opacity,margin] duration-150 ease-out ${
+                              activeReactionMsgId === msg.id
+                                ? 'grid-rows-[1fr] opacity-100 mt-1.5'
+                                : 'grid-rows-[1fr] opacity-100 mt-1 md:grid-rows-[0fr] md:opacity-0 md:mt-0 md:pointer-events-none md:group-hover:grid-rows-[1fr] md:group-hover:opacity-100 md:group-hover:mt-1.5 md:group-hover:pointer-events-auto md:group-focus-within:grid-rows-[1fr] md:group-focus-within:opacity-100 md:group-focus-within:mt-1.5 md:group-focus-within:pointer-events-auto'
+                            }`}
                           >
+                            <div className="overflow-hidden min-h-0">
+                              <div
+                                className={`flex flex-wrap items-center gap-1 px-0.5 py-0.5 text-[10px] ${
+                                  isOutbound ? 'justify-end' : 'justify-start'
+                                }`}
+                              >
                             {canReplyConversation && (
                               <button
                                 type="button"
@@ -6324,7 +6407,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   replyInputRef.current?.focus();
                                 }}
                                 title="Balas pesan ini"
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-indigo-50 hover:border-indigo-200 text-indigo-700 font-medium shadow-2xs transition-all hover:scale-102"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-indigo-50 hover:border-indigo-200 text-indigo-700 font-medium shadow-2xs transition-colors"
                               >
                                 <Reply className="w-2.5 h-2.5" />
                                 <span>Balas</span>
@@ -6339,7 +6422,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   setForwardTargetConvId('');
                                 }}
                                 title="Teruskan pesan ke chat lain"
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-emerald-50 hover:border-emerald-200 text-gray-700 hover:text-emerald-700 font-medium shadow-2xs transition-all hover:scale-102"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-emerald-50 hover:border-emerald-200 text-gray-700 hover:text-emerald-700 font-medium shadow-2xs transition-colors"
                               >
                                 <Forward className="w-2.5 h-2.5" />
                                 <span>Teruskan</span>
@@ -6350,7 +6433,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 type="button"
                                 onClick={() => void handleStartPinMessage(msg)}
                                 title={msgMeta?.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-all hover:scale-102 ${
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-colors ${
                                   msgMeta?.isPinned
                                     ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
                                     : 'border-gray-200 bg-white hover:bg-indigo-50 text-gray-600 hover:text-indigo-700'
@@ -6365,7 +6448,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 type="button"
                                 onClick={() => void handleToggleStarMessage(msg)}
                                 title={msgMeta?.isStarred ? 'Hapus bintang' : 'Beri bintang'}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-all hover:scale-102 ${
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-colors ${
                                   msgMeta?.isStarred
                                     ? 'bg-amber-50 border-amber-300 text-amber-800'
                                     : 'border-gray-200 bg-white hover:bg-amber-50 text-gray-600 hover:text-amber-700'
@@ -6382,7 +6465,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   setActiveReactionMsgId((prev) => (prev === msg.id ? null : msg.id))
                                 }
                                 title="Beri reaksi emoji"
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-all hover:scale-102 ${
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-colors ${
                                   activeReactionMsgId === msg.id
                                     ? 'bg-amber-50 border-amber-300 text-amber-800'
                                     : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'
@@ -6396,11 +6479,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               type="button"
                               onClick={() => setDeleteMessageTarget(msg)}
                               title="Hapus Pesan (Tarik / Hapus Pribadi)"
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-gray-600 hover:text-rose-600 font-medium shadow-2xs transition-all hover:scale-102"
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-gray-600 hover:text-rose-600 font-medium shadow-2xs transition-colors"
                             >
                               <Trash2 className="w-2.5 h-2.5" />
                               <span>Hapus</span>
                             </button>
+                              </div>
+                            </div>
                           </div>
                         )}
 

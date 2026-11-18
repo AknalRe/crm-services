@@ -443,6 +443,7 @@ async function sendCsatCtaForConversation(
       channel: convChannel,
       wahaSession: effectiveSession,
       body: ctaBody,
+      metadataJson: JSON.stringify({ sentVia: 'CRM', actorName: 'Tim CS' }),
       wahaMessageId: sendResult.messageId || null,
       status: 'SENT',
       ackStatus: 1,
@@ -2971,7 +2972,11 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           replyToMessageId: quotedLocalId,
           replyToBody: quotedBodyText,
           replyToSender: quotedSenderLabel,
-          metadataJson: metadataRecord ? JSON.stringify(metadataRecord) : null,
+          metadataJson: JSON.stringify({
+            ...(metadataRecord || {}),
+            sentVia: 'CRM',
+            actorName: currentAgentName,
+          }),
           wahaMessageId: convChannel === 'WHATSAPP' && sendResult.success ? (sendResult.messageId || null) : null,
           status: sendResult.success ? 'SENT' : 'FAILED',
           ackStatus: sendResult.success ? 1 : -1,
@@ -3596,6 +3601,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const newMeta = {
         ...sourceMeta,
+        sentVia: 'CRM',
+        actorName: authUser?.name || 'Tim CS',
         forwarded: true,
         forwardingScore: Number(sourceMeta?.forwardingScore || 0) + 1,
         forwardedFromSender: sourceMsg.senderName || (sourceMsg.direction === 'OUTBOUND' ? (authUser?.name || 'Anda') : targetConv.contact.namaLengkap),

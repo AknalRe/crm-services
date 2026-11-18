@@ -80,6 +80,58 @@ export function isWahaFromMe(payload: any): boolean {
   return false;
 }
 
+export function detectWahaOutboundOrigin(payload: any): {
+  sentVia: 'WHATSAPP_WEB' | 'WHATSAPP_PHONE' | 'WHATSAPP_DEVICE' | 'WHATSAPP_API';
+  label: string;
+  deviceType: string;
+} {
+  const rawSource = String(payload?.source || '').trim().toLowerCase();
+  const rawDevice = String(
+    payload?.deviceType ||
+      payload?._data?.deviceType ||
+      payload?._data?.Info?.DeviceType ||
+      payload?._data?.Info?.Platform ||
+      payload?._data?.platform ||
+      ''
+  )
+    .trim()
+    .toLowerCase();
+
+  const rawId = String(
+    payload?._data?.Info?.ID ||
+      payload?.id?.id ||
+      payload?._data?.key?.id ||
+      (typeof payload?.id === 'string' ? payload.id : payload?.id?._serialized || '')
+  ).trim();
+  const stanzaId = rawId.includes('_') ? rawId.split('_').pop() || rawId : rawId;
+
+  if (/android/.test(rawDevice)) {
+    return { sentVia: 'WHATSAPP_PHONE', label: 'WhatsApp HP (Android)', deviceType: rawDevice };
+  }
+  if (/ios|iphone|ipad/.test(rawDevice)) {
+    return { sentVia: 'WHATSAPP_PHONE', label: 'WhatsApp HP (iOS)', deviceType: rawDevice };
+  }
+  if (/web|desktop|mac|win|linux|chrome|edge|firefox|safari/.test(rawDevice)) {
+    return { sentVia: 'WHATSAPP_WEB', label: 'WhatsApp Web', deviceType: rawDevice };
+  }
+  if (/^3A[0-9A-F]{12,}$/i.test(stanzaId)) {
+    return { sentVia: 'WHATSAPP_PHONE', label: 'WhatsApp HP (iOS)', deviceType: 'ios' };
+  }
+  if (/^3EB0[0-9A-F]{10,}$/i.test(stanzaId)) {
+    return rawSource === 'app'
+      ? { sentVia: 'WHATSAPP_WEB', label: 'WhatsApp Web / Tertaut', deviceType: 'web' }
+      : { sentVia: 'WHATSAPP_DEVICE', label: 'WhatsApp Web / HP', deviceType: rawSource || 'web' };
+  }
+  if (rawSource === 'api') {
+    return { sentVia: 'WHATSAPP_API', label: 'WAHA API Eksternal', deviceType: 'api' };
+  }
+  return {
+    sentVia: 'WHATSAPP_DEVICE',
+    label: 'WhatsApp HP / Web',
+    deviceType: rawSource || 'device',
+  };
+}
+
 export function extractWahaContextInfo(payload: any): Record<string, any> | null {
   if (!payload || typeof payload !== 'object') return null;
   const containers = [
@@ -2232,14 +2284,18 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       const isInboundMessageEvent = event === 'message' || event === 'message.any';
       const isFromMe = isWahaFromMe(payload);
       const rawTarget = isFromMe
-        ? String(
-            payload?.to ||
-            payload?.chatId ||
-            payload?._data?.key?.remoteJid ||
-            payload?._data?.Info?.Chat ||
-            payload?.from ||
-            ''
-          ).trim()
+        ? (() => {
+            const candidates = [
+              payload?.chatId,
+              payload?._data?.Info?.Chat,
+              payload?._data?.key?.remoteJid,
+              payload?.to,
+              payload?.from,
+            ]
+              .map((v) => String(v || '').trim())
+              .filter((v) => v && v.toLowerCase() !== 'me');
+            return candidates.find((v) => v.toLowerCase().endsWith('@g.us')) || candidates[0] || '';
+          })()
         : String(
             payload?.from ||
             payload?.chatId ||
@@ -3080,6 +3136,21 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           }
         }
 
+        const outboundOrigin = isFromMe ? detectWahaOutboundOrigin(payload) : null;
+        const effectiveMsgMeta =
+          outboundOrigin || richData.metadata
+            ? {
+                ...(richData.metadata || {}),
+                ...(outboundOrigin
+                  ? {
+                      sentVia: outboundOrigin.sentVia,
+                      sentViaLabel: outboundOrigin.label,
+                      sentDeviceType: outboundOrigin.deviceType,
+                    }
+                  : {}),
+              }
+            : null;
+
         // Create ChatMessage
         await db.insert(chatMessages).values({
           id: crypto.randomUUID(),
@@ -3092,12 +3163,16 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           wahaSession: inboundSession,
           senderJid: isGroupChat ? groupSenderJid : rawFrom || null,
           senderPhone: isGroupChat ? groupSenderPhone : fromPhone || null,
-          senderName: isGroupChat ? groupSenderName : isFromMe ? (notifyName || 'WhatsApp Langsung') : notifyName || null,
+          senderName: isGroupChat
+            ? groupSenderName
+            : isFromMe
+            ? outboundOrigin?.label || notifyName || 'WhatsApp HP / Web'
+            : notifyName || null,
           body,
           mediaUrl,
           mediaType,
           mediaName: mediaMeta.isSticker && !mediaName ? 'sticker.webp' : mediaName,
-          metadataJson: richData.metadata ? JSON.stringify(richData.metadata) : null,
+          metadataJson: effectiveMsgMeta ? JSON.stringify(effectiveMsgMeta) : null,
           replyToMessageId,
           replyToBody,
           replyToSender,

@@ -7,7 +7,21 @@ import { db } from '../db';
 import { chatMessages } from '../db/schema';
 import { requirePermission } from './auth';
 
-const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+export function resolveUploadsDir(
+  cwd = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (p: string) => boolean = fs.existsSync
+): string {
+  const explicit = String(env.MEDIA_UPLOAD_DIR || env.UPLOAD_DIR || '').trim();
+  if (explicit) return path.resolve(explicit);
+  // Persist uploads inside /app/data so container recreates/updates preserve all media files
+  if (cwd === '/app' && exists('/app/data')) {
+    return '/app/data/uploads';
+  }
+  return path.resolve(cwd, 'uploads');
+}
+
+const UPLOADS_DIR = resolveUploadsDir();
 const META_DIR = path.join(UPLOADS_DIR, '.meta');
 
 export interface MediaMetadata {

@@ -311,6 +311,9 @@ export interface ChatMessageMetadata {
   pinExpiresAt?: string | null;
   asDocument?: boolean;
   isHd?: boolean;
+  sentVia?: 'CRM' | 'AI_BOT' | 'BROADCAST' | 'WHATSAPP_WEB' | 'WHATSAPP_PHONE' | 'WHATSAPP_DEVICE' | 'WHATSAPP_API' | string;
+  sentViaLabel?: string;
+  sentDeviceType?: string;
   isStarred?: boolean;
   starredAt?: string | null;
   forwarded?: boolean;

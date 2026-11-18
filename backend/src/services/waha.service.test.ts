@@ -2312,6 +2312,43 @@ test('pinMessage and unpinMessage handle WAHA engine 501 / 404 unsupported grace
   assert.equal(bogusPinCall, undefined, 'Must not dispatch non-existent /api/pinMessage route');
 });
 
+test('resolveUploadsDir persists media inside /app/data/uploads inside container and respects MEDIA_UPLOAD_DIR', async () => {
+  const pathMod = await import('path');
+  const { resolveUploadsDir } = await import('../routes/media');
+  assert.equal(
+    resolveUploadsDir('/app', {}, (p) => p === '/app/data'),
+    '/app/data/uploads'
+  );
+  assert.equal(
+    resolveUploadsDir('/app', { MEDIA_UPLOAD_DIR: '/custom/media' }, () => true),
+    pathMod.resolve('/custom/media')
+  );
+  assert.equal(
+    resolveUploadsDir('/tmp/crm-local', {}, () => false),
+    pathMod.resolve('/tmp/crm-local', 'uploads')
+  );
+});
+
+test('detectWahaOutboundOrigin distinguishes WhatsApp Web, HP (iOS/Android), and fallback device messages', async () => {
+  const { detectWahaOutboundOrigin } = await import('../routes/waha');
+  assert.equal(
+    detectWahaOutboundOrigin({ fromMe: true, source: 'app', id: 'true_62812@c.us_3EB01234567890ABCD' }).sentVia,
+    'WHATSAPP_WEB'
+  );
+  assert.equal(
+    detectWahaOutboundOrigin({ fromMe: true, source: 'app', id: 'true_62812@c.us_3A1234567890ABCD' }).sentVia,
+    'WHATSAPP_PHONE'
+  );
+  assert.equal(
+    detectWahaOutboundOrigin({ fromMe: true, source: 'app', deviceType: 'android', id: 'true_62812@c.us_AC9988' }).sentVia,
+    'WHATSAPP_PHONE'
+  );
+  assert.equal(
+    detectWahaOutboundOrigin({ fromMe: true, source: 'app', id: 'true_62812@c.us_AC99887766' }).sentVia,
+    'WHATSAPP_DEVICE'
+  );
+});
+
 
 
 
