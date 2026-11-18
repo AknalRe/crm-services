@@ -3989,6 +3989,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
     [unifiedSessionOptions, channelFilter]
   );
 
+  useLayoutEffect(() => {
+    const anchor = convListAnchorRef.current;
+    convListAnchorRef.current = null;
+    const el = convListContainerRef.current;
+    if (!anchor || !el) return;
+    const delta = el.scrollHeight - anchor.height;
+    el.scrollTop = delta > 0 ? anchor.top + delta : anchor.top;
+  }, [conversations]);
+
   if (!licenseInfo) {
     return (
       <div className="bg-white rounded-lg border border-gray-200 p-8 max-w-xl mx-auto mt-8 text-center space-y-2">
@@ -4097,15 +4106,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
       c.assignedAgentName?.toLowerCase().includes(q)
     );
   });
-
-  useLayoutEffect(() => {
-    const anchor = convListAnchorRef.current;
-    convListAnchorRef.current = null;
-    const el = convListContainerRef.current;
-    if (!anchor || !el) return;
-    const delta = el.scrollHeight - anchor.height;
-    el.scrollTop = delta > 0 ? anchor.top + delta : anchor.top;
-  }, [conversations]);
 
   const activeLabels = getLabelList(selectedConversation);
   const activeAdvancedFilterCount =
