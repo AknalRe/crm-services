@@ -2472,6 +2472,44 @@ test('group management helpers strip data URI prefix, parse invite objects, and 
   assert.match(permErr.error || '', /Admin grup/i);
 });
 
+test('WAHA inbound webhook deduplication resolves identical stanza and lock keys across @lid and @c.us payloads', () => {
+  const { extractWahaMessageIds, buildWahaInboundLockKey } = require('../routes/waha') as typeof import('../routes/waha');
+
+  const lidPayload = {
+    id: 'false_160602458619101@lid_3EB0 pare99887766'.replace(' ', ''),
+    from: '160602458619101@lid',
+    _data: { Info: { ID: '3EB0pare99887766' } },
+  };
+  const cusPayload = {
+    id: 'false_628113251288@c.us_3EB0pare99887766',
+    from: '628113251288@c.us',
+    notifyName: 'CS Pare',
+  };
+  const barePayload = {
+    id: '3EB0pare99887766',
+    from: '628113251288@c.us',
+  };
+
+  const lidIds = extractWahaMessageIds(lidPayload);
+  const cusIds = extractWahaMessageIds(cusPayload);
+  const bareIds = extractWahaMessageIds(barePayload);
+
+  assert.ok(lidIds.stanzaIds.includes('3EB0pare99887766'));
+  assert.ok(cusIds.stanzaIds.includes('3EB0pare99887766'));
+  assert.ok(bareIds.stanzaIds.includes('3EB0pare99887766'));
+
+  const lidLock = buildWahaInboundLockKey('comp-1', 'HRIS_MINTI', lidPayload, '160602458619101@lid');
+  const cusLock = buildWahaInboundLockKey('comp-1', 'HRIS_MINTI', cusPayload, '628113251288@c.us');
+  const bareLock = buildWahaInboundLockKey('comp-1', 'hris_minti', barePayload, '628113251288@c.us');
+  const otherSessionLock = buildWahaInboundLockKey('comp-1', 'WA_TEST', cusPayload, '628113251288@c.us');
+
+  assert.equal(lidLock, 'msg:comp-1:hris_minti:3EB0pare99887766');
+  assert.equal(cusLock, lidLock);
+  assert.equal(bareLock, lidLock);
+  assert.notEqual(otherSessionLock, lidLock);
+});
+
+
 
 
 

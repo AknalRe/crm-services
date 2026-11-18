@@ -619,6 +619,110 @@ export async function initDb() {
     ON conversations (company_id, contact_id, COALESCE(LOWER(TRIM(waha_session)), ''))
     WHERE channel = 'WHATSAPP';
   `);
+  await safeExec('deduplicate_waha_chat_messages', async () => {
+    const stanzaRemoved = await _queryClient.unsafe(`
+      WITH ranked_stanza AS (
+        SELECT
+          id,
+          FIRST_VALUE(id) OVER (
+            PARTITION BY
+              company_id,
+              conversation_id,
+              COALESCE(LOWER(TRIM(waha_session)), ''),
+              direction,
+              REGEXP_REPLACE(waha_message_id, '^.*_', '')
+            ORDER BY
+              (CASE WHEN sender_name IS NOT NULL AND TRIM(sender_name) <> '' THEN 1 ELSE 0 END) DESC,
+              (CASE WHEN sender_phone IS NOT NULL AND TRIM(sender_phone) <> '' THEN 1 ELSE 0 END) DESC,
+              (CASE WHEN media_url IS NOT NULL THEN 1 ELSE 0 END) DESC,
+              created_at ASC,
+              id ASC
+          ) AS keep_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY
+              company_id,
+              conversation_id,
+              COALESCE(LOWER(TRIM(waha_session)), ''),
+              direction,
+              REGEXP_REPLACE(waha_message_id, '^.*_', '')
+            ORDER BY
+              (CASE WHEN sender_name IS NOT NULL AND TRIM(sender_name) <> '' THEN 1 ELSE 0 END) DESC,
+              (CASE WHEN sender_phone IS NOT NULL AND TRIM(sender_phone) <> '' THEN 1 ELSE 0 END) DESC,
+              (CASE WHEN media_url IS NOT NULL THEN 1 ELSE 0 END) DESC,
+              created_at ASC,
+              id ASC
+          ) AS rn
+        FROM chat_messages
+        WHERE channel = 'WHATSAPP'
+          AND waha_message_id IS NOT NULL
+          AND waha_message_id NOT LIKE '%status@broadcast%'
+          AND LENGTH(REGEXP_REPLACE(waha_message_id, '^.*_', '')) >= 8
+      ),
+      dups AS (
+        SELECT id, keep_id FROM ranked_stanza WHERE rn > 1 AND id <> keep_id
+      ),
+      relinked AS (
+        UPDATE chat_messages m
+        SET reply_to_message_id = d.keep_id
+        FROM dups d
+        WHERE m.reply_to_message_id = d.id
+      )
+      DELETE FROM chat_messages
+      WHERE id IN (SELECT id FROM dups)
+      RETURNING id;
+    `);
+    const mediaRemoved = await _queryClient.unsafe(`
+      WITH media_dups AS (
+        SELECT DISTINCT ON (b.id)
+          b.id AS dup_id,
+          a.id AS keep_id
+        FROM chat_messages a
+        JOIN chat_messages b
+          ON a.company_id = b.company_id
+         AND a.conversation_id = b.conversation_id
+         AND a.direction = b.direction
+         AND COALESCE(a.media_type, '') = COALESCE(b.media_type, '')
+         AND a.body = b.body
+         AND a.id <> b.id
+         AND ABS(EXTRACT(EPOCH FROM (b.created_at - a.created_at))) <= 15
+        WHERE a.channel = 'WHATSAPP'
+          AND a.media_type IS NOT NULL
+          AND LENGTH(TRIM(a.body)) >= 20
+          AND (
+            (a.sender_name IS NOT NULL AND TRIM(a.sender_name) <> ''),
+            (a.sender_phone IS NOT NULL AND TRIM(a.sender_phone) <> ''),
+            (a.media_url IS NOT NULL),
+            EXTRACT(EPOCH FROM b.created_at),
+            b.id
+          ) > (
+            (b.sender_name IS NOT NULL AND TRIM(b.sender_name) <> ''),
+            (b.sender_phone IS NOT NULL AND TRIM(b.sender_phone) <> ''),
+            (b.media_url IS NOT NULL),
+            EXTRACT(EPOCH FROM a.created_at),
+            a.id
+          )
+        ORDER BY
+          b.id,
+          (a.sender_name IS NOT NULL AND TRIM(a.sender_name) <> '') DESC,
+          (a.sender_phone IS NOT NULL AND TRIM(a.sender_phone) <> '') DESC,
+          a.created_at ASC,
+          a.id ASC
+      ),
+      relinked AS (
+        UPDATE chat_messages m
+        SET reply_to_message_id = d.keep_id
+        FROM media_dups d
+        WHERE m.reply_to_message_id = d.dup_id
+      )
+      DELETE FROM chat_messages
+      WHERE id IN (SELECT dup_id FROM media_dups)
+      RETURNING id;
+    `);
+    const totalRemoved = (stanzaRemoved?.length || 0) + (mediaRemoved?.length || 0);
+    if (totalRemoved > 0) {
+      console.log(`[DB Init] Cleaned ${totalRemoved} duplicate WhatsApp message row(s)`);
+    }
+  });
   await safeExec('idx_crm_roles_company_name', () => _queryClient`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_crm_roles_company_name ON crm_roles (company_id, LOWER(name));
   `);

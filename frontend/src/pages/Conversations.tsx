@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   MessageSquare,
   Search,
@@ -27,6 +27,7 @@ import {
   Trash2,
   ArrowLeft,
   ChevronDown,
+  ChevronUp,
   Package,
   AlertTriangle,
   GitMerge,
@@ -1149,11 +1150,86 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const targetConvIdRef = useRef<string | null>(targetConversation?.conversationId || null);
   targetConvIdRef.current = targetConversation?.conversationId || null;
 
+  const convListContainerRef = useRef<HTMLDivElement>(null);
+  const convListAnchorRef = useRef<{ top: number; height: number } | null>(null);
+  const [pendingNewConvIds, setPendingNewConvIds] = useState<string[]>([]);
+  const prevConvSnapshotRef = useRef<{
+    initialized: boolean;
+    ids: Set<string>;
+    activityAt: Map<string, string>;
+  }>({
+    initialized: false,
+    ids: new Set(),
+    activityAt: new Map(),
+  });
+
+  const scrollConvListToTop = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const el = convListContainerRef.current;
+    if (el) {
+      if (behavior === 'smooth') {
+        el.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        el.scrollTop = 0;
+      }
+    }
+    setPendingNewConvIds([]);
+  }, []);
+
+  const handleConvListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (e.currentTarget.scrollTop <= 32) {
+      setPendingNewConvIds((prev) => (prev.length > 0 ? [] : prev));
+    }
+  }, []);
+
   const fetchConversations = useCallback(async () => {
     if (!isLiveChatUnlocked) return;
     try {
       const rawData = await api.getConversations();
       const data = Array.from(new Map(rawData.map((c) => [c.id, c])).values());
+
+      const listEl = convListContainerRef.current;
+      const isScrolledDown = Boolean(listEl && listEl.scrollTop > 48);
+      if (listEl && isScrolledDown) {
+        convListAnchorRef.current = { top: listEl.scrollTop, height: listEl.scrollHeight };
+      } else {
+        convListAnchorRef.current = null;
+      }
+
+      const snap = prevConvSnapshotRef.current;
+      const newlyDetectedIds: string[] = [];
+      const nextIds = new Set<string>();
+      const nextActivity = new Map<string, string>();
+      for (const c of data) {
+        nextIds.add(c.id);
+        const actTs = String(c.lastMessageAt || c.updatedAt || c.createdAt || '');
+        nextActivity.set(c.id, actTs);
+        if (snap.initialized) {
+          const isBrandNew = !snap.ids.has(c.id);
+          const prevAct = snap.activityAt.get(c.id) || '';
+          const hasFreshActivity = Boolean(
+            actTs &&
+              prevAct &&
+              actTs > prevAct &&
+              (c.unreadCount || 0) > 0 &&
+              c.id !== activeConvIdRef.current
+          );
+          if (isBrandNew || hasFreshActivity) {
+            newlyDetectedIds.push(c.id);
+          }
+        }
+      }
+      prevConvSnapshotRef.current = {
+        initialized: true,
+        ids: nextIds,
+        activityAt: nextActivity,
+      };
+
+      if (isScrolledDown && newlyDetectedIds.length > 0) {
+        setPendingNewConvIds((prev) => Array.from(new Set([...prev, ...newlyDetectedIds])));
+      } else if (!isScrolledDown) {
+        setPendingNewConvIds((prev) => (prev.length > 0 ? [] : prev));
+      }
+
       setConversations(data);
       setListError(null);
       setSelectedConversation((prev) => {
@@ -3976,6 +4052,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
     );
   });
 
+  useLayoutEffect(() => {
+    const anchor = convListAnchorRef.current;
+    convListAnchorRef.current = null;
+    const el = convListContainerRef.current;
+    if (!anchor || !el) return;
+    const delta = el.scrollHeight - anchor.height;
+    el.scrollTop = delta > 0 ? anchor.top + delta : anchor.top;
+  }, [conversations]);
+
   const activeLabels = getLabelList(selectedConversation);
   const activeAdvancedFilterCount =
     (metricFilter !== 'ALL' ? 1 : 0) +
@@ -4345,7 +4430,26 @@ export const Conversations: React.FC<ConversationsProps> = ({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto divide-y divide-gray-200">
+        <div className="relative flex-1 min-h-0 flex flex-col">
+        {pendingNewConvIds.length > 0 && (
+          <button
+            type="button"
+            onClick={() => scrollConvListToTop('smooth')}
+            className="absolute top-2.5 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md border border-indigo-500 transition-all cursor-pointer"
+          >
+            <ChevronUp className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              {pendingNewConvIds.length > 1
+                ? `${pendingNewConvIds.length} obrolan baru`
+                : 'Obrolan baru'}
+            </span>
+          </button>
+        )}
+        <div
+          ref={convListContainerRef}
+          onScroll={handleConvListScroll}
+          className="flex-1 overflow-y-auto divide-y divide-gray-200"
+        >
           {loadingList && conversations.length === 0 ? (
             <LoadingState message="Memuat percakapan..." />
           ) : listError && conversations.length === 0 ? (
@@ -4571,6 +4675,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
               )}
             </>
           )}
+        </div>
         </div>
       </div>
 
@@ -8751,36 +8856,46 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           <div
                             key={part.jid}
                             onClick={() => {
-                              if (part.contactId || part.phone) {
+                              if (part.contactId || part.phone || part.jid) {
                                 handleOpenMentionContact({
                                   contactId: part.contactId,
                                   phone: part.phone,
                                   name: part.contactName || part.name,
                                   jid: part.jid,
                                   role: part.role,
+                                  avatarUrl: part.avatarUrl || null,
                                 });
                               }
                             }}
-                            className={`flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-gray-200 text-[11px] ${
-                              part.contactId || part.phone
+                            className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-white border border-gray-200 text-[11px] ${
+                              part.contactId || part.phone || part.jid
                                 ? 'cursor-pointer hover:bg-gray-50'
                                 : ''
                             }`}
                           >
-                            <div className="min-w-0">
-                              <div className="font-medium text-gray-900 truncate flex items-center gap-1">
-                                <span>{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
-                                {part.role !== 'member' && (
-                                  <span className="px-1 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                                    {part.role === 'superadmin' ? 'Owner' : 'Admin'}
-                                  </span>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <ContactAvatar
+                                url={part.avatarUrl}
+                                label={part.contactName || part.name || part.phone || 'Anggota'}
+                                className={`w-6 h-6 rounded-full text-white font-semibold text-[9px] shrink-0 ${getParticipantAvatarBgClass(
+                                  part.jid || part.phone || part.name
+                                )}`}
+                              />
+                              <div className="min-w-0">
+                                <div className="font-medium text-gray-900 truncate flex items-center gap-1">
+                                  <span className="truncate">{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
+                                  {part.role !== 'member' && (
+                                    <span className="px-1 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
+                                      {part.role === 'superadmin' ? 'Owner' : 'Admin'}
+                                    </span>
+                                  )}
+                                </div>
+                                {part.phone && (
+                                  <div className="text-[10px] font-mono text-gray-500 truncate">
+                                    +{part.phone}
+                                  </div>
                                 )}
                               </div>
-                              {part.phone && (
-                                <div className="text-[10px] font-mono text-gray-500 truncate">
-                                  +{part.phone}
-                                </div>
-                              )}
                             </div>
                             {part.messageCount > 0 && (
                               <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px] shrink-0">
@@ -9681,7 +9796,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <div
                         key={part.jid}
                         onClick={() => {
-                          if (part.contactId || part.phone) {
+                          if (part.contactId || part.phone || part.jid) {
                             setShowParticipantsModal(false);
                             handleOpenMentionContact({
                               contactId: part.contactId,
@@ -9689,17 +9804,26 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               name: part.contactName || part.name,
                               jid: part.jid,
                               role: part.role,
+                              avatarUrl: part.avatarUrl || null,
                             });
                           }
                         }}
-                        className={`px-3 py-2 flex items-center justify-between gap-2 text-xs ${
-                          part.contactId || part.phone
+                        className={`px-3 py-2 flex items-center justify-between gap-2.5 text-xs ${
+                          part.contactId || part.phone || part.jid
                             ? 'cursor-pointer hover:bg-gray-50'
                             : ''
                         }`}
                       >
-                        <div className="min-w-0">
-                          <div className="font-semibold text-gray-900 truncate flex items-center gap-1.5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <ContactAvatar
+                            url={part.avatarUrl}
+                            label={part.contactName || part.name || part.phone || 'Anggota'}
+                            className={`w-9 h-9 rounded-full text-white font-semibold text-xs shrink-0 ${getParticipantAvatarBgClass(
+                              part.jid || part.phone || part.name
+                            )}`}
+                          />
+                          <div className="min-w-0">
+                            <div className="font-semibold text-gray-900 truncate flex items-center gap-1.5">
                             <span>{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
                             {part.role !== 'member' && (
                               <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
@@ -9716,6 +9840,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           <div className="text-[11px] font-mono text-gray-500 truncate mt-0.5">
                             {part.phone ? `+${part.phone}` : part.jid}
                           </div>
+                        </div>
                         </div>
                         <div className="text-right shrink-0">
                           <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[11px] font-semibold">

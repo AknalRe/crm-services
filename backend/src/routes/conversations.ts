@@ -1544,6 +1544,84 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         }
       }
 
+      // Enrich remaining participants (e.g. @lid JIDs without phone numbers) via contactIdentities
+      const unmatchedJids = Array.from(
+        new Set(
+          Array.from(byKey.values())
+            .filter((x) => !x.contactId && x.jid && x.jid.includes('@'))
+            .map((x) => x.jid)
+        )
+      );
+      if (unmatchedJids.length > 0) {
+        const idRows = await db
+          .select({
+            externalId: contactIdentities.externalId,
+            contactId: contactIdentities.contactId,
+          })
+          .from(contactIdentities)
+          .where(
+            and(
+              eq(contactIdentities.companyId, companyId),
+              eq(contactIdentities.channel, 'WHATSAPP'),
+              inArray(contactIdentities.externalId, unmatchedJids)
+            )
+          );
+        const linkedContactIds = Array.from(new Set(idRows.map((r) => r.contactId)));
+        if (linkedContactIds.length > 0) {
+          const linkedContacts = await db
+            .select({
+              id: contacts.id,
+              namaLengkap: contacts.namaLengkap,
+              nomorWhatsapp: contacts.nomorWhatsapp,
+              profilePictureUrl: contacts.profilePictureUrl,
+            })
+            .from(contacts)
+            .where(and(eq(contacts.companyId, companyId), inArray(contacts.id, linkedContactIds)));
+          const linkedById = new Map(linkedContacts.map((c) => [c.id, c]));
+          const contactByJid = new Map(
+            idRows
+              .map((r) => [r.externalId.toLowerCase(), linkedById.get(r.contactId)] as const)
+              .filter(
+                (pair): pair is readonly [string, (typeof linkedContacts)[number]] => Boolean(pair[1])
+              )
+          );
+          for (const [key, entry] of byKey.entries()) {
+            if (entry.contactId) continue;
+            const matched = contactByJid.get(entry.jid.toLowerCase());
+            if (matched) {
+              byKey.set(key, {
+                ...entry,
+                contactId: matched.id,
+                contactName: matched.namaLengkap,
+                phone:
+                  entry.phone ||
+                  (matched.nomorWhatsapp ? normalizePhoneNumber(matched.nomorWhatsapp) : null),
+                avatarUrl: matched.profilePictureUrl || entry.avatarUrl || null,
+              });
+            }
+          }
+        }
+      }
+
+      if (req.query?.sync !== 'false') {
+        const missingAvatarParticipants = Array.from(byKey.values())
+          .filter((p) => Boolean(p.contactId && !p.avatarUrl && (p.phone || p.jid.includes('@'))))
+          .slice(0, 10);
+        if (missingAvatarParticipants.length > 0) {
+          void Promise.all(
+            missingAvatarParticipants.map((p) =>
+              syncWhatsAppProfile({
+                companyId,
+                contactId: p.contactId!,
+                jid: p.phone ? `${p.phone}@c.us` : p.jid,
+                session: row.conv.wahaSession,
+                isGroup: false,
+              }).catch(() => {})
+            )
+          );
+        }
+      }
+
       if (isGroup && groupJid && row.contact) {
         void syncWhatsAppProfile({
           companyId,

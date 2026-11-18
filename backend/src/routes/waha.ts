@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, desc, eq, inArray, like, lt, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, like, lt, ne, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   campaignRecipients,
@@ -989,12 +989,64 @@ export function extractWahaMessageIds(payload: any): { exactIds: string[]; stanz
       if (stanza.length >= 8 && !stanza.includes('@')) {
         stanzaSet.add(stanza);
       }
+    } else if (trimmed.length >= 8 && !trimmed.includes('@') && !/\s/.test(trimmed)) {
+      stanzaSet.add(trimmed);
     }
   }
 
   return {
     exactIds: Array.from(exactSet),
     stanzaIds: Array.from(stanzaSet),
+  };
+}
+
+export function buildWahaInboundLockKey(
+  companyId: string,
+  session: string | null | undefined,
+  payload: any,
+  fallbackFrom: string
+): string {
+  const { exactIds, stanzaIds } = extractWahaMessageIds(payload);
+  const lockToken = stanzaIds[0] || exactIds[0] || null;
+  const sessionKey = (session || '').trim().toLowerCase();
+  return lockToken
+    ? `msg:${companyId}:${sessionKey}:${lockToken}`
+    : `chat:${companyId}:${sessionKey}:${String(fallbackFrom || '').trim().toLowerCase()}`;
+}
+
+function extractWahaInboundSenderSnapshot(
+  payload: any,
+  rawFrom: string,
+  isGroupChat: boolean,
+  isFromMe: boolean
+): { senderName: string | null; senderPhone: string | null; senderJid: string | null } {
+  const senderName =
+    String(
+      payload?.notifyName ||
+        payload?._data?.notifyName ||
+        payload?._data?.Info?.PushName ||
+        payload?._data?.pushName ||
+        ''
+    ).trim() || null;
+  const senderJid =
+    String(
+      payload?.participant ||
+        payload?._data?.participant ||
+        payload?._data?.Info?.SenderAlt ||
+        payload?._data?.Info?.Sender ||
+        (!isGroupChat ? rawFrom : '') ||
+        ''
+    ).trim() || null;
+  const candidateDigits =
+    senderJid && isPhoneWahaJid(senderJid)
+      ? normalizePhoneNumber(fromWahaChatId(senderJid))
+      : !isGroupChat && isPhoneWahaJid(rawFrom)
+      ? normalizePhoneNumber(fromWahaChatId(rawFrom))
+      : extractPhoneCandidatesFromWahaPayload(payload, isFromMe)[0] || null;
+  return {
+    senderName,
+    senderPhone: candidateDigits || null,
+    senderJid,
   };
 }
 
@@ -2451,29 +2503,54 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         }
 
         const inboundSession = webhookSession ? String(webhookSession).trim() : null;
-        const { exactIds } = extractWahaMessageIds(payload);
+        const { exactIds, stanzaIds } = extractWahaMessageIds(payload);
         const msgId = exactIds[0] || null;
-        const webhookLockKey = msgId
-          ? `msg:${companyId}:${(inboundSession || '').toLowerCase()}:${msgId}`
-          : `chat:${companyId}:${(inboundSession || '').toLowerCase()}:${rawFrom.toLowerCase()}`;
+        const webhookLockKey = buildWahaInboundLockKey(companyId, inboundSession, payload, rawFrom);
 
         return await withWebhookKeyLock(webhookLockKey, async () => {
-        // Dedup scoped by wahaSession so multiple sessions in the same group or thread never shadow each other
-        if (msgId) {
+        // Dedup across exact IDs and WA stanza IDs (e.g. @lid vs @c.us duplicates), scoped by wahaSession
+        const dedupIds = Array.from(new Set([...exactIds, ...stanzaIds]));
+        if (dedupIds.length > 0) {
+          const idMatchConditions = [
+            inArray(chatMessages.wahaMessageId, dedupIds),
+            ...stanzaIds.map((stanza) => {
+              const escaped = stanza.replace(/[\\%_]/g, '\\$&');
+              return like(chatMessages.wahaMessageId, `%_${escaped}`);
+            }),
+          ];
           const dedupConditions = inboundSession
             ? and(
                 eq(chatMessages.companyId, companyId),
-                eq(chatMessages.wahaMessageId, msgId),
-                eq(chatMessages.wahaSession, inboundSession)
+                eq(chatMessages.wahaSession, inboundSession),
+                or(...idMatchConditions)
               )
-            : and(eq(chatMessages.companyId, companyId), eq(chatMessages.wahaMessageId, msgId));
+            : and(eq(chatMessages.companyId, companyId), or(...idMatchConditions));
 
           const dupMsg = await db
-            .select({ id: chatMessages.id, conversationId: chatMessages.conversationId })
+            .select({
+              id: chatMessages.id,
+              conversationId: chatMessages.conversationId,
+              senderName: chatMessages.senderName,
+              senderPhone: chatMessages.senderPhone,
+              senderJid: chatMessages.senderJid,
+            })
             .from(chatMessages)
             .where(dedupConditions)
             .limit(1);
           if (dupMsg[0]) {
+            const snap = extractWahaInboundSenderSnapshot(payload, rawFrom, isGroupChat, isFromMe);
+            const enrichSet: Record<string, any> = {};
+            if (!dupMsg[0].senderName && snap.senderName) enrichSet.senderName = snap.senderName;
+            if (!dupMsg[0].senderPhone && snap.senderPhone) enrichSet.senderPhone = snap.senderPhone;
+            if (!dupMsg[0].senderJid && snap.senderJid) enrichSet.senderJid = snap.senderJid;
+            if (Object.keys(enrichSet).length > 0) {
+              await db
+                .update(chatMessages)
+                .set(enrichSet)
+                .where(eq(chatMessages.id, dupMsg[0].id))
+                .catch(() => {});
+              liveEvents.emit('conversations:update', { conversationId: dupMsg[0].conversationId }, companyId);
+            }
             wahaService.recordWebhookEvent({
               receivedAt: now.toISOString(),
               event,
@@ -3130,6 +3207,58 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         }
         if (!createdConversation && existingConv) {
           convId = existingConv.id;
+        }
+        const resolvedSenderJid = isGroupChat ? groupSenderJid : rawFrom || null;
+        const resolvedSenderPhone = isGroupChat ? groupSenderPhone : fromPhone || null;
+        const persistOutcome = await withWebhookKeyLock(`conv:${convId}`, async () => {
+        if (!createdConversation && existingConv && hasMedia && mediaType && body.trim().length > 0 && !isRevokedShellPayload) {
+          const recentCutoff = new Date(now.getTime() - 15_000);
+          const recentMediaDups = await db
+            .select({
+              id: chatMessages.id,
+              senderName: chatMessages.senderName,
+              senderPhone: chatMessages.senderPhone,
+              senderJid: chatMessages.senderJid,
+              mediaUrl: chatMessages.mediaUrl,
+            })
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                eq(chatMessages.conversationId, convId),
+                eq(chatMessages.direction, isFromMe ? 'OUTBOUND' : 'INBOUND'),
+                eq(chatMessages.mediaType, mediaType),
+                eq(chatMessages.body, body),
+                gte(chatMessages.createdAt, recentCutoff)
+              )
+            )
+            .limit(1);
+          if (recentMediaDups[0]) {
+            const snap = extractWahaInboundSenderSnapshot(payload, rawFrom, isGroupChat, isFromMe);
+            const fallbackName = isGroupChat ? groupSenderName : snap.senderName || notifyName || null;
+            const enrichSet: Record<string, any> = {};
+            if (!recentMediaDups[0].senderName && fallbackName) enrichSet.senderName = fallbackName;
+            if (!recentMediaDups[0].senderPhone && (resolvedSenderPhone || snap.senderPhone)) {
+              enrichSet.senderPhone = resolvedSenderPhone || snap.senderPhone;
+            }
+            if (!recentMediaDups[0].senderJid && (resolvedSenderJid || snap.senderJid)) {
+              enrichSet.senderJid = resolvedSenderJid || snap.senderJid;
+            }
+            if (!recentMediaDups[0].mediaUrl && mediaUrl) {
+              enrichSet.mediaUrl = mediaUrl;
+            }
+            if (Object.keys(enrichSet).length > 0) {
+              await db
+                .update(chatMessages)
+                .set(enrichSet)
+                .where(eq(chatMessages.id, recentMediaDups[0].id))
+                .catch(() => {});
+              liveEvents.emit('conversations:update', { conversationId: convId }, companyId);
+            }
+            return 'DEDUP_MEDIA' as const;
+          }
+        }
+        if (!createdConversation && existingConv) {
           const isReopeningFromResolved = existingConv.status === 'RESOLVED';
           await db
             .update(conversations)
@@ -3324,8 +3453,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           messageType: richData.messageType,
           channel: 'WHATSAPP',
           wahaSession: inboundSession,
-          senderJid: isGroupChat ? groupSenderJid : rawFrom || null,
-          senderPhone: isGroupChat ? groupSenderPhone : fromPhone || null,
+          senderJid: resolvedSenderJid,
+          senderPhone: resolvedSenderPhone,
           senderName: isGroupChat
             ? groupSenderName
             : isFromMe
@@ -3345,6 +3474,20 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           sentAt: isFromMe ? now : null,
           createdAt: now,
         }).onConflictDoNothing();
+        return 'INSERTED' as const;
+        });
+
+        if (persistOutcome === 'DEDUP_MEDIA') {
+          wahaService.recordWebhookEvent({
+            receivedAt: now.toISOString(),
+            event,
+            session: inboundSession,
+            from: rawFrom,
+            outcome: 'DEDUP',
+            note: 'Duplikat pesan media & caption yang sama diabaikan',
+          }, companyId);
+          return reply.send({ success: true, deduplicated: true, message: 'Duplicate media webhook ignored' });
+        }
 
         // Capture WhatsApp profile (name & photo) of the contact or group without delaying the webhook response
         const profileJid = isGroupChat
