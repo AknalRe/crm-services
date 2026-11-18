@@ -706,10 +706,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                     shortcutLabel: 'Buka Tracking',
                   })
                 }
-                className="bg-emerald-50/70 hover:bg-emerald-100/70 border border-emerald-200 p-2 sm:p-2.5 rounded-md min-w-0 transition-colors cursor-pointer"
+                className="bg-gray-50 hover:bg-gray-100 border border-gray-200 p-2 sm:p-2.5 rounded-md min-w-0 transition-colors cursor-pointer"
               >
-                <span className="block text-emerald-700 text-[10px] sm:text-[11px] truncate">Centang Dua</span>
-                <span className="font-bold text-emerald-800 tabular-nums">{summary.delivered}</span>
+                <span className="inline-flex items-center justify-center gap-1 text-gray-500 text-[10px] sm:text-[11px] truncate">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                  Centang Dua
+                </span>
+                <span className="block font-bold text-gray-900 tabular-nums">{summary.delivered}</span>
               </button>
               <button
                 type="button"
@@ -722,10 +725,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                     shortcutLabel: 'Buka Tracking',
                   })
                 }
-                className="bg-indigo-50/70 hover:bg-indigo-100/70 border border-indigo-200 p-2 sm:p-2.5 rounded-md min-w-0 transition-colors cursor-pointer"
+                className="bg-gray-50 hover:bg-gray-100 border border-gray-200 p-2 sm:p-2.5 rounded-md min-w-0 transition-colors cursor-pointer"
               >
-                <span className="block text-indigo-700 text-[10px] sm:text-[11px] truncate">Centang Biru</span>
-                <span className="font-bold text-indigo-800 tabular-nums">{summary.read}</span>
+                <span className="inline-flex items-center justify-center gap-1 text-gray-500 text-[10px] sm:text-[11px] truncate">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+                  Centang Biru
+                </span>
+                <span className="block font-bold text-gray-900 tabular-nums">{summary.read}</span>
               </button>
             </div>
           </div>
@@ -734,8 +740,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
         <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-2.5 sm:mb-3 gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                <Cake className="w-3.5 h-3.5" />
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                <Cake className="w-3.5 h-3.5 text-slate-500" />
                 Otomasi Ulang Tahun
               </span>
               <button
@@ -1020,7 +1026,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                   <EyeOff className="w-3 h-3" />
                   <span>{convAnalytics.excludedCount} Non-Penilaian</span>
                   {(convAnalytics.groupCount || 0) > 0 && (
-                    <span className="text-teal-700 font-semibold">({convAnalytics.groupCount} Grup)</span>
+                    <span className="text-slate-600 font-semibold">({convAnalytics.groupCount} Grup)</span>
                   )}
                 </button>
               )}
@@ -1079,7 +1085,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                 Resolution Time <ChevronRight className="w-2.5 h-2.5" />
               </span>
             </button>
-            <div className="p-3 rounded-md bg-emerald-50/70 border border-emerald-200 space-y-1">
+            <div className="p-3 rounded-md bg-gray-50 border border-gray-200 space-y-1">
               <button
                 type="button"
                 onClick={() =>
@@ -1094,18 +1100,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                 }
                 className="text-left w-full hover:opacity-80 cursor-pointer"
               >
-                <span className="text-[11px] text-emerald-700 flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3" />
+                <span className="text-[11px] text-gray-500 flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
                   Kepatuhan SLA
                 </span>
-                <span className="text-base font-bold text-emerald-800 font-mono tabular-nums mt-0.5 block">
+                <span className="text-base font-bold text-gray-900 font-mono tabular-nums mt-0.5 block">
                   {convAnalytics.slaComplianceRate !== null
                     ? `${convAnalytics.slaComplianceRate}%`
                     : '-'}
                 </span>
               </button>
               <div className="flex items-center justify-between gap-1 text-[10px]">
-                <span className="text-emerald-700/80">
+                <span className="text-gray-500">
                   {convAnalytics.slaMetCount}/{convAnalytics.slaMeasuredCount} tepat waktu
                 </span>
                 {convAnalytics.slaBreachedCount > 0 && (
@@ -1128,8 +1134,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                 )}
               </div>
             </div>
-            <div className="p-3 rounded-md bg-indigo-50/70 border border-indigo-200">
-              <span className="text-[11px] text-indigo-700 block">Status Percakapan</span>
+            <div className="p-3 rounded-md bg-gray-50 border border-gray-200">
+              <span className="text-[11px] text-gray-500 block">Status Percakapan</span>
               <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] font-semibold tabular-nums">
                 <button
                   type="button"
@@ -1282,7 +1288,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                             <span className="text-gray-700 font-semibold">{sess.count} chat</span>
                             <span className="text-emerald-700">({sess.resolvedCount} selesai)</span>
                             {sess.slaRate !== null && sess.slaRate !== undefined && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-white text-slate-700 border border-slate-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                                 SLA {sess.slaRate}%
                               </span>
                             )}
@@ -1333,7 +1340,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                             <span className="text-gray-700 font-semibold">{ch.count} chat</span>
                             <span className="text-emerald-700">({ch.resolvedCount} selesai)</span>
                             {ch.slaRate !== null && ch.slaRate !== undefined && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-white text-slate-700 border border-slate-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                                 SLA {ch.slaRate}%
                               </span>
                             )}
@@ -2129,12 +2137,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                       </span>
                     )}
                     {selectedSession !== 'all' && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 font-mono">
                         Sesi: {selectedSession}
                       </span>
                     )}
                     {selectedChannel !== 'all' && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 font-mono">
                         Channel: {selectedChannel}
                       </span>
                     )}
@@ -2359,7 +2367,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                           <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                             <span className="font-semibold text-gray-900 truncate">{c.displayName}</span>
                             {c.isGroup && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-700 border border-teal-200">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
                                 Grup WA
                               </span>
                             )}

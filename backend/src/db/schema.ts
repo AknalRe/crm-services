@@ -626,6 +626,13 @@ export const messageTemplates = pgTable('message_templates', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+export const persistedMedia = pgTable('persisted_media', {
+  key: text('key').primaryKey(), // e.g. 'profiles/1794985_abcd.jpg'
+  mimeType: text('mime_type').notNull(),
+  dataBase64: text('data_base64').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
   conversation: one(conversations, {
     fields: [chatMessages.conversationId],

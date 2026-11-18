@@ -475,7 +475,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <div className="px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="font-semibold text-slate-800">@tokoresmi.id</span>
-                      <span className="text-[10px] font-mono text-pink-700 bg-pink-50 border border-pink-200 px-1.5 py-0.5 rounded shrink-0">
+                      <span className="text-[10px] font-mono text-slate-700 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
                         Instagram
                       </span>
                     </div>

@@ -7,12 +7,14 @@ import {
   planWhatsAppConversationDedup,
 } from './index';
 
-test('buildSchemaSyncStatements creates all 30 tables on an empty schema', () => {
+test('buildSchemaSyncStatements creates all 31 tables on an empty schema', () => {
   const stmts = buildSchemaSyncStatements(new Map());
-  assert.equal(stmts.length, 30);
+  assert.equal(stmts.length, 31);
   const companiesCreate = stmts.find((s) => s.label === 'create table companies');
   assert.ok(companiesCreate, 'companies create statement should exist');
   assert.ok(companiesCreate.sqlText.includes('"slug" text NOT NULL'), 'companies should include slug');
+  const persistedMediaCreate = stmts.find((s) => s.label === 'create table persisted_media');
+  assert.ok(persistedMediaCreate, 'persisted_media create statement should exist');
 });
 
 test('buildSchemaSyncStatements detects missing slug and columns on legacy companies and ai_skills tables', () => {

@@ -15,12 +15,12 @@ interface StatCardProps {
 }
 
 const ICON_COLOR_CLASSES: Record<NonNullable<StatCardProps['color']>, string> = {
-  emerald: 'text-emerald-600',
-  blue: 'text-blue-600',
-  amber: 'text-amber-600',
-  rose: 'text-red-600',
+  emerald: 'text-slate-400',
+  blue: 'text-slate-400',
+  amber: 'text-slate-400',
+  rose: 'text-rose-500',
   indigo: 'text-indigo-600',
-  purple: 'text-purple-600',
+  purple: 'text-slate-400',
 };
 
 export const StatCard: React.FC<StatCardProps> = ({

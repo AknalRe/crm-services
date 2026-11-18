@@ -38,33 +38,33 @@ function formatBytes(bytes: number): string {
 const CHANNEL_BADGES: Record<string, { label: string; cls: string; dot: string }> = {
   WHATSAPP: {
     label: 'WhatsApp',
-    cls: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    cls: 'bg-slate-50 text-slate-700 border-slate-200',
     dot: 'bg-emerald-500',
   },
   INSTAGRAM: {
     label: 'Instagram',
-    cls: 'bg-pink-50 text-pink-800 border-pink-200',
-    dot: 'bg-pink-500',
+    cls: 'bg-slate-50 text-slate-700 border-slate-200',
+    dot: 'bg-rose-400',
   },
   FACEBOOK: {
     label: 'Facebook',
-    cls: 'bg-blue-50 text-blue-800 border-blue-200',
+    cls: 'bg-slate-50 text-slate-700 border-slate-200',
     dot: 'bg-blue-500',
   },
   THREADS: {
     label: 'Threads',
-    cls: 'bg-neutral-100 text-neutral-800 border-neutral-300',
-    dot: 'bg-neutral-700',
+    cls: 'bg-slate-50 text-slate-700 border-slate-200',
+    dot: 'bg-slate-600',
   },
   TELEGRAM: {
     label: 'Telegram',
-    cls: 'bg-sky-50 text-sky-800 border-sky-200',
+    cls: 'bg-slate-50 text-slate-700 border-slate-200',
     dot: 'bg-sky-500',
   },
   DIRECT: {
     label: 'Pustaka',
-    cls: 'bg-purple-50 text-purple-800 border-purple-200',
-    dot: 'bg-purple-500',
+    cls: 'bg-slate-50 text-slate-700 border-slate-200',
+    dot: 'bg-indigo-500',
   },
 };
 

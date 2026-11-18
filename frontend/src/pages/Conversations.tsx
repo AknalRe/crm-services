@@ -103,40 +103,48 @@ import {
 import { LABEL_COLOR_MAP } from '../components/MasterDataSettings';
 import { hasPerm } from '../lib/permissions';
 
-const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls: string }> = {
-  WHATSAPP: { label: 'WhatsApp', short: 'WA', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  WHATSAPP_CLOUD: { label: 'WA Business Cloud', short: 'WA Cloud', cls: 'bg-teal-50 text-teal-700 border-teal-200' },
-  INSTAGRAM: { label: 'Instagram', short: 'IG', cls: 'bg-pink-50 text-pink-700 border-pink-200' },
-  FACEBOOK: { label: 'Facebook', short: 'FB', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
-  THREADS: { label: 'Threads', short: 'Threads', cls: 'bg-gray-100 text-gray-800 border-gray-300' },
-  TELEGRAM: { label: 'Telegram', short: 'TG', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
+const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls: string; dot: string }> = {
+  WHATSAPP: { label: 'WhatsApp', short: 'WA', cls: 'bg-slate-50 text-slate-700 border-slate-200', dot: 'bg-emerald-500' },
+  WHATSAPP_CLOUD: { label: 'WA Business Cloud', short: 'WA Cloud', cls: 'bg-slate-50 text-slate-700 border-slate-200', dot: 'bg-teal-500' },
+  INSTAGRAM: { label: 'Instagram', short: 'IG', cls: 'bg-slate-50 text-slate-700 border-slate-200', dot: 'bg-rose-400' },
+  FACEBOOK: { label: 'Facebook', short: 'FB', cls: 'bg-slate-50 text-slate-700 border-slate-200', dot: 'bg-blue-500' },
+  THREADS: { label: 'Threads', short: 'Threads', cls: 'bg-slate-50 text-slate-700 border-slate-200', dot: 'bg-slate-500' },
+  TELEGRAM: { label: 'Telegram', short: 'TG', cls: 'bg-slate-50 text-slate-700 border-slate-200', dot: 'bg-sky-500' },
 };
 
-const WAHA_SESSION_BADGE_PALETTE = [
-  'bg-emerald-50 text-emerald-700 border-emerald-200',
-  'bg-sky-50 text-sky-700 border-sky-200',
-  'bg-violet-50 text-violet-700 border-violet-200',
-  'bg-indigo-50 text-indigo-700 border-indigo-200',
-  'bg-cyan-50 text-cyan-800 border-cyan-200',
-  'bg-rose-50 text-rose-700 border-rose-200',
+const WAHA_SESSION_DOT_PALETTE = [
+  'bg-emerald-500',
+  'bg-sky-500',
+  'bg-indigo-500',
+  'bg-slate-500',
+  'bg-amber-500',
+  'bg-rose-500',
 ];
 
 function getWahaSessionBadgeClass(
-  sessionName: string | null | undefined,
-  sessionList: Array<{ name: string }>,
+  _sessionName: string | null | undefined,
+  _sessionList: Array<{ name: string }>,
   fallbackCls: string
 ): string {
+  return fallbackCls;
+}
+
+function getWahaSessionDotClass(
+  sessionName: string | null | undefined,
+  sessionList: Array<{ name: string }>,
+  fallbackDot: string
+): string {
   const clean = String(sessionName || '').trim();
-  if (!clean) return fallbackCls;
+  if (!clean) return fallbackDot;
   const idx = sessionList.findIndex((s) => s.name.toLowerCase() === clean.toLowerCase());
   if (idx >= 0) {
-    return WAHA_SESSION_BADGE_PALETTE[idx % WAHA_SESSION_BADGE_PALETTE.length];
+    return WAHA_SESSION_DOT_PALETTE[idx % WAHA_SESSION_DOT_PALETTE.length];
   }
   let hash = 0;
   for (let i = 0; i < clean.length; i++) {
-    hash = (hash * 31 + clean.charCodeAt(i)) % WAHA_SESSION_BADGE_PALETTE.length;
+    hash = (hash * 31 + clean.charCodeAt(i)) % WAHA_SESSION_DOT_PALETTE.length;
   }
-  return WAHA_SESSION_BADGE_PALETTE[Math.abs(hash)];
+  return WAHA_SESSION_DOT_PALETTE[Math.abs(hash)];
 }
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -825,13 +833,11 @@ function getConversationDisplayTitle(conv?: Conversation | null): string {
 }
 
 const PARTICIPANT_TEXT_COLORS = [
-  'text-indigo-700',
-  'text-emerald-700',
-  'text-amber-700',
-  'text-rose-700',
-  'text-sky-700',
-  'text-violet-700',
-  'text-teal-700',
+  'text-slate-800',
+  'text-slate-700',
+  'text-indigo-800/80',
+  'text-zinc-800',
+  'text-slate-900',
 ];
 
 function getParticipantColorClass(key?: string | null): string {
@@ -844,13 +850,11 @@ function getParticipantColorClass(key?: string | null): string {
 }
 
 const PARTICIPANT_AVATAR_BG_COLORS = [
-  'bg-indigo-600',
-  'bg-emerald-600',
-  'bg-amber-600',
-  'bg-rose-600',
-  'bg-sky-600',
-  'bg-violet-600',
-  'bg-teal-600',
+  'bg-slate-600',
+  'bg-slate-700',
+  'bg-zinc-600',
+  'bg-slate-500',
+  'bg-indigo-600/80',
 ];
 
 function getParticipantAvatarBgClass(key?: string | null): string {
@@ -1103,10 +1107,31 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const msgElementRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeConvIdRef = useRef<string>('');
+  activeConvIdRef.current = selectedConversation?.id || '';
+  const loadedMsgsConvIdRef = useRef<string>('');
+  const isAtBottomRef = useRef<boolean>(true);
+  const pendingInitialScrollRef = useRef<boolean>(false);
+  const [pendingNewMsgCount, setPendingNewMsgCount] = useState<number>(0);
   const lastAutoScrollRef = useRef<{ convId: string; lastMsgId: string | null }>({
     convId: '',
     lastMsgId: null,
   });
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      if (behavior === 'smooth') {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    }
+    isAtBottomRef.current = true;
+    setPendingNewMsgCount(0);
+  }, []);
 
   const toggleContactPanel = (next?: boolean) => {
     setShowContactPanel((prev) => {
@@ -1153,6 +1178,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
     try {
       const isVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
       const data = await api.getConversationMessages(convId, { markRead: isVisible });
+      if (activeConvIdRef.current !== convId) return;
+      loadedMsgsConvIdRef.current = convId;
       setMessages(data);
     } catch (err) {
       console.error('Error fetching messages:', err);
@@ -1307,6 +1334,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
   useEffect(() => {
     if (isLiveChatUnlocked && selectedConversation) {
+      setMessages([]);
+      loadedMsgsConvIdRef.current = '';
+      lastAutoScrollRef.current = { convId: '', lastMsgId: null };
+      pendingInitialScrollRef.current = true;
+      isAtBottomRef.current = true;
+      setPendingNewMsgCount(0);
       fetchMessages(selectedConversation.id, false);
       setContactNotesDraft(selectedConversation.contact?.notes || '');
       setChannelDisplayNameDraft(selectedConversation.channelDisplayName || '');
@@ -1380,7 +1413,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
   useEffect(() => {
     const convId = selectedConversation?.id || '';
-    if (convId && highlightedCsatWindow && messages.length > 0) {
+    if (!convId || loadedMsgsConvIdRef.current !== convId) return;
+
+    if (highlightedCsatWindow && messages.length > 0) {
       const targetMsg =
         (highlightedCsatWindow.token
           ? messages.find((m) => m.body && m.body.includes(highlightedCsatWindow.token!))
@@ -1393,6 +1428,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
             )
           : undefined);
       if (targetMsg && msgElementRefs.current[targetMsg.id]) {
+        pendingInitialScrollRef.current = false;
         lastAutoScrollRef.current = {
           convId,
           lastMsgId: messages[messages.length - 1]?.id || null,
@@ -1404,13 +1440,41 @@ export const Conversations: React.FC<ConversationsProps> = ({
         return;
       }
     }
+
     const lastMsgId = messages.length > 0 ? messages[messages.length - 1].id : null;
     const prev = lastAutoScrollRef.current;
-    if (convId && (prev.convId !== convId || (lastMsgId && prev.lastMsgId !== lastMsgId))) {
+
+    if (pendingInitialScrollRef.current || prev.convId !== convId) {
+      pendingInitialScrollRef.current = false;
       lastAutoScrollRef.current = { convId, lastMsgId };
-      messagesEndRef.current?.scrollIntoView({ behavior: prev.convId === convId ? 'smooth' : 'auto' });
+      if (messages.length > 0) {
+        scrollToBottom('auto');
+        requestAnimationFrame(() => scrollToBottom('auto'));
+        window.setTimeout(() => {
+          if (activeConvIdRef.current === convId && isAtBottomRef.current) {
+            scrollToBottom('auto');
+          }
+        }, 90);
+      }
+      return;
     }
-  }, [messages, selectedConversation?.id, highlightedCsatWindow]);
+
+    if (lastMsgId && prev.lastMsgId !== lastMsgId) {
+      const prevIdx = prev.lastMsgId ? messages.findIndex((m) => m.id === prev.lastMsgId) : -1;
+      const newMsgs =
+        prevIdx >= 0 && prevIdx < messages.length - 1
+          ? messages.slice(prevIdx + 1)
+          : [messages[messages.length - 1]];
+      lastAutoScrollRef.current = { convId, lastMsgId };
+
+      const hasOutbound = newMsgs.some((m) => m.direction === 'OUTBOUND');
+      if (hasOutbound || isAtBottomRef.current) {
+        requestAnimationFrame(() => scrollToBottom('smooth'));
+      } else {
+        setPendingNewMsgCount((c) => c + newMsgs.length);
+      }
+    }
+  }, [messages, selectedConversation?.id, highlightedCsatWindow, scrollToBottom]);
 
   const updateFloatingDateLabel = useCallback(() => {
     const container = messagesContainerRef.current;
@@ -1433,6 +1497,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
     }
     setFloatingDateLabel(detected);
   }, [messages]);
+
+  const handleMessagesScroll = useCallback(() => {
+    updateFloatingDateLabel();
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const nearBottom = distanceFromBottom <= 100;
+    isAtBottomRef.current = nearBottom;
+    if (nearBottom) {
+      setPendingNewMsgCount(0);
+    }
+  }, [updateFloatingDateLabel]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => updateFloatingDateLabel());
@@ -4294,7 +4370,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   <ContactAvatar
                     url={conv.contact?.profile_picture_url}
                     label={getConversationDisplayTitle(conv)}
-                    className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs mt-0.5"
+                    className="w-8 h-8 rounded-md bg-slate-700 text-white font-semibold text-xs mt-0.5"
                     onClick={(e) => {
                       if (conv.contact?.profile_picture_url) {
                         e.stopPropagation();
@@ -4370,10 +4446,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           ch === 'WHATSAPP' && conv.wahaSession
                             ? getWahaSessionBadgeClass(conv.wahaSession, sessions, meta.cls)
                             : meta.cls;
+                        const dotCls =
+                          ch === 'WHATSAPP' && conv.wahaSession
+                            ? getWahaSessionDotClass(conv.wahaSession, sessions, meta.dot)
+                            : meta.dot;
                         return (
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded font-semibold border shrink-0 ${badgeCls}`}>
-                            {meta.short}
-                            {conv.wahaSession ? ` • ${conv.wahaSession}` : ''}
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium border shrink-0 ${badgeCls}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotCls}`} />
+                            <span>
+                              {meta.short}
+                              {conv.wahaSession ? ` • ${conv.wahaSession}` : ''}
+                            </span>
                           </span>
                         );
                       })()}
@@ -4393,28 +4476,30 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           </span>
                         )}
                       {conv.isGroup ? (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium bg-teal-50 text-teal-700 border border-teal-200 shrink-0">
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
                           Grup
                         </span>
                       ) : conv.excludeFromMetrics ? (
                         <span
                           title={`Tidak masuk penilaian (${conv.excludeReason || 'Non-Customer'})`}
-                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-800 border border-amber-200 shrink-0"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium bg-white text-slate-500 border border-slate-200 shrink-0"
                         >
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />
                           Non-Nilai
                         </span>
                       ) : (
                         <>
                           <span
                             title="Percakapan pada sesi ini masuk penilaian SLA & CSAT"
-                            className="inline-flex items-center px-1.5 py-0.5 rounded font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0"
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium bg-white text-slate-700 border border-slate-200 shrink-0"
                           >
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                             Dinilai
                           </span>
                           {conv.assignedAgentName && (
                             <span
                               title={`Ditugaskan ke: ${conv.assignedAgentName}`}
-                              className="inline-flex items-center px-1.5 py-0.5 rounded font-medium bg-sky-50 text-sky-700 border border-sky-200 shrink-0 truncate max-w-[90px]"
+                              className="inline-flex items-center px-1.5 py-0.5 rounded font-medium bg-slate-50 text-slate-600 border border-slate-200 shrink-0 truncate max-w-[90px]"
                             >
                               • {conv.assignedAgentName}
                             </span>
@@ -4510,7 +4595,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <ContactAvatar
                       url={selectedConversation.contact?.profile_picture_url}
                       label={getConversationDisplayTitle(selectedConversation)}
-                      className="w-8 h-8 rounded-md bg-indigo-600 text-white font-semibold text-xs"
+                      className="w-8 h-8 rounded-md bg-slate-700 text-white font-semibold text-xs"
                       onClick={(e) => {
                         if (selectedConversation.contact?.profile_picture_url) {
                           e.stopPropagation();
@@ -4528,22 +4613,32 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           {getConversationDisplayTitle(selectedConversation)}
                         </h4>
                         <span
-                          className={`hidden sm:inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold border shrink-0 ${
+                          className={`hidden sm:inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium border shrink-0 ${
                             ch === 'WHATSAPP' && selectedConversation.wahaSession
                               ? getWahaSessionBadgeClass(selectedConversation.wahaSession, sessions, channelMeta.cls)
                               : channelMeta.cls
                           }`}
                         >
-                          {channelMeta.short}
-                          {selectedConversation.wahaSession ? ` • ${selectedConversation.wahaSession}` : ''}
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              ch === 'WHATSAPP' && selectedConversation.wahaSession
+                                ? getWahaSessionDotClass(selectedConversation.wahaSession, sessions, channelMeta.dot)
+                                : channelMeta.dot
+                            }`}
+                          />
+                          <span>
+                            {channelMeta.short}
+                            {selectedConversation.wahaSession ? ` • ${selectedConversation.wahaSession}` : ''}
+                          </span>
                         </span>
                         {selectedConversation.excludeFromMetrics ? (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-medium bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
-                            <EyeOff className="w-2.5 h-2.5" />
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-medium bg-slate-50 text-slate-600 border border-slate-200 shrink-0">
+                            <EyeOff className="w-2.5 h-2.5 text-slate-400" />
                             <span className="hidden sm:inline">Non-Penilaian</span>
                           </span>
                         ) : !selectedConversation.isGroup ? (
-                          <span className="hidden sm:inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                          <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-medium bg-white text-slate-700 border border-slate-200 shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                             Dinilai
                           </span>
                         ) : null}
@@ -4606,7 +4701,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </div>
                       <div className="text-[11px] text-gray-500 truncate flex items-center gap-1.5">
                         {activePresence ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-600 font-medium">
+                          <span className="inline-flex items-center gap-1 text-emerald-600 font-medium shrink-0">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             {activePresence === 'typing'
                               ? 'Mengetik...'
@@ -4615,25 +4710,31 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               : 'Online'}
                           </span>
                         ) : (
-                          <>
-                            <span className="font-mono truncate">
-                              {selectedConversation.contact?.nomor_whatsapp
-                                ? `+${selectedConversation.contact.nomor_whatsapp}`
-                                : selectedConversation.isGroup
-                                ? 'Grup WhatsApp'
-                                : channelMeta.label}
-                            </span>
-                            {selectedConversation.wahaSession && (
-                              <span className="hidden sm:inline text-emerald-700 font-mono truncate">
-                                • {selectedConversation.wahaSession}
-                              </span>
-                            )}
-                            {selectedConversation.assignedAgentName && !isExcludedConv && (
-                              <span className="lg:hidden text-sky-700 font-medium truncate">
-                                • {selectedConversation.assignedAgentName}
-                              </span>
-                            )}
-                          </>
+                          <span className="font-mono truncate">
+                            {selectedConversation.contact?.nomor_whatsapp
+                              ? `+${selectedConversation.contact.nomor_whatsapp}`
+                              : selectedConversation.isGroup
+                              ? 'Grup WhatsApp'
+                              : channelMeta.label}
+                          </span>
+                        )}
+                        {selectedConversation.wahaSession && (
+                          <span className="inline-flex items-center gap-1 text-slate-600 font-mono font-medium shrink-0">
+                            <span aria-hidden="true">•</span>
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${getWahaSessionDotClass(
+                                selectedConversation.wahaSession,
+                                sessions,
+                                channelMeta.dot
+                              )}`}
+                            />
+                            <span>{selectedConversation.wahaSession}</span>
+                          </span>
+                        )}
+                        {!activePresence && selectedConversation.assignedAgentName && !isExcludedConv && (
+                          <span className="lg:hidden text-slate-600 font-medium truncate">
+                            • {selectedConversation.assignedAgentName}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -4650,9 +4751,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         void fetchParticipants(selectedConversation.id, true);
                       }}
                       title="Lihat daftar partisipan grup"
-                      className="h-7 px-2 rounded-md border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-800 text-[11px] font-semibold inline-flex items-center gap-1 shrink-0 transition-colors"
+                      className="h-7 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-slate-700 text-[11px] font-medium inline-flex items-center gap-1 shrink-0 transition-colors"
                     >
-                      <Users className="w-3 h-3" />
+                      <Users className="w-3 h-3 text-slate-500" />
                       <span>
                         Partisipan
                         {participantsData && participantsData.participants.length > 0
@@ -4695,12 +4796,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           ? 'Status Percakapan'
                           : 'Role Anda tidak memiliki izin mengubah status percakapan'
                       }
-                      className={`h-7 px-2 rounded-md text-[11px] font-semibold border focus:outline-none shrink-0 disabled:opacity-70 disabled:cursor-not-allowed ${
+                      className={`h-7 px-2 rounded-md text-[11px] font-medium border focus:outline-none shrink-0 disabled:opacity-70 disabled:cursor-not-allowed ${
                         selectedConversation.status === 'RESOLVED'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          ? 'bg-white text-emerald-700 border-emerald-300'
                           : selectedConversation.status === 'PENDING'
-                          ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-blue-50 text-blue-700 border-blue-200'
+                          ? 'bg-white text-amber-700 border-amber-300'
+                          : 'bg-white text-slate-700 border-gray-200 focus:border-indigo-500'
                       }`}
                     >
                       <option value="OPEN">Open</option>
@@ -5103,11 +5204,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
             );
           })()}
 
-          <div
-            ref={messagesContainerRef}
-            onScroll={updateFloatingDateLabel}
-            className="relative flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-1.5 bg-slate-50/70"
-          >
+          <div className="relative flex-1 min-h-0 flex flex-col">
+            <div
+              ref={messagesContainerRef}
+              onScroll={handleMessagesScroll}
+              className="relative flex-1 min-h-0 p-2.5 sm:p-4 overflow-y-auto space-y-1.5 bg-slate-50/70"
+            >
             {floatingDateLabel && messages.length > 0 && !loadingMessages && (
               <div className="sticky top-1 z-20 w-full flex justify-center pointer-events-none pb-1">
                 <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/95 backdrop-blur-sm border border-gray-200 shadow-2xs text-[11px] font-medium text-gray-700">
@@ -5424,22 +5526,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               className={`w-7 h-7 rounded-full text-white font-semibold text-[10px] shadow-2xs ${getParticipantAvatarBgClass(
                                 colorSeed
                               )}`}
-                              title={
-                                avatarUrl
-                                  ? `${senderDisplayName} (klik untuk lihat foto profil)`
-                                  : senderDisplayName
-                              }
-                              onClick={() => {
-                                if (avatarUrl) {
-                                  handleOpenAvatarLightbox(avatarUrl, senderDisplayName);
-                                } else {
-                                  handleOpenMentionContact({
-                                    name: senderDisplayName,
-                                    phone: cleanPhone || null,
-                                    jid: msg.senderJid || null,
-                                    contactId: lookup?.contactId || null,
-                                  });
-                                }
+                              title={`${senderDisplayName} (klik untuk info kontak)`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenMentionContact({
+                                  name: senderDisplayName,
+                                  phone: cleanPhone || null,
+                                  jid: msg.senderJid || null,
+                                  contactId: lookup?.contactId || null,
+                                  role: lookup?.role,
+                                  avatarUrl,
+                                });
                               }}
                             />
                           </div>
@@ -5467,7 +5564,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               : isCsat
                               ? 'bg-amber-50/60 border-amber-200 text-gray-900'
                               : isOutbound
-                              ? 'bg-indigo-50/90 border-indigo-200 text-gray-950'
+                              ? 'bg-slate-100/90 border-slate-200 text-gray-950'
                               : 'bg-white border-gray-200/90 text-gray-950'
                           }`}
                         >
@@ -5497,23 +5594,57 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         {!isOutbound &&
                           !isCsat &&
                           (!selectedConversation.isGroup || isFirstInSenderRun) &&
-                          (selectedConversation.isGroup || msg.senderName || msg.senderPhone) && (
-                            <div className="flex items-center gap-2 pb-1 border-b border-gray-100">
-                              <span
-                                className={`text-xs sm:text-[13px] font-semibold truncate ${getParticipantColorClass(
-                                  msg.senderJid || msg.senderPhone || msg.senderName
-                                )}`}
-                              >
-                                {resolveMessageSenderName(msg)}
-                              </span>
-                                {msg.senderPhone &&
-                                  resolveMessageSenderName(msg) !== `+${msg.senderPhone}` && (
-                                    <span className="text-[10px] sm:text-[11px] font-mono text-gray-400 shrink-0">
-                                      +{msg.senderPhone}
-                                    </span>
-                                  )}
-                            </div>
-                          )}
+                          (selectedConversation.isGroup || msg.senderName || msg.senderPhone) && (() => {
+                            const senderDisplayName = resolveMessageSenderName(msg);
+                            const cleanPhone = msg.senderPhone ? msg.senderPhone.replace(/\D/g, '') : '';
+                            const jidToken = msg.senderJid ? msg.senderJid.replace(/@.*$/, '').toLowerCase() : '';
+                            const lookup =
+                              (cleanPhone ? participantsLookup.get(cleanPhone) : undefined) ||
+                              (jidToken ? participantsLookup.get(jidToken) : undefined);
+                            const avatarUrl =
+                              msg.senderAvatarUrl ||
+                              lookup?.avatarUrl ||
+                              (!selectedConversation.isGroup ? selectedConversation.contact?.profile_picture_url : null) ||
+                              null;
+                            const targetContactId =
+                              lookup?.contactId ||
+                              (!selectedConversation.isGroup ? selectedConversation.contact?.id : null) ||
+                              null;
+                            return (
+                              <div className="flex items-center gap-2 pb-1 border-b border-gray-100">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenMentionContact({
+                                      name: senderDisplayName,
+                                      phone: cleanPhone || null,
+                                      jid: msg.senderJid || null,
+                                      contactId: targetContactId,
+                                      role: lookup?.role,
+                                      avatarUrl,
+                                    });
+                                  }}
+                                  title={`Klik untuk info kontak ${senderDisplayName}`}
+                                  className="inline-flex items-center gap-2 min-w-0 max-w-full text-left group/sender cursor-pointer hover:opacity-85"
+                                >
+                                  <span
+                                    className={`text-xs sm:text-[13px] font-semibold truncate group-hover/sender:underline ${getParticipantColorClass(
+                                      msg.senderJid || msg.senderPhone || msg.senderName
+                                    )}`}
+                                  >
+                                    {senderDisplayName}
+                                  </span>
+                                  {msg.senderPhone &&
+                                    senderDisplayName !== `+${msg.senderPhone}` && (
+                                      <span className="text-[10px] sm:text-[11px] font-mono text-gray-400 group-hover/sender:text-indigo-600 shrink-0">
+                                        +{msg.senderPhone}
+                                      </span>
+                                    )}
+                                </button>
+                              </div>
+                            );
+                          })()}
 
                         {isOutbound && !isCsat && (() => {
                           const sentVia = msgMeta?.sentVia;
@@ -5535,15 +5666,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 ? 'WhatsApp HP'
                                 : 'WhatsApp HP / Web');
                             return (
-                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-indigo-200/60">
+                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-slate-200/70">
                                 <span
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100/80 border border-emerald-200 text-emerald-800 text-[10px] font-medium"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600 text-[10px] font-medium"
                                   title="Pesan dikirim langsung dari perangkat/sesi WhatsApp di luar CRM"
                                 >
                                   {sentVia === 'WHATSAPP_WEB' ? (
-                                    <Monitor className="w-2.5 h-2.5 shrink-0" />
+                                    <Monitor className="w-2.5 h-2.5 shrink-0 text-slate-500" />
                                   ) : (
-                                    <Smartphone className="w-2.5 h-2.5 shrink-0" />
+                                    <Smartphone className="w-2.5 h-2.5 shrink-0 text-slate-500" />
                                   )}
                                   <span>{originLabel}</span>
                                 </span>
@@ -5553,8 +5684,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                           if (isAiBot) {
                             return (
-                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-indigo-200/60">
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-700">
+                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-slate-200/70">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-700">
                                   <Sparkles className="w-2.5 h-2.5 shrink-0" />
                                   <span>{msgMeta?.sentViaLabel || msg.senderName || 'Bot AI'}</span>
                                 </span>
@@ -5564,8 +5695,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                           if (isBroadcast) {
                             return (
-                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-indigo-200/60">
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-sky-700">
+                              <div className="flex items-center justify-end gap-1 pb-1 border-b border-slate-200/70">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600">
                                   <Send className="w-2.5 h-2.5 shrink-0" />
                                   <span>{msgMeta?.sentViaLabel || msg.senderName || 'Siaran Terjadwal'}</span>
                                 </span>
@@ -5575,11 +5706,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                           if (sentVia === 'CRM' || msg.senderName) {
                             return (
-                              <div className="flex items-center justify-end gap-1.5 pb-1 border-b border-indigo-200/60 text-[10px] text-indigo-800/80">
-                                <span className="font-semibold truncate max-w-[180px]">
+                              <div className="flex items-center justify-end gap-1.5 pb-1 border-b border-slate-200/70 text-[10px] text-slate-600">
+                                <span className="font-semibold text-slate-800 truncate max-w-[180px]">
                                   {msg.senderName || msgMeta?.actorName || 'Tim CS'}
                                 </span>
-                                <span className="px-1 py-0.2 rounded bg-white/80 border border-indigo-200 text-[9px] font-mono text-indigo-700 shrink-0">
+                                <span className="px-1 py-0.2 rounded bg-white border border-slate-200 text-[9px] font-mono text-slate-600 shrink-0">
                                   CRM
                                 </span>
                               </div>
@@ -6056,9 +6187,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           }
                           if (meta?.kind === 'GROUP_INVITE' && meta.groupInvite) {
                             return (
-                              <div className="p-2.5 rounded-md border border-teal-200 bg-teal-50/60 space-y-1">
-                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-800">
-                                  <Users className="w-3 h-3" />
+                              <div className="p-2.5 rounded-md border border-slate-200 bg-white space-y-1">
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-700">
+                                  <Users className="w-3 h-3 text-slate-500" />
                                   <span>Undangan Grup WhatsApp</span>
                                 </div>
                                 <div className="font-semibold text-gray-900">{meta.groupInvite.groupName}</div>
@@ -6442,6 +6573,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
               });
             })()}
             <div ref={messagesEndRef} />
+            </div>
+            {pendingNewMsgCount > 0 && (
+              <button
+                type="button"
+                onClick={() => scrollToBottom('smooth')}
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md border border-indigo-500 transition-all cursor-pointer"
+              >
+                <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {pendingNewMsgCount > 1 ? `${pendingNewMsgCount} pesan baru` : 'Pesan baru'}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Composer */}
@@ -6854,7 +6998,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               onClick={() => setStickerSubTab(stTab.id)}
                               className={`px-2 py-1 rounded font-medium whitespace-nowrap border cursor-pointer transition-colors ${
                                 stickerSubTab === stTab.id
-                                  ? 'bg-violet-50 border-violet-300 text-violet-800 font-semibold'
+                                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-semibold'
                                   : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
                               }`}
                             >
@@ -7969,7 +8113,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
+                        onClick={() => {
+                          setShowComposerTools(false);
+                          handleOpenMediaLibraryModal('CHAT_ATTACHMENT');
+                        }}
                         className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-emerald-700 hover:bg-emerald-50 cursor-pointer"
                       >
                         <FolderOpen className="w-4 h-4 text-emerald-600" />
@@ -8107,7 +8254,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       type="button"
                       onClick={() => imageInputRef.current?.click()}
                       title="Kirim Foto / Video (Mendukung HD & Multi-Foto)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-200 text-indigo-600 inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                      className="hidden sm:inline-flex h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
                     >
                       <ImageIcon className="w-4 h-4" />
                     </button>
@@ -8115,7 +8262,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       type="button"
                       onClick={() => docInputRef.current?.click()}
                       title="Kirim Dokumen / Berkas (Tanpa Pratinjau Foto Langsung)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                      className="hidden sm:inline-flex h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
                     >
                       <Paperclip className="w-4 h-4" />
                     </button>
@@ -8123,7 +8270,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       type="button"
                       onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
                       title="Pilih Foto, Video, atau Dokumen dari Pustaka Media Tersimpan"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-200 text-emerald-600 inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                      className="hidden sm:inline-flex h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
                     >
                       <FolderOpen className="w-4 h-4" />
                     </button>
@@ -8265,8 +8412,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
             )}
             <div className="mt-1.5 flex items-center justify-center flex-wrap gap-1">
               {selectedConversation.wahaSession && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 max-w-full truncate">
-                  <Smartphone className="w-3 h-3 shrink-0" />
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono bg-slate-50 text-slate-700 border border-slate-200 max-w-full truncate">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${getWahaSessionDotClass(selectedConversation.wahaSession, sessions, 'bg-emerald-500')}`} />
                   <span className="truncate">Sesi: {selectedConversation.wahaSession}</span>
                 </span>
               )}
@@ -8287,9 +8434,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 <button
                   type="button"
                   onClick={() => void handleOpenGroupManageModal('INFO')}
-                  className="px-2.5 py-1 rounded bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                  className="px-2.5 py-1 rounded bg-white hover:bg-gray-50 text-slate-700 border border-gray-200 text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
                 >
-                  <Shield className="w-3.5 h-3.5 text-teal-600" />
+                  <Shield className="w-3.5 h-3.5 text-slate-500" />
                   <span>Kelola Grup</span>
                 </button>
                 <button
@@ -8532,35 +8679,35 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
             {/* 3. Partisipan Grup */}
             {selectedConversation.isGroup && (
-              <div className="border border-teal-200 rounded-lg bg-white overflow-hidden">
+              <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
                 <button
                   type="button"
                   onClick={() => toggleProfileSection('participants')}
-                  className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-teal-50/40 transition-colors"
+                  className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-gray-50 transition-colors"
                 >
-                  <span className="text-[11px] font-semibold text-teal-900 flex items-center gap-1.5 truncate">
-                    <Users className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                  <span className="text-[11px] font-semibold text-gray-900 flex items-center gap-1.5 truncate">
+                    <Users className="w-3.5 h-3.5 text-gray-500 shrink-0" />
                     <span>Partisipan Grup</span>
                   </span>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[10px] font-mono font-semibold text-teal-700">
+                    <span className="text-[10px] font-mono font-semibold text-gray-600">
                       {participantsData?.participants.length || 0}
                     </span>
                     {openProfileSections.participants ? (
-                      <ChevronDown className="w-3.5 h-3.5 text-teal-600" />
+                      <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                     ) : (
-                      <ChevronRight className="w-3.5 h-3.5 text-teal-600" />
+                      <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
                     )}
                   </div>
                 </button>
                 {openProfileSections.participants && (
-                  <div className="px-3 pb-3 pt-2 border-t border-teal-100 bg-teal-50/30 space-y-2">
+                  <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60 space-y-2">
                     <div className="flex items-center justify-end gap-2">
                       <button
                         type="button"
                         disabled={loadingParticipants}
                         onClick={() => void fetchParticipants(selectedConversation.id, true)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-teal-200 text-[10px] font-medium text-teal-800 hover:bg-teal-100 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-gray-200 text-[10px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       >
                         <RefreshCw className={`w-2.5 h-2.5 ${loadingParticipants ? 'animate-spin' : ''}`} />
                         Sync
@@ -8571,7 +8718,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           setShowParticipantsModal(true);
                           void fetchParticipants(selectedConversation.id, true);
                         }}
-                        className="text-[10px] font-semibold text-indigo-700 hover:underline"
+                        className="text-[10px] font-semibold text-indigo-600 hover:underline"
                       >
                         Lihat Semua Modal
                       </button>
@@ -8598,9 +8745,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 });
                               }
                             }}
-                            className={`flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-teal-100 text-[11px] ${
+                            className={`flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-gray-200 text-[11px] ${
                               part.contactId || part.phone
-                                ? 'cursor-pointer hover:bg-teal-50/70'
+                                ? 'cursor-pointer hover:bg-gray-50'
                                 : ''
                             }`}
                           >
@@ -8608,7 +8755,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               <div className="font-medium text-gray-900 truncate flex items-center gap-1">
                                 <span>{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
                                 {part.role !== 'member' && (
-                                  <span className="px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                  <span className="px-1 py-0.2 rounded text-[9px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
                                     {part.role === 'superadmin' ? 'Owner' : 'Admin'}
                                   </span>
                                 )}
@@ -8620,7 +8767,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               )}
                             </div>
                             {part.messageCount > 0 && (
-                              <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px] shrink-0">
                                 {part.messageCount} chat
                               </span>
                             )}
@@ -9481,9 +9628,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     setShowParticipantsModal(false);
                     handleOpenGroupManageModal('INFO');
                   }}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-teal-200 bg-teal-50 text-xs text-teal-800 hover:bg-teal-100 font-medium"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-200 bg-white text-xs text-slate-700 hover:bg-gray-50 font-medium"
                 >
-                  <Shield className="w-3 h-3 text-teal-600" />
+                  <Shield className="w-3 h-3 text-slate-500" />
                   <span>Kelola Grup</span>
                 </button>
                 <button
@@ -9537,12 +9684,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           <div className="font-semibold text-gray-900 truncate flex items-center gap-1.5">
                             <span>{part.contactName || part.name || (part.phone ? `+${part.phone}` : part.jid)}</span>
                             {part.role !== 'member' && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
                                 {part.role === 'superadmin' ? 'Owner Grup' : 'Admin Grup'}
                               </span>
                             )}
                             {part.contactId && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-white text-slate-700 border border-slate-200 inline-flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                                 Di Kontak CRM
                               </span>
                             )}
@@ -9552,7 +9700,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           </div>
                         </div>
                         <div className="text-right shrink-0">
-                          <span className="inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[11px] font-semibold">
+                          <span className="inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[11px] font-semibold">
                             {part.messageCount} pesan
                           </span>
                           {part.lastMessageAt && (
@@ -9587,7 +9735,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
           >
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="w-7 h-7 rounded-md bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
+                <div className="w-7 h-7 rounded-md bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center shrink-0">
                   <Shield className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
@@ -9614,7 +9762,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 onClick={() => setGroupManageTab('INFO')}
                 className={`py-2.5 border-b-2 transition-colors ${
                   groupManageTab === 'INFO'
-                    ? 'border-teal-600 text-teal-800 font-semibold'
+                    ? 'border-indigo-600 text-indigo-700 font-semibold'
                     : 'border-transparent text-gray-500 hover:text-gray-900'
                 }`}
               >
@@ -9628,7 +9776,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 }}
                 className={`py-2.5 border-b-2 transition-colors ${
                   groupManageTab === 'INVITE'
-                    ? 'border-teal-600 text-teal-800 font-semibold'
+                    ? 'border-indigo-600 text-indigo-700 font-semibold'
                     : 'border-transparent text-gray-500 hover:text-gray-900'
                 }`}
               >
@@ -9639,7 +9787,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 onClick={() => setGroupManageTab('ADD_MEMBER')}
                 className={`py-2.5 border-b-2 transition-colors ${
                   groupManageTab === 'ADD_MEMBER'
-                    ? 'border-teal-600 text-teal-800 font-semibold'
+                    ? 'border-indigo-600 text-indigo-700 font-semibold'
                     : 'border-transparent text-gray-500 hover:text-gray-900'
                 }`}
               >
@@ -9736,7 +9884,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           setSavingGroupInfo(false);
                         }
                       }}
-                      className="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-medium file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer"
+                      className="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border file:border-gray-200 file:text-xs file:font-medium file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100 cursor-pointer"
                     />
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <p className="text-[10px] text-gray-400">
@@ -9772,7 +9920,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         <div className="text-[10px] uppercase font-bold text-gray-500 font-sans">
                           Tautan Undangan Aktif
                         </div>
-                        <div className="break-all text-teal-800 select-all font-semibold">
+                        <div className="break-all text-indigo-700 select-all font-semibold">
                           {groupInviteLink || 'Tautan belum dibuat atau tidak tersedia'}
                         </div>
                       </div>
@@ -10293,7 +10441,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       selectedContactModalTarget.role === 'superadmin'
                         ? 'bg-amber-50 text-amber-800 border-amber-200'
                         : selectedContactModalTarget.role === 'admin'
-                        ? 'bg-teal-50 text-teal-800 border-teal-200'
+                        ? 'bg-slate-100 text-slate-700 border-slate-200'
                         : 'bg-gray-100 text-gray-700 border-gray-200'
                     }`}
                   >
@@ -10449,7 +10597,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
                         Kategori:
                       </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
                         {modalContactData.kategori}
                       </span>
                     </div>

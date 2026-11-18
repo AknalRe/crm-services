@@ -1229,7 +1229,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                             <ContactAvatarImg
                               url={contact.profile_picture_url}
                               name={contact.nama_lengkap}
-                              className="w-8 h-8 rounded-md bg-indigo-50 text-indigo-700 font-semibold text-xs border border-indigo-200/70 mt-0.5"
+                              className="w-8 h-8 rounded-md bg-slate-100 text-slate-700 font-semibold text-xs border border-slate-200 mt-0.5"
                             />
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-1.5">
@@ -1237,9 +1237,9 @@ export const Contacts: React.FC<ContactsProps> = ({
                                 {contact.exclude_from_metrics && (
                                   <span
                                     title={contact.exclude_reason || 'Dikecualikan dari penilaian SLA/CSAT'}
-                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-medium"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200 text-[10px] font-medium"
                                   >
-                                    <EyeOff className="w-2.5 h-2.5" />
+                                    <EyeOff className="w-2.5 h-2.5 text-slate-400" />
                                     <span>Non-Penilaian</span>
                                   </span>
                                 )}

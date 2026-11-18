@@ -2,9 +2,15 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { ilike } from 'drizzle-orm';
+import { and, desc, eq, ilike, like } from 'drizzle-orm';
 import { db } from '../db';
-import { chatMessages } from '../db/schema';
+import {
+  chatMessages,
+  contactIdentities,
+  contacts,
+  conversations,
+  persistedMedia,
+} from '../db/schema';
 import { requirePermission } from './auth';
 
 export function resolveUploadsDir(
@@ -144,13 +150,160 @@ function ensureUploadsDir() {
   }
 }
 
-// Profile photos live in a separate folder so they never appear in the media library listing
+// Profile photos live in a separate folder AND persist in PostgreSQL so container updates never lose avatars
 const PROFILES_DIR = path.join(UPLOADS_DIR, 'profiles');
 const PROFILE_EXT_MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.png': 'image/png',
   '.webp': 'image/webp',
 };
+const backedUpProfileKeys = new Set<string>();
+const inflightProfileHeals = new Map<string, Promise<{ buffer: Buffer; mimeType: string } | null>>();
+
+function extractProfileFilename(relativeUrl?: string | null): string | null {
+  const match = String(relativeUrl || '').match(/\/api\/media\/profiles\/([a-zA-Z0-9._-]+)(?:[?#].*)?$/);
+  return match ? match[1] : null;
+}
+
+async function persistProfileBlobToDb(
+  filename: string,
+  mimeType: string,
+  buffer: Buffer
+): Promise<void> {
+  const key = `profiles/${filename}`;
+  try {
+    const b64 = buffer.toString('base64');
+    await db
+      .insert(persistedMedia)
+      .values({ key, mimeType, dataBase64: b64 })
+      .onConflictDoUpdate({
+        target: persistedMedia.key,
+        set: { mimeType, dataBase64: b64 },
+      });
+    backedUpProfileKeys.add(key);
+  } catch {
+    // Non-fatal in environments without DB initialized (e.g. unit tests)
+  }
+}
+
+export async function restorePersistedProfilePicture(relativeUrl?: string | null): Promise<boolean> {
+  const filename = extractProfileFilename(relativeUrl);
+  if (!filename) return Boolean(relativeUrl);
+  const filePath = path.join(PROFILES_DIR, filename);
+  if (fs.existsSync(filePath)) return true;
+
+  try {
+    const rows = await db
+      .select({
+        mimeType: persistedMedia.mimeType,
+        dataBase64: persistedMedia.dataBase64,
+      })
+      .from(persistedMedia)
+      .where(eq(persistedMedia.key, `profiles/${filename}`))
+      .limit(1);
+    const row = rows[0];
+    if (!row?.dataBase64) return false;
+    const buf = Buffer.from(row.dataBase64, 'base64');
+    if (buf.length === 0) return false;
+    await fs.promises.mkdir(PROFILES_DIR, { recursive: true });
+    await fs.promises.writeFile(filePath, buf);
+    backedUpProfileKeys.add(`profiles/${filename}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function healMissingProfilePicture(
+  filename: string
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  const existingHeal = inflightProfileHeals.get(filename);
+  if (existingHeal) return existingHeal;
+
+  const task = (async (): Promise<{ buffer: Buffer; mimeType: string } | null> => {
+    try {
+      const contactRows = await db
+        .select({
+          id: contacts.id,
+          companyId: contacts.companyId,
+          nomorWhatsapp: contacts.nomorWhatsapp,
+        })
+        .from(contacts)
+        .where(like(contacts.profilePictureUrl, `%/${filename}`))
+        .limit(1);
+      const contact = contactRows[0];
+      if (!contact) return null;
+
+      const convRows = await db
+        .select({
+          externalThreadId: conversations.externalThreadId,
+          wahaSession: conversations.wahaSession,
+          isGroup: conversations.isGroup,
+        })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.companyId, contact.companyId),
+            eq(conversations.contactId, contact.id),
+            eq(conversations.channel, 'WHATSAPP')
+          )
+        )
+        .orderBy(desc(conversations.lastMessageAt), desc(conversations.createdAt))
+        .limit(1);
+      const conv = convRows[0];
+
+      let jid = conv?.externalThreadId?.trim() || '';
+      const isGroup = Boolean(conv?.isGroup || jid.toLowerCase().endsWith('@g.us'));
+      if (!jid) {
+        const idRows = await db
+          .select({ externalId: contactIdentities.externalId })
+          .from(contactIdentities)
+          .where(
+            and(
+              eq(contactIdentities.companyId, contact.companyId),
+              eq(contactIdentities.contactId, contact.id),
+              eq(contactIdentities.channel, 'WHATSAPP')
+            )
+          )
+          .limit(1);
+        jid = idRows[0]?.externalId?.trim() || '';
+      }
+      if (!jid && contact.nomorWhatsapp) {
+        const digits = contact.nomorWhatsapp.replace(/\D/g, '');
+        if (digits) jid = `${digits}@c.us`;
+      }
+      if (!jid) return null;
+
+      const { syncWhatsAppProfile } = await import('../services/profile.service');
+      const synced = await syncWhatsAppProfile({
+        companyId: contact.companyId,
+        contactId: contact.id,
+        jid,
+        session: conv?.wahaSession || undefined,
+        isGroup,
+        force: true,
+      });
+
+      const healedFilename = extractProfileFilename(synced.profilePictureUrl);
+      if (!healedFilename) return null;
+      const healedPath = path.join(PROFILES_DIR, healedFilename);
+      if (!fs.existsSync(healedPath)) return null;
+      const buffer = await fs.promises.readFile(healedPath);
+      const ext = path.extname(healedFilename).toLowerCase();
+      return {
+        buffer,
+        mimeType: PROFILE_EXT_MIME[ext] || 'image/jpeg',
+      };
+    } catch {
+      return null;
+    } finally {
+      inflightProfileHeals.delete(filename);
+    }
+  })();
+
+  inflightProfileHeals.set(filename, task);
+  return task;
+}
 
 export async function saveProfilePictureFile(params: {
   buffer: Buffer;
@@ -164,16 +317,25 @@ export async function saveProfilePictureFile(params: {
   }
   const mime = normalizeMimeBase(params.mimeType);
   const ext = mime === 'image/png' ? '.png' : mime === 'image/webp' ? '.webp' : '.jpg';
+  const storedMime = PROFILE_EXT_MIME[ext] || 'image/jpeg';
   const filename = `${Date.now()}_${crypto.randomUUID().slice(0, 8)}${ext}`;
   await fs.promises.mkdir(PROFILES_DIR, { recursive: true });
   await fs.promises.writeFile(path.join(PROFILES_DIR, filename), params.buffer);
+  await persistProfileBlobToDb(filename, storedMime, params.buffer);
   return { filename, relativeUrl: `/api/media/profiles/${filename}` };
 }
 
 export async function deleteProfilePictureFile(relativeUrl?: string | null): Promise<void> {
-  const match = String(relativeUrl || '').match(/\/api\/media\/profiles\/([a-zA-Z0-9._-]+)$/);
-  if (!match) return;
-  await fs.promises.unlink(path.join(PROFILES_DIR, match[1])).catch(() => {});
+  const filename = extractProfileFilename(relativeUrl);
+  if (!filename) return;
+  await fs.promises.unlink(path.join(PROFILES_DIR, filename)).catch(() => {});
+  try {
+    const key = `profiles/${filename}`;
+    backedUpProfileKeys.delete(key);
+    await db.delete(persistedMedia).where(eq(persistedMedia.key, key));
+  } catch {
+    // Non-fatal in unit tests
+  }
 }
 
 export async function saveMediaBufferFile(params: {
@@ -471,7 +633,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
     }
   );
 
-  // Serve locally cached WhatsApp profile photos
+  // Serve cached WhatsApp profile photos (auto-restoring from PostgreSQL or healing from WAHA if container disk was recreated)
   fastify.get<{ Params: { filename: string } }>(
     '/profiles/:filename',
     async (req: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
@@ -481,13 +643,38 @@ export default async function mediaRouter(fastify: FastifyInstance) {
           return reply.status(400).send({ success: false, error: 'Invalid filename' });
         }
         const filePath = path.join(PROFILES_DIR, filename);
-        if (!fs.existsSync(filePath)) {
-          return reply.status(404).send({ success: false, error: 'File not found' });
-        }
         const ext = path.extname(filename).toLowerCase();
-        reply.header('Content-Type', PROFILE_EXT_MIME[ext] || 'image/jpeg');
-        reply.header('Cache-Control', 'private, max-age=3600');
-        return reply.send(fs.createReadStream(filePath));
+        const fallbackMime = PROFILE_EXT_MIME[ext] || 'image/jpeg';
+        const key = `profiles/${filename}`;
+
+        if (fs.existsSync(filePath)) {
+          if (!backedUpProfileKeys.has(key)) {
+            backedUpProfileKeys.add(key);
+            void fs.promises
+              .readFile(filePath)
+              .then((buf) => persistProfileBlobToDb(filename, fallbackMime, buf))
+              .catch(() => {});
+          }
+          reply.header('Content-Type', fallbackMime);
+          reply.header('Cache-Control', 'private, max-age=3600');
+          return reply.send(fs.createReadStream(filePath));
+        }
+
+        const restored = await restorePersistedProfilePicture(`/api/media/profiles/${filename}`);
+        if (restored && fs.existsSync(filePath)) {
+          reply.header('Content-Type', fallbackMime);
+          reply.header('Cache-Control', 'private, max-age=3600');
+          return reply.send(fs.createReadStream(filePath));
+        }
+
+        const healed = await healMissingProfilePicture(filename);
+        if (healed) {
+          reply.header('Content-Type', healed.mimeType);
+          reply.header('Cache-Control', 'no-store');
+          return reply.send(healed.buffer);
+        }
+
+        return reply.status(404).send({ success: false, error: 'File not found' });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });
       }

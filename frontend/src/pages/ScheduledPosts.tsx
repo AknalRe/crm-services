@@ -57,12 +57,12 @@ interface ScheduledPostsProps {
 }
 
 const POST_CHANNEL_META: Record<PostChannel, { label: string; badgeCls: string }> = {
-  INSTAGRAM: { label: 'Instagram Feed', badgeCls: 'bg-pink-50 text-pink-700 border-pink-200' },
-  FACEBOOK: { label: 'Facebook Page', badgeCls: 'bg-blue-50 text-blue-700 border-blue-200' },
-  THREADS: { label: 'Threads', badgeCls: 'bg-gray-100 text-gray-800 border-gray-300' },
-  TELEGRAM: { label: 'Telegram Channel', badgeCls: 'bg-sky-50 text-sky-700 border-sky-200' },
-  WHATSAPP_STATUS: { label: 'WhatsApp Story', badgeCls: 'bg-teal-50 text-teal-700 border-teal-200' },
-  WHATSAPP: { label: 'Post WhatsApp', badgeCls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  INSTAGRAM: { label: 'Instagram Feed', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
+  FACEBOOK: { label: 'Facebook Page', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
+  THREADS: { label: 'Threads', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
+  TELEGRAM: { label: 'Telegram Channel', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
+  WHATSAPP_STATUS: { label: 'WhatsApp Story', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
+  WHATSAPP: { label: 'Post WhatsApp', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
 };
 
 const STORY_BG_COLORS = [
@@ -597,7 +597,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                         onClick={() => setStatusPostType(item.id)}
                         className={`px-2 py-1.5 rounded border text-xs font-medium flex items-center justify-center gap-1 ${
                           statusPostType === item.id
-                            ? 'border-teal-600 bg-teal-50 text-teal-800'
+                            ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
                             : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
                         }`}
                       >
@@ -645,7 +645,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                           onClick={() => setStatusFont(f)}
                           className={`px-2 py-0.5 rounded text-[11px] border ${
                             statusFont === f
-                              ? 'border-teal-600 bg-teal-50 text-teal-800 font-semibold'
+                              ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-semibold'
                               : 'border-gray-200 bg-white text-gray-600'
                           }`}
                         >
@@ -693,7 +693,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                     onClick={() => setTargetAudienceMode('ALL')}
                     className={`px-2.5 py-1.5 rounded border text-xs font-medium ${
                       targetAudienceMode === 'ALL'
-                        ? 'border-teal-600 bg-teal-50 text-teal-800'
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
                         : 'border-gray-200 bg-white text-gray-600'
                     }`}
                   >
@@ -704,7 +704,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                     onClick={() => setTargetAudienceMode('SELECTED')}
                     className={`px-2.5 py-1.5 rounded border text-xs font-medium ${
                       targetAudienceMode === 'SELECTED'
-                        ? 'border-teal-600 bg-teal-50 text-teal-800'
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
                         : 'border-gray-200 bg-white text-gray-600'
                     }`}
                   >
@@ -1366,7 +1366,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                               <Video className="w-5 h-5" />
                             </div>
                           ) : isAudioMediaUrl(post.mediaUrl) ? (
-                            <div className="w-14 h-14 rounded bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
+                            <div className="w-14 h-14 rounded bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center shrink-0">
                               <Mic className="w-5 h-5" />
                             </div>
                           ) : (
@@ -1404,9 +1404,9 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                             <button
                               type="button"
                               onClick={() => void handleOpenViewers(post, true)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 text-[11px] font-medium transition-colors"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-gray-200 bg-white text-slate-700 hover:bg-gray-50 text-[11px] font-medium transition-colors"
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              <Eye className="w-3.5 h-3.5 text-slate-500" />
                               <span>Penonton ({post.viewerCount ?? 0})</span>
                             </button>
                           )}
@@ -1487,7 +1487,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             <div className="flex items-start justify-between gap-2 border-b border-gray-100 pb-3 shrink-0">
               <div>
                 <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-teal-600" />
+                  <Eye className="w-4 h-4 text-slate-500" />
                   <span>Penonton WhatsApp Story</span>
                 </h3>
                 <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">
@@ -1520,9 +1520,9 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
             ) : (
               <div className="space-y-3 overflow-y-auto flex-1 pr-1">
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2.5 rounded-md bg-teal-50 border border-teal-200">
-                    <span className="text-[10px] font-medium text-teal-700 uppercase">Sudah Dilihat</span>
-                    <p className="text-lg font-bold text-teal-900 tabular-nums">
+                  <div className="p-2.5 rounded-md bg-slate-50 border border-slate-200">
+                    <span className="text-[10px] font-medium text-slate-600 uppercase">Sudah Dilihat</span>
+                    <p className="text-lg font-bold text-slate-900 tabular-nums">
                       {viewersModal.data?.totalViewed ?? 0}
                     </p>
                   </div>

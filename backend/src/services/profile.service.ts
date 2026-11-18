@@ -3,7 +3,11 @@ import { db } from '../db';
 import { contacts, conversations } from '../db/schema';
 import { wahaService } from './waha.service';
 import { liveEvents } from './events.service';
-import { deleteProfilePictureFile, saveProfilePictureFile } from '../routes/media';
+import {
+  deleteProfilePictureFile,
+  restorePersistedProfilePicture,
+  saveProfilePictureFile,
+} from '../routes/media';
 import { isGenericDisplayName } from '../routes/waha';
 
 const PICTURE_REFRESH_MS = 6 * 60 * 60 * 1000;
@@ -63,14 +67,17 @@ export async function syncWhatsAppProfile(params: {
   if (!contact) return empty;
 
   const key = `${params.companyId}:${params.contactId}`;
+  const hasRestorablePicture = contact.profilePictureUrl
+    ? await restorePersistedProfilePicture(contact.profilePictureUrl)
+    : false;
   if (!params.force) {
     const last = lastAttemptAt.get(key) || 0;
-    const ttl = contact.profilePictureUrl ? PICTURE_REFRESH_MS : RETRY_WITHOUT_PICTURE_MS;
-    if (Date.now() - last < ttl) {
+    const ttl = hasRestorablePicture ? PICTURE_REFRESH_MS : RETRY_WITHOUT_PICTURE_MS;
+    if (last > 0 && Date.now() - last < ttl) {
       return {
         ...empty,
         name: contact.namaLengkap,
-        profilePictureUrl: contact.profilePictureUrl || null,
+        profilePictureUrl: hasRestorablePicture ? contact.profilePictureUrl || null : null,
         profileAbout: contact.profileAbout || null,
       };
     }
