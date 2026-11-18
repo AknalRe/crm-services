@@ -61,6 +61,8 @@ import {
   Shield,
   Image as ImageIcon,
   Sparkles,
+  FolderOpen,
+  BookmarkPlus,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -78,6 +80,7 @@ import {
   CrmLabelItem,
   InteractiveButtonItem,
   LicenseInfo,
+  MediaLibraryItem,
   OmnichannelType,
   ProductItem,
   ResolvedMentionItem,
@@ -109,6 +112,10 @@ const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls:
 };
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
+import {
+  MediaLibraryPickerModal,
+  resolveCrmMediaUrl,
+} from '../components/ui/MediaLibraryPickerModal';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
@@ -179,9 +186,11 @@ function inferAttachmentMime(file: File): string {
 
 interface PendingAttachmentItem {
   id: string;
-  file: File;
-  base64: string;
-  originalBase64: string;
+  file?: File;
+  base64?: string;
+  originalBase64?: string;
+  mediaUrl?: string;
+  previewUrl?: string;
   mimetype: string;
   name: string;
   size: number;
@@ -320,14 +329,7 @@ const ContactAvatar: React.FC<{
   );
 };
 
-function formatMentionPlainText(
-  text: string,
-  mySessionPhones?: Set<string>,
-  contactsByPhone?: Map<string, string>,
-  participantsLookup?: Map<string, ParticipantLookupEntry>,
-  mentionedContacts?: ResolvedMentionItem[]
-): string {
-  if (!text) return '';
+function buildMentionLookupMap(mentionedContacts?: ResolvedMentionItem[]): Map<string, ResolvedMentionItem> {
   const mentionByToken = new Map<string, ResolvedMentionItem>();
   if (Array.isArray(mentionedContacts)) {
     for (const mc of mentionedContacts) {
@@ -336,27 +338,46 @@ function formatMentionPlainText(
       if (mc?.jid) mentionByToken.set(mc.jid.replace(/@.*$/, '').toLowerCase(), mc);
     }
   }
+  return mentionByToken;
+}
 
-  return text.replace(/@(\d{6,20}|[a-zA-Z0-9_.-]+)/g, (match, rawTarget) => {
-    const cleanDigits = rawTarget.replace(/\D/g, '');
+function formatMentionPlainText(
+  text: string,
+  mySessionPhones?: Set<string>,
+  contactsByPhone?: Map<string, string>,
+  participantsLookup?: Map<string, ParticipantLookupEntry>,
+  mentionedContacts?: ResolvedMentionItem[]
+): string {
+  if (!text) return '';
+  const mentionByToken = buildMentionLookupMap(mentionedContacts);
+
+  return text.replace(/@(\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?)/g, (match, rawTarget) => {
+    const cleanTarget = rawTarget.replace(/^\+/, '');
+    const cleanDigits = cleanTarget.replace(/\D/g, '');
     if (cleanDigits && mySessionPhones?.has(cleanDigits)) {
       return '@Anda';
     }
     const fromMsg =
-      mentionByToken.get(rawTarget.toLowerCase()) ||
+      mentionByToken.get(cleanTarget.toLowerCase()) ||
       (cleanDigits ? mentionByToken.get(cleanDigits) : undefined);
     if (fromMsg?.name) {
       return `@${fromMsg.name}`;
     }
-    const fromPart = cleanDigits ? participantsLookup?.get(cleanDigits) : participantsLookup?.get(rawTarget.toLowerCase());
+    const fromPart = cleanDigits ? participantsLookup?.get(cleanDigits) : participantsLookup?.get(cleanTarget.toLowerCase());
     if (fromPart?.name) {
       return `@${fromPart.name}`;
     }
     if (cleanDigits && contactsByPhone?.has(cleanDigits)) {
       return `@${contactsByPhone.get(cleanDigits)}`;
     }
-    if (cleanDigits && cleanDigits.length >= 7 && cleanDigits.length <= 15) {
+    if (fromMsg?.phone) {
+      return `@+${fromMsg.phone}`;
+    }
+    if (cleanDigits && cleanDigits.length >= 7 && cleanDigits.length <= 13) {
       return `@+${cleanDigits}`;
+    }
+    if (cleanDigits && cleanDigits.length >= 14) {
+      return `@${cleanDigits}`;
     }
     return match;
   });
@@ -365,21 +386,43 @@ function formatMentionPlainText(
 function formatConversationPreview(
   text: string | null | undefined,
   mySessionPhones: Set<string>,
-  contactsByPhone: Map<string, string>
+  contactsByPhone: Map<string, string>,
+  participantsLookup?: Map<string, ParticipantLookupEntry>,
+  mentionedContacts?: ResolvedMentionItem[]
 ): { previewText: string; isMentionedMe: boolean } {
   if (!text) return { previewText: 'Tidak ada pesan terbaru', isMentionedMe: false };
   let isMentionedMe = false;
-  const previewText = text.replace(/@(\d{6,20}|[a-zA-Z0-9_.-]+)/g, (match, rawTarget) => {
-    const cleanDigits = rawTarget.replace(/\D/g, '');
+  const mentionByToken = buildMentionLookupMap(mentionedContacts);
+  const previewText = text.replace(/@(\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?)/g, (match, rawTarget) => {
+    const cleanTarget = rawTarget.replace(/^\+/, '');
+    const cleanDigits = cleanTarget.replace(/\D/g, '');
     if (cleanDigits && mySessionPhones.has(cleanDigits)) {
       isMentionedMe = true;
       return '@Anda';
     }
+    const fromMsg =
+      mentionByToken.get(cleanTarget.toLowerCase()) ||
+      (cleanDigits ? mentionByToken.get(cleanDigits) : undefined);
+    if (fromMsg?.name) {
+      return `@${fromMsg.name}`;
+    }
+    const fromPart = cleanDigits
+      ? participantsLookup?.get(cleanDigits)
+      : participantsLookup?.get(cleanTarget.toLowerCase());
+    if (fromPart?.name) {
+      return `@${fromPart.name}`;
+    }
     if (cleanDigits && contactsByPhone.has(cleanDigits)) {
       return `@${contactsByPhone.get(cleanDigits)}`;
     }
-    if (cleanDigits && cleanDigits.length >= 7 && cleanDigits.length <= 15) {
+    if (fromMsg?.phone) {
+      return `@+${fromMsg.phone}`;
+    }
+    if (cleanDigits && cleanDigits.length >= 7 && cleanDigits.length <= 13) {
       return `@+${cleanDigits}`;
+    }
+    if (cleanDigits && cleanDigits.length >= 14) {
+      return `@${cleanDigits}`;
     }
     return match;
   });
@@ -395,44 +438,73 @@ function renderTextWithClickableLinks(
   mySessionPhones?: Set<string>
 ): React.ReactNode {
   if (!text) return null;
-  const mentionByToken = new Map<string, ResolvedMentionItem>();
-  if (Array.isArray(mentionedContacts)) {
-    for (const mc of mentionedContacts) {
-      if (mc?.token) mentionByToken.set(mc.token.toLowerCase(), mc);
-      if (mc?.phone) mentionByToken.set(mc.phone.replace(/\D/g, ''), mc);
-      if (mc?.jid) mentionByToken.set(mc.jid.replace(/@.*$/, '').toLowerCase(), mc);
-    }
-  }
-  const parts = text.split(/(https?:\/\/[^\s<>]+|@\d{6,20}|@[a-zA-Z0-9_.-]+)/gi);
-  return parts.map((part, idx) => {
-    if (/^https?:\/\/[^\s<>]+$/i.test(part)) {
-      const clean = part.replace(/[.,);!?]+$/, '');
-      const trailing = part.slice(clean.length);
-      return (
-        <React.Fragment key={idx}>
-          <a
-            href={clean}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline text-indigo-700 hover:text-indigo-900 break-all font-medium"
-          >
-            {clean}
-          </a>
-          {trailing}
-        </React.Fragment>
-      );
-    }
+  const mentionByToken = buildMentionLookupMap(mentionedContacts);
+  const protectedNodes: React.ReactNode[] = [];
+  let keyCounter = 0;
 
-    if (/^@(\d{6,20}|[a-zA-Z0-9_.-]+)$/.test(part)) {
+  const pushProtected = (node: React.ReactNode) => {
+    const idx = protectedNodes.length;
+    protectedNodes.push(node);
+    return `\uE000${idx}\uE001`;
+  };
+
+  // 1. Extract fenced code blocks (```...```) first so contents are rendered verbatim
+  const withBlocksReplaced = text.replace(/```([\s\S]*?)```/g, (_m, codeBody) => {
+    const trimmed = String(codeBody).replace(/^\n|\n$/g, '');
+    return pushProtected(
+      <code
+        key={`cb-${keyCounter++}`}
+        className="block my-1 px-2.5 py-1.5 rounded bg-gray-100/95 border border-gray-200 font-mono text-[12px] text-gray-900 whitespace-pre-wrap break-all"
+      >
+        {trimmed}
+      </code>
+    );
+  });
+
+  // 2. Extract inline monospace (`...`)
+  const withInlineCodeReplaced = withBlocksReplaced.replace(/`([^`\n]+)`/g, (_m, codeSpan) =>
+    pushProtected(
+      <code
+        key={`ic-${keyCounter++}`}
+        className="px-1 py-[1px] rounded bg-gray-100 border border-gray-200/80 font-mono text-[12px] text-rose-700 break-all"
+      >
+        {codeSpan}
+      </code>
+    )
+  );
+
+  // 3. Extract URLs and @mentions BEFORE italic/bold/strike so URLs with _ or * are never split
+  const tokenized = withInlineCodeReplaced.replace(
+    /(https?:\/\/[^\s<>\uE000\uE001]+|@(?:\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?))/gi,
+    (part) => {
+      if (/^https?:\/\//i.test(part)) {
+        const clean = part.replace(/[.,);!?*_~]+$/, '');
+        const trailing = part.slice(clean.length);
+        return (
+          pushProtected(
+            <a
+              key={`url-${keyCounter++}`}
+              href={clean}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline text-indigo-700 hover:text-indigo-900 break-all font-medium"
+            >
+              {clean}
+            </a>
+          ) + trailing
+        );
+      }
+
       const rawTarget = part.slice(1);
-      const cleanPhone = rawTarget.replace(/\D/g, '');
+      const cleanTarget = rawTarget.replace(/^\+/, '');
+      const cleanPhone = cleanTarget.replace(/\D/g, '');
       const isMe = Boolean(cleanPhone && mySessionPhones?.has(cleanPhone));
       const fromMsg =
-        mentionByToken.get(rawTarget.toLowerCase()) ||
+        mentionByToken.get(cleanTarget.toLowerCase()) ||
         (cleanPhone ? mentionByToken.get(cleanPhone) : undefined);
       const fromPart =
         (cleanPhone ? participantsLookup?.get(cleanPhone) : undefined) ||
-        participantsLookup?.get(rawTarget.toLowerCase());
+        participantsLookup?.get(cleanTarget.toLowerCase());
       const fromContact = cleanPhone && contactsByPhone ? contactsByPhone.get(cleanPhone) : undefined;
 
       const matchedName =
@@ -441,21 +513,21 @@ function renderTextWithClickableLinks(
         fromPart?.name ||
         fromContact ||
         (fromMsg?.phone ? `+${fromMsg.phone}` : '') ||
-        (cleanPhone ? `+${cleanPhone}` : rawTarget);
+        (cleanPhone ? (cleanPhone.length <= 13 ? `+${cleanPhone}` : cleanPhone) : cleanTarget);
       const resolvedPhone =
         fromMsg?.phone ||
         fromPart?.phone ||
-        (cleanPhone && cleanPhone.length <= 15 ? cleanPhone : null);
+        (cleanPhone && cleanPhone.length <= 13 ? cleanPhone : null);
       const resolvedContactId = fromMsg?.contactId || fromPart?.contactId || null;
       const canOpen = Boolean(onMentionClick && (resolvedContactId || resolvedPhone || matchedName));
 
       const pillCls =
-        'inline-flex items-center gap-0.5 font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/90 rounded px-1.5 py-0.2 text-[11px] sm:text-xs mx-0.5 align-baseline hover:bg-indigo-100 hover:text-indigo-800 transition-colors shadow-2xs';
+        'inline font-semibold text-indigo-700 bg-indigo-50/95 border border-indigo-200/80 rounded px-1 py-[1px] hover:bg-indigo-100 hover:text-indigo-800 transition-colors';
 
       if (canOpen) {
-        return (
+        return pushProtected(
           <button
-            key={idx}
+            key={`m-${keyCounter++}`}
             type="button"
             onClick={(e) => {
               e.stopPropagation();
@@ -470,25 +542,143 @@ function renderTextWithClickableLinks(
             className={`${pillCls} cursor-pointer`}
             title={`Klik untuk melihat detail kontak: ${matchedName}${resolvedPhone ? ` (+${resolvedPhone})` : ''}`}
           >
-            <AtSign className="w-2.5 h-2.5 inline text-indigo-500 shrink-0" />
-            <span>{matchedName}</span>
+            @{matchedName}
           </button>
         );
       }
 
-      return (
+      return pushProtected(
         <span
-          key={idx}
+          key={`m-${keyCounter++}`}
           className={pillCls}
-          title={`Mention: @${rawTarget}${matchedName !== rawTarget ? ` (${matchedName})` : ''}`}
+          title={`Mention: @${cleanTarget}${matchedName !== cleanTarget ? ` (${matchedName})` : ''}`}
         >
-          <AtSign className="w-2.5 h-2.5 inline text-indigo-500 shrink-0" />
-          <span>{matchedName}</span>
+          @{matchedName}
         </span>
       );
     }
+  );
 
-    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  // Expand placeholders \uE000idx\uE001 inside a leaf string
+  const expandPlaceholders = (segment: string): React.ReactNode => {
+    const segParts = segment.split(/(\uE000\d+\uE001)/g);
+    return segParts.map((sp, i) => {
+      const m = /^\uE000(\d+)\uE001$/.exec(sp);
+      if (m) {
+        return <React.Fragment key={`p-${i}-${m[1]}`}>{protectedNodes[Number(m[1])]}</React.Fragment>;
+      }
+      return sp ? <React.Fragment key={`t-${i}`}>{sp}</React.Fragment> : null;
+    });
+  };
+
+  // Recursive WhatsApp inline formatter (*bold*, _italic_, ~strikethrough~)
+  const formatInlineWa = (segment: string, depth = 0): React.ReactNode => {
+    if (!segment || depth > 4) return expandPlaceholders(segment);
+
+    const patterns: Array<{
+      type: 'bold' | 'italic' | 'strike';
+      regex: RegExp;
+    }> = [
+      {
+        type: 'bold',
+        regex: /(^|[\s([>~_])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?=$|[\s.,!?;:)\]<~_])/,
+      },
+      {
+        type: 'italic',
+        regex: /(^|[\s([>*~])_([^\s_](?:[^_\n]*[^\s_])?)_(?=$|[\s.,!?;:)\]<*~])/,
+      },
+      {
+        type: 'strike',
+        regex: /(^|[\s([>*_])~([^\s~](?:[^~\n]*[^\s~])?)~(?=$|[\s.,!?;:)\]<*_])/,
+      },
+    ];
+
+    let bestMatch: {
+      type: 'bold' | 'italic' | 'strike';
+      index: number;
+      prefix: string;
+      inner: string;
+      fullLength: number;
+    } | null = null;
+
+    for (const p of patterns) {
+      const m = p.regex.exec(segment);
+      if (m && m[2]) {
+        const idx = m.index;
+        if (!bestMatch || idx < bestMatch.index) {
+          bestMatch = {
+            type: p.type,
+            index: idx,
+            prefix: m[1],
+            inner: m[2],
+            fullLength: m[0].length,
+          };
+        }
+      }
+    }
+
+    if (!bestMatch) return expandPlaceholders(segment);
+
+    const before = segment.slice(0, bestMatch.index) + bestMatch.prefix;
+    const after = segment.slice(bestMatch.index + bestMatch.fullLength);
+    const innerNode = formatInlineWa(bestMatch.inner, depth + 1);
+
+    const wrapped =
+      bestMatch.type === 'bold' ? (
+        <strong key={`wa-${keyCounter++}`} className="font-semibold">
+          {innerNode}
+        </strong>
+      ) : bestMatch.type === 'italic' ? (
+        <em key={`wa-${keyCounter++}`} className="italic">
+          {innerNode}
+        </em>
+      ) : (
+        <del key={`wa-${keyCounter++}`} className="line-through text-gray-500">
+          {innerNode}
+        </del>
+      );
+
+    return (
+      <>
+        {before ? expandPlaceholders(before) : null}
+        {wrapped}
+        {after ? formatInlineWa(after, depth) : null}
+      </>
+    );
+  };
+
+  // Line-level handling (> blockquote lines preserved cleanly alongside normal lines)
+  const lines = tokenized.split('\n');
+  if (lines.length === 1) {
+    const qm = /^>\s?(.*)$/.exec(lines[0]);
+    if (qm) {
+      return (
+        <div className="border-l-2 border-indigo-400/75 pl-2 text-gray-700/90 italic">
+          {formatInlineWa(qm[1])}
+        </div>
+      );
+    }
+    return formatInlineWa(lines[0]);
+  }
+
+  return lines.map((line, lIdx) => {
+    const qm = /^>\s?(.*)$/.exec(line);
+    if (qm) {
+      return (
+        <div
+          key={`ln-${lIdx}`}
+          className="border-l-2 border-indigo-400/75 pl-2 my-0.5 text-gray-700/90 italic"
+        >
+          {formatInlineWa(qm[1])}
+        </div>
+      );
+    }
+    return (
+      <React.Fragment key={`ln-${lIdx}`}>
+        {lIdx > 0 && !/^>\s?/.test(lines[lIdx - 1]) ? '\n' : null}
+        {formatInlineWa(line)}
+      </React.Fragment>
+    );
   });
 }
 
@@ -739,11 +929,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [emojiSearch, setEmojiSearch] = useState('');
   const [recentEmojis, setRecentEmojis] = useState<string[]>(getRecentEmojis);
   const [savedStickers, setSavedStickers] = useState<SavedStickerItem[]>([]);
+  const [whatsappStickers, setWhatsappStickers] = useState<
+    Array<SavedStickerItem & { wahaSession?: string | null; senderName?: string | null }>
+  >([]);
+  const [stickerSubTab, setStickerSubTab] = useState<'all' | 'whatsapp' | 'saved' | 'preset'>('all');
   const [savingSticker, setSavingSticker] = useState(false);
   const [savingMsgStickerId, setSavingMsgStickerId] = useState<string | null>(null);
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
   const [reactingMsgId, setReactingMsgId] = useState<string | null>(null);
   const stickerInputRef = useRef<HTMLInputElement>(null);
+
+  const [mediaPickerMode, setMediaPickerMode] = useState<
+    'CHAT_ATTACHMENT' | 'STICKER' | 'LINK_THUMBNAIL' | 'GROUP_AVATAR' | null
+  >(null);
 
   const [showLocationComposer, setShowLocationComposer] = useState(false);
   const [locLat, setLocLat] = useState('');
@@ -806,7 +1004,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
-  const replyInputRef = useRef<HTMLInputElement>(null);
+  const replyInputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = replyInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  }, [inputText]);
 
   // Right panel: Labels & Contact Notes
   const [newLabel, setNewLabel] = useState('');
@@ -1250,10 +1455,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const handleToggleHdMode = async () => {
     const nextHd = !isHdMode;
     setIsHdMode(nextHd);
-    if (pendingAttachments.some((item) => item.kind === 'image' && !item.asDocument)) {
+    if (pendingAttachments.some((item) => item.kind === 'image' && !item.asDocument && item.file)) {
       const updated = await Promise.all(
         pendingAttachments.map(async (item) => {
-          if (item.kind === 'image' && !item.asDocument) {
+          if (item.kind === 'image' && !item.asDocument && item.file) {
             const { base64, size } = await processImageAttachment(item.file, nextHd);
             return { ...item, base64, size };
           }
@@ -1267,6 +1472,91 @@ export const Conversations: React.FC<ConversationsProps> = ({
         ? 'Mode HD Aktif: Foto dikirim dalam kualitas tinggi resolusi asli'
         : 'Mode Standar Aktif: Foto dikompresi agar hemat kuota'
     );
+  };
+
+  const handleOpenMediaLibraryModal = (
+    mode: 'CHAT_ATTACHMENT' | 'STICKER' | 'LINK_THUMBNAIL' | 'GROUP_AVATAR' = 'CHAT_ATTACHMENT'
+  ) => {
+    setShowComposerTools(false);
+    setMediaPickerMode(mode);
+  };
+
+  const handleConfirmMediaPicker = async (
+    picked: MediaLibraryItem[],
+    options: { asDocument: boolean }
+  ) => {
+    if (picked.length === 0) return;
+    const mode = mediaPickerMode;
+    if (mode === 'STICKER') {
+      const asset = picked[0];
+      setSavingSticker(true);
+      try {
+        const { sticker, alreadyExists } = await api.saveSticker({
+          name: (asset.originalFileName || asset.filename).replace(/\.[^.]+$/, '') || 'Stiker',
+          mediaUrl: asset.relativeUrl,
+        });
+        setSavedStickers((prev) => [sticker, ...prev.filter((s) => s.id !== sticker.id)]);
+        toast.success(
+          alreadyExists ? 'Stiker sudah ada di koleksi Anda' : 'Stiker ditambahkan dari Pustaka Media'
+        );
+      } catch (err: any) {
+        toast.error(err?.response?.data?.error || 'Gagal menyimpan stiker dari Pustaka Media');
+      } finally {
+        setSavingSticker(false);
+      }
+      return;
+    }
+
+    if (mode === 'LINK_THUMBNAIL') {
+      const asset = picked[0];
+      setLinkImageUrl(asset.url || asset.relativeUrl);
+      toast.info(`Thumbnail dipilih: ${asset.originalFileName || asset.filename}`);
+      return;
+    }
+
+    if (mode === 'GROUP_AVATAR') {
+      if (!selectedConversation) return;
+      const asset = picked[0];
+      setSavingGroupInfo(true);
+      try {
+        const resp = await fetch(resolveCrmMediaUrl(asset.relativeUrl), { credentials: 'include' });
+        if (!resp.ok) throw new Error('Gagal mengunduh aset dari Pustaka Media');
+        const blob = await resp.blob();
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('Gagal membaca gambar dari Pustaka Media'));
+          reader.readAsDataURL(blob);
+        });
+        await api.updateGroupPicture(
+          selectedConversation.id,
+          base64,
+          selectedSession || selectedConversation.wahaSession || undefined
+        );
+        toast.success('Foto profil grup berhasil diperbarui dari Pustaka Media');
+        void handleSyncConversationProfile();
+      } catch (err: any) {
+        toast.error(err?.response?.data?.error || err?.message || 'Gagal mengubah foto profil grup');
+      } finally {
+        setSavingGroupInfo(false);
+      }
+      return;
+    }
+
+    const nextItems: PendingAttachmentItem[] = picked.map((m) => ({
+      id: `lib-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      mediaUrl: m.relativeUrl,
+      previewUrl: m.mediaKind === 'image' ? resolveMediaUrl(m.relativeUrl) : undefined,
+      mimetype: m.mimeType || 'application/octet-stream',
+      name: m.originalFileName || m.filename,
+      size: m.sizeBytes || 0,
+      kind: m.mediaKind,
+      asDocument: options.asDocument || m.mediaKind === 'document',
+    }));
+    if (nextItems.length > 0) {
+      setPendingAttachments((prev) => [...prev, ...nextItems]);
+      setComposerMode('REPLY');
+    }
   };
 
   const openComposerPicker = (
@@ -2143,7 +2433,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
     stopOutboundTyping(selectedConversation.id);
     setSending(true);
     try {
-      const textMentions = Array.from(text.matchAll(/@(\d{8,16})/g)).map((m) => `${m[1]}@c.us`);
+      const textMentions = Array.from(text.matchAll(/@\+?(\d{6,20})/g)).map((m) => {
+        const d = m[1];
+        const part = participantsLookup.get(d);
+        if (part?.jid) return part.jid;
+        return d.length >= 14 ? `${d}@lid` : `${d}@c.us`;
+      });
 
       if (pendingAttachments.length === 0) {
         const newMsg = await api.sendConversationMessage(selectedConversation.id, {
@@ -2168,6 +2463,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
             body: msgCaption,
             session: selectedSession || undefined,
             mediaBase64: item.base64,
+            mediaUrl: !item.base64 ? item.mediaUrl : undefined,
             mediaMimetype: item.mimetype,
             mediaName: item.name,
             replyToMessageId: isFirst ? replyingToMessage?.id : undefined,
@@ -2899,16 +3195,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const fetchAgentsAndCanned = useCallback(async () => {
     if (!isLiveChatUnlocked) return;
     try {
-      const [agentsData, cannedData, labelsData, stickersData] = await Promise.all([
+      const [agentsData, cannedData, labelsData, stickerCatalog] = await Promise.all([
         api.getAssignableAgents().catch(() => []),
         api.getCannedResponses(true).catch(() => []),
         api.getMasterLabels('CONVERSATION_LABEL', true).catch(() => []),
-        api.getStickers().catch(() => []),
+        api.getStickerCatalog().catch(() => ({ saved: [], whatsappStickers: [] })),
       ]);
       setAssignableAgents(agentsData || []);
       setCannedList(cannedData || []);
       setMasterLabels(labelsData || []);
-      setSavedStickers(stickersData || []);
+      setSavedStickers(stickerCatalog.saved || []);
+      setWhatsappStickers(stickerCatalog.whatsappStickers || []);
     } catch {
       // ignore
     }
@@ -3975,7 +4272,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       const { previewText, isMentionedMe } = formatConversationPreview(
                         conv.lastMessage,
                         mySessionPhones,
-                        contactsByPhone
+                        contactsByPhone,
+                        selectedConversation?.id === conv.id ? participantsLookup : undefined,
+                        conv.lastMessageMentionedContacts
                       );
                       return (
                         <>
@@ -4931,7 +5230,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
           <div
             ref={messagesContainerRef}
             onScroll={updateFloatingDateLabel}
-            className="relative flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2 sm:space-y-2.5 bg-slate-50/70"
+            className="relative flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-1.5 bg-slate-50/70"
           >
             {floatingDateLabel && messages.length > 0 && !loadingMessages && (
               <div className="sticky top-1 z-20 w-full flex justify-center pointer-events-none pb-1">
@@ -5018,6 +5317,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 });
 
               return messages.map((msg, msgIndex) => {
+                const msgMeta = parseChatMessageMeta(msg);
+                const isActivity = msg.messageType === 'ACTIVITY' || msgMeta?.kind === 'ACTIVITY';
                 const isNote = msg.messageType === 'NOTE';
                 const isCsat = msg.messageType === 'CSAT';
                 const isOutbound = msg.direction === 'OUTBOUND';
@@ -5038,9 +5339,21 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 const startBanner = startBannerAtMsgIdx.get(msgIndex);
                 const closingSessions = closingSessionsAtMsgIdx.get(msgIndex) || [];
                 const msgDateKey = getChatDateKey(msg.createdAt);
-                const prevDateKey = msgIndex > 0 ? getChatDateKey(messages[msgIndex - 1].createdAt) : '';
+                const prevMsg = msgIndex > 0 ? messages[msgIndex - 1] : null;
+                const prevDateKey = prevMsg ? getChatDateKey(prevMsg.createdAt) : '';
                 const msgDateLabel = formatChatDateLabel(msg.createdAt);
                 const showDateDivider = Boolean(msgDateLabel && msgIndex > 0 && msgDateKey !== prevDateKey);
+                const isSenderSwitch = Boolean(
+                  prevMsg &&
+                    !showDateDivider &&
+                    !startBanner &&
+                    (prevMsg.messageType === 'ACTIVITY' ||
+                      prevMsg.messageType === 'NOTE' ||
+                      prevMsg.direction !== msg.direction ||
+                      (selectedConversation.isGroup &&
+                        (prevMsg.senderJid || prevMsg.senderPhone || prevMsg.senderName) !==
+                          (msg.senderJid || msg.senderPhone || msg.senderName)))
+                );
                 const dateDividerNode = showDateDivider ? (
                   <div className="flex justify-center py-1">
                     <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/90 border border-gray-200 text-[11px] font-medium text-gray-600 shadow-2xs">
@@ -5099,6 +5412,37 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   );
                 });
 
+                if (isActivity) {
+                  const actorLabel = msgMeta?.actorName || msg.senderName || 'Sistem';
+                  const actTime = new Date(msg.createdAt).toLocaleTimeString('id-ID', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
+                  return (
+                    <React.Fragment key={msg.id}>
+                      {dateDividerNode}
+                      {startDividerNode}
+                      <div
+                        data-chat-date={msgDateLabel}
+                        ref={(el) => {
+                          msgElementRefs.current[msg.id] = el;
+                        }}
+                        className="flex justify-center py-0.5"
+                      >
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/95 border border-gray-200/90 text-[11px] text-gray-600 shadow-2xs max-w-[92%]">
+                          <Clock className="w-3 h-3 text-indigo-500 shrink-0" />
+                          <span className="truncate">
+                            <strong className="font-semibold text-gray-800">{actorLabel}</strong>{' '}
+                            {msg.body}
+                          </span>
+                          <span className="text-[10px] font-mono text-gray-400 shrink-0">• {actTime}</span>
+                        </div>
+                      </div>
+                      {endDividerNodes}
+                    </React.Fragment>
+                  );
+                }
+
                 if (isNote) {
                   return (
                     <React.Fragment key={msg.id}>
@@ -5109,7 +5453,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         ref={(el) => {
                           msgElementRefs.current[msg.id] = el;
                         }}
-                        className="flex justify-center"
+                        className="flex justify-center py-0.5"
                       >
                         <div
                           className={`max-w-[92%] sm:max-w-[85%] rounded-lg px-3.5 py-2 text-xs border bg-amber-50 border-amber-200 text-amber-950 space-y-1 min-w-0 ${
@@ -5119,7 +5463,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           <div className="flex items-center justify-between gap-3 text-[10px] font-semibold text-amber-800">
                             <span className="inline-flex items-center gap-1.5">
                               <StickyNote className="w-3 h-3 shrink-0" />
-                              <span>Catatan Internal (Tidak terkirim ke WhatsApp)</span>
+                              <span>
+                                Catatan Internal
+                                {msg.senderName ? ` • oleh ${msg.senderName}` : ' (Internal Tim)'}
+                              </span>
                             </span>
                             {(canReplyConversation || canManageConversation) && (
                               <button
@@ -5133,7 +5480,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               </button>
                             )}
                           </div>
-                          <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.body}</div>
+                          <div className="whitespace-pre-wrap break-words leading-relaxed">
+                            {renderTextWithClickableLinks(
+                              msg.body,
+                              participantsLookup,
+                              msg.mentionedContacts,
+                              handleOpenMentionContact,
+                              contactsByPhone,
+                              mySessionPhones
+                            )}
+                          </div>
                           <div className="text-[10px] text-amber-700/80 font-mono text-right">
                             {new Date(msg.createdAt).toLocaleTimeString('id-ID', {
                               hour: '2-digit',
@@ -5147,7 +5503,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   );
                 }
 
-                const msgMeta = parseChatMessageMeta(msg);
                 const isRevoked = Boolean(msgMeta?.revoked);
                 const isStickerMsg = Boolean(
                   msgMeta?.kind === 'STICKER' ||
@@ -5166,17 +5521,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       ref={(el) => {
                         msgElementRefs.current[msg.id] = el;
                       }}
-                      className={`group relative flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
+                      className={`group relative flex ${isOutbound ? 'justify-end' : 'justify-start'} ${
+                        isSenderSwitch ? 'mt-2' : ''
+                      }`}
                     >
                       <div
-                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[90%] sm:max-w-[80%] md:max-w-[540px] lg:max-w-[580px] xl:max-w-[620px] min-w-0 transition-all duration-300 ${
+                        className={`relative flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[90%] sm:max-w-[80%] md:max-w-[540px] lg:max-w-[580px] xl:max-w-[620px] min-w-0 transition-all duration-300 ${
                           highlightedMessageId === msg.id
                             ? 'scale-[1.02] ring-2 ring-indigo-500 ring-offset-2 rounded-lg'
                             : ''
                         }`}
                       >
                         <div
-                          className={`w-full min-w-0 rounded-lg px-3.5 py-2.5 text-[13px] sm:text-sm border leading-relaxed space-y-1.5 shadow-2xs ${
+                          className={`w-full min-w-0 rounded-lg px-3 py-2 text-[13px] sm:text-sm border leading-snug space-y-1 shadow-2xs ${
                             isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
                           } ${
                             isRevoked
@@ -5196,14 +5553,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-100/90 border border-rose-300 text-[11px] font-semibold text-rose-900">
                             <Trash2 className="w-3.5 h-3.5 shrink-0 text-rose-600" />
                             <span>
-                              {msgMeta?.revokeScope === 'EVERYONE'
+                              {msgMeta?.revokedBySender || (!isOutbound && msgMeta?.revokeScope !== 'ME')
+                                ? 'Pesan ditarik oleh pengirim'
+                                : msgMeta?.revokeScope === 'EVERYONE'
                                 ? 'Pesan ditarik (WhatsApp & CRM)'
                                 : msgMeta?.revokeScope === 'ME'
                                 ? 'Pesan dihapus di CRM'
                                 : 'Pesan ditarik oleh pengirim'}
-                              {msgMeta?.revokedBy && (
-                                <span className="font-normal"> • oleh {msgMeta.revokedBy}</span>
-                              )}
+                              {msgMeta?.revokedBy &&
+                                msgMeta.revokedBy !== 'Pengirim' && (
+                                  <span className="font-normal"> • oleh {msgMeta.revokedBy}</span>
+                                )}
                               {msgMeta?.revokedAt && (
                                 <span className="ml-1 text-[10px] font-mono font-normal opacity-80">
                                   ({new Date(msgMeta.revokedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})
@@ -5843,12 +6203,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             return null;
                           }
                           return (
-                            <div className="whitespace-pre-wrap break-words text-[13px] sm:text-sm text-gray-950 font-normal leading-relaxed">
+                            <div
+                              className={`whitespace-pre-wrap break-words text-[13px] sm:text-sm font-normal leading-relaxed ${
+                                isRevoked ? 'line-through opacity-70 text-rose-900/80' : 'text-gray-950'
+                              }`}
+                            >
                               {renderTextWithClickableLinks(
                                 msg.body,
                                 participantsLookup,
                                 msg.mentionedContacts,
-                                handleOpenMentionContact
+                                handleOpenMentionContact,
+                                contactsByPhone,
+                                mySessionPhones
                               )}
                             </div>
                           );
@@ -5944,7 +6310,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                         {/* Directly Accessible Outside Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) - Muncul halus saat kursor diarahkan ke pesan */}
                         {!isRevoked && (canReplyConversation || canManageConversation) && (
-                          <div className="mt-0.5 flex flex-wrap items-center gap-1 px-0.5 text-[10px] opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity duration-150">
+                          <div
+                            className={`mt-1 flex flex-wrap items-center gap-1 px-0.5 text-[10px] md:hidden md:group-hover:inline-flex md:group-focus-within:inline-flex md:flex-nowrap md:whitespace-nowrap md:absolute md:-top-3 ${
+                              isOutbound ? 'md:right-2' : 'md:left-2'
+                            } md:z-20 md:mt-0 md:bg-white/95 md:backdrop-blur-xs md:rounded-md md:p-0.5 md:border md:border-gray-200 md:shadow-sm`}
+                          >
                             {canReplyConversation && (
                               <button
                                 type="button"
@@ -6218,8 +6588,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <button
                       type="button"
                       onClick={() => imageInputRef.current?.click()}
-                      title="Tambah Foto atau Video"
-                      className="px-1.5 py-0.5 rounded text-[10px] font-medium text-indigo-700 bg-white border border-indigo-200 hover:bg-indigo-50 transition-colors inline-flex items-center gap-0.5"
+                      title="Tambah Foto atau Video dari Perangkat"
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium text-indigo-700 bg-white border border-indigo-200 hover:bg-indigo-50 transition-colors inline-flex items-center gap-0.5 cursor-pointer"
                     >
                       <Plus className="w-3 h-3" />
                       <span>Foto</span>
@@ -6227,11 +6597,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <button
                       type="button"
                       onClick={() => docInputRef.current?.click()}
-                      title="Tambah Dokumen / Berkas"
-                      className="px-1.5 py-0.5 rounded text-[10px] font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 transition-colors inline-flex items-center gap-0.5"
+                      title="Tambah Dokumen / Berkas dari Perangkat"
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 transition-colors inline-flex items-center gap-0.5 cursor-pointer"
                     >
                       <Plus className="w-3 h-3" />
                       <span>Berkas</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
+                      title="Pilih Foto atau Dokumen dari Pustaka Media"
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium text-emerald-700 bg-white border border-emerald-200 hover:bg-emerald-50 transition-colors inline-flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <FolderOpen className="w-3 h-3" />
+                      <span>Pustaka</span>
                     </button>
                     <button
                       type="button"
@@ -6251,10 +6630,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       key={item.id}
                       className="relative shrink-0 flex items-center gap-2 p-1.5 rounded-md bg-white border border-indigo-200/90 shadow-2xs max-w-[210px]"
                     >
-                      {item.kind === 'image' && !item.asDocument ? (
+                      {item.kind === 'image' && !item.asDocument && (item.base64 || item.previewUrl) ? (
                         <div className="relative w-10 h-10 rounded overflow-hidden border border-gray-200 shrink-0">
                           <img
-                            src={item.base64}
+                            src={item.base64 || item.previewUrl}
                             alt={item.name}
                             className="w-full h-full object-cover"
                           />
@@ -6282,6 +6661,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           {item.name}
                         </div>
                         <div className="text-[10px] text-gray-500 font-mono">
+                          {item.mediaUrl ? 'PUSTAKA • ' : ''}
                           {item.asDocument ? 'DOKUMEN' : item.kind.toUpperCase()} •{' '}
                           {item.size >= 1024 * 1024
                             ? `${(item.size / (1024 * 1024)).toFixed(1)} MB`
@@ -6306,16 +6686,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
             <div className="relative">
               {showEmojiPicker && (
-                <div className="absolute bottom-full left-0 mb-2 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-80 sm:w-96 max-w-[calc(100vw-2rem)] space-y-2.5">
+                <div className="absolute bottom-full left-0 mb-2 z-30 bg-white border border-gray-200 rounded-xl shadow-xl p-3 w-[340px] sm:w-[410px] max-w-[calc(100vw-1.5rem)] space-y-2.5">
                   <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
-                    <div className="inline-flex rounded border border-gray-200 p-0.5 bg-gray-50 text-[11px]">
+                    <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50 text-[11px]">
                       <button
                         type="button"
                         onClick={() => setEmojiPickerTab('EMOJI')}
-                        className={`px-2.5 py-1 rounded font-medium inline-flex items-center gap-1 ${
+                        className={`px-2.5 py-1 rounded font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
                           emojiPickerTab === 'EMOJI'
-                            ? 'bg-white text-indigo-700 shadow-2xs'
-                            : 'text-gray-600'
+                            ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
+                            : 'text-gray-600 hover:text-gray-900'
                         }`}
                       >
                         <Smile className="w-3.5 h-3.5" />
@@ -6324,21 +6704,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => setEmojiPickerTab('STICKER')}
-                        className={`px-2.5 py-1 rounded font-medium inline-flex items-center gap-1 ${
+                        className={`px-2.5 py-1 rounded font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
                           emojiPickerTab === 'STICKER'
-                            ? 'bg-white text-indigo-700 shadow-2xs'
-                            : 'text-gray-600'
+                            ? 'bg-white text-violet-700 shadow-2xs font-semibold'
+                            : 'text-gray-600 hover:text-gray-900'
                         }`}
                       >
-                        <Sticker className="w-3.5 h-3.5" />
-                        <span>Stiker ({savedStickers.length + PRESET_STICKER_TEMPLATES.length})</span>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>
+                          Stiker ({whatsappStickers.length + savedStickers.length + PRESET_STICKER_TEMPLATES.length})
+                        </span>
                       </button>
                     </div>
                     <button
                       type="button"
                       onClick={() => setShowEmojiPicker(false)}
                       title="Tutup panel emotikon & stiker"
-                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0"
+                      className="h-6 w-6 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 inline-flex items-center justify-center shrink-0 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -6353,7 +6735,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           placeholder="Cari emotikon (mis. senyum, paket, ok, love)..."
                           value={emojiSearch}
                           onChange={(e) => setEmojiSearch(e.target.value)}
-                          className="w-full h-7 pl-7 pr-6 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                          className="w-full h-8 pl-7 pr-6 bg-gray-50 border border-gray-200 rounded-md text-[11px] focus:outline-none focus:bg-white focus:border-indigo-500"
                         />
                         {emojiSearch && (
                           <button
@@ -6377,7 +6759,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 key={`rec-${em}`}
                                 type="button"
                                 onClick={() => handleInsertEmoji(em)}
-                                className="h-8 rounded hover:bg-indigo-50 text-lg flex items-center justify-center"
+                                className="h-8 rounded hover:bg-indigo-50 text-lg flex items-center justify-center transition-transform hover:scale-110 cursor-pointer"
                               >
                                 {em}
                               </button>
@@ -6393,7 +6775,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               key={cat.id}
                               type="button"
                               onClick={() => setEmojiCategoryId(cat.id)}
-                              className={`px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap shrink-0 inline-flex items-center gap-1 border ${
+                              className={`px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap shrink-0 inline-flex items-center gap-1 border cursor-pointer ${
                                 emojiCategoryId === cat.id
                                   ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
                                   : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
@@ -6406,7 +6788,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         </div>
                       )}
 
-                      <div className="max-h-48 overflow-y-auto">
+                      <div className="max-h-52 overflow-y-auto pb-1">
                         {(() => {
                           const q = emojiSearch.trim().toLowerCase();
                           const list = q
@@ -6429,7 +6811,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   type="button"
                                   onClick={() => handleInsertEmoji(item.char)}
                                   title={item.keywords}
-                                  className="h-8 rounded hover:bg-indigo-50 text-lg flex items-center justify-center transition-transform hover:scale-110"
+                                  className="h-8 rounded hover:bg-indigo-50 text-lg flex items-center justify-center transition-transform hover:scale-110 cursor-pointer"
                                 >
                                   {item.char}
                                 </button>
@@ -6440,7 +6822,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-2.5 max-h-64 overflow-y-auto pr-0.5">
+                    <div className="space-y-2.5">
                       <input
                         ref={stickerInputRef}
                         type="file"
@@ -6448,89 +6830,200 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         onChange={(e) => void handleUploadNewSticker(e)}
                         className="hidden"
                       />
+
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-semibold text-gray-700">
-                          Koleksi Stiker Tersimpan ({savedStickers.length})
-                        </span>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          isLoading={savingSticker}
-                          onClick={() => stickerInputRef.current?.click()}
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Unggah Stiker</span>
-                        </Button>
-                      </div>
-
-                      {savedStickers.length > 0 ? (
-                        <div className="grid grid-cols-4 gap-2">
-                          {savedStickers.map((st) => (
-                            <div
-                              key={st.id}
-                              className="relative group rounded-md border border-gray-200 bg-gray-50 p-1.5 flex flex-col items-center gap-1 hover:border-indigo-300"
-                            >
-                              <button
-                                type="button"
-                                disabled={sending}
-                                onClick={() => void handleSendSavedSticker(st)}
-                                title={`Kirim stiker: ${st.name}`}
-                                className="w-full aspect-square flex items-center justify-center disabled:opacity-50"
-                              >
-                                <img
-                                  src={resolveMediaUrl(st.mediaUrl)}
-                                  alt={st.name}
-                                  className="max-w-full max-h-full object-contain"
-                                />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void handleDeleteSavedSticker(st.id)}
-                                title="Hapus stiker dari koleksi"
-                                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-red-600 shadow-xs inline-flex items-center justify-center text-[10px]"
-                              >
-                                <X className="w-2.5 h-2.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="px-3 py-2.5 rounded-md bg-gray-50 border border-dashed border-gray-200 text-[11px] text-gray-500 text-center">
-                          Unggah gambar/WebP atau klik "Simpan Stiker" pada stiker pelanggan untuk menyimpannya di sini.
-                        </div>
-                      )}
-
-                      <div className="space-y-1.5 pt-1 border-t border-gray-100">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                          Stiker Cepat Layanan CS (1-Klik Kirim)
-                        </span>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                          {PRESET_STICKER_TEMPLATES.map((tpl) => (
+                        <div className="flex items-center gap-1 overflow-x-auto text-[10px]">
+                          {(
+                            [
+                              { id: 'all', label: 'Semua' },
+                              { id: 'whatsapp', label: `Chat WA (${whatsappStickers.length})` },
+                              { id: 'saved', label: `Favorit (${savedStickers.length})` },
+                              { id: 'preset', label: `CS (${PRESET_STICKER_TEMPLATES.length})` },
+                            ] as const
+                          ).map((stTab) => (
                             <button
-                              key={tpl.id}
+                              key={stTab.id}
                               type="button"
-                              disabled={sending}
-                              onClick={() => void handleSendPresetSticker(tpl)}
-                              style={{ backgroundColor: tpl.bgHex, borderColor: tpl.accentHex }}
-                              className="p-2 rounded-md border text-left hover:opacity-90 transition-opacity disabled:opacity-50 space-y-0.5"
+                              onClick={() => setStickerSubTab(stTab.id)}
+                              className={`px-2 py-1 rounded font-medium whitespace-nowrap border cursor-pointer transition-colors ${
+                                stickerSubTab === stTab.id
+                                  ? 'bg-violet-50 border-violet-300 text-violet-800 font-semibold'
+                                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                              }`}
                             >
-                              <div className="text-base leading-none">{tpl.emoji}</div>
-                              <div
-                                style={{ color: tpl.accentHex }}
-                                className="text-[10px] font-bold truncate"
-                              >
-                                {tpl.topText}
-                              </div>
-                              <div
-                                style={{ color: tpl.textHex }}
-                                className="text-[9px] truncate opacity-85"
-                              >
-                                {tpl.bottomText}
-                              </div>
+                              {stTab.label}
                             </button>
                           ))}
                         </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={savingSticker}
+                            onClick={() => handleOpenMediaLibraryModal('STICKER')}
+                            title="Pilih gambar dari Pustaka Media menjadi Stiker"
+                          >
+                            <FolderOpen className="w-3 h-3" />
+                            <span>Pustaka</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            isLoading={savingSticker}
+                            onClick={() => stickerInputRef.current?.click()}
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Unggah</span>
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="max-h-72 overflow-y-auto pr-0.5 pb-1.5 space-y-3">
+                        {(stickerSubTab === 'all' || stickerSubTab === 'whatsapp') && (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
+                                Stiker dari Chat WhatsApp ({whatsappStickers.length})
+                              </span>
+                            </div>
+                            {whatsappStickers.length > 0 ? (
+                              <div className="grid grid-cols-4 gap-2">
+                                {whatsappStickers.map((st) => (
+                                  <div
+                                    key={st.id}
+                                    className="relative group rounded-lg border border-gray-200 bg-gray-50/70 p-1.5 flex flex-col items-center hover:border-emerald-300 hover:bg-emerald-50/30 transition-colors"
+                                  >
+                                    <button
+                                      type="button"
+                                      disabled={sending}
+                                      onClick={() => void handleSendSavedSticker(st)}
+                                      title={`Kirim stiker WA: ${st.name}`}
+                                      className="w-full aspect-square flex items-center justify-center disabled:opacity-50 cursor-pointer"
+                                    >
+                                      <img
+                                        src={resolveMediaUrl(st.mediaUrl)}
+                                        alt={st.name}
+                                        loading="lazy"
+                                        className="max-w-full max-h-full object-contain"
+                                      />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={async (ev) => {
+                                        ev.stopPropagation();
+                                        try {
+                                          const { sticker } = await api.saveSticker({
+                                            name: st.name,
+                                            mediaUrl: st.mediaUrl,
+                                          });
+                                          setSavedStickers((prev) => [
+                                            sticker,
+                                            ...prev.filter((s) => s.id !== sticker.id),
+                                          ]);
+                                          setWhatsappStickers((prev) =>
+                                            prev.filter((s) => s.mediaUrl !== st.mediaUrl)
+                                          );
+                                          toast.success('Stiker difavoritkan ke koleksi');
+                                        } catch {
+                                          toast.error('Gagal menyimpan stiker');
+                                        }
+                                      }}
+                                      title="Favoritkan ke Koleksi Stiker"
+                                      className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-white border border-gray-200 text-gray-500 hover:text-indigo-600 shadow-xs inline-flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity cursor-pointer"
+                                    >
+                                      <BookmarkPlus className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="px-3 py-2 rounded-md bg-gray-50 border border-dashed border-gray-200 text-[10px] text-gray-500 text-center">
+                                Belum ada stiker WebP dari riwayat chat WhatsApp. Stiker yang dikirim atau diterima di chat akan muncul otomatis di sini.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {(stickerSubTab === 'all' || stickerSubTab === 'saved') && (
+                          <div className="space-y-1.5 pt-1 border-t border-gray-100">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-600 block">
+                              Koleksi Stiker Favorit ({savedStickers.length})
+                            </span>
+                            {savedStickers.length > 0 ? (
+                              <div className="grid grid-cols-4 gap-2">
+                                {savedStickers.map((st) => (
+                                  <div
+                                    key={st.id}
+                                    className="relative group rounded-lg border border-gray-200 bg-gray-50/70 p-1.5 flex flex-col items-center hover:border-indigo-300 transition-colors"
+                                  >
+                                    <button
+                                      type="button"
+                                      disabled={sending}
+                                      onClick={() => void handleSendSavedSticker(st)}
+                                      title={`Kirim stiker: ${st.name}`}
+                                      className="w-full aspect-square flex items-center justify-center disabled:opacity-50 cursor-pointer"
+                                    >
+                                      <img
+                                        src={resolveMediaUrl(st.mediaUrl)}
+                                        alt={st.name}
+                                        loading="lazy"
+                                        className="max-w-full max-h-full object-contain"
+                                      />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleDeleteSavedSticker(st.id)}
+                                      title="Hapus stiker dari favorit"
+                                      className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-red-600 shadow-xs inline-flex items-center justify-center cursor-pointer"
+                                    >
+                                      <X className="w-2.5 h-2.5" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="px-3 py-2 rounded-md bg-gray-50 border border-dashed border-gray-200 text-[10px] text-gray-500 text-center">
+                                Unggah gambar/WebP atau klik ikon simpan pada stiker dari chat WA untuk menyimpannya di sini.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {(stickerSubTab === 'all' || stickerSubTab === 'preset') && (
+                          <div className="space-y-1.5 pt-1 border-t border-gray-100">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 block">
+                              Stiker Cepat Layanan CS (1-Klik Kirim)
+                            </span>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {PRESET_STICKER_TEMPLATES.map((tpl) => (
+                                <button
+                                  key={tpl.id}
+                                  type="button"
+                                  disabled={sending}
+                                  onClick={() => void handleSendPresetSticker(tpl)}
+                                  style={{ backgroundColor: tpl.bgHex, borderColor: tpl.accentHex }}
+                                  className="p-2 rounded-lg border text-center hover:opacity-90 transition-opacity disabled:opacity-50 flex flex-col items-center justify-center gap-0.5 cursor-pointer"
+                                >
+                                  <div className="text-lg leading-none">{tpl.emoji}</div>
+                                  <div
+                                    style={{ color: tpl.accentHex }}
+                                    className="text-[10px] font-bold leading-tight truncate w-full"
+                                  >
+                                    {tpl.topText}
+                                  </div>
+                                  <div
+                                    style={{ color: tpl.textHex }}
+                                    className="text-[9px] leading-tight truncate w-full opacity-85"
+                                  >
+                                    {tpl.bottomText}
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -7037,13 +7530,26 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       onChange={(e) => setLinkDesc(e.target.value)}
                       className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
                     />
-                    <input
-                      type="url"
-                      placeholder="URL gambar thumbnail preview (opsional)"
-                      value={linkImageUrl}
-                      onChange={(e) => setLinkImageUrl(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono focus:outline-none focus:border-indigo-500"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="URL gambar thumbnail preview (opsional)"
+                        value={linkImageUrl}
+                        onChange={(e) => setLinkImageUrl(e.target.value)}
+                        className="flex-1 min-w-0 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded text-[11px] font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleOpenMediaLibraryModal('LINK_THUMBNAIL')}
+                        title="Pilih gambar dari Pustaka Media"
+                        className="shrink-0"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        <span>Pustaka</span>
+                      </Button>
+                    </div>
                   </div>
                   <div className="flex items-center justify-end gap-1.5 pt-1">
                     <Button
@@ -7339,11 +7845,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
               )}
 
               {showComposerTools && (
-                <div className="sm:hidden mb-2 p-2 rounded-lg bg-gray-50 border border-gray-200 grid grid-cols-4 gap-1.5 text-[10px]">
+                <div className="mb-2 sm:mb-0 sm:absolute sm:bottom-full sm:left-0 sm:mb-2 sm:w-80 sm:bg-white sm:shadow-lg sm:z-30 p-2 rounded-lg bg-gray-50 border border-gray-200 grid grid-cols-4 gap-1.5 text-[10px]">
                   <button
                     type="button"
                     onClick={() => openComposerPicker('EMOJI')}
-                    className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                    className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                   >
                     <Smile className="w-4 h-4 text-gray-600" />
                     <span>Emotikon</span>
@@ -7352,9 +7858,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <button
                       type="button"
                       onClick={() => openComposerPicker('STICKER')}
-                      className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                      className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                     >
-                      <Sticker className="w-4 h-4 text-violet-600" />
+                      <Sparkles className="w-4 h-4 text-violet-600" />
                       <span>Stiker</span>
                     </button>
                   )}
@@ -7372,7 +7878,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         }
                         setShowComposerTools(false);
                       }}
-                      className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-md border ${
+                      className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-md border cursor-pointer ${
                         composerMode === 'NOTE'
                           ? 'bg-amber-50 border-amber-300 text-amber-900 font-semibold'
                           : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-100'
@@ -7387,7 +7893,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => openComposerPicker('CANNED')}
-                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                       >
                         <Zap className="w-4 h-4 text-amber-600" />
                         <span>Template</span>
@@ -7395,7 +7901,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => openComposerPicker('PRODUCT')}
-                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                       >
                         <Package className="w-4 h-4 text-indigo-600" />
                         <span>Produk</span>
@@ -7403,7 +7909,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => openComposerPicker('LOCATION')}
-                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                       >
                         <MapPin className="w-4 h-4 text-emerald-600" />
                         <span>Lokasi</span>
@@ -7411,7 +7917,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => openComposerPicker('CONTACT')}
-                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                       >
                         <Users className="w-4 h-4 text-indigo-600" />
                         <span>Kontak</span>
@@ -7419,7 +7925,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => openComposerPicker('LINK')}
-                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                       >
                         <Link2 className="w-4 h-4 text-sky-600" />
                         <span>Tautan</span>
@@ -7427,7 +7933,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <button
                         type="button"
                         onClick={() => openComposerPicker('INTERACTIVE')}
-                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                       >
                         <ListChecks className="w-4 h-4 text-emerald-600" />
                         <span>Tombol</span>
@@ -7438,7 +7944,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           setShowComposerTools(false);
                           imageInputRef.current?.click();
                         }}
-                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-indigo-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-indigo-700 hover:bg-gray-100 cursor-pointer"
                       >
                         <ImageIcon className="w-4 h-4 text-indigo-600" />
                         <span>Foto/Video</span>
@@ -7449,16 +7955,24 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           setShowComposerTools(false);
                           docInputRef.current?.click();
                         }}
-                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                       >
                         <FileText className="w-4 h-4 text-gray-600" />
                         <span>Dokumen</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-emerald-700 hover:bg-emerald-50 cursor-pointer"
+                      >
+                        <FolderOpen className="w-4 h-4 text-emerald-600" />
+                        <span>Pustaka Media</span>
                       </button>
                       {isCurrentConversationGroup && (
                         <button
                           type="button"
                           onClick={() => openComposerPicker('MENTION')}
-                          className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-indigo-700 hover:bg-gray-100"
+                          className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-indigo-700 hover:bg-gray-100 cursor-pointer"
                         >
                           <AtSign className="w-4 h-4 text-indigo-600" />
                           <span>Mention</span>
@@ -7549,7 +8063,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               )}
 
-              <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <form onSubmit={handleSendMessage} className="flex items-end gap-1.5 sm:gap-2 min-w-0">
               <input
                 ref={imageInputRef}
                 type="file"
@@ -7566,13 +8080,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 onChange={(e) => void handleAttachmentPick(e, true)}
                 className="hidden"
               />
-              {/* Mobile Compact Trigger & Attachment */}
-              <div className="flex sm:hidden items-center gap-1 shrink-0">
+              {/* Unified Compact Pintasan & Attachment Bar (Mobile + Desktop) */}
+              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowComposerTools((v) => !v)}
-                  title="Buka Alat Pesan (Template, Produk, Tautan, Catatan)"
-                  className={`h-9 w-9 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors ${
+                  title="Buka Pintasan Alat Pesan (Emotikon, Stiker, Template, Produk, Lokasi, Kontak, Tautan, Tombol)"
+                  className={`h-9 w-9 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
                     showComposerTools || composerMode === 'NOTE'
                       ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
                       : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600'
@@ -7586,7 +8100,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       type="button"
                       onClick={() => imageInputRef.current?.click()}
                       title="Kirim Foto / Video (Mendukung HD & Multi-Foto)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-indigo-50 text-indigo-600 inline-flex items-center justify-center shrink-0"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-200 text-indigo-600 inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer"
                     >
                       <ImageIcon className="w-4 h-4" />
                     </button>
@@ -7594,133 +8108,45 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       type="button"
                       onClick={() => docInputRef.current?.click()}
                       title="Kirim Dokumen / Berkas (Tanpa Pratinjau Foto Langsung)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer"
                     >
                       <Paperclip className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
+                      title="Pilih Foto, Video, atau Dokumen dari Pustaka Media Tersimpan"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-emerald-50 hover:border-emerald-200 text-emerald-600 inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer"
+                    >
+                      <FolderOpen className="w-4 h-4" />
                     </button>
                   </>
                 )}
               </div>
 
-              {/* Desktop Quick Tool Buttons (sm+) */}
-              <div className="hidden sm:flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => openComposerPicker('EMOJI')}
-                  title="Sisipkan Emotikon"
-                  className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
-                >
-                  <Smile className="w-4 h-4" />
-                </button>
-                {composerMode === 'REPLY' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => openComposerPicker('STICKER')}
-                      title="Kirim Stiker WhatsApp"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-violet-600 inline-flex items-center justify-center shrink-0"
-                    >
-                      <Sticker className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openComposerPicker('CANNED')}
-                      title="Balasan Cepat (Canned Responses)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-amber-600 inline-flex items-center justify-center shrink-0"
-                    >
-                      <Zap className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openComposerPicker('PRODUCT')}
-                      title="Sisipkan Katalog Produk (Quick Quote)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
-                    >
-                      <Package className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openComposerPicker('LOCATION')}
-                      title="Bagikan Lokasi (Google Maps Pin)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-emerald-600 inline-flex items-center justify-center shrink-0"
-                    >
-                      <MapPin className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openComposerPicker('CONTACT')}
-                      title="Bagikan Kartu Kontak (vCard)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600 inline-flex items-center justify-center shrink-0"
-                    >
-                      <Users className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openComposerPicker('LINK')}
-                      title="Kirim Tautan (Send Link Preview)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-sky-600 inline-flex items-center justify-center shrink-0"
-                    >
-                      <Link2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openComposerPicker('INTERACTIVE')}
-                      title="Kirim Tombol Interaktif / Polling WhatsApp"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-emerald-600 inline-flex items-center justify-center shrink-0"
-                    >
-                      <ListChecks className="w-4 h-4" />
-                    </button>
-                    {isCurrentConversationGroup && (
-                      <button
-                        type="button"
-                        onClick={() => openComposerPicker('MENTION')}
-                        title="Sebut / Mention Partisipan (@)"
-                        className={`h-9 w-9 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors ${
-                          showMentionPicker
-                            ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                            : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600'
-                        }`}
-                      >
-                        <AtSign className="w-4 h-4" />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => imageInputRef.current?.click()}
-                      title="Kirim Foto atau Video (Mendukung HD & Multi-Foto)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-200 text-indigo-600 inline-flex items-center justify-center shrink-0 transition-colors"
-                    >
-                      <ImageIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => docInputRef.current?.click()}
-                      title="Kirim Dokumen / Berkas (Tanpa Pratinjau Foto Langsung)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0 transition-colors"
-                    >
-                      <Paperclip className="w-4 h-4" />
-                    </button>
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                <input
+              <div className="flex items-end gap-1.5 flex-1 min-w-0">
+                <textarea
                   ref={replyInputRef}
-                  type="text"
+                  rows={1}
                   placeholder={
                     composerMode === 'NOTE'
-                      ? 'Catatan internal tim...'
+                      ? 'Catatan internal tim... (Enter simpan, Shift+Enter baris baru)'
                       : `Balas ${
                           CHANNEL_META[
                             ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType
                           ]?.short || 'WA'
-                        } (ketik / utk template${isCurrentConversationGroup ? ', @ utk mention' : ''})...`
+                        } (/ template${isCurrentConversationGroup ? ', @ mention' : ''}, Shift+Enter baris baru)...`
                   }
                   value={inputText}
                   onChange={(e) => handleReplyTextChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      e.currentTarget.form?.requestSubmit();
+                    }
+                  }}
                   onBlur={() => stopOutboundTyping(selectedConversation.id)}
-                  className={`flex-1 min-w-0 h-9 px-3 border rounded-md text-[13px] placeholder-gray-400 focus:outline-none ${
+                  className={`flex-1 min-w-0 min-h-[36px] max-h-[132px] px-3 py-2 border rounded-md text-[13px] leading-5 placeholder-gray-400 focus:outline-none resize-none overflow-y-auto ${
                     composerMode === 'NOTE'
                       ? 'bg-amber-50/70 border-amber-200 focus:border-amber-500'
                       : 'bg-gray-50 border-gray-200 focus:border-indigo-500'
@@ -8582,6 +9008,96 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               )}
             </div>
+
+            {/* 8. Linimasa Aktivitas Percakapan */}
+            {(() => {
+              const activityTimeline = messages
+                .filter((m) => {
+                  const mm = parseChatMessageMeta(m);
+                  return (
+                    m.messageType === 'ACTIVITY' ||
+                    mm?.kind === 'ACTIVITY' ||
+                    m.messageType === 'NOTE' ||
+                    m.messageType === 'CSAT'
+                  );
+                })
+                .slice()
+                .reverse();
+              return (
+                <div className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => toggleProfileSection('activity')}
+                    className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-gray-50 transition-colors"
+                  >
+                    <span className="text-[11px] font-semibold text-gray-700 flex items-center gap-1.5 truncate">
+                      <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Linimasa Aktivitas</span>
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] font-mono text-gray-500">
+                        {activityTimeline.length} aksi
+                      </span>
+                      {openProfileSections.activity ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                      )}
+                    </div>
+                  </button>
+                  {openProfileSections.activity && (
+                    <div className="px-3 pb-3 pt-2 border-t border-gray-100 bg-gray-50/60">
+                      {activityTimeline.length === 0 ? (
+                        <p className="text-[11px] text-gray-400">
+                          Belum ada aktivitas tercatat (ubah status, penugasan agent, label, sematan, atau CSAT).
+                        </p>
+                      ) : (
+                        <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
+                          {activityTimeline.map((act) => {
+                            const actMeta = parseChatMessageMeta(act);
+                            const actor =
+                              actMeta?.actorName ||
+                              act.senderName ||
+                              (act.messageType === 'CSAT' ? 'Sistem CSAT' : 'Agent');
+                            const summaryText =
+                              act.messageType === 'NOTE'
+                                ? `menulis catatan internal: "${act.body}"`
+                                : act.messageType === 'CSAT'
+                                ? 'mengirim tautan survei CSAT'
+                                : act.body;
+                            return (
+                              <button
+                                key={act.id}
+                                type="button"
+                                onClick={() => handleJumpToMessage(act.id)}
+                                className="w-full text-left p-2 rounded-md border border-gray-200 bg-white hover:bg-indigo-50/50 transition-colors space-y-0.5 cursor-pointer"
+                              >
+                                <div className="flex items-center justify-between gap-2 text-[10px]">
+                                  <span className="font-semibold text-indigo-700 truncate">
+                                    {actor}
+                                  </span>
+                                  <span className="font-mono text-gray-400 shrink-0">
+                                    {new Date(act.createdAt).toLocaleString('id-ID', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-gray-700 leading-snug break-words">
+                                  {summaryText}
+                                </p>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="pt-3 border-t border-gray-200 space-y-2 text-center">
@@ -9212,9 +9728,22 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       }}
                       className="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-medium file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer"
                     />
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      Pilih file gambar JPEG atau PNG untuk foto profil grup.
-                    </p>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <p className="text-[10px] text-gray-400">
+                        Unggah berkas JPEG/PNG atau pilih dari Pustaka Media.
+                      </p>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={savingGroupInfo}
+                        onClick={() => handleOpenMediaLibraryModal('GROUP_AVATAR')}
+                        className="shrink-0"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        <span>Pilih dari Pustaka Media</span>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -9971,6 +10500,37 @@ export const Conversations: React.FC<ConversationsProps> = ({
           </div>
         )}
       </Modal>
+
+      <MediaLibraryPickerModal
+        isOpen={mediaPickerMode !== null}
+        onClose={() => setMediaPickerMode(null)}
+        title={
+          mediaPickerMode === 'STICKER'
+            ? 'Pilih Gambar untuk Stiker'
+            : mediaPickerMode === 'LINK_THUMBNAIL'
+            ? 'Pilih Thumbnail Tautan'
+            : mediaPickerMode === 'GROUP_AVATAR'
+            ? 'Pilih Foto Profil Grup'
+            : 'Pilih Aset dari Pustaka Media'
+        }
+        multiple={mediaPickerMode === 'CHAT_ATTACHMENT'}
+        allowedKinds={
+          mediaPickerMode === 'STICKER' ||
+          mediaPickerMode === 'LINK_THUMBNAIL' ||
+          mediaPickerMode === 'GROUP_AVATAR'
+            ? ['image']
+            : undefined
+        }
+        defaultKind={
+          mediaPickerMode === 'STICKER' ||
+          mediaPickerMode === 'LINK_THUMBNAIL' ||
+          mediaPickerMode === 'GROUP_AVATAR'
+            ? 'image'
+            : 'all'
+        }
+        showAsDocumentOption={mediaPickerMode === 'CHAT_ATTACHMENT'}
+        onConfirm={handleConfirmMediaPicker}
+      />
 
       {lightboxMedia && (
         <div

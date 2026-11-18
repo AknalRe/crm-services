@@ -346,7 +346,8 @@ export async function handleInboundAutomation(params: {
             .where(
               and(
                 eq(chatMessages.conversationId, conversationId),
-                ne(chatMessages.messageType, 'NOTE')
+                ne(chatMessages.messageType, 'NOTE'),
+                ne(chatMessages.messageType, 'ACTIVITY')
               )
             )
             .orderBy(desc(chatMessages.createdAt))

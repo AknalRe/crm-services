@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, ne, desc, asc, gt, inArray } from 'drizzle-orm';
+import { and, eq, ne, desc, asc, gt, inArray, ilike, isNotNull, or } from 'drizzle-orm';
 import { db } from '../db';
 import {
   conversations,
@@ -61,7 +61,7 @@ export interface ResolvedMention {
 // Extract @mention tokens (phone or @lid digits) from message text and stored WAHA mention JIDs
 export function collectMentionTokens(body?: string | null, metadataJson?: string | null): Map<string, string | null> {
   const tokens = new Map<string, string | null>();
-  for (const m of String(body || '').matchAll(/@(\d{6,20})\b/g)) {
+  for (const m of String(body || '').matchAll(/@\+?(\d{6,20})\b/g)) {
     if (!tokens.has(m[1])) tokens.set(m[1], null);
   }
   if (metadataJson) {
@@ -90,7 +90,8 @@ function phoneLookupVariants(phone: string): string[] {
 // Resolve mentioned numbers to CRM contact names so chat text can show "@Nama" and link to the contact
 export async function resolveMessageMentions(params: {
   companyId: string;
-  messages: Array<typeof chatMessages.$inferSelect>;
+  messages: Array<Pick<typeof chatMessages.$inferSelect, 'id' | 'body' | 'metadataJson' | 'wahaSession' | 'direction' | 'senderName' | 'senderPhone' | 'senderJid'>>;
+  extraSenderNames?: Map<string, string>;
 }): Promise<Map<string, ResolvedMention[]>> {
   const result = new Map<string, ResolvedMention[]>();
   const sessionForLookup = params.messages.find((m) => m.wahaSession)?.wahaSession || undefined;
@@ -107,6 +108,11 @@ export async function resolveMessageMentions(params: {
   if (allTokens.size === 0) return result;
 
   const senderNames = new Map<string, string>();
+  if (params.extraSenderNames) {
+    for (const [k, v] of params.extraSenderNames) {
+      if (!senderNames.has(k) && v && !isGenericDisplayName(v)) senderNames.set(k, v);
+    }
+  }
   for (const msg of params.messages) {
     if (msg.direction !== 'INBOUND' || !msg.senderName) continue;
     const keys = [
@@ -118,9 +124,15 @@ export async function resolveMessageMentions(params: {
     }
   }
 
-  const lidJids = Array.from(allTokens.entries())
-    .filter(([, jid]) => jid && jid.toLowerCase().endsWith('@lid'))
-    .map(([, jid]) => jid as string);
+  const candidateLidJids = new Set<string>();
+  for (const [token, jid] of allTokens) {
+    if (jid && jid.toLowerCase().endsWith('@lid')) {
+      candidateLidJids.add(jid);
+    } else if (!jid) {
+      candidateLidJids.add(`${token}@lid`);
+    }
+  }
+  const lidJids = Array.from(candidateLidJids);
   const identityByLid = new Map<string, string>();
   if (lidJids.length > 0) {
     const idRows = await db
@@ -139,11 +151,19 @@ export async function resolveMessageMentions(params: {
   const phoneByToken = new Map<string, string | null>();
   let lidResolveBudget = 8;
   for (const [token, jid] of allTokens) {
-    if (jid && jid.toLowerCase().endsWith('@lid')) {
+    const assumedLidJid =
+      jid && jid.toLowerCase().endsWith('@lid')
+        ? jid
+        : !jid && identityByLid.has(`${token}@lid`)
+        ? `${token}@lid`
+        : !jid && token.length >= 14
+        ? `${token}@lid`
+        : null;
+    if (assumedLidJid) {
       let phone: string | null = null;
-      if (!identityByLid.has(jid.toLowerCase()) && lidResolveBudget > 0) {
+      if (!identityByLid.has(assumedLidJid.toLowerCase()) && lidResolveBudget > 0) {
         lidResolveBudget -= 1;
-        phone = await wahaService.resolveLidToPhone(sessionForLookup, jid).catch(() => null);
+        phone = await wahaService.resolveLidToPhone(sessionForLookup, assumedLidJid).catch(() => null);
       }
       phoneByToken.set(token, phone);
     } else {
@@ -179,8 +199,9 @@ export async function resolveMessageMentions(params: {
   for (const [token, jid] of allTokens) {
     let phone = phoneByToken.get(token) || null;
     let contactRow: { id: string; namaLengkap: string; nomorWhatsapp?: string | null } | undefined;
-    if (jid && jid.toLowerCase().endsWith('@lid')) {
-      const cid = identityByLid.get(jid.toLowerCase());
+    const lidKey = (jid && jid.toLowerCase().endsWith('@lid') ? jid : `${token}@lid`).toLowerCase();
+    if (identityByLid.has(lidKey)) {
+      const cid = identityByLid.get(lidKey);
       if (cid) contactRow = contactById.get(cid);
       if (contactRow?.nomorWhatsapp && !phone) {
         phone = normalizePhoneNumber(contactRow.nomorWhatsapp) || contactRow.nomorWhatsapp;
@@ -191,7 +212,7 @@ export async function resolveMessageMentions(params: {
     const best = pickBestContactDisplayName(contactRow?.namaLengkap, pushName, null);
     resolvedByToken.set(token, {
       token,
-      jid,
+      jid: jid || (identityByLid.has(lidKey) || token.length >= 14 ? `${token}@lid` : null),
       phone,
       name: best && !isGenericDisplayName(best) ? best : null,
       contactId: contactRow?.id || null,
@@ -205,6 +226,50 @@ export async function resolveMessageMentions(params: {
     if (list.length > 0) result.set(msgId, list);
   }
   return result;
+}
+
+export async function recordConversationActivity(params: {
+  companyId: string;
+  conversationId: string;
+  contactId: string;
+  wahaSession?: string | null;
+  channel?: string | null;
+  actorId?: string | null;
+  actorName?: string | null;
+  actorRole?: string | null;
+  action: string;
+  summary: string;
+  detail?: Record<string, any>;
+  createdAt?: Date;
+}) {
+  try {
+    const actorName = params.actorName?.trim() || 'Sistem';
+    await db.insert(chatMessages).values({
+      id: crypto.randomUUID(),
+      companyId: params.companyId,
+      conversationId: params.conversationId,
+      contactId: params.contactId,
+      direction: 'SYSTEM',
+      messageType: 'ACTIVITY',
+      channel: params.channel || 'WHATSAPP',
+      wahaSession: params.wahaSession || null,
+      senderName: actorName,
+      body: params.summary,
+      metadataJson: JSON.stringify({
+        kind: 'ACTIVITY',
+        action: params.action,
+        actorId: params.actorId || null,
+        actorName,
+        actorRole: params.actorRole || null,
+        ...(params.detail ? { detail: params.detail } : {}),
+      }),
+      status: 'SYSTEM',
+      ackStatus: 0,
+      createdAt: params.createdAt || new Date(),
+    });
+  } catch (err: any) {
+    console.warn('[Conversations] recordConversationActivity failed:', err?.message);
+  }
 }
 const DEFAULT_CSAT_TEMPLATE =
   'Halo {nama_panggilan}, terima kasih telah menghubungi kami. Mohon bantuannya untuk memberikan penilaian layanan kami melalui tautan berikut:\n{link_csat}';
@@ -575,11 +640,56 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET / POST / DELETE Saved Sticker Pack for Live Chat CRM
+  // GET / POST / DELETE Saved Sticker Pack & Auto-Collected WhatsApp Chat Stickers for Live Chat CRM
   fastify.get('/stickers', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const items = await readSavedStickers(getRequestCompanyId(req));
-      return reply.send({ success: true, data: items });
+      const companyId = getRequestCompanyId(req);
+      const items = await readSavedStickers(companyId);
+
+      // Auto-collect real stickers received/sent across WhatsApp chats in this company
+      const waStickerRows = await db
+        .select({
+          id: chatMessages.id,
+          mediaUrl: chatMessages.mediaUrl,
+          mediaName: chatMessages.mediaName,
+          senderName: chatMessages.senderName,
+          wahaSession: chatMessages.wahaSession,
+          createdAt: chatMessages.createdAt,
+        })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.companyId, companyId),
+            isNotNull(chatMessages.mediaUrl),
+            or(
+              ilike(chatMessages.metadataJson, '%"kind":"STICKER"%'),
+              eq(chatMessages.body, '[Stiker]'),
+              ilike(chatMessages.mediaUrl, '%.webp%')
+            )
+          )
+        )
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(200);
+
+      const savedUrls = new Set(items.map((s) => s.mediaUrl));
+      const seenWaUrls = new Set<string>();
+      const whatsappStickers: Array<SavedStickerItem & { wahaSession?: string | null; senderName?: string | null }> = [];
+      for (const row of waStickerRows) {
+        const u = String(row.mediaUrl || '').trim();
+        if (!u || seenWaUrls.has(u) || savedUrls.has(u)) continue;
+        seenWaUrls.add(u);
+        whatsappStickers.push({
+          id: `wa-${row.id}`,
+          name: row.mediaName || (row.senderName ? `Dari ${row.senderName}` : 'Stiker WA'),
+          mediaUrl: u,
+          createdAt: row.createdAt.toISOString(),
+          wahaSession: row.wahaSession,
+          senderName: row.senderName,
+        });
+        if (whatsappStickers.length >= 60) break;
+      }
+
+      return reply.send({ success: true, data: items, whatsappStickers });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }
@@ -1009,6 +1119,69 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         accountNameMap.set(acc.id, acc.name);
       }
 
+      const convsWithMentionPreview = rows.filter(
+        (r) => r.conv.lastMessage && /@\+?\d{6,20}/.test(r.conv.lastMessage)
+      );
+      let listMentionMap = new Map<string, ResolvedMention[]>();
+      if (convsWithMentionPreview.length > 0) {
+        const targetConvIds = convsWithMentionPreview.map((r) => r.conv.id);
+        const senderHistoryRows = await db
+          .select({
+            conversationId: chatMessages.conversationId,
+            body: chatMessages.body,
+            metadataJson: chatMessages.metadataJson,
+            senderJid: chatMessages.senderJid,
+            senderPhone: chatMessages.senderPhone,
+            senderName: chatMessages.senderName,
+            wahaSession: chatMessages.wahaSession,
+            createdAt: chatMessages.createdAt,
+          })
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.companyId, companyId),
+              inArray(chatMessages.conversationId, targetConvIds),
+              ne(chatMessages.messageType, 'ACTIVITY')
+            )
+          )
+          .orderBy(desc(chatMessages.createdAt))
+          .limit(200);
+
+        const extraSenderNames = new Map<string, string>();
+        const latestMetaByConv = new Map<string, string | null>();
+        for (const sr of senderHistoryRows) {
+          if (!latestMetaByConv.has(sr.conversationId) && sr.metadataJson) {
+            latestMetaByConv.set(sr.conversationId, sr.metadataJson);
+          }
+          if (sr.senderName && !isGenericDisplayName(sr.senderName)) {
+            if (sr.senderPhone) {
+              const dp = sr.senderPhone.replace(/\D/g, '');
+              if (dp && !extraSenderNames.has(dp)) extraSenderNames.set(dp, sr.senderName);
+            }
+            if (sr.senderJid) {
+              const dj = sr.senderJid.replace(/@.*$/, '').replace(/\D/g, '');
+              if (dj && !extraSenderNames.has(dj)) extraSenderNames.set(dj, sr.senderName);
+            }
+          }
+        }
+
+        const syntheticMsgs = convsWithMentionPreview.map((r) => ({
+          id: r.conv.id,
+          body: r.conv.lastMessage || '',
+          metadataJson: latestMetaByConv.get(r.conv.id) || null,
+          wahaSession: r.conv.wahaSession,
+          direction: 'INBOUND',
+          senderName: null,
+          senderPhone: null,
+          senderJid: null,
+        }));
+        listMentionMap = await resolveMessageMentions({
+          companyId,
+          messages: syntheticMsgs,
+          extraSenderNames,
+        });
+      }
+
       const data = rows.map((r) => ({
         id: r.conv.id,
         contactId: r.conv.contactId,
@@ -1028,6 +1201,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         status: r.conv.status || 'OPEN',
         labels: r.conv.labels,
         lastMessage: r.conv.lastMessage,
+        lastMessageMentionedContacts: listMentionMap.get(r.conv.id) || [],
         lastMessageAt: r.conv.lastMessageAt,
         unreadCount: r.conv.unreadCount,
         firstInboundAt: r.conv.firstInboundAt,
@@ -1822,6 +1996,130 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           .where(and(eq(contacts.id, existing.contactId), eq(contacts.companyId, companyId)));
       }
 
+      const actor = await getCurrentAuthUser(req);
+      const actorName = actor?.name || actor?.email || 'Agent';
+      const statusLabelMap: Record<string, string> = {
+        OPEN: 'Open',
+        PENDING: 'Pending',
+        RESOLVED: 'Selesai',
+      };
+
+      const activityTasks: Promise<void>[] = [];
+      if (convUpdate.status && convUpdate.status !== existing.status) {
+        activityTasks.push(
+          recordConversationActivity({
+            companyId,
+            conversationId: existing.id,
+            contactId: existing.contactId,
+            wahaSession: convUpdate.wahaSession ?? existing.wahaSession,
+            channel: existing.channel,
+            actorId: actor?.id,
+            actorName,
+            actorRole: actor?.roleName,
+            action: 'STATUS_CHANGED',
+            summary: `mengubah status obrolan: ${statusLabelMap[existing.status || 'OPEN'] || existing.status} → ${statusLabelMap[convUpdate.status] || convUpdate.status}`,
+            detail: { from: existing.status, to: convUpdate.status },
+            createdAt: now,
+          })
+        );
+      }
+      if (req.body?.assignedAgentId !== undefined && convUpdate.assignedAgentId !== existing.assignedAgentId) {
+        activityTasks.push(
+          recordConversationActivity({
+            companyId,
+            conversationId: existing.id,
+            contactId: existing.contactId,
+            wahaSession: convUpdate.wahaSession ?? existing.wahaSession,
+            channel: existing.channel,
+            actorId: actor?.id,
+            actorName,
+            actorRole: actor?.roleName,
+            action: convUpdate.assignedAgentId ? 'AGENT_ASSIGNED' : 'AGENT_UNASSIGNED',
+            summary: convUpdate.assignedAgentId
+              ? `menugaskan obrolan ke Agent ${convUpdate.assignedAgentName}`
+              : `melepas penugasan Agent (${existing.assignedAgentName || '-'})`,
+            detail: {
+              fromAgentId: existing.assignedAgentId,
+              fromAgentName: existing.assignedAgentName,
+              toAgentId: convUpdate.assignedAgentId || null,
+              toAgentName: convUpdate.assignedAgentName || null,
+            },
+            createdAt: now,
+          })
+        );
+      }
+      if (req.body?.labels !== undefined && (convUpdate.labels || '') !== (existing.labels || '')) {
+        const prevLabels: string[] = String(existing.labels || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+        const nextLabels: string[] = String(convUpdate.labels || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+        const prevSet = new Set(prevLabels.map((s: string) => s.toLowerCase()));
+        const nextSet = new Set(nextLabels.map((s: string) => s.toLowerCase()));
+        const added = nextLabels.filter((s: string) => !prevSet.has(s.toLowerCase()));
+        const removed = prevLabels.filter((s: string) => !nextSet.has(s.toLowerCase()));
+        if (added.length > 0 || removed.length > 0) {
+          const parts: string[] = [];
+          if (added.length > 0) parts.push(`menambah label ${added.map((l: string) => `#${l}`).join(', ')}`);
+          if (removed.length > 0) parts.push(`melepas label ${removed.map((l: string) => `#${l}`).join(', ')}`);
+          activityTasks.push(
+            recordConversationActivity({
+              companyId,
+              conversationId: existing.id,
+              contactId: existing.contactId,
+              wahaSession: convUpdate.wahaSession ?? existing.wahaSession,
+              channel: existing.channel,
+              actorId: actor?.id,
+              actorName,
+              actorRole: actor?.roleName,
+              action: 'LABELS_UPDATED',
+              summary: parts.join(' & '),
+              detail: { added, removed },
+              createdAt: now,
+            })
+          );
+        }
+      }
+      if (req.body?.wahaSession !== undefined && (convUpdate.wahaSession || null) !== (existing.wahaSession || null)) {
+        activityTasks.push(
+          recordConversationActivity({
+            companyId,
+            conversationId: existing.id,
+            contactId: existing.contactId,
+            wahaSession: convUpdate.wahaSession ?? existing.wahaSession,
+            channel: existing.channel,
+            actorId: actor?.id,
+            actorName,
+            actorRole: actor?.roleName,
+            action: 'SESSION_CHANGED',
+            summary: `mengubah sesi WhatsApp menjadi ${convUpdate.wahaSession || 'Default'}`,
+            createdAt: now,
+          })
+        );
+      }
+      if (
+        typeof req.body?.excludeFromMetrics === 'boolean' &&
+        convUpdate.excludeFromMetrics !== existing.excludeFromMetrics
+      ) {
+        activityTasks.push(
+          recordConversationActivity({
+            companyId,
+            conversationId: existing.id,
+            contactId: existing.contactId,
+            wahaSession: convUpdate.wahaSession ?? existing.wahaSession,
+            channel: existing.channel,
+            actorId: actor?.id,
+            actorName,
+            actorRole: actor?.roleName,
+            action: 'METRICS_EXCLUDED',
+            summary: convUpdate.excludeFromMetrics
+              ? `menandai obrolan sebagai Non-Penilaian (${convUpdate.excludeReason || 'Bukan Customer'})`
+              : `mengaktifkan kembali penilaian SLA & CSAT`,
+            createdAt: now,
+          })
+        );
+      }
+      if (activityTasks.length > 0) {
+        await Promise.all(activityTasks);
+      }
+
       liveEvents.emit('conversations:update', { conversationId: existing.id }, companyId);
       liveEvents.emit('tracking:update', { conversationId: existing.id }, companyId);
 
@@ -1852,6 +2150,19 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
                 triggerType: 'AUTO_RESOLVE',
               });
               csatSent = true;
+              await recordConversationActivity({
+                companyId,
+                conversationId: existing.id,
+                contactId: existing.contactId,
+                wahaSession: refreshedConv.wahaSession,
+                channel: existing.channel,
+                actorId: actor?.id,
+                actorName,
+                actorRole: actor?.roleName,
+                action: 'CSAT_SENT',
+                summary: `mengirim survei CSAT otomatis setelah obrolan selesai`,
+                createdAt: new Date(),
+              });
             } catch (err: any) {
               csatError = err?.message || 'Gagal mengirim tautan CSAT otomatis';
               console.warn('[Conversations] Auto-CSAT send skipped:', csatError);
@@ -1887,6 +2198,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
       }
 
+      const actor = await getCurrentAuthUser(req);
+      const actorName = actor?.name || actor?.email || 'Agent';
       const now = new Date();
       const inserted = await db
         .insert(chatMessages)
@@ -1898,6 +2211,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           direction: 'OUTBOUND',
           messageType: 'NOTE',
           wahaSession: existing.wahaSession,
+          senderName: actorName,
           body,
           status: 'NOTE',
           ackStatus: 0,
@@ -1945,10 +2259,26 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         });
       }
 
+      const actor = await getCurrentAuthUser(req);
+      const actorName = actor?.name || actor?.email || 'Agent';
+
       const result = await sendCsatCtaForConversation(row.conv, row.contact, {
         session: req.body?.session,
         baseUrl: req.body?.baseUrl || resolveRequestAppBaseUrl(req),
         customMessage: req.body?.customMessage,
+      });
+
+      await recordConversationActivity({
+        companyId,
+        conversationId: row.conv.id,
+        contactId: row.conv.contactId,
+        wahaSession: req.body?.session || row.conv.wahaSession,
+        channel: row.conv.channel,
+        actorId: actor?.id,
+        actorName,
+        actorRole: actor?.roleName,
+        action: 'CSAT_SENT',
+        summary: `mengirim survei CSAT ke pelanggan`,
       });
 
       return reply.status(201).send({
@@ -2016,15 +2346,22 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const currentUser = await getCurrentAuthUser(req);
       const currentAgentName = currentUser?.name || 'Tim CS';
 
-      const textPhoneMentions = Array.from(bodyText.matchAll(/@(\d{8,16})/g)).map(
-        (m) => `${m[1]}@c.us`
-      );
-      const effectiveMentions = Array.from(
-        new Set([
-          ...(Array.isArray(mentions) ? mentions : []),
-          ...textPhoneMentions,
-        ])
-      ).map((m) => (m.includes('@') ? m : `${m}@c.us`));
+      const providedByDigits = new Map<string, string>();
+      if (Array.isArray(mentions)) {
+        for (const rawM of mentions) {
+          const jid = String(rawM || '').trim();
+          if (!jid) continue;
+          const d = jid.replace(/@.*$/, '').replace(/\D/g, '');
+          if (d) providedByDigits.set(d, jid.includes('@') ? jid : `${d}@c.us`);
+        }
+      }
+      for (const m of bodyText.matchAll(/@\+?(\d{6,20})/g)) {
+        const d = m[1];
+        if (!providedByDigits.has(d)) {
+          providedByDigits.set(d, d.length >= 14 ? `${d}@lid` : `${d}@c.us`);
+        }
+      }
+      const effectiveMentions = Array.from(providedByDigits.values());
 
       const inferredKind: OutboundMessageKind =
         messageKind ||
@@ -2563,6 +2900,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               },
               targetSession
             );
+            if (isHd || asDocument) {
+              metadataRecord = {
+                ...(metadataRecord || {}),
+                ...(isHd ? { isHd: true } : {}),
+                ...(asDocument ? { asDocument: true } : {}),
+              };
+            }
           } else {
             sendResult = await wahaService.sendTextMessage(
               targetWa,
@@ -3033,11 +3377,29 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .where(
           and(
             eq(chatMessages.conversationId, convRow.conv.id),
-            ne(chatMessages.messageType, 'NOTE')
+            ne(chatMessages.messageType, 'NOTE'),
+            ne(chatMessages.messageType, 'ACTIVITY')
           )
         )
         .orderBy(desc(chatMessages.createdAt))
         .limit(1);
+
+      await recordConversationActivity({
+        companyId,
+        conversationId: convRow.conv.id,
+        contactId: convRow.conv.contactId,
+        wahaSession: convRow.conv.wahaSession,
+        channel: convRow.conv.channel,
+        actorId: currentUser?.id,
+        actorName: revokedBy,
+        actorRole: currentUser?.roleName,
+        action: 'MESSAGE_REVOKED',
+        summary:
+          scope === 'EVERYONE'
+            ? `menarik pesan untuk semua (WhatsApp & CRM)`
+            : `menghapus pesan di CRM`,
+        detail: { targetMessageId: msg.id, scope },
+      });
 
       const nextLast = remainingLatest[0];
       let nextLastBody: string | null = null;
@@ -3372,6 +3734,22 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         mentionedContacts: mentionMap.get(updatedMsg.id) || [],
       };
 
+      await recordConversationActivity({
+        companyId,
+        conversationId: req.params.id,
+        contactId: msg.contactId,
+        wahaSession: msg.wahaSession || convRow?.conv?.wahaSession,
+        channel: convRow?.conv?.channel,
+        actorId: currentUser?.id,
+        actorName: currentUser?.name || currentUser?.email || 'Agent',
+        actorRole: currentUser?.roleName,
+        action: isPinned ? 'MESSAGE_PINNED' : 'MESSAGE_UNPINNED',
+        summary: isPinned
+          ? `menyematkan pesan (${durationSeconds >= 2592000 ? '30 hari' : durationSeconds >= 604800 ? '7 hari' : '24 jam'})`
+          : `melepas sematan pesan`,
+        detail: { targetMessageId: msg.id, isPinned, durationSeconds: isPinned ? durationSeconds : null },
+      });
+
       liveEvents.emit('conversations:update', { conversationId: req.params.id }, companyId);
       return reply.send({ success: true, isPinned, data: enrichedMsg, warning: wahaWarning });
     } catch (err: any) {
@@ -3452,6 +3830,21 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         ...updatedMsg,
         mentionedContacts: mentionMap.get(updatedMsg.id) || [],
       };
+
+      const currentUser = await getCurrentAuthUser(req);
+      await recordConversationActivity({
+        companyId,
+        conversationId: req.params.id,
+        contactId: msg.contactId,
+        wahaSession: msg.wahaSession || convRow?.conv?.wahaSession,
+        channel: convRow?.conv?.channel,
+        actorId: currentUser?.id,
+        actorName: currentUser?.name || currentUser?.email || 'Agent',
+        actorRole: currentUser?.roleName,
+        action: isStarred ? 'MESSAGE_STARRED' : 'MESSAGE_UNSTARRED',
+        summary: isStarred ? `menandai pesan dengan bintang` : `menghapus bintang pesan`,
+        detail: { targetMessageId: msg.id, isStarred },
+      });
 
       liveEvents.emit('conversations:update', { conversationId: req.params.id }, companyId);
       return reply.send({ success: true, isStarred, data: enrichedMsg, warning: wahaWarning });

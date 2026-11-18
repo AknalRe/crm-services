@@ -325,6 +325,16 @@ export const api = {
     const res = await client.get('/conversations/stickers');
     return res.data.data || [];
   },
+  getStickerCatalog: async (): Promise<{
+    saved: SavedStickerItem[];
+    whatsappStickers: Array<SavedStickerItem & { wahaSession?: string | null; senderName?: string | null }>;
+  }> => {
+    const res = await client.get('/conversations/stickers');
+    return {
+      saved: res.data.data || [],
+      whatsappStickers: res.data.whatsappStickers || [],
+    };
+  },
   saveSticker: async (payload: {
     name?: string;
     mediaBase64?: string;

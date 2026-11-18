@@ -20,10 +20,15 @@ import {
   Mic,
   Type as TypeIcon,
   Plus,
+  FolderOpen,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
 import { hasPerm } from '../lib/permissions';
+import {
+  MediaLibraryPickerModal,
+  resolveCrmMediaUrl,
+} from '../components/ui/MediaLibraryPickerModal';
 import {
   AuthStatus,
   ChannelAccount,
@@ -117,6 +122,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
   const [publishMode, setPublishMode] = useState<'SCHEDULED' | 'NOW'>('SCHEDULED');
   const [scheduledAt, setScheduledAt] = useState('');
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [showMediaPickerModal, setShowMediaPickerModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [viewersModal, setViewersModal] = useState<{
@@ -796,7 +802,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
 
           {!(channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_TEXT') && (
             <div>
-              <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center justify-between gap-2 mb-1">
                 <label className="block text-xs font-medium text-gray-700">
                   URL Media / File{' '}
                   {channel === 'INSTAGRAM' || (channel === 'WHATSAPP_STATUS' && statusPostType !== 'STATUS_TEXT') ? (
@@ -818,21 +824,31 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                   onChange={handleUploadImage}
                   className="hidden"
                 />
-                <button
-                  type="button"
-                  disabled={uploadingMedia}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
-                >
-                  <Upload className="w-3 h-3" />
-                  {uploadingMedia ? 'Mengunggah...' : 'Upload Media'}
-                </button>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowMediaPickerModal(true)}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                  >
+                    <FolderOpen className="w-3 h-3" />
+                    <span>Pilih dari Pustaka</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={uploadingMedia}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-700 cursor-pointer"
+                  >
+                    <Upload className="w-3 h-3" />
+                    <span>{uploadingMedia ? 'Mengunggah...' : 'Upload Media'}</span>
+                  </button>
+                </div>
               </div>
               <div className="relative">
                 <ImageIcon className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
                 <input
                   type="url"
-                  placeholder="https://domain.com/media.jpg atau klik Upload Media"
+                  placeholder="https://domain.com/media.jpg, Upload Media, atau Pilih dari Pustaka"
                   value={mediaUrl}
                   onChange={(e) => setMediaUrl(e.target.value)}
                   className="w-full h-9 pl-8 pr-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
@@ -840,17 +856,17 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
               </div>
               {mediaUrl.trim() && isVideoMediaUrl(mediaUrl.trim()) ? (
                 <video
-                  src={mediaUrl.trim()}
+                  src={resolveCrmMediaUrl(mediaUrl.trim())}
                   controls
                   className="mt-2 w-full max-h-44 rounded-md border border-gray-200 bg-black"
                 />
               ) : mediaUrl.trim() && isAudioMediaUrl(mediaUrl.trim()) ? (
-                <audio src={mediaUrl.trim()} controls className="mt-2 w-full" />
+                <audio src={resolveCrmMediaUrl(mediaUrl.trim())} controls className="mt-2 w-full" />
               ) : (
                 mediaUrl.trim() &&
                 (/^https?:\/\//i.test(mediaUrl.trim()) || mediaUrl.trim().startsWith('/')) && (
                   <img
-                    src={mediaUrl.trim()}
+                    src={resolveCrmMediaUrl(mediaUrl.trim())}
                     alt="Pratinjau media"
                     className="mt-2 w-full max-h-40 object-cover rounded-md border border-gray-200"
                     onError={(e) => {
@@ -1355,7 +1371,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                             </div>
                           ) : (
                             <img
-                              src={post.mediaUrl}
+                              src={resolveCrmMediaUrl(post.mediaUrl)}
                               alt="Media postingan"
                               className="w-14 h-14 rounded object-cover border border-gray-200 shrink-0"
                             />
@@ -1680,6 +1696,31 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
           </div>
         </div>
       )}
+
+      <MediaLibraryPickerModal
+        isOpen={showMediaPickerModal}
+        onClose={() => setShowMediaPickerModal(false)}
+        title="Pilih Media dari Pustaka"
+        allowedKinds={
+          channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VOICE'
+            ? ['audio']
+            : channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VIDEO'
+            ? ['video']
+            : ['image', 'video', 'audio']
+        }
+        defaultKind={
+          channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VOICE'
+            ? 'audio'
+            : channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VIDEO'
+            ? 'video'
+            : 'all'
+        }
+        onConfirm={(picked) => {
+          if (picked[0]) {
+            setMediaUrl(picked[0].relativeUrl);
+          }
+        }}
+      />
     </div>
   );
 };

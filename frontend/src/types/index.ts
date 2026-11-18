@@ -129,6 +129,7 @@ export interface Conversation {
   status?: 'OPEN' | 'PENDING' | 'RESOLVED';
   labels?: string | null;
   lastMessage?: string | null;
+  lastMessageMentionedContacts?: ResolvedMentionItem[];
   lastMessageAt?: string | null;
   assignedAgentId?: string | null;
   assignedAgentName?: string | null;
@@ -289,12 +290,19 @@ export interface ChatMessageMetadata {
   | 'STICKER'
   | 'ORDER'
   | 'PRODUCT'
-  | 'GROUP_INVITE';
+  | 'GROUP_INVITE'
+  | 'ACTIVITY';
+  action?: string;
+  actorId?: string | null;
+  actorName?: string | null;
+  actorRole?: string | null;
+  detail?: Record<string, any> | null;
   usedFallbackText?: boolean;
   fallbackReason?: string;
   revoked?: boolean;
   revokedAt?: string;
   revokedBy?: string;
+  revokedBySender?: boolean;
   revokeScope?: 'ME' | 'EVERYONE';
   isPinned?: boolean;
   pinnedAt?: string | null;
@@ -381,8 +389,8 @@ export interface ChatMessage {
   id: string;
   conversationId: string;
   contactId: string;
-  direction: 'INBOUND' | 'OUTBOUND';
-  messageType?: 'TEXT' | 'MEDIA' | 'NOTE' | 'CSAT' | 'LINK' | 'BUTTONS' | 'POLL' | 'CONTACT' | 'LOCATION';
+  direction: 'INBOUND' | 'OUTBOUND' | 'SYSTEM';
+  messageType?: 'TEXT' | 'MEDIA' | 'NOTE' | 'CSAT' | 'LINK' | 'BUTTONS' | 'POLL' | 'CONTACT' | 'LOCATION' | 'ACTIVITY';
   wahaSession?: string | null;
   body: string;
   mediaUrl?: string | null;

@@ -1516,6 +1516,8 @@ export class WahaService {
       'message',
       'message.any',
       'message.ack',
+      'message.reaction',
+      'message.revoked',
       'session.status',
       'presence.update',
       'poll.vote',
@@ -1542,6 +1544,8 @@ export class WahaService {
         evs.includes('*') ||
         (evs.includes('message.any') &&
           evs.includes('message.ack') &&
+          evs.includes('message.reaction') &&
+          evs.includes('message.revoked') &&
           evs.includes('session.status') &&
           evs.includes('presence.update') &&
           evs.includes('poll.vote') &&
@@ -1648,6 +1652,8 @@ export class WahaService {
               'message',
               'message.any',
               'message.ack',
+              'message.reaction',
+              'message.revoked',
               'session.status',
               'presence.update',
               'poll.vote',

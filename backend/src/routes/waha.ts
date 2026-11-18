@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, desc, eq, inArray, like, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, lt, ne, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   campaignRecipients,
@@ -314,18 +314,38 @@ function extractBaseInboundWahaRichData(
     }
   }
 
-  // 2. Revoked / Deleted for everyone by sender (protocolMessage type 0 / REVOKE)
-  const protoMsg = msg?.protocolMessage;
+  // 2. Revoked / Deleted for everyone by sender (protocolMessage type 0 / REVOKE across NOWEB, GOWS, WEBJS)
+  const protoMsg =
+    msg?.protocolMessage ||
+    payload?.protocolMessage ||
+    payload?._data?.protocolMessage ||
+    payload?.after?._data?.Message?.protocolMessage ||
+    payload?.after?._data?.message?.protocolMessage;
+  const protoType = protoMsg?.type ?? protoMsg?.Type;
+  const protoTargetId =
+    protoMsg?.key?.id ||
+    protoMsg?.key?.ID ||
+    protoMsg?.Key?.ID ||
+    protoMsg?.Key?.id ||
+    payload?.revokedMessageId ||
+    payload?._data?.protocolMessageKey?.id ||
+    payload?._data?.protocolMessageKey?._serialized ||
+    payload?.before?.id ||
+    null;
   if (
-    protoMsg &&
-    (protoMsg.type === 0 || String(protoMsg.type).toUpperCase() === 'REVOKE') &&
-    protoMsg?.key?.id
+    (protoMsg &&
+      (protoType === 0 || String(protoType).toUpperCase() === 'REVOKE') &&
+      protoTargetId) ||
+    ((payload?.type === 'revoked' ||
+      payload?._data?.subtype === 'revoke' ||
+      payload?._data?.Info?.Type === 'revoked') &&
+      protoTargetId)
   ) {
     return {
       messageType: 'TEXT',
       body: '',
       metadata: null,
-      revokedTargetId: String(protoMsg.key.id).trim(),
+      revokedTargetId: String(protoTargetId).trim(),
     };
   }
 
@@ -1574,7 +1594,19 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         const targetIdCandidate =
           event === 'message.reaction'
             ? richReaction.reaction?.targetMessageId || payload?.reaction?.messageId || null
-            : richReaction.revokedTargetId || payload?.revokedMessageId || payload?.id || null;
+            : richReaction.revokedTargetId ||
+              payload?.revokedMessageId ||
+              payload?.before?.id ||
+              payload?.before?._data?.Info?.ID ||
+              payload?.before?._data?.key?.id ||
+              payload?.before?._data?.id?._serialized ||
+              payload?.after?.revokedMessageId ||
+              payload?.after?._data?.Message?.protocolMessage?.Key?.ID ||
+              payload?.after?._data?.Message?.protocolMessage?.key?.id ||
+              payload?.after?._data?.message?.protocolMessage?.key?.id ||
+              payload?._data?.protocolMessageKey?.id ||
+              payload?.id ||
+              null;
 
         if (targetIdCandidate) {
           const cleanTarget = String(targetIdCandidate).trim();
@@ -1585,7 +1617,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             .where(
               and(
                 eq(chatMessages.companyId, companyId),
-                or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
+                or(
+                  eq(chatMessages.wahaMessageId, cleanTarget),
+                  eq(chatMessages.wahaMessageId, stanzaPart),
+                  like(chatMessages.wahaMessageId, `%_${stanzaPart}`)
+                )
               )
             )
             .limit(10);
@@ -1616,6 +1652,17 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 .where(eq(chatMessages.id, targetMsg.id));
             } else {
               const nowIso = now.toISOString();
+              const revokeFromMe = isWahaFromMe(payload?.after || payload);
+              const rawPushName = String(
+                payload?.after?.pushName ||
+                  payload?.before?.pushName ||
+                  payload?.pushName ||
+                  payload?._data?.Info?.PushName ||
+                  ''
+              ).trim();
+              const revokedByLabel = revokeFromMe
+                ? targetMsg.senderName || 'WhatsApp'
+                : rawPushName || targetMsg.senderName || 'Pengirim';
               await db
                 .update(chatMessages)
                 .set({
@@ -1623,22 +1670,55 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                     ...prevMeta,
                     revoked: true,
                     revokedAt: nowIso,
+                    revokedBy: revokedByLabel,
+                    revokedBySender: !revokeFromMe,
                     revokeScope: 'EVERYONE',
                   }),
                 })
                 .where(eq(chatMessages.id, targetMsg.id));
 
+              await db.insert(chatMessages).values({
+                id: crypto.randomUUID(),
+                companyId,
+                conversationId: targetMsg.conversationId,
+                contactId: targetMsg.contactId,
+                direction: 'SYSTEM',
+                messageType: 'ACTIVITY',
+                channel: 'WHATSAPP',
+                wahaSession: targetMsg.wahaSession || webhookSession || null,
+                senderName: revokedByLabel,
+                body: !revokeFromMe
+                  ? `menarik pesan WhatsApp`
+                  : `menarik pesan dari perangkat WhatsApp`,
+                metadataJson: JSON.stringify({
+                  kind: 'ACTIVITY',
+                  action: 'MESSAGE_REVOKED',
+                  actorName: revokedByLabel,
+                  revokedBySender: !revokeFromMe,
+                  targetMessageId: targetMsg.id,
+                }),
+                status: 'SYSTEM',
+                ackStatus: 0,
+                createdAt: now,
+              });
+
               const latestMsgRows = await db
                 .select({ id: chatMessages.id })
                 .from(chatMessages)
-                .where(eq(chatMessages.conversationId, targetMsg.conversationId))
+                .where(
+                  and(
+                    eq(chatMessages.conversationId, targetMsg.conversationId),
+                    ne(chatMessages.messageType, 'ACTIVITY'),
+                    ne(chatMessages.messageType, 'NOTE')
+                  )
+                )
                 .orderBy(desc(chatMessages.createdAt))
                 .limit(1);
               if (latestMsgRows[0]?.id === targetMsg.id) {
                 await db
                   .update(conversations)
                   .set({
-                    lastMessage: '🚫 Pesan ditarik',
+                    lastMessage: '🚫 Pesan ditarik oleh pengirim',
                     updatedAt: new Date(),
                   })
                   .where(eq(conversations.id, targetMsg.conversationId));
@@ -2305,7 +2385,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             .where(
               and(
                 eq(chatMessages.companyId, companyId),
-                or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
+                or(
+                  eq(chatMessages.wahaMessageId, cleanTarget),
+                  eq(chatMessages.wahaMessageId, stanzaPart),
+                  like(chatMessages.wahaMessageId, `%_${stanzaPart}`)
+                )
               )
             )
             .limit(10);
@@ -2321,6 +2405,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               }
             }
             const nowIso = new Date().toISOString();
+            const rawPushName = String(
+              payload?.pushName || payload?._data?.notifyName || payload?._data?.Info?.PushName || ''
+            ).trim();
+            const revokedByLabel = isFromMe
+              ? targetMsg.senderName || 'WhatsApp'
+              : rawPushName || targetMsg.senderName || 'Pengirim';
             await db
               .update(chatMessages)
               .set({
@@ -2328,22 +2418,55 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                   ...prevMeta,
                   revoked: true,
                   revokedAt: nowIso,
+                  revokedBy: revokedByLabel,
+                  revokedBySender: !isFromMe,
                   revokeScope: 'EVERYONE',
                 }),
               })
               .where(eq(chatMessages.id, targetMsg.id));
 
+            await db.insert(chatMessages).values({
+              id: crypto.randomUUID(),
+              companyId,
+              conversationId: targetMsg.conversationId,
+              contactId: targetMsg.contactId,
+              direction: 'SYSTEM',
+              messageType: 'ACTIVITY',
+              channel: 'WHATSAPP',
+              wahaSession: targetMsg.wahaSession || webhookSession || null,
+              senderName: revokedByLabel,
+              body: !isFromMe
+                ? `menarik pesan WhatsApp`
+                : `menarik pesan dari perangkat WhatsApp`,
+              metadataJson: JSON.stringify({
+                kind: 'ACTIVITY',
+                action: 'MESSAGE_REVOKED',
+                actorName: revokedByLabel,
+                revokedBySender: !isFromMe,
+                targetMessageId: targetMsg.id,
+              }),
+              status: 'SYSTEM',
+              ackStatus: 0,
+              createdAt: now,
+            });
+
             const latestMsgRows = await db
               .select({ id: chatMessages.id })
               .from(chatMessages)
-              .where(eq(chatMessages.conversationId, targetMsg.conversationId))
+              .where(
+                and(
+                  eq(chatMessages.conversationId, targetMsg.conversationId),
+                  ne(chatMessages.messageType, 'ACTIVITY'),
+                  ne(chatMessages.messageType, 'NOTE')
+                )
+              )
               .orderBy(desc(chatMessages.createdAt))
               .limit(1);
             if (latestMsgRows[0]?.id === targetMsg.id) {
               await db
                 .update(conversations)
                 .set({
-                  lastMessage: '🚫 Pesan ditarik',
+                  lastMessage: '🚫 Pesan ditarik oleh pengirim',
                   updatedAt: new Date(),
                 })
                 .where(eq(conversations.id, targetMsg.conversationId));
@@ -2453,6 +2576,19 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         const inboundMentions = Array.from(new Set(rawMentions));
         if (inboundMentions.length > 0) {
           richData.metadata = { ...(richData.metadata || {}), mentions: inboundMentions };
+        }
+        const isRevokedShellPayload =
+          payload?.type === 'revoked' ||
+          payload?._data?.subtype === 'revoke' ||
+          payload?._data?.Info?.Type === 'revoked';
+        if (isRevokedShellPayload) {
+          richData.metadata = {
+            ...(richData.metadata || {}),
+            revoked: true,
+            revokedAt: now.toISOString(),
+            revokedBySender: !isFromMe,
+            revokeScope: 'EVERYONE',
+          };
         }
 
         if (!body && !hasMedia && !richData.metadata) {

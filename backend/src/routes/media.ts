@@ -74,9 +74,14 @@ const MIME_EXT: Record<string, string> = {
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
   'text/csv': '.csv',
   'text/plain': '.txt',
+  'text/markdown': '.md',
+  'text/vcard': '.vcf',
+  'application/json': '.json',
+  'application/xml': '.xml',
   'application/zip': '.zip',
   'application/x-zip-compressed': '.zip',
   'application/x-rar-compressed': '.rar',
+  'application/x-7z-compressed': '.7z',
 };
 
 const EXT_MIME: Record<string, string> = {
@@ -85,6 +90,7 @@ const EXT_MIME: Record<string, string> = {
   '.png': 'image/png',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
   '.mp4': 'video/mp4',
   '.mov': 'video/quicktime',
   '.webm': 'video/webm',
@@ -105,8 +111,13 @@ const EXT_MIME: Record<string, string> = {
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.csv': 'text/csv',
   '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.vcf': 'text/vcard',
+  '.json': 'application/json',
+  '.xml': 'application/xml',
   '.zip': 'application/zip',
   '.rar': 'application/x-rar-compressed',
+  '.7z': 'application/x-7z-compressed',
 };
 
 function normalizeMimeBase(raw?: string | null): string {
@@ -341,12 +352,20 @@ export default async function mediaRouter(fastify: FastifyInstance) {
                 ? `${channel === 'WHATSAPP' ? 'WA' : channel}${sessionName ? ` • ${sessionName}` : ''}`
                 : undefined);
 
+            const mediaKind = mimeType.startsWith('image/')
+              ? 'image'
+              : mimeType.startsWith('video/')
+              ? 'video'
+              : mimeType.startsWith('audio/')
+              ? 'audio'
+              : 'document';
+
             return {
               filename: e.name,
               url: `${proto}://${host}${appPrefix}${relativeUrl}`,
               relativeUrl,
               mimeType,
-              mediaKind: mimeType.startsWith('video/') ? 'video' : 'image',
+              mediaKind,
               sizeBytes: stat.size,
               createdAt: stat.mtime.toISOString(),
               channel,
@@ -410,6 +429,8 @@ export default async function mediaRouter(fastify: FastifyInstance) {
         const ext = path.extname(filename).toLowerCase();
         const contentType = EXT_MIME[ext] || 'application/octet-stream';
         reply.header('Content-Type', contentType);
+        reply.header('Content-Disposition', `inline; filename="${filename.replace(/"/g, '')}"`);
+        reply.header('X-Content-Type-Options', 'nosniff');
         reply.header('Accept-Ranges', 'bytes');
         reply.header('Cache-Control', 'public, max-age=86400');
 
@@ -483,11 +504,19 @@ export default async function mediaRouter(fastify: FastifyInstance) {
             ? `${customChannel === 'WHATSAPP' ? 'WA' : customChannel}${customSession ? ` • ${customSession}` : ''}`
             : 'Unggahan Langsung');
 
+        const extFromFileName = path.extname(String(req.body?.fileName || '')).toLowerCase();
+        const rawUploadMime = normalizeMimeBase(req.body?.mimeType);
+        const effectiveMime =
+          rawUploadMime && rawUploadMime !== 'application/octet-stream'
+            ? rawUploadMime
+            : EXT_MIME[extFromFileName] || rawUploadMime || undefined;
+
         const saved = await saveBase64MediaFile({
           base64: req.body?.base64 || '',
-          mimeType: req.body?.mimeType,
+          mimeType: effectiveMime,
           fileName: req.body?.fileName,
-          fallbackExt: '.png',
+          maxBytes: 25 * 1024 * 1024,
+          fallbackExt: '.bin',
           metadata: {
             channel: customChannel,
             sessionName: customSession,

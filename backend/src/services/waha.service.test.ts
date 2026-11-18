@@ -1637,6 +1637,21 @@ test('parseVCardString, buildVCardString, and extractInboundWahaRichData capture
     { hasMedia: false, rawMediaUrl: null, inlineBase64: null, mimetype: null, mediaType: null, mediaName: null, isSticker: false }
   );
   assert.equal(revokeRich.revokedTargetId, 'MSG_OLD_1');
+
+  const revokeGowsRich = extractInboundWahaRichData(
+    {
+      _data: {
+        Message: {
+          protocolMessage: {
+            Type: 'REVOKE',
+            Key: { ID: 'GOWS_REVOKED_1' },
+          },
+        },
+      },
+    },
+    { hasMedia: false, rawMediaUrl: null, inlineBase64: null, mimetype: null, mediaType: null, mediaName: null, isSticker: false }
+  );
+  assert.equal(revokeGowsRich.revokedTargetId, 'GOWS_REVOKED_1');
 });
 
 test('sendSticker, sendLocation, sendContactVcard, and sendReaction dispatch expected WAHA endpoints and fallbacks', async (t) => {

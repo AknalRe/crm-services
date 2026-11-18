@@ -13,6 +13,9 @@ import {
   UploadCloud,
   CheckCircle2,
   AlertTriangle,
+  FileText,
+  Music,
+  Download,
 } from 'lucide-react';
 import api from '../services/api';
 import { AuthStatus, MediaLibraryItem } from '../types';
@@ -71,7 +74,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
   const [items, setItems] = useState<MediaLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [filterKind, setFilterKind] = useState<'all' | 'image' | 'video'>('all');
+  const [filterKind, setFilterKind] = useState<'all' | 'image' | 'video' | 'document' | 'audio'>('all');
   const [filterChannel, setFilterChannel] = useState<'all' | string>('all');
   const [filterSession, setFilterSession] = useState<'all' | string>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -94,31 +97,40 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
     loadMedia();
   }, [loadMedia]);
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
+    if (files.length === 0) return;
     setUploading(true);
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
+    try {
+      let okCount = 0;
+      for (const file of files) {
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(file);
+        });
+        if (!base64) continue;
         await api.uploadMedia({
           fileName: file.name,
-          mimeType: file.type || 'image/png',
-          base64: String(reader.result || ''),
+          mimeType: file.type || 'application/octet-stream',
+          base64,
           channel: 'DIRECT',
           label: 'Unggahan Pustaka',
           source: 'UPLOAD',
         });
-        toast.success('Media berhasil diunggah ke pustaka');
-        loadMedia();
-      } catch (err: any) {
-        toast.error(err.response?.data?.error || 'Gagal mengunggah media');
-      } finally {
-        setUploading(false);
+        okCount += 1;
       }
-    };
-    reader.readAsDataURL(file);
+      if (okCount > 0) {
+        toast.success(`${okCount} aset media berhasil diunggah ke pustaka`);
+        void loadMedia();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengunggah media');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -183,7 +195,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
             <span>Pustaka Media CRM</span>
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Semua aset gambar dan video dari percakapan pelanggan (WhatsApp, Instagram, dll.) dan unggahan langsung tersimpan aman dengan label asal sesi.
+            Semua aset foto, video, dokumen (PDF/Word/Excel), dan audio dari percakapan pelanggan maupun unggahan langsung tersimpan aman dengan label asal sesi.
           </p>
         </div>
         {canEdit && (
@@ -191,8 +203,9 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
             <input
               ref={fileRef}
               type="file"
-              accept="image/*,video/mp4"
-              onChange={handleUpload}
+              accept="*/*"
+              multiple
+              onChange={(e) => void handleUpload(e)}
               className="hidden"
             />
             <Button
@@ -248,12 +261,14 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
         {/* Filter Controls */}
         <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2">
           {/* Format Kind Tabs */}
-          <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs font-medium">
+          <div className="inline-flex flex-wrap rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs font-medium">
             {(
               [
-                { id: 'all', label: 'Semua Format' },
+                { id: 'all', label: 'Semua' },
                 { id: 'image', label: 'Foto' },
                 { id: 'video', label: 'Video' },
+                { id: 'document', label: 'Dokumen' },
+                { id: 'audio', label: 'Audio' },
               ] as const
             ).map((t) => (
               <button
@@ -354,8 +369,20 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
                   >
                     {item.mediaKind === 'video' ? (
                       <div className="flex flex-col items-center justify-center text-gray-500">
-                        <Film className="w-8 h-8 text-gray-400 group-hover:scale-110 transition-transform" />
+                        <Film className="w-8 h-8 text-indigo-500 group-hover:scale-110 transition-transform" />
                         <span className="text-[10px] font-mono mt-1">Video</span>
+                      </div>
+                    ) : item.mediaKind === 'audio' ? (
+                      <div className="flex flex-col items-center justify-center text-gray-500">
+                        <Music className="w-8 h-8 text-emerald-600 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-mono mt-1">Audio</span>
+                      </div>
+                    ) : item.mediaKind === 'document' ? (
+                      <div className="flex flex-col items-center justify-center px-3 text-center text-gray-600">
+                        <FileText className="w-8 h-8 text-amber-600 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-mono font-semibold uppercase mt-1 px-1.5 py-0.5 rounded bg-white border border-gray-200 text-gray-700">
+                          {(item.originalFileName || item.filename).split('.').pop()?.slice(0, 6) || 'DOC'}
+                        </span>
                       </div>
                     ) : (
                       <img
@@ -467,16 +494,20 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
       </div>
 
       {/* Lightbox / Preview Modal */}
-      {selectedPreview && (
+      {selectedPreview && (() => {
+        const previewSrc = selectedPreview.relativeUrl.startsWith('/')
+          ? `.${selectedPreview.relativeUrl}`
+          : selectedPreview.relativeUrl;
+        return (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6"
+          className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-[1px] flex items-center justify-center p-3 sm:p-6"
           onClick={() => setSelectedPreview(null)}
         >
           <div
-            className="relative bg-white rounded-xl shadow-2xl max-w-3xl w-full overflow-hidden flex flex-col max-h-[90vh]"
+            className="relative bg-white rounded-xl border border-gray-200 shadow-2xl max-w-3xl w-full overflow-hidden flex flex-col max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white">
               <div className="min-w-0 flex-1">
                 <h4 className="text-xs sm:text-sm font-semibold text-gray-900 truncate">
                   {selectedPreview.originalFileName || selectedPreview.filename}
@@ -496,32 +527,88 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
               <button
                 type="button"
                 onClick={() => setSelectedPreview(null)}
-                className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors"
+                className="p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex-1 bg-black/90 p-4 flex items-center justify-center overflow-auto min-h-[300px]">
+            <div
+              className={`flex-1 p-4 flex items-center justify-center overflow-auto min-h-[280px] ${
+                selectedPreview.mediaKind === 'video' ? 'bg-slate-950' : 'bg-slate-100'
+              }`}
+            >
               {selectedPreview.mediaKind === 'video' ? (
                 <video
-                  src={selectedPreview.relativeUrl}
+                  src={previewSrc}
                   controls
                   autoPlay
                   className="max-h-[65vh] max-w-full rounded"
                 />
+              ) : selectedPreview.mediaKind === 'audio' ? (
+                <div className="w-full max-w-md bg-white rounded-xl border border-gray-200 shadow-2xs p-6 text-center space-y-4">
+                  <Music className="w-12 h-12 mx-auto text-emerald-600" />
+                  <div className="text-xs font-mono text-gray-800 break-all">
+                    {selectedPreview.originalFileName || selectedPreview.filename}
+                  </div>
+                  <audio src={previewSrc} controls className="w-full" />
+                </div>
+              ) : selectedPreview.mediaKind === 'document' ? (
+                selectedPreview.mimeType === 'application/pdf' ? (
+                  <object
+                    data={previewSrc}
+                    type="application/pdf"
+                    className="w-full h-[65vh] rounded border border-gray-200 bg-white"
+                  >
+                    <div className="bg-white rounded-xl border border-gray-200 p-6 text-center space-y-3 max-w-md mx-auto my-8">
+                      <FileText className="w-12 h-12 mx-auto text-amber-600" />
+                      <div className="text-sm font-semibold text-gray-900 break-all">
+                        {selectedPreview.originalFileName || selectedPreview.filename}
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Browser tidak dapat merender pratinjau PDF secara langsung.
+                      </p>
+                      <a
+                        href={previewSrc}
+                        download={selectedPreview.originalFileName || selectedPreview.filename}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Unduh PDF</span>
+                      </a>
+                    </div>
+                  </object>
+                ) : (
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-2xs p-6 text-center space-y-3 max-w-md w-full">
+                    <FileText className="w-12 h-12 mx-auto text-amber-600" />
+                    <div className="text-sm font-semibold text-gray-900 break-all">
+                      {selectedPreview.originalFileName || selectedPreview.filename}
+                    </div>
+                    <div className="text-xs text-gray-500 font-mono">
+                      {selectedPreview.mimeType} • {formatBytes(selectedPreview.sizeBytes)}
+                    </div>
+                    <a
+                      href={previewSrc}
+                      download={selectedPreview.originalFileName || selectedPreview.filename}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Unduh Berkas</span>
+                    </a>
+                  </div>
+                )
               ) : (
                 <img
-                  src={selectedPreview.relativeUrl}
+                  src={previewSrc}
                   alt={selectedPreview.filename}
-                  className="max-h-[65vh] max-w-full object-contain rounded"
+                  className="max-h-[65vh] max-w-full object-contain rounded shadow-xs bg-white"
                 />
               )}
             </div>
 
             <div className="flex items-center justify-between p-3 bg-white border-t border-gray-200 text-xs">
               <a
-                href={selectedPreview.url}
+                href={previewSrc}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 text-indigo-600 hover:underline font-medium"
@@ -558,7 +645,8 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Delete Confirmation Dialog */}
       {deleteTarget && (

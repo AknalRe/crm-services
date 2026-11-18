@@ -42,9 +42,10 @@ test('selectWhatsAppConversationForSession ignores group conversations when dire
 
 test('collectMentionTokens extracts phone and @lid mentions from text and metadataJson', () => {
   const tokens = collectMentionTokens(
-    'Halo @6281234567890 dan @99887766554433 tolong cek',
+    'Halo @6281234567890, @+207386824446190 dan @99887766554433 tolong cek',
     JSON.stringify({ mentions: ['6281234567890@c.us', '99887766554433@lid'] })
   );
   assert.equal(tokens.get('6281234567890'), '6281234567890@c.us');
   assert.equal(tokens.get('99887766554433'), '99887766554433@lid');
+  assert.equal(tokens.has('207386824446190'), true);
 });
