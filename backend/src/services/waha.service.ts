@@ -704,6 +704,7 @@ export class WahaService {
   private static instance: WahaService;
   private webhookSyncAt = new Map<string, number>();
   private lidPhoneCache = new Map<string, string>();
+  private lidNameCache = new Map<string, string>();
   private externalEngineCache = new Map<
     string,
     { engine: string | null; version: string | null; tier: string | null; checkedAt: number }
@@ -1314,16 +1315,62 @@ export class WahaService {
   }
 
   /**
-   * Resolve a WhatsApp @lid privacy JID to a normalized phone number via WAHA API (cached)
+   * Resolve a WhatsApp @lid privacy JID to a normalized phone number and display name via WAHA API (cached)
    */
-  public async resolveLidToPhone(sessionName: string | null | undefined, lidJid: string): Promise<string | null> {
+  public async resolveLidIdentity(
+    sessionName: string | null | undefined,
+    lidJid: string
+  ): Promise<{ phone: string | null; name: string | null }> {
     const cleanLid = String(lidJid || '').trim();
-    if (!cleanLid || !cleanLid.toLowerCase().endsWith('@lid')) return null;
+    if (!cleanLid || !cleanLid.toLowerCase().endsWith('@lid')) {
+      return { phone: null, name: null };
+    }
 
     const cid = getActiveCompanyId();
     const cacheKey = `${cid}::${cleanLid}`;
-    const cached = this.lidPhoneCache.get(cacheKey);
-    if (cached) return cached;
+    let resolvedPhone = this.lidPhoneCache.get(cacheKey) || null;
+    let resolvedName = this.lidNameCache.get(cacheKey) || null;
+    if (resolvedPhone && resolvedName) {
+      return { phone: resolvedPhone, name: resolvedName };
+    }
+
+    const tryExtractPhone = (candidate: unknown): string | null => {
+      const rawStr =
+        typeof candidate === 'string'
+          ? candidate
+          : candidate && typeof candidate === 'object'
+          ? String((candidate as any)._serialized || (candidate as any).id || '')
+          : '';
+      if (!rawStr.trim() || rawStr.toLowerCase().endsWith('@lid')) return null;
+      const normalized = normalizePhoneNumber(fromWahaChatId(rawStr));
+      const digits = normalized.replace(/\D/g, '');
+      return digits.length >= 7 && digits.length <= 15 ? normalized : null;
+    };
+
+    const pickName = (data: any): string | null => {
+      if (!data || typeof data !== 'object') return null;
+      for (const c of [
+        data.name,
+        data.Name,
+        data.fullName,
+        data.FullName,
+        data.pushname,
+        data.pushName,
+        data.PushName,
+        data.notifyName,
+        data.shortName,
+        data.verifiedName,
+        data.BusinessName,
+      ]) {
+        if (typeof c === 'string' && c.trim()) {
+          const t = c.trim();
+          if (!/@(lid|c\.us|s\.whatsapp\.net|g\.us)$/i.test(t) && !/^\+?\d{6,16}$/.test(t.replace(/[\s-]/g, ''))) {
+            return t;
+          }
+        }
+      }
+      return null;
+    };
 
     try {
       const { client, session, ownerPrefix } = await this.getClient();
@@ -1331,58 +1378,92 @@ export class WahaService {
         ? this.resolveOwnedSessionName(sessionName, ownerPrefix)
         : session;
 
-      const tryExtractPhone = (candidate: unknown): string | null => {
-        if (typeof candidate !== 'string' || !candidate.trim()) return null;
-        if (candidate.toLowerCase().endsWith('@lid')) return null;
-        const normalized = normalizePhoneNumber(fromWahaChatId(candidate));
-        const digits = normalized.replace(/\D/g, '');
-        return digits.length >= 7 && digits.length <= 15 ? normalized : null;
-      };
+      if (!resolvedPhone) {
+        const lidRes = await client
+          .get(`/api/${encodeURIComponent(targetSession)}/lids/${encodeURIComponent(cleanLid)}`, {
+            timeout: 3500,
+          })
+          .catch(() => null);
 
-      const lidRes = await client
-        .get(`/api/${encodeURIComponent(targetSession)}/lids/${encodeURIComponent(cleanLid)}`, {
-          timeout: 3500,
-        })
-        .catch(() => null);
-
-      const lidCandidates = [
-        lidRes?.data?.pn,
-        lidRes?.data?.phoneNumber,
-        lidRes?.data?.id,
-      ];
-      for (const c of lidCandidates) {
-        const phone = tryExtractPhone(c);
-        if (phone) {
-          if (this.lidPhoneCache.size > 2000) this.lidPhoneCache.clear();
-          this.lidPhoneCache.set(cacheKey, phone);
-          return phone;
+        const lidCandidates = [
+          lidRes?.data?.pn,
+          lidRes?.data?.phone,
+          lidRes?.data?.phoneNumber,
+          lidRes?.data?.id,
+        ];
+        for (const c of lidCandidates) {
+          const phone = tryExtractPhone(c);
+          if (phone) {
+            resolvedPhone = phone;
+            if (this.lidPhoneCache.size > 2000) this.lidPhoneCache.clear();
+            this.lidPhoneCache.set(cacheKey, phone);
+            break;
+          }
         }
       }
 
-      const contactRes = await client
-        .get('/api/contacts', {
-          params: { contactId: cleanLid, session: targetSession },
-          timeout: 3500,
-        })
-        .catch(() => null);
+      if (!resolvedPhone || !resolvedName) {
+        const contactRes = await client
+          .get('/api/contacts', {
+            params: { contactId: cleanLid, session: targetSession },
+            timeout: 3500,
+          })
+          .catch(() => null);
 
-      const contactCandidates = [
-        contactRes?.data?.number,
-        contactRes?.data?.id,
-        isPhoneWahaJid(String(contactRes?.data?.id || '')) ? contactRes?.data?.id : null,
-      ];
-      for (const c of contactCandidates) {
-        const phone = tryExtractPhone(c);
-        if (phone) {
-          if (this.lidPhoneCache.size > 2000) this.lidPhoneCache.clear();
-          this.lidPhoneCache.set(cacheKey, phone);
-          return phone;
+        if (!resolvedPhone) {
+          const contactCandidates = [
+            contactRes?.data?.number,
+            contactRes?.data?.pn,
+            contactRes?.data?.phone,
+            contactRes?.data?.id,
+            isPhoneWahaJid(String(contactRes?.data?.id || '')) ? contactRes?.data?.id : null,
+          ];
+          for (const c of contactCandidates) {
+            const phone = tryExtractPhone(c);
+            if (phone) {
+              resolvedPhone = phone;
+              if (this.lidPhoneCache.size > 2000) this.lidPhoneCache.clear();
+              this.lidPhoneCache.set(cacheKey, phone);
+              break;
+            }
+          }
+        }
+
+        const cName = pickName(contactRes?.data);
+        if (cName && !resolvedName) {
+          resolvedName = cName;
+          if (this.lidNameCache.size > 2000) this.lidNameCache.clear();
+          this.lidNameCache.set(cacheKey, cName);
+        }
+      }
+
+      if (resolvedPhone && !resolvedName) {
+        const phoneContactRes = await client
+          .get('/api/contacts', {
+            params: { contactId: `${resolvedPhone}@c.us`, session: targetSession },
+            timeout: 3000,
+          })
+          .catch(() => null);
+        const pName = pickName(phoneContactRes?.data);
+        if (pName) {
+          resolvedName = pName;
+          if (this.lidNameCache.size > 2000) this.lidNameCache.clear();
+          this.lidNameCache.set(cacheKey, pName);
         }
       }
     } catch {
       // Ignore LID lookup failures cleanly
     }
-    return null;
+
+    return { phone: resolvedPhone, name: resolvedName };
+  }
+
+  /**
+   * Resolve a WhatsApp @lid privacy JID to a normalized phone number via WAHA API (cached)
+   */
+  public async resolveLidToPhone(sessionName: string | null | undefined, lidJid: string): Promise<string | null> {
+    const { phone } = await this.resolveLidIdentity(sessionName, lidJid);
+    return phone;
   }
 
   /**

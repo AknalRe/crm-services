@@ -2251,12 +2251,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
         const fwdMeta = parseChatMessageMeta(forwardingMessage);
         const fromSenderLabel =
           fwdMeta?.forwardedFromSender || resolveMessageSenderName(forwardingMessage);
+        const fallbackMentions = Array.from(
+          new Set([
+            ...(Array.isArray(fwdMeta?.mentions) ? fwdMeta.mentions : []),
+            ...(Array.isArray(forwardingMessage.mentionedContacts)
+              ? forwardingMessage.mentionedContacts
+                  .map((mc) => mc.jid || (mc.phone ? `${mc.phone}@c.us` : ''))
+                  .filter(Boolean)
+              : []),
+          ])
+        );
         const payload: Parameters<typeof api.sendConversationMessage>[1] = {
           body: forwardingMessage.body || undefined,
           session: selectedSession || targetConv.wahaSession || undefined,
           isForwarded: true,
           forwardedFromSender: fromSenderLabel,
           forwardedFromChannel: fwdMeta?.forwardedFromChannel,
+          ...(fallbackMentions.length > 0 ? { mentions: fallbackMentions } : {}),
         };
         if (forwardingMessage.mediaUrl) {
           payload.mediaUrl = forwardingMessage.mediaUrl;
@@ -5913,7 +5924,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 msg.replyToBody || 'Pesan dikutip',
                                 mySessionPhones,
                                 contactsByPhone,
-                                participantsLookup
+                                participantsLookup,
+                                msg.mentionedContacts
                               )}
                             </div>
                           </button>
@@ -6094,7 +6106,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                       meta.linkPreview.caption,
                                       participantsLookup,
                                       msg.mentionedContacts,
-                                      handleOpenMentionContact
+                                      handleOpenMentionContact,
+                                      contactsByPhone,
+                                      mySessionPhones
                                     )}
                                   </div>
                                 )}
@@ -6148,7 +6162,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                     meta.interactiveButtons.body,
                                     participantsLookup,
                                     msg.mentionedContacts,
-                                    handleOpenMentionContact
+                                    handleOpenMentionContact,
+                                    contactsByPhone,
+                                    mySessionPhones
                                   )}
                                 </div>
                                 {meta.interactiveButtons.footer && (
@@ -10438,7 +10454,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   Sumber: {resolveMessageSenderName(forwardingMessage)}
                 </div>
                 <div className="text-gray-800 line-clamp-3 whitespace-pre-wrap break-words">
-                  {forwardingMessage.body || forwardingMessage.mediaName || '[Media]'}
+                  {forwardingMessage.body
+                    ? formatMentionPlainText(
+                        forwardingMessage.body,
+                        mySessionPhones,
+                        contactsByPhone,
+                        participantsLookup,
+                        forwardingMessage.mentionedContacts
+                      )
+                    : forwardingMessage.mediaName || '[Media]'}
                 </div>
               </div>
 

@@ -2509,6 +2509,92 @@ test('WAHA inbound webhook deduplication resolves identical stanza and lock keys
   assert.notEqual(otherSessionLock, lidLock);
 });
 
+test('extractInboundWahaMentions & GOWS PascalCase forwarding helpers preserve forwarded mentions and resolveLidIdentity extracts display names', async (t) => {
+  const {
+    extractWahaContextInfo,
+    extractWahaForwardingMeta,
+    extractInboundWahaMentions,
+    extractInboundWahaText,
+  } = require('../routes/waha') as typeof import('../routes/waha');
+
+  const gowsForwardedPayload = {
+    from: '12036300112233@g.us',
+    _data: {
+      Info: { IsForwarded: true, ForwardingScore: 2 },
+      Message: {
+        EphemeralMessage: {
+          Message: {
+            ExtendedTextMessage: {
+              Text: 'Tolong cek @160602458619101 ya',
+              ContextInfo: {
+                IsForwarded: true,
+                ForwardingScore: 2,
+                MentionedJID: ['160602458619101@lid', '6285155431301@s.whatsapp.net'],
+              },
+            },
+          },
+        },
+      },
+    },
+    mentions: [
+      { id: '160602458619101@lid', pushname: 'Agnes HR' },
+    ],
+  };
+
+  const ctx = extractWahaContextInfo(gowsForwardedPayload);
+  assert.ok(ctx);
+  assert.equal(extractWahaForwardingMeta(gowsForwardedPayload)?.forwardingScore, 2);
+  assert.equal(extractInboundWahaText(gowsForwardedPayload), 'Tolong cek @160602458619101 ya');
+  const { mentions, mentionHints } = extractInboundWahaMentions(gowsForwardedPayload, ctx);
+  assert.ok(mentions.includes('160602458619101@lid'));
+  assert.ok(mentions.includes('6285155431301@s.whatsapp.net'));
+  assert.equal(mentionHints['160602458619101'], 'Agnes HR');
+
+  stubWahaEnvSession(t, 'HRIS_HR');
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha.example.com',
+    apiKey: 'secret-token',
+    session: 'HRIS_HR',
+    internalLocked: false,
+    hasApiKey: true,
+  });
+
+  const origCreate = axios.create;
+  t.after(() => {
+    axios.create = origCreate;
+  });
+
+  axios.create = (() =>
+    ({
+      get: async (url: string, cfg?: any) => {
+        if (url === '/api/version') {
+          return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+        }
+        if (url === '/api/sessions?all=true') {
+          return { data: [{ name: 'HRIS_HR', status: 'WORKING' }] };
+        }
+        if (url.includes('/lids/77665544332211%40lid')) {
+          return { data: { pn: '628112233445@c.us' } };
+        }
+        if (url === '/api/contacts' && cfg?.params?.contactId === '77665544332211@lid') {
+          return { data: { id: '77665544332211@lid', pushname: 'Bu Intan' } };
+        }
+        if (url === '/api/contacts' && cfg?.params?.contactId === '88990011223344@lid') {
+          return { data: { id: '88990011223344@lid', pushName: 'Aldona HRD' } };
+        }
+        return { data: {} };
+      },
+    } as any)) as any;
+
+  const withPhone = await wahaService.resolveLidIdentity('HRIS_HR', '77665544332211@lid');
+  assert.deepEqual(withPhone, { phone: '628112233445', name: 'Bu Intan' });
+
+  const nameOnly = await wahaService.resolveLidIdentity('HRIS_HR', '88990011223344@lid');
+  assert.deepEqual(nameOnly, { phone: null, name: 'Aldona HRD' });
+});
+
+
 
 
 

@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, ne, desc, asc, gt, inArray, ilike, isNotNull, or } from 'drizzle-orm';
+import { and, eq, ne, desc, asc, gt, inArray, ilike, isNotNull, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   conversations,
@@ -58,11 +58,17 @@ export interface ResolvedMention {
   contactId: string | null;
 }
 
-// Extract @mention tokens (phone or @lid digits) from message text and stored WAHA mention JIDs
-export function collectMentionTokens(body?: string | null, metadataJson?: string | null): Map<string, string | null> {
+// Extract @mention tokens (phone or @lid digits) from message text, quoted snippet, and stored WAHA mention JIDs
+export function collectMentionTokens(
+  body?: string | null,
+  metadataJson?: string | null,
+  replyToBody?: string | null
+): Map<string, string | null> {
   const tokens = new Map<string, string | null>();
-  for (const m of String(body || '').matchAll(/@\+?(\d{6,20})\b/g)) {
-    if (!tokens.has(m[1])) tokens.set(m[1], null);
+  for (const text of [body, replyToBody]) {
+    for (const m of String(text || '').matchAll(/@\+?(\d{6,20})\b/g)) {
+      if (!tokens.has(m[1])) tokens.set(m[1], null);
+    }
   }
   if (metadataJson) {
     try {
@@ -81,28 +87,60 @@ export function collectMentionTokens(body?: string | null, metadataJson?: string
   return tokens;
 }
 
+function collectMentionHints(metadataJson?: string | null): Map<string, string> {
+  const hints = new Map<string, string>();
+  if (!metadataJson) return hints;
+  try {
+    const meta = JSON.parse(metadataJson);
+    const rawHints = meta?.mentionHints;
+    if (rawHints && typeof rawHints === 'object') {
+      for (const [key, val] of Object.entries(rawHints)) {
+        const name = typeof val === 'string' ? val.trim() : '';
+        if (!name || isGenericDisplayName(name)) continue;
+        const digits = String(key).replace(/@.*$/, '').replace(/\D/g, '');
+        if (digits) hints.set(digits, name);
+      }
+    }
+  } catch {
+    // ignore invalid metadata
+  }
+  return hints;
+}
+
 function phoneLookupVariants(phone: string): string[] {
   return Array.from(
     new Set([phone, `+${phone}`, phone.startsWith('62') ? `0${phone.slice(2)}` : ''].filter(Boolean))
   );
 }
 
-// Resolve mentioned numbers to CRM contact names so chat text can show "@Nama" and link to the contact
+// Resolve mentioned numbers (including @lid mentions across forwarded/quoted chats) to CRM names and phones
 export async function resolveMessageMentions(params: {
   companyId: string;
-  messages: Array<Pick<typeof chatMessages.$inferSelect, 'id' | 'body' | 'metadataJson' | 'wahaSession' | 'direction' | 'senderName' | 'senderPhone' | 'senderJid'>>;
+  messages: Array<
+    Pick<
+      typeof chatMessages.$inferSelect,
+      'id' | 'body' | 'metadataJson' | 'wahaSession' | 'direction' | 'senderName' | 'senderPhone' | 'senderJid'
+    > & { replyToBody?: string | null }
+  >;
   extraSenderNames?: Map<string, string>;
 }): Promise<Map<string, ResolvedMention[]>> {
   const result = new Map<string, ResolvedMention[]>();
   const sessionForLookup = params.messages.find((m) => m.wahaSession)?.wahaSession || undefined;
   const perMessage = new Map<string, Map<string, string | null>>();
   const allTokens = new Map<string, string | null>();
+  const tokenSessionMap = new Map<string, string>();
+  const hintNames = new Map<string, string>();
+
   for (const msg of params.messages) {
-    const tokens = collectMentionTokens(msg.body, msg.metadataJson);
+    const tokens = collectMentionTokens(msg.body, msg.metadataJson, msg.replyToBody);
     if (tokens.size === 0) continue;
     perMessage.set(msg.id, tokens);
+    for (const [k, v] of collectMentionHints(msg.metadataJson)) {
+      if (!hintNames.has(k)) hintNames.set(k, v);
+    }
     for (const [t, jid] of tokens) {
       if (!allTokens.has(t) || (!allTokens.get(t) && jid)) allTokens.set(t, jid);
+      if (msg.wahaSession && !tokenSessionMap.has(t)) tokenSessionMap.set(t, msg.wahaSession);
     }
   }
   if (allTokens.size === 0) return result;
@@ -125,31 +163,104 @@ export async function resolveMessageMentions(params: {
   }
 
   const candidateLidJids = new Set<string>();
+  const directNumericPhones = new Set<string>();
   for (const [token, jid] of allTokens) {
     if (jid && jid.toLowerCase().endsWith('@lid')) {
       candidateLidJids.add(jid);
     } else if (!jid) {
       candidateLidJids.add(`${token}@lid`);
+      const norm = normalizePhoneNumber(token);
+      if (norm && norm.length <= 14) directNumericPhones.add(norm);
+    } else {
+      const norm = normalizePhoneNumber(jid.replace(/@.*$/, ''));
+      if (norm) directNumericPhones.add(norm);
     }
   }
   const lidJids = Array.from(candidateLidJids);
+  const directPhoneVariants = Array.from(new Set(Array.from(directNumericPhones).flatMap(phoneLookupVariants)));
   const identityByLid = new Map<string, string>();
-  if (lidJids.length > 0) {
-    const idRows = await db
-      .select({ externalId: contactIdentities.externalId, contactId: contactIdentities.contactId })
-      .from(contactIdentities)
-      .where(
-        and(
-          eq(contactIdentities.companyId, params.companyId),
-          eq(contactIdentities.channel, 'WHATSAPP'),
-          inArray(contactIdentities.externalId, lidJids)
+  const dbPhoneByLid = new Map<string, string>();
+
+  if (lidJids.length > 0 || directPhoneVariants.length > 0) {
+    const [idRows, lidConvs, crossMsgRows] = await Promise.all([
+      lidJids.length > 0
+        ? db
+            .select({ externalId: contactIdentities.externalId, contactId: contactIdentities.contactId })
+            .from(contactIdentities)
+            .where(
+              and(
+                eq(contactIdentities.companyId, params.companyId),
+                eq(contactIdentities.channel, 'WHATSAPP'),
+                inArray(contactIdentities.externalId, lidJids)
+              )
+            )
+        : Promise.resolve([]),
+      lidJids.length > 0
+        ? db
+            .select({
+              externalThreadId: conversations.externalThreadId,
+              contactId: conversations.contactId,
+              pushName: conversations.pushName,
+            })
+            .from(conversations)
+            .where(
+              and(
+                eq(conversations.companyId, params.companyId),
+                eq(conversations.channel, 'WHATSAPP'),
+                inArray(conversations.externalThreadId, lidJids)
+              )
+            )
+        : Promise.resolve([]),
+      db
+        .select({
+          senderJid: chatMessages.senderJid,
+          senderPhone: chatMessages.senderPhone,
+          senderName: chatMessages.senderName,
+        })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.companyId, params.companyId),
+            eq(chatMessages.direction, 'INBOUND'),
+            or(
+              lidJids.length > 0 ? inArray(chatMessages.senderJid, lidJids) : sql`false`,
+              directPhoneVariants.length > 0 ? inArray(chatMessages.senderPhone, directPhoneVariants) : sql`false`
+            )
+          )
         )
-      );
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(200),
+    ]);
+
     for (const r of idRows) identityByLid.set(r.externalId.toLowerCase(), r.contactId);
+    for (const lc of lidConvs) {
+      if (!lc.externalThreadId) continue;
+      const lowerExt = lc.externalThreadId.toLowerCase();
+      if (lc.contactId && !identityByLid.has(lowerExt)) {
+        identityByLid.set(lowerExt, lc.contactId);
+      }
+      const d = lc.externalThreadId.replace(/@.*$/, '').replace(/\D/g, '');
+      if (d && lc.pushName && !isGenericDisplayName(lc.pushName) && !senderNames.has(d)) {
+        senderNames.set(d, lc.pushName);
+      }
+    }
+    for (const cm of crossMsgRows) {
+      const sDigits = cm.senderJid ? cm.senderJid.replace(/@.*$/, '').replace(/\D/g, '') : '';
+      const pNorm = cm.senderPhone ? normalizePhoneNumber(cm.senderPhone) : '';
+      if (sDigits && pNorm && !dbPhoneByLid.has(sDigits)) {
+        dbPhoneByLid.set(sDigits, pNorm);
+      }
+      if (cm.senderName && !isGenericDisplayName(cm.senderName)) {
+        if (sDigits && !senderNames.has(sDigits)) senderNames.set(sDigits, cm.senderName);
+        if (pNorm && !senderNames.has(pNorm)) senderNames.set(pNorm, cm.senderName);
+      }
+    }
   }
 
   const phoneByToken = new Map<string, string | null>();
-  let lidResolveBudget = 8;
+  const lidResolvedNames = new Map<string, string>();
+  let lidResolveBudget = 12;
+
   for (const [token, jid] of allTokens) {
     const assumedLidJid =
       jid && jid.toLowerCase().endsWith('@lid')
@@ -159,11 +270,24 @@ export async function resolveMessageMentions(params: {
         : !jid && token.length >= 14
         ? `${token}@lid`
         : null;
+
     if (assumedLidJid) {
-      let phone: string | null = null;
-      if (!identityByLid.has(assumedLidJid.toLowerCase()) && lidResolveBudget > 0) {
+      let phone = dbPhoneByLid.get(token) || null;
+      const hasLocalName = Boolean(
+        senderNames.get(token) ||
+          (phone && senderNames.get(phone)) ||
+          hintNames.get(token)
+      );
+      if ((!phone || !hasLocalName) && lidResolveBudget > 0) {
         lidResolveBudget -= 1;
-        phone = await wahaService.resolveLidToPhone(sessionForLookup, assumedLidJid).catch(() => null);
+        const tokenSession = tokenSessionMap.get(token) || sessionForLookup;
+        const resolved = await wahaService
+          .resolveLidIdentity(tokenSession, assumedLidJid)
+          .catch(() => ({ phone: null, name: null }));
+        if (!phone && resolved.phone) phone = resolved.phone;
+        if (resolved.name && !isGenericDisplayName(resolved.name)) {
+          lidResolvedNames.set(token, resolved.name);
+        }
       }
       phoneByToken.set(token, phone);
     } else {
@@ -196,6 +320,7 @@ export async function resolveMessageMentions(params: {
   }
 
   const resolvedByToken = new Map<string, ResolvedMention>();
+  let waProfileBudget = Math.min(lidResolveBudget, 6);
   for (const [token, jid] of allTokens) {
     let phone = phoneByToken.get(token) || null;
     let contactRow: { id: string; namaLengkap: string; nomorWhatsapp?: string | null } | undefined;
@@ -208,8 +333,24 @@ export async function resolveMessageMentions(params: {
       }
     }
     if (!contactRow && phone) contactRow = contactByPhone.get(phone);
-    const pushName = senderNames.get(token) || (phone ? senderNames.get(phone) : undefined) || null;
-    const best = pickBestContactDisplayName(contactRow?.namaLengkap, pushName, null);
+    const pushName =
+      senderNames.get(token) ||
+      (phone ? senderNames.get(phone) : undefined) ||
+      hintNames.get(token) ||
+      (phone ? hintNames.get(phone) : undefined) ||
+      lidResolvedNames.get(token) ||
+      null;
+    let best = pickBestContactDisplayName(contactRow?.namaLengkap, pushName, null);
+    if ((!best || isGenericDisplayName(best)) && phone && waProfileBudget > 0) {
+      waProfileBudget -= 1;
+      const prof = await wahaService
+        .getWhatsAppProfile(`${phone}@c.us`, tokenSessionMap.get(token) || sessionForLookup)
+        .catch(() => null);
+      const waName = prof?.name || prof?.pushName || null;
+      if (waName && !isGenericDisplayName(waName)) {
+        best = waName;
+      }
+    }
     resolvedByToken.set(token, {
       token,
       jid: jid || (identityByLid.has(lidKey) || token.length >= 14 ? `${token}@lid` : null),
@@ -226,6 +367,104 @@ export async function resolveMessageMentions(params: {
     if (list.length > 0) result.set(msgId, list);
   }
   return result;
+}
+
+async function normalizeOutboundBodyAndMentions(params: {
+  companyId: string;
+  bodyText: string;
+  rawMentions?: string[];
+  sessionName?: string;
+}): Promise<{ bodyText: string; mentions: string[] }> {
+  let bodyText = params.bodyText || '';
+  const providedByDigits = new Map<string, string>();
+  if (Array.isArray(params.rawMentions)) {
+    for (const rawM of params.rawMentions) {
+      const jid = String(rawM || '').trim();
+      if (!jid) continue;
+      const d = jid.replace(/@.*$/, '').replace(/\D/g, '');
+      if (d) providedByDigits.set(d, jid.includes('@') ? jid : `${d}@c.us`);
+    }
+  }
+  for (const m of bodyText.matchAll(/@\+?(\d{6,20})/g)) {
+    const d = m[1];
+    if (!providedByDigits.has(d)) {
+      providedByDigits.set(d, d.length >= 14 ? `${d}@lid` : `${d}@c.us`);
+    }
+  }
+
+  const lidEntries = Array.from(providedByDigits.entries()).filter(
+    ([digits, jid]) => jid.toLowerCase().endsWith('@lid') || digits.length >= 14
+  );
+  if (lidEntries.length > 0) {
+    const lidJids = lidEntries.map(([digits]) => `${digits}@lid`);
+    const [idRows, crossRows] = await Promise.all([
+      db
+        .select({ externalId: contactIdentities.externalId, contactId: contactIdentities.contactId })
+        .from(contactIdentities)
+        .where(
+          and(
+            eq(contactIdentities.companyId, params.companyId),
+            eq(contactIdentities.channel, 'WHATSAPP'),
+            inArray(contactIdentities.externalId, lidJids)
+          )
+        ),
+      db
+        .select({ senderJid: chatMessages.senderJid, senderPhone: chatMessages.senderPhone })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.companyId, params.companyId),
+            inArray(chatMessages.senderJid, lidJids),
+            isNotNull(chatMessages.senderPhone)
+          )
+        )
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(50),
+    ]);
+
+    const phoneByDigits = new Map<string, string>();
+    for (const cr of crossRows) {
+      const d = cr.senderJid?.replace(/@.*$/, '').replace(/\D/g, '');
+      const p = cr.senderPhone ? normalizePhoneNumber(cr.senderPhone) : '';
+      if (d && p && !phoneByDigits.has(d)) phoneByDigits.set(d, p);
+    }
+    const contactIds = Array.from(new Set(idRows.map((r) => r.contactId)));
+    if (contactIds.length > 0) {
+      const cRows = await db
+        .select({ id: contacts.id, nomorWhatsapp: contacts.nomorWhatsapp })
+        .from(contacts)
+        .where(and(eq(contacts.companyId, params.companyId), inArray(contacts.id, contactIds)));
+      const phoneByCid = new Map(
+        cRows
+          .filter((c) => Boolean(c.nomorWhatsapp))
+          .map((c) => [c.id, normalizePhoneNumber(c.nomorWhatsapp!) || c.nomorWhatsapp!])
+      );
+      for (const ir of idRows) {
+        const d = ir.externalId.replace(/@.*$/, '').replace(/\D/g, '');
+        const p = phoneByCid.get(ir.contactId);
+        if (d && p && !phoneByDigits.has(d)) phoneByDigits.set(d, p);
+      }
+    }
+
+    for (const [digits] of lidEntries) {
+      let phone = phoneByDigits.get(digits) || null;
+      if (!phone) {
+        phone = await wahaService
+          .resolveLidToPhone(params.sessionName, `${digits}@lid`)
+          .catch(() => null);
+      }
+      if (phone) {
+        providedByDigits.delete(digits);
+        providedByDigits.set(phone, `${phone}@c.us`);
+        bodyText = bodyText.replace(new RegExp(`@\\+?${digits}\\b`, 'g'), `@${phone}`);
+      }
+    }
+  }
+
+  return {
+    bodyText,
+    mentions: Array.from(providedByDigits.values()),
+  };
 }
 
 export async function recordConversationActivity(params: {
@@ -2482,7 +2721,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     };
   }>, reply: FastifyReply) => {
     try {
-      const bodyText = (req.body?.body || '').trim();
+      let bodyText = (req.body?.body || '').trim();
       const {
         session,
         mediaBase64,
@@ -2506,23 +2745,6 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const currentUser = await getCurrentAuthUser(req);
       const currentAgentName = currentUser?.name || 'Tim CS';
-
-      const providedByDigits = new Map<string, string>();
-      if (Array.isArray(mentions)) {
-        for (const rawM of mentions) {
-          const jid = String(rawM || '').trim();
-          if (!jid) continue;
-          const d = jid.replace(/@.*$/, '').replace(/\D/g, '');
-          if (d) providedByDigits.set(d, jid.includes('@') ? jid : `${d}@c.us`);
-        }
-      }
-      for (const m of bodyText.matchAll(/@\+?(\d{6,20})/g)) {
-        const d = m[1];
-        if (!providedByDigits.has(d)) {
-          providedByDigits.set(d, d.length >= 14 ? `${d}@lid` : `${d}@c.us`);
-        }
-      }
-      const effectiveMentions = Array.from(providedByDigits.values());
 
       const inferredKind: OutboundMessageKind =
         messageKind ||
@@ -2688,6 +2910,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const targetSession = session?.trim() || conversation.conv.wahaSession || undefined;
       const convChannel = ((conversation.conv.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType;
+      const normalizedOutbound =
+        convChannel === 'WHATSAPP'
+          ? await normalizeOutboundBodyAndMentions({
+              companyId,
+              bodyText,
+              rawMentions: mentions,
+              sessionName: targetSession,
+            })
+          : { bodyText, mentions: Array.isArray(mentions) ? mentions : [] };
+      bodyText = normalizedOutbound.bodyText;
+      const effectiveMentions = normalizedOutbound.mentions;
       let sendResult: WahaSendResult;
       let mediaType: string | null = null;
       let storedMediaUrl: string | null = null;
@@ -3741,6 +3974,18 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const authUser = await getCurrentAuthUser(req);
       const session = req.body?.session?.trim() || targetConv.conv.wahaSession || sourceMsg.wahaSession || undefined;
+
+      let sourceMeta: any = {};
+      if (sourceMsg.metadataJson) {
+        try { sourceMeta = JSON.parse(sourceMsg.metadataJson); } catch {}
+      }
+
+      const normalizedForward = await normalizeOutboundBodyAndMentions({
+        companyId,
+        bodyText: sourceMsg.body || '',
+        rawMentions: Array.isArray(sourceMeta?.mentions) ? sourceMeta.mentions : undefined,
+        sessionName: session,
+      });
       let wahaMsgId: string | null = null;
       let forwardError: string | null = null;
 
@@ -3754,13 +3999,44 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         }
       }
 
-      let sourceMeta: any = {};
-      if (sourceMsg.metadataJson) {
-        try { sourceMeta = JSON.parse(sourceMsg.metadataJson); } catch {}
+      if (targetWa && !wahaMsgId && normalizedForward.bodyText) {
+        const fallbackSend = sourceMsg.mediaUrl
+          ? await (async () => {
+              const loaded = await readUploadedMediaAsDataUri(sourceMsg.mediaUrl!).catch(() => null);
+              if (loaded?.dataUri) {
+                return wahaService.sendMediaMessage(
+                  targetWa,
+                  {
+                    base64: loaded.dataUri,
+                    mimetype: loaded.mimetype || 'application/octet-stream',
+                    filename: sourceMsg.mediaName || 'attachment',
+                    caption: normalizedForward.bodyText,
+                    mentions:
+                      normalizedForward.mentions.length > 0 ? normalizedForward.mentions : undefined,
+                  },
+                  session
+                );
+              }
+              return wahaService.sendTextMessage(targetWa, normalizedForward.bodyText, session, {
+                mentions:
+                  normalizedForward.mentions.length > 0 ? normalizedForward.mentions : undefined,
+              });
+            })()
+          : await wahaService.sendTextMessage(targetWa, normalizedForward.bodyText, session, {
+              mentions:
+                normalizedForward.mentions.length > 0 ? normalizedForward.mentions : undefined,
+            });
+        if (fallbackSend.success && fallbackSend.messageId) {
+          wahaMsgId = fallbackSend.messageId;
+          forwardError = null;
+        } else if (!forwardError) {
+          forwardError = fallbackSend.error || null;
+        }
       }
 
       const newMeta = {
         ...sourceMeta,
+        ...(normalizedForward.mentions.length > 0 ? { mentions: normalizedForward.mentions } : {}),
         sentVia: 'CRM',
         actorName: authUser?.name || 'Tim CS',
         forwarded: true,
@@ -3770,6 +4046,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const now = new Date();
       const newMsgId = crypto.randomUUID();
+      const persistedForwardBody = normalizedForward.bodyText || sourceMsg.body;
       const [insertedMsg] = await db
         .insert(chatMessages)
         .values({
@@ -3780,7 +4057,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           direction: 'OUTBOUND',
           messageType: sourceMsg.messageType || 'TEXT',
           senderName: authUser?.name || 'Tim CS',
-          body: sourceMsg.body,
+          body: persistedForwardBody,
           mediaUrl: sourceMsg.mediaUrl,
           mediaType: sourceMsg.mediaType,
           mediaName: sourceMsg.mediaName,
@@ -3797,14 +4074,24 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       await db
         .update(conversations)
         .set({
-          lastMessage: sourceMsg.body || '[Pesan Diteruskan]',
+          lastMessage: persistedForwardBody || '[Pesan Diteruskan]',
           lastMessageAt: now,
           updatedAt: now,
         })
         .where(eq(conversations.id, targetConv.conv.id));
 
       liveEvents.emit('conversations:update', { conversationId: targetConv.conv.id }, companyId);
-      return reply.send({ success: true, data: insertedMsg, warning: forwardError });
+      const fwdMentionMap = await resolveMessageMentions({
+        companyId,
+        messages: [insertedMsg],
+      });
+      const enrichedForward = {
+        ...insertedMsg,
+        ...(fwdMentionMap.get(insertedMsg.id)?.length
+          ? { mentionedContacts: fwdMentionMap.get(insertedMsg.id) }
+          : {}),
+      };
+      return reply.send({ success: true, data: enrichedForward, warning: forwardError });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
     }

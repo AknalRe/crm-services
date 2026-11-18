@@ -119,16 +119,32 @@ export function unwrapWahaProtoMessage(rawMsg: any): Record<string, any> {
     const inner =
       cur.deviceSentMessage?.message ||
       cur.deviceSentMessage?.Message ||
+      cur.DeviceSentMessage?.message ||
+      cur.DeviceSentMessage?.Message ||
       cur.ephemeralMessage?.message ||
       cur.ephemeralMessage?.Message ||
+      cur.EphemeralMessage?.message ||
+      cur.EphemeralMessage?.Message ||
       cur.viewOnceMessage?.message ||
       cur.viewOnceMessage?.Message ||
+      cur.ViewOnceMessage?.message ||
+      cur.ViewOnceMessage?.Message ||
       cur.viewOnceMessageV2?.message ||
       cur.viewOnceMessageV2?.Message ||
+      cur.ViewOnceMessageV2?.message ||
+      cur.ViewOnceMessageV2?.Message ||
       cur.viewOnceMessageV2Extension?.message ||
+      cur.viewOnceMessageV2Extension?.Message ||
+      cur.ViewOnceMessageV2Extension?.message ||
+      cur.ViewOnceMessageV2Extension?.Message ||
       cur.documentWithCaptionMessage?.message ||
+      cur.documentWithCaptionMessage?.Message ||
+      cur.DocumentWithCaptionMessage?.message ||
+      cur.DocumentWithCaptionMessage?.Message ||
       cur.editedMessage?.message?.protocolMessage?.editedMessage ||
-      cur.editedMessage?.message;
+      cur.editedMessage?.message ||
+      cur.EditedMessage?.Message?.ProtocolMessage?.EditedMessage ||
+      cur.EditedMessage?.Message;
     if (inner && typeof inner === 'object') {
       cur = inner;
       continue;
@@ -222,38 +238,58 @@ export function extractWahaContextInfo(payload: any): Record<string, any> | null
     payload?._data?.message,
     payload?._data?.Message,
     payload?._data?.Info?.Message,
+    payload?.message,
     payload?._data,
     payload,
   ];
   const msgKeys = [
     'extendedTextMessage',
+    'ExtendedTextMessage',
     'imageMessage',
+    'ImageMessage',
     'videoMessage',
+    'VideoMessage',
     'documentMessage',
+    'DocumentMessage',
     'documentWithCaptionMessage',
+    'DocumentWithCaptionMessage',
     'audioMessage',
+    'AudioMessage',
     'stickerMessage',
+    'StickerMessage',
     'contactMessage',
+    'ContactMessage',
     'contactsArrayMessage',
+    'ContactsArrayMessage',
     'locationMessage',
+    'LocationMessage',
     'liveLocationMessage',
+    'LiveLocationMessage',
     'buttonsResponseMessage',
+    'ButtonsResponseMessage',
     'listResponseMessage',
+    'ListResponseMessage',
     'templateButtonReplyMessage',
+    'TemplateButtonReplyMessage',
   ];
   for (const container of containers) {
     if (!container || typeof container !== 'object') continue;
     const unwrapped = unwrapWahaProtoMessage(container);
-    if (container.contextInfo && typeof container.contextInfo === 'object') {
-      return container.contextInfo;
+    const directCtx = container.contextInfo || container.ContextInfo || unwrapped.contextInfo || unwrapped.ContextInfo;
+    if (directCtx && typeof directCtx === 'object') {
+      return directCtx;
     }
     for (const key of msgKeys) {
       const inner = container[key] || unwrapped?.[key];
-      if (inner?.contextInfo && typeof inner.contextInfo === 'object') {
-        return inner.contextInfo;
+      const innerCtx = inner?.contextInfo || inner?.ContextInfo;
+      if (innerCtx && typeof innerCtx === 'object') {
+        return innerCtx;
       }
-      if (inner?.message?.documentMessage?.contextInfo) {
-        return inner.message.documentMessage.contextInfo;
+      const docNestedCtx =
+        inner?.message?.documentMessage?.contextInfo ||
+        inner?.Message?.DocumentMessage?.ContextInfo;
+      if (docNestedCtx && typeof docNestedCtx === 'object') {
+        return docNestedCtx;
       }
     }
   }
@@ -268,6 +304,7 @@ export function extractWahaForwardingMeta(payload: any): {
   const ctxInfo = extractWahaContextInfo(payload);
   const rawScore = Number(
     ctxInfo?.forwardingScore ??
+      ctxInfo?.ForwardingScore ??
       payload?.forwardingScore ??
       payload?._data?.forwardingScore ??
       payload?._data?.Info?.ForwardingScore ??
@@ -276,13 +313,20 @@ export function extractWahaForwardingMeta(payload: any): {
   const score = Number.isFinite(rawScore) && rawScore > 0 ? Math.floor(rawScore) : 0;
   const newsletterInfo =
     ctxInfo?.forwardedNewsletterMessageInfo ||
+    ctxInfo?.ForwardedNewsletterMessageInfo ||
     payload?._data?.forwardedNewsletterMessageInfo ||
+    payload?._data?.ForwardedNewsletterMessageInfo ||
     null;
   const newsletterName = String(
-    newsletterInfo?.newsletterName || newsletterInfo?.name || ''
+    newsletterInfo?.newsletterName ||
+      newsletterInfo?.NewsletterName ||
+      newsletterInfo?.name ||
+      newsletterInfo?.Name ||
+      ''
   ).trim();
   const isForwarded = Boolean(
     ctxInfo?.isForwarded === true ||
+      ctxInfo?.IsForwarded === true ||
       payload?.isForwarded === true ||
       payload?._data?.isForwarded === true ||
       payload?._data?.Info?.IsForwarded === true ||
@@ -709,25 +753,108 @@ function extractBaseInboundWahaRichData(
   };
 }
 
+export function extractInboundWahaMentions(payload: any, ctxInfo?: Record<string, any> | null): {
+  mentions: string[];
+  mentionHints: Record<string, string>;
+} {
+  const effectiveCtx = ctxInfo ?? extractWahaContextInfo(payload);
+  const unwrapped = extractWahaProtoMessage(payload);
+  const rawEntries: any[] = [
+    ...(Array.isArray(payload?.mentions) ? payload.mentions : []),
+    ...(Array.isArray(payload?._data?.mentionedJidList) ? payload._data.mentionedJidList : []),
+    ...(Array.isArray(payload?._data?.Info?.MentionedJID) ? payload._data.Info.MentionedJID : []),
+    ...(Array.isArray(effectiveCtx?.mentionedJid) ? effectiveCtx.mentionedJid : []),
+    ...(Array.isArray(effectiveCtx?.MentionedJID) ? effectiveCtx.MentionedJID : []),
+    ...(Array.isArray(effectiveCtx?.groupMentions) ? effectiveCtx.groupMentions : []),
+    ...(Array.isArray(effectiveCtx?.GroupMentions) ? effectiveCtx.GroupMentions : []),
+    ...(Array.isArray(unwrapped?.extendedTextMessage?.contextInfo?.mentionedJid)
+      ? unwrapped.extendedTextMessage.contextInfo.mentionedJid
+      : []),
+    ...(Array.isArray(unwrapped?.ExtendedTextMessage?.ContextInfo?.MentionedJID)
+      ? unwrapped.ExtendedTextMessage.ContextInfo.MentionedJID
+      : []),
+    ...(Array.isArray(payload?._data?.message?.extendedTextMessage?.contextInfo?.mentionedJid)
+      ? payload._data.message.extendedTextMessage.contextInfo.mentionedJid
+      : []),
+    ...(Array.isArray(payload?._data?.Message?.extendedTextMessage?.contextInfo?.mentionedJid)
+      ? payload._data.Message.extendedTextMessage.contextInfo.mentionedJid
+      : []),
+    ...(Array.isArray(payload?._data?.Message?.ExtendedTextMessage?.ContextInfo?.MentionedJID)
+      ? payload._data.Message.ExtendedTextMessage.ContextInfo.MentionedJID
+      : []),
+  ];
+
+  const mentionsSet = new Set<string>();
+  const mentionHints: Record<string, string> = {};
+
+  for (const item of rawEntries) {
+    if (typeof item === 'string') {
+      const clean = item.trim();
+      if (clean) mentionsSet.add(clean);
+      continue;
+    }
+    if (item && typeof item === 'object') {
+      const jid = String(
+        item._serialized || item.id || item.jid || item.groupJid || item.GroupJID || ''
+      ).trim();
+      if (jid) {
+        mentionsSet.add(jid);
+        const hint = String(
+          item.name ||
+            item.pushname ||
+            item.pushName ||
+            item.notifyName ||
+            item.groupSubject ||
+            item.GroupSubject ||
+            item.subject ||
+            ''
+        ).trim();
+        if (hint && !isGenericDisplayName(hint)) {
+          mentionHints[jid] = hint;
+          const digits = jid.replace(/@.*$/, '').replace(/\D/g, '');
+          if (digits) mentionHints[digits] = hint;
+        }
+      }
+    }
+  }
+
+  return {
+    mentions: Array.from(mentionsSet),
+    mentionHints,
+  };
+}
+
 export function extractInboundWahaText(payload: any): string {
   const msg = extractWahaProtoMessage(payload);
-  const docWithCaptionMsg = msg?.documentWithCaptionMessage?.message?.documentMessage;
+  const docWithCaptionMsg =
+    msg?.documentWithCaptionMessage?.message?.documentMessage ||
+    msg?.DocumentWithCaptionMessage?.Message?.DocumentMessage;
   const candidates = [
     payload?.body,
     payload?.caption,
     payload?._data?.body,
     payload?._data?.caption,
     msg?.conversation,
+    msg?.Conversation,
     msg?.extendedTextMessage?.text,
+    msg?.ExtendedTextMessage?.Text,
     msg?.imageMessage?.caption,
+    msg?.ImageMessage?.Caption,
     msg?.videoMessage?.caption,
+    msg?.VideoMessage?.Caption,
     msg?.documentMessage?.caption,
+    msg?.DocumentMessage?.Caption,
     docWithCaptionMsg?.caption,
+    docWithCaptionMsg?.Caption,
     msg?.buttonsResponseMessage?.selectedDisplayText,
+    msg?.ButtonsResponseMessage?.SelectedDisplayText,
     msg?.listResponseMessage?.title,
+    msg?.ListResponseMessage?.Title,
     msg?.templateButtonReplyMessage?.selectedDisplayText,
+    msg?.TemplateButtonReplyMessage?.SelectedDisplayText,
     msg?.interactiveResponseMessage?.body?.text,
-    msg?.pollUpdateMessage ? '[Suara polling diterima]' : null,
+    msg?.InteractiveResponseMessage?.Body?.Text,
+    msg?.pollUpdateMessage || msg?.PollUpdateMessage ? '[Suara polling diterima]' : null,
   ];
   for (const c of candidates) {
     if (typeof c === 'string' && c.trim()) return c;
@@ -2812,20 +2939,13 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           (quotedMsgNode?.stickerMessage ? '[Stiker]' : null) ||
           null;
 
-        const rawMentions: string[] = [
-          ...(Array.isArray(payload?.mentions) ? payload.mentions : []),
-          ...(Array.isArray(payload?._data?.mentionedJidList) ? payload._data.mentionedJidList : []),
-          ...(Array.isArray(ctxInfo?.mentionedJid) ? ctxInfo.mentionedJid : []),
-          ...(Array.isArray(payload?._data?.message?.extendedTextMessage?.contextInfo?.mentionedJid)
-            ? payload._data.message.extendedTextMessage.contextInfo.mentionedJid
-            : []),
-          ...(Array.isArray(payload?._data?.Message?.extendedTextMessage?.contextInfo?.mentionedJid)
-            ? payload._data.Message.extendedTextMessage.contextInfo.mentionedJid
-            : []),
-        ].map((x) => String(typeof x === 'string' ? x : x?._serialized || x?.id || '').trim()).filter(Boolean);
-        const inboundMentions = Array.from(new Set(rawMentions));
-        if (inboundMentions.length > 0) {
-          richData.metadata = { ...(richData.metadata || {}), mentions: inboundMentions };
+        const { mentions: inboundMentions, mentionHints } = extractInboundWahaMentions(payload, ctxInfo);
+        if (inboundMentions.length > 0 || Object.keys(mentionHints).length > 0) {
+          richData.metadata = {
+            ...(richData.metadata || {}),
+            ...(inboundMentions.length > 0 ? { mentions: inboundMentions } : {}),
+            ...(Object.keys(mentionHints).length > 0 ? { mentionHints } : {}),
+          };
         }
         const isRevokedShellPayload =
           payload?.type === 'revoked' ||
