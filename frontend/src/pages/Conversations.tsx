@@ -4962,11 +4962,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
           <div
             ref={messagesContainerRef}
             onScroll={updateFloatingDateLabel}
-            className="relative flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2 sm:space-y-2.5"
+            className="relative flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-2 sm:space-y-2.5 bg-slate-50/70"
           >
             {floatingDateLabel && messages.length > 0 && !loadingMessages && (
-              <div className="sticky top-1 z-20 flex justify-center pointer-events-none pb-1">
-                <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/95 backdrop-blur-sm border border-gray-200 shadow-sm text-[11px] font-medium text-gray-700">
+              <div className="sticky top-1 z-20 w-full flex justify-center pointer-events-none pb-1">
+                <span className="inline-flex items-center px-3 py-0.5 rounded-full bg-white/95 backdrop-blur-sm border border-gray-200 shadow-2xs text-[11px] font-medium text-gray-700">
                   {floatingDateLabel}
                 </span>
               </div>
@@ -5197,10 +5197,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       ref={(el) => {
                         msgElementRefs.current[msg.id] = el;
                       }}
-                      className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
+                      className={`group relative flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%] min-w-0 transition-all duration-300 ${
+                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%] md:max-w-[620px] lg:max-w-[560px] xl:max-w-[640px] min-w-0 transition-all duration-300 ${
                           highlightedMessageId === msg.id
                             ? 'scale-[1.02] ring-2 ring-indigo-500 ring-offset-2 rounded-lg'
                             : ''
@@ -5973,9 +5973,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         </div>
                         </div>
 
-                        {/* Directly Accessible Outside Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) - Disembunyikan jika pesan sudah ditarik/dihapus */}
+                        {/* Directly Accessible Outside Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) - Muncul halus saat kursor diarahkan ke pesan */}
                         {!isRevoked && (canReplyConversation || canManageConversation) && (
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 px-0.5 text-[11px]">
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1 px-0.5 text-[10px] opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity duration-150">
                             {canReplyConversation && (
                               <button
                                 type="button"
@@ -5985,9 +5985,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   replyInputRef.current?.focus();
                                 }}
                                 title="Balas pesan ini"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-indigo-50 hover:border-indigo-200 text-indigo-700 font-medium transition-colors"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-indigo-50 hover:border-indigo-200 text-indigo-700 font-medium shadow-2xs transition-all hover:scale-102"
                               >
-                                <Reply className="w-3 h-3" />
+                                <Reply className="w-2.5 h-2.5" />
                                 <span>Balas</span>
                               </button>
                             )}
@@ -6000,9 +6000,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   setForwardTargetConvId('');
                                 }}
                                 title="Teruskan pesan ke chat lain"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-emerald-50 hover:border-emerald-200 text-gray-700 hover:text-emerald-700 font-medium transition-colors"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-emerald-50 hover:border-emerald-200 text-gray-700 hover:text-emerald-700 font-medium shadow-2xs transition-all hover:scale-102"
                               >
-                                <Forward className="w-3 h-3" />
+                                <Forward className="w-2.5 h-2.5" />
                                 <span>Teruskan</span>
                               </button>
                             )}
@@ -6011,13 +6011,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 type="button"
                                 onClick={() => void handleStartPinMessage(msg)}
                                 title={msgMeta?.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-medium transition-colors ${
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-all hover:scale-102 ${
                                   msgMeta?.isPinned
                                     ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
                                     : 'border-gray-200 bg-white hover:bg-indigo-50 text-gray-600 hover:text-indigo-700'
                                 }`}
                               >
-                                {msgMeta?.isPinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+                                {msgMeta?.isPinned ? <PinOff className="w-2.5 h-2.5" /> : <Pin className="w-2.5 h-2.5" />}
                                 <span>{msgMeta?.isPinned ? 'Lepas Pin' : 'Pin'}</span>
                               </button>
                             )}
@@ -6026,13 +6026,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 type="button"
                                 onClick={() => void handleToggleStarMessage(msg)}
                                 title={msgMeta?.isStarred ? 'Hapus bintang' : 'Beri bintang'}
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-medium transition-colors ${
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-all hover:scale-102 ${
                                   msgMeta?.isStarred
                                     ? 'bg-amber-50 border-amber-300 text-amber-800'
                                     : 'border-gray-200 bg-white hover:bg-amber-50 text-gray-600 hover:text-amber-700'
                                 }`}
                               >
-                                <Star className={`w-3 h-3 ${msgMeta?.isStarred ? 'fill-amber-400 text-amber-500' : ''}`} />
+                                <Star className={`w-2.5 h-2.5 ${msgMeta?.isStarred ? 'fill-amber-400 text-amber-500' : ''}`} />
                                 <span>{msgMeta?.isStarred ? 'Favorit' : 'Bintang'}</span>
                               </button>
                             )}
@@ -6043,13 +6043,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   setActiveReactionMsgId((prev) => (prev === msg.id ? null : msg.id))
                                 }
                                 title="Beri reaksi emoji"
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-medium transition-colors ${
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-all hover:scale-102 ${
                                   activeReactionMsgId === msg.id
                                     ? 'bg-amber-50 border-amber-300 text-amber-800'
                                     : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'
                                 }`}
                               >
-                                <SmilePlus className="w-3 h-3" />
+                                <SmilePlus className="w-2.5 h-2.5" />
                                 <span>Reaksi</span>
                               </button>
                             )}
@@ -6057,9 +6057,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               type="button"
                               onClick={() => setDeleteMessageTarget(msg)}
                               title="Hapus Pesan (Tarik / Hapus Pribadi)"
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 text-gray-600 hover:text-red-600 font-medium transition-colors"
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-gray-600 hover:text-rose-600 font-medium shadow-2xs transition-all hover:scale-102"
                             >
-                              <Trash2 className="w-3 h-3" />
+                              <Trash2 className="w-2.5 h-2.5" />
                               <span>Hapus</span>
                             </button>
                           </div>

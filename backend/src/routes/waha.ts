@@ -2355,6 +2355,18 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
         // Download & persist inbound WAHA media locally so files never disappear when WAHA purges /api/files/
         if (hasMedia) {
+          const inboundMediaMeta = {
+            channel: 'WHATSAPP',
+            sessionName: webhookSession || undefined,
+            senderName:
+              String(payload?._data?.notifyName || payload?._data?.Info?.PushName || '').trim() ||
+              undefined,
+            senderPhone: rawFrom ? String(rawFrom).replace(/\D/g, '') : undefined,
+            source: isFromMe ? ('OUTBOUND' as const) : ('INBOUND' as const),
+            originalFileName: mediaName || undefined,
+            label: webhookSession ? `WA • ${webhookSession}` : 'WhatsApp',
+          };
+
           if (mediaMeta.inlineBase64) {
             try {
               const saved = await saveBase64MediaFile({
@@ -2362,6 +2374,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 mimeType: mediaMeta.mimetype || undefined,
                 fileName: mediaName || undefined,
                 maxBytes: 25 * 1024 * 1024,
+                metadata: inboundMediaMeta,
               });
               mediaUrl = saved.relativeUrl;
             } catch (err: any) {
@@ -2375,6 +2388,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 mimeType: mediaMeta.mimetype || downloaded.contentType,
                 fileName: mediaName || downloaded.filename,
                 maxBytes: 25 * 1024 * 1024,
+                metadata: inboundMediaMeta,
               });
               mediaUrl = saved.relativeUrl;
             } catch (err: any) {

@@ -1064,6 +1064,10 @@ export const api = {
     fileName: string;
     mimeType: string;
     base64: string;
+    channel?: string;
+    sessionName?: string;
+    label?: string;
+    source?: 'INBOUND' | 'OUTBOUND' | 'UPLOAD' | 'BROADCAST';
   }): Promise<{ filename: string; relativeUrl: string; url: string }> => {
     const res = await client.post('/media/upload', data);
     return res.data.data;

@@ -940,9 +940,16 @@ export interface MediaLibraryItem {
   url: string;
   relativeUrl: string;
   mimeType: string;
-  mediaKind: 'image' | 'video';
+  mediaKind: 'image' | 'video' | 'audio' | 'document';
   sizeBytes: number;
   createdAt: string;
+  channel?: string;
+  sessionName?: string;
+  senderName?: string;
+  senderPhone?: string;
+  source?: 'INBOUND' | 'OUTBOUND' | 'UPLOAD' | 'BROADCAST';
+  label?: string;
+  originalFileName?: string;
 }
 
 export interface ContentIdeaItem {

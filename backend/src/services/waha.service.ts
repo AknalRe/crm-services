@@ -2004,7 +2004,7 @@ export class WahaService {
     const rawMsg = this.extractWahaError(err).toLowerCase();
     if (
       (status === 400 || status === 422 || status === 500) &&
-      /(not implemented|not supported|unsupported|deprecated|buttons?\s+(are|is)\s+(disabled|deprecated|unsupported)|cannot post)/i.test(
+      /(not implemented|not supported|unsupported|deprecated|duration must be one of|duration must be|buttons?\s+(are|is)\s+(disabled|deprecated|unsupported)|cannot post)/i.test(
         rawMsg
       )
     ) {
@@ -2222,6 +2222,18 @@ export class WahaService {
         error: 'ID pesan WhatsApp tidak ditemukan untuk disematkan.',
       };
     }
+    const VALID_WAHA_PIN_DURATIONS = [86400, 604800, 2592000];
+    let normalizedDuration = 604800;
+    if (VALID_WAHA_PIN_DURATIONS.includes(durationSeconds)) {
+      normalizedDuration = durationSeconds;
+    } else if (durationSeconds <= 86400) {
+      normalizedDuration = 86400;
+    } else if (durationSeconds <= 604800) {
+      normalizedDuration = 604800;
+    } else {
+      normalizedDuration = 2592000;
+    }
+
     return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
       const stanzaId = cleanMsgId.includes('_') ? cleanMsgId.split('_').pop() : null;
       const candidateIds = [cleanMsgId, ...(stanzaId && stanzaId !== cleanMsgId ? [stanzaId] : [])];
@@ -2231,7 +2243,7 @@ export class WahaService {
         try {
           const res = await client.post(
             `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(msgId)}/pin`,
-            { duration: durationSeconds },
+            { duration: normalizedDuration },
             { timeout: 12000 }
           );
           return res.data;
@@ -2279,28 +2291,12 @@ export class WahaService {
       const candidateIds = [cleanMsgId, ...(stanzaId && stanzaId !== cleanMsgId ? [stanzaId] : [])];
 
       let lastErr: any = null;
-      // 1. Primary: POST /api/{session}/chats/{chatId}/messages/{messageId}/unpin
+      // Primary WAHA endpoint: POST /api/{session}/chats/{chatId}/messages/{messageId}/unpin
       for (const msgId of candidateIds) {
         try {
           const res = await client.post(
             `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(msgId)}/unpin`,
             {},
-            { timeout: 12000 }
-          );
-          return res.data;
-        } catch (err: any) {
-          lastErr = err;
-          const st = err?.response?.status;
-          if (st === 401 || st === 403) throw err;
-        }
-      }
-
-      // 2. Alternative fallback: POST /api/{session}/chats/{chatId}/messages/{messageId}/pin with duration: 0
-      for (const msgId of candidateIds) {
-        try {
-          const res = await client.post(
-            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(msgId)}/pin`,
-            { duration: 0 },
             { timeout: 12000 }
           );
           return res.data;

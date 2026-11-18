@@ -2454,6 +2454,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
                 mimeType: stickerMime,
                 fileName: mediaName || 'sticker.webp',
                 maxBytes: 5 * 1024 * 1024,
+                metadata: {
+                  channel: conversation.conv.channel || 'WHATSAPP',
+                  sessionName: targetSession,
+                  source: 'OUTBOUND',
+                  originalFileName: mediaName || 'sticker.webp',
+                  label: targetSession ? `WA • ${targetSession}` : 'WhatsApp',
+                },
               });
               storedMediaUrl = savedMedia.relativeUrl;
             } catch {
@@ -2490,6 +2497,13 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               base64: mediaBase64,
               mimeType: mediaMimetype,
               fileName: mediaName,
+              metadata: {
+                channel: conversation.conv.channel || 'WHATSAPP',
+                sessionName: targetSession,
+                source: 'OUTBOUND',
+                originalFileName: mediaName,
+                label: targetSession ? `WA • ${targetSession}` : 'WhatsApp',
+              },
             });
             storedMediaUrl = savedMedia.relativeUrl;
           } catch (saveErr: any) {

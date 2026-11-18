@@ -2,9 +2,51 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { ilike } from 'drizzle-orm';
+import { db } from '../db';
+import { chatMessages } from '../db/schema';
 import { requirePermission } from './auth';
 
 const UPLOADS_DIR = path.resolve(process.cwd(), 'uploads');
+const META_DIR = path.join(UPLOADS_DIR, '.meta');
+
+export interface MediaMetadata {
+  channel?: string; // e.g. 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM' | 'DIRECT'
+  sessionName?: string; // e.g. 'WA_TEST', 'HRIS_HR', 'sales'
+  senderName?: string;
+  senderPhone?: string;
+  source?: 'INBOUND' | 'OUTBOUND' | 'UPLOAD' | 'BROADCAST';
+  originalFileName?: string;
+  label?: string; // e.g. 'WA • WA_TEST'
+}
+
+export async function saveMediaMetadata(filename: string, meta: MediaMetadata): Promise<void> {
+  try {
+    if (!fs.existsSync(META_DIR)) {
+      await fs.promises.mkdir(META_DIR, { recursive: true });
+    }
+    await fs.promises.writeFile(
+      path.join(META_DIR, `${filename}.json`),
+      JSON.stringify(meta, null, 2),
+      'utf-8'
+    );
+  } catch (err: any) {
+    console.warn('[MediaMetadata] Gagal menyimpan metadata media:', err?.message);
+  }
+}
+
+export async function readMediaMetadata(filename: string): Promise<MediaMetadata | null> {
+  try {
+    const metaPath = path.join(META_DIR, `${filename}.json`);
+    if (fs.existsSync(metaPath)) {
+      const content = await fs.promises.readFile(metaPath, 'utf-8');
+      return JSON.parse(content) as MediaMetadata;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/jpg': '.jpg',
@@ -115,6 +157,7 @@ export async function saveMediaBufferFile(params: {
   fileName?: string;
   maxBytes?: number;
   fallbackExt?: string;
+  metadata?: MediaMetadata;
 }): Promise<{ filename: string; relativeUrl: string; mimeType: string }> {
   const mimeType = normalizeMimeBase(params.mimeType);
   const maxBytes = params.maxBytes ?? 10 * 1024 * 1024;
@@ -135,6 +178,13 @@ export async function saveMediaBufferFile(params: {
   ensureUploadsDir();
   await fs.promises.writeFile(path.join(UPLOADS_DIR, safeName), params.buffer);
 
+  if (params.metadata) {
+    await saveMediaMetadata(safeName, {
+      ...params.metadata,
+      originalFileName: params.metadata.originalFileName || params.fileName,
+    });
+  }
+
   return {
     filename: safeName,
     relativeUrl: `/api/media/files/${safeName}`,
@@ -148,6 +198,7 @@ export async function saveBase64MediaFile(params: {
   fileName?: string;
   maxBytes?: number;
   fallbackExt?: string;
+  metadata?: MediaMetadata;
 }): Promise<{ filename: string; relativeUrl: string; mimeType: string }> {
   const dataUriMatch = String(params.base64 || '')
     .trim()
@@ -164,6 +215,7 @@ export async function saveBase64MediaFile(params: {
     fileName: params.fileName,
     maxBytes: params.maxBytes,
     fallbackExt: params.fallbackExt,
+    metadata: params.metadata,
   });
 }
 
@@ -223,25 +275,89 @@ export default async function mediaRouter(fastify: FastifyInstance) {
           'localhost';
         const appPrefix = resolveMediaAppPrefix(req);
 
+        const validEntries = entries.filter(
+          (e) => e.isFile() && /^[a-zA-Z0-9._-]+$/.test(e.name)
+        );
+
         const items = await Promise.all(
-          entries
-            .filter((e) => e.isFile() && /^[a-zA-Z0-9._-]+$/.test(e.name))
-            .map(async (e) => {
-              const full = path.join(UPLOADS_DIR, e.name);
-              const stat = await fs.promises.stat(full);
-              const ext = path.extname(e.name).toLowerCase();
-              const mimeType = EXT_MIME[ext] || 'application/octet-stream';
-              const relativeUrl = `/api/media/files/${e.name}`;
-              return {
-                filename: e.name,
-                url: `${proto}://${host}${appPrefix}${relativeUrl}`,
-                relativeUrl,
-                mimeType,
-                mediaKind: mimeType.startsWith('video/') ? 'video' : 'image',
-                sizeBytes: stat.size,
-                createdAt: stat.mtime.toISOString(),
-              };
-            })
+          validEntries.map(async (e) => {
+            const full = path.join(UPLOADS_DIR, e.name);
+            const stat = await fs.promises.stat(full);
+            const ext = path.extname(e.name).toLowerCase();
+            const mimeType = EXT_MIME[ext] || 'application/octet-stream';
+            const relativeUrl = `/api/media/files/${e.name}`;
+
+            let meta = await readMediaMetadata(e.name);
+            if (!meta) {
+              // Auto-backfill metadata from chat_messages table if this file originated from a chat
+              try {
+                const matchedMsg = await db
+                  .select({
+                    channel: chatMessages.channel,
+                    wahaSession: chatMessages.wahaSession,
+                    senderName: chatMessages.senderName,
+                    senderPhone: chatMessages.senderPhone,
+                    direction: chatMessages.direction,
+                    mediaName: chatMessages.mediaName,
+                  })
+                  .from(chatMessages)
+                  .where(ilike(chatMessages.mediaUrl, `%${e.name}%`))
+                  .limit(1);
+
+                if (matchedMsg && matchedMsg[0]) {
+                  const m = matchedMsg[0];
+                  const ch = (m.channel || 'WHATSAPP').toUpperCase();
+                  const sess = m.wahaSession || undefined;
+                  const label =
+                    ch === 'WHATSAPP'
+                      ? sess
+                        ? `WA • ${sess}`
+                        : 'WhatsApp'
+                      : sess
+                      ? `${ch} • ${sess}`
+                      : ch;
+
+                  meta = {
+                    channel: ch,
+                    sessionName: sess,
+                    senderName: m.senderName || undefined,
+                    senderPhone: m.senderPhone || undefined,
+                    source: m.direction === 'INBOUND' ? 'INBOUND' : 'OUTBOUND',
+                    originalFileName: m.mediaName || undefined,
+                    label,
+                  };
+                  void saveMediaMetadata(e.name, meta);
+                }
+              } catch {
+                // Ignore DB error if connection or query is not ready
+              }
+            }
+
+            const channel = meta?.channel || undefined;
+            const sessionName = meta?.sessionName || undefined;
+            const label =
+              meta?.label ||
+              (channel
+                ? `${channel === 'WHATSAPP' ? 'WA' : channel}${sessionName ? ` • ${sessionName}` : ''}`
+                : undefined);
+
+            return {
+              filename: e.name,
+              url: `${proto}://${host}${appPrefix}${relativeUrl}`,
+              relativeUrl,
+              mimeType,
+              mediaKind: mimeType.startsWith('video/') ? 'video' : 'image',
+              sizeBytes: stat.size,
+              createdAt: stat.mtime.toISOString(),
+              channel,
+              sessionName,
+              senderName: meta?.senderName,
+              senderPhone: meta?.senderPhone,
+              source: meta?.source,
+              label,
+              originalFileName: meta?.originalFileName,
+            };
+          })
         );
         items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         return reply.send({ success: true, data: items });
@@ -264,6 +380,10 @@ export default async function mediaRouter(fastify: FastifyInstance) {
         const filePath = path.join(UPLOADS_DIR, filename);
         if (fs.existsSync(filePath)) {
           await fs.promises.unlink(filePath);
+        }
+        const metaPath = path.join(META_DIR, `${filename}.json`);
+        if (fs.existsSync(metaPath)) {
+          await fs.promises.unlink(metaPath).catch(() => {});
         }
         return reply.send({ success: true });
       } catch (error: any) {
@@ -341,17 +461,40 @@ export default async function mediaRouter(fastify: FastifyInstance) {
 
   // Authenticated upload endpoint (accepts base64 JSON payload)
   fastify.post<{
-    Body: { fileName?: string; mimeType?: string; base64?: string };
+    Body: {
+      fileName?: string;
+      mimeType?: string;
+      base64?: string;
+      channel?: string;
+      sessionName?: string;
+      label?: string;
+      source?: 'INBOUND' | 'OUTBOUND' | 'UPLOAD' | 'BROADCAST';
+    };
   }>(
     '/upload',
     { preHandler: requirePermission('broadcasts.send', 'conversations.reply') },
     async (req, reply) => {
       try {
+        const customChannel = req.body?.channel || undefined;
+        const customSession = req.body?.sessionName || undefined;
+        const customLabel =
+          req.body?.label ||
+          (customChannel
+            ? `${customChannel === 'WHATSAPP' ? 'WA' : customChannel}${customSession ? ` • ${customSession}` : ''}`
+            : 'Unggahan Langsung');
+
         const saved = await saveBase64MediaFile({
           base64: req.body?.base64 || '',
           mimeType: req.body?.mimeType,
           fileName: req.body?.fileName,
           fallbackExt: '.png',
+          metadata: {
+            channel: customChannel,
+            sessionName: customSession,
+            label: customLabel,
+            source: req.body?.source || 'UPLOAD',
+            originalFileName: req.body?.fileName,
+          },
         });
 
         const proto =
@@ -373,6 +516,9 @@ export default async function mediaRouter(fastify: FastifyInstance) {
             filename: safeName,
             relativeUrl,
             url,
+            channel: customChannel,
+            sessionName: customSession,
+            label: customLabel,
           },
         });
       } catch (error: any) {
