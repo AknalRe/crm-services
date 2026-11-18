@@ -260,6 +260,8 @@ export const api = {
       mediaUrl?: string;
       replyToMessageId?: string;
       mentions?: string[];
+      asDocument?: boolean;
+      isHd?: boolean;
       isForwarded?: boolean;
       forwardedFromSender?: string;
       forwardedFromChannel?: string;

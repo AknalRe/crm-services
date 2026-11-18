@@ -744,6 +744,20 @@ test('sendTextMessage & sendMediaMessage resolve away from stale default session
   assert.equal(posted[2].body.chatId, '123456789012345@lid');
   assert.equal(posted[2].body.reply_to, 'true_123456789012345@lid_ORIG2');
 
+  const docImgRes = await wahaService.sendMediaMessage(
+    '081234567890',
+    {
+      base64: 'data:image/png;base64,iVBOR',
+      mimetype: 'image/png',
+      filename: 'invoice.png',
+      asDocument: true,
+    },
+    'HRIS_HR'
+  );
+  assert.equal(docImgRes.success, true);
+  assert.equal(posted[3].url, '/api/sendFile');
+  assert.equal(posted[3].body.file.filename, 'invoice.png');
+
   const stoppedRes = await wahaService.sendTextMessage('081234567890', 'Halo', 'WA_OFF');
   assert.equal(stoppedRes.success, false);
   assert.match(stoppedRes.error || '', /SCAN_QR_CODE/);

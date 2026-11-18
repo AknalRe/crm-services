@@ -2599,12 +2599,20 @@ export class WahaService {
    */
   public async sendMediaMessage(
     phone: string,
-    file: { base64: string; mimetype: string; filename: string; caption?: string; replyTo?: string; mentions?: string[] },
+    file: {
+      base64: string;
+      mimetype: string;
+      filename: string;
+      caption?: string;
+      replyTo?: string;
+      mentions?: string[];
+      asDocument?: boolean;
+    },
     sessionName?: string
   ): Promise<WahaSendResult> {
     const cleanBase64 = file.base64.includes(',') ? file.base64.split(',')[1] : file.base64;
-    const isImage = file.mimetype.startsWith('image/');
-    const isVideo = file.mimetype.startsWith('video/');
+    const isImage = !file.asDocument && file.mimetype.startsWith('image/');
+    const isVideo = !file.asDocument && file.mimetype.startsWith('video/');
 
     return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
       const payload = {

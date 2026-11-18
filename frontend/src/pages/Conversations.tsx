@@ -59,6 +59,8 @@ import {
   Pin,
   PinOff,
   Shield,
+  Image as ImageIcon,
+  Sparkles,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -173,6 +175,87 @@ function inferAttachmentMime(file: File): string {
     if (FALLBACK_EXT_MIME[ext]) return FALLBACK_EXT_MIME[ext];
   }
   return 'application/octet-stream';
+}
+
+interface PendingAttachmentItem {
+  id: string;
+  file: File;
+  base64: string;
+  originalBase64: string;
+  mimetype: string;
+  name: string;
+  size: number;
+  kind: 'image' | 'video' | 'audio' | 'document';
+  asDocument?: boolean;
+}
+
+async function processImageAttachment(
+  file: File,
+  isHd: boolean,
+  fallbackBase64?: string
+): Promise<{ base64: string; size: number }> {
+  return new Promise((resolve) => {
+    const doProcess = (dataUri: string) => {
+      if (!dataUri) {
+        resolve({ base64: '', size: 0 });
+        return;
+      }
+      if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
+        resolve({ base64: dataUri, size: file.size });
+        return;
+      }
+      const img = new window.Image();
+      img.onerror = () => resolve({ base64: dataUri, size: file.size });
+      img.onload = () => {
+        try {
+          const { width, height } = img;
+          const maxDim = isHd ? 4096 : 1600;
+          const quality = isHd ? 0.95 : 0.82;
+
+          let targetW = width;
+          let targetH = height;
+          if (width > maxDim || height > maxDim) {
+            if (width >= height) {
+              targetW = maxDim;
+              targetH = Math.round((height * maxDim) / width);
+            } else {
+              targetH = maxDim;
+              targetW = Math.round((width * maxDim) / height);
+            }
+          } else if (isHd) {
+            resolve({ base64: dataUri, size: file.size });
+            return;
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve({ base64: dataUri, size: file.size });
+            return;
+          }
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+          const outMime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+          const compressed = canvas.toDataURL(outMime, quality);
+          const estSize = Math.round((compressed.length * 3) / 4);
+          resolve({ base64: compressed, size: estSize });
+        } catch {
+          resolve({ base64: dataUri, size: file.size });
+        }
+      };
+      img.src = dataUri;
+    };
+
+    if (fallbackBase64) {
+      doProcess(fallbackBase64);
+    } else {
+      const reader = new FileReader();
+      reader.onload = () => doProcess(String(reader.result || ''));
+      reader.onerror = () => resolve({ base64: '', size: 0 });
+      reader.readAsDataURL(file);
+    }
+  });
 }
 
 function parseChatMessageMeta(msg: ChatMessage): ChatMessageMetadata | null {
@@ -594,6 +677,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const isCurrentConversationGroup = Boolean(
+    selectedConversation?.isGroup ||
+      selectedConversation?.externalThreadId?.toLowerCase().endsWith('@g.us')
+  );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [search, setSearch] = useState('');
@@ -712,15 +799,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [newProdPrice, setNewProdPrice] = useState('');
   const [newProdUnit, setNewProdUnit] = useState('pcs');
   const [savingProduct, setSavingProduct] = useState(false);
-  const [pendingAttachment, setPendingAttachment] = useState<{
-    base64: string;
-    mimetype: string;
-    name: string;
-    size?: number;
-    kind: 'image' | 'video' | 'audio' | 'document';
-  } | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachmentItem[]>([]);
+  const [isHdMode, setIsHdMode] = useState<boolean>(false);
+  const [sendingProgress, setSendingProgress] = useState<{ current: number; total: number } | null>(null);
   const [replyingToMessage, setReplyingToMessage] = useState<ChatMessage | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
   const replyInputRef = useRef<HTMLInputElement>(null);
 
   // Right panel: Labels & Contact Notes
@@ -1088,35 +1172,97 @@ export const Conversations: React.FC<ConversationsProps> = ({
     return () => cancelAnimationFrame(raf);
   }, [updateFloatingDateLabel, selectedConversation?.id, messages.length]);
 
-  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleAttachmentPick = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    asDocument: boolean
+  ) => {
+    const fileList = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('Ukuran berkas maksimal 10 MB');
-      return;
+    if (fileList.length === 0) return;
+
+    const oversized = fileList.filter((f) => f.size > 10 * 1024 * 1024);
+    if (oversized.length > 0) {
+      toast.error(`Beberapa berkas melebihi batas 10 MB (${oversized.map((f) => f.name).join(', ')})`);
     }
-    const mime = inferAttachmentMime(file);
-    const kind: 'image' | 'video' | 'audio' | 'document' = mime.startsWith('image/')
-      ? 'image'
-      : mime.startsWith('video/')
-      ? 'video'
-      : mime.startsWith('audio/')
-      ? 'audio'
-      : 'document';
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || '');
-      setPendingAttachment({
-        base64: result,
-        mimetype: mime,
-        name: file.name,
-        size: file.size,
-        kind,
-      });
+    const validFiles = fileList.filter((f) => f.size <= 10 * 1024 * 1024);
+    if (validFiles.length === 0) return;
+
+    const newItems: PendingAttachmentItem[] = [];
+    for (const file of validFiles) {
+      const mime = inferAttachmentMime(file);
+      const isImg = mime.startsWith('image/');
+      const kind: 'image' | 'video' | 'audio' | 'document' = asDocument
+        ? 'document'
+        : isImg
+        ? 'image'
+        : mime.startsWith('video/')
+        ? 'video'
+        : mime.startsWith('audio/')
+        ? 'audio'
+        : 'document';
+
+      if (!asDocument && isImg) {
+        const { base64, size } = await processImageAttachment(file, isHdMode);
+        newItems.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          file,
+          base64,
+          originalBase64: base64,
+          mimetype: mime,
+          name: file.name,
+          size,
+          kind: 'image',
+          asDocument: false,
+        });
+      } else {
+        const dataUri = await new Promise<string>((res) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result || ''));
+          r.onerror = () => res('');
+          r.readAsDataURL(file);
+        });
+        if (dataUri) {
+          newItems.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            file,
+            base64: dataUri,
+            originalBase64: dataUri,
+            mimetype: mime,
+            name: file.name,
+            size: file.size,
+            kind,
+            asDocument,
+          });
+        }
+      }
+    }
+
+    if (newItems.length > 0) {
+      setPendingAttachments((prev) => [...prev, ...newItems]);
       setComposerMode('REPLY');
-    };
-    reader.readAsDataURL(file);
+    }
+  };
+
+  const handleToggleHdMode = async () => {
+    const nextHd = !isHdMode;
+    setIsHdMode(nextHd);
+    if (pendingAttachments.some((item) => item.kind === 'image' && !item.asDocument)) {
+      const updated = await Promise.all(
+        pendingAttachments.map(async (item) => {
+          if (item.kind === 'image' && !item.asDocument) {
+            const { base64, size } = await processImageAttachment(item.file, nextHd);
+            return { ...item, base64, size };
+          }
+          return item;
+        })
+      );
+      setPendingAttachments(updated);
+    }
+    toast.info(
+      nextHd
+        ? 'Mode HD Aktif: Foto dikirim dalam kualitas tinggi resolusi asli'
+        : 'Mode Standar Aktif: Foto dikompresi agar hemat kuota'
+    );
   };
 
   const openComposerPicker = (
@@ -1148,11 +1294,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setShowLocationComposer((v) => (target === 'LOCATION' ? !v : false));
     setShowContactSharePicker((v) => (target === 'CONTACT' ? !v : false));
     setShowMentionPicker((v) => {
+      if (target === 'MENTION' && !isCurrentConversationGroup) return false;
       const nextOpen = target === 'MENTION' ? !v : false;
       if (
         nextOpen &&
+        isCurrentConversationGroup &&
         selectedConversation &&
-        (selectedConversation.isGroup || selectedConversation.externalThreadId?.endsWith('@g.us')) &&
         (!participantsData || participantsData.participants.length === 0 || participantsData.syncError)
       ) {
         void fetchParticipants(selectedConversation.id, true);
@@ -1160,6 +1307,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       return nextOpen;
     });
     if (target === 'MENTION') {
+      if (!isCurrentConversationGroup) return;
       setMentionFilter('');
       setMentionAnchorIndex(inputText.length);
     }
@@ -1747,29 +1895,32 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const handleReplyTextChange = (nextVal: string) => {
     setInputText(nextVal);
 
-    // Detect @ mention trigger while typing
-    const cursorPos = replyInputRef.current?.selectionStart ?? nextVal.length;
-    const textBeforeCursor = nextVal.slice(0, cursorPos);
-    const lastAt = textBeforeCursor.lastIndexOf('@');
-    if (lastAt !== -1 && (lastAt === 0 || /\s/.test(textBeforeCursor[lastAt - 1]))) {
-      const query = textBeforeCursor.slice(lastAt + 1);
-      if (!/\s/.test(query) && query.length <= 25) {
-        setMentionFilter(query.toLowerCase());
-        setMentionAnchorIndex(lastAt);
-        if (
-          !showMentionPicker &&
-          selectedConversation &&
-          (selectedConversation.isGroup || selectedConversation.externalThreadId?.endsWith('@g.us')) &&
-          (!participantsData || participantsData.participants.length === 0 || participantsData.syncError)
-        ) {
-          void fetchParticipants(selectedConversation.id, true);
+    // Detect @ mention trigger while typing (group chats only)
+    if (isCurrentConversationGroup) {
+      const cursorPos = replyInputRef.current?.selectionStart ?? nextVal.length;
+      const textBeforeCursor = nextVal.slice(0, cursorPos);
+      const lastAt = textBeforeCursor.lastIndexOf('@');
+      if (lastAt !== -1 && (lastAt === 0 || /\s/.test(textBeforeCursor[lastAt - 1]))) {
+        const query = textBeforeCursor.slice(lastAt + 1);
+        if (!/\s/.test(query) && query.length <= 25) {
+          setMentionFilter(query.toLowerCase());
+          setMentionAnchorIndex(lastAt);
+          if (
+            !showMentionPicker &&
+            selectedConversation &&
+            (!participantsData || participantsData.participants.length === 0 || participantsData.syncError)
+          ) {
+            void fetchParticipants(selectedConversation.id, true);
+          }
+          setShowMentionPicker(true);
+        } else {
+          setShowMentionPicker(false);
         }
-        setShowMentionPicker(true);
+      } else if (showMentionPicker && !mentionFilter) {
+        // Keep open if opened explicitly via toolbar button
       } else {
         setShowMentionPicker(false);
       }
-    } else if (showMentionPicker && !mentionFilter) {
-      // Keep open if opened explicitly via toolbar button
     } else {
       setShowMentionPicker(false);
     }
@@ -1984,36 +2135,64 @@ export const Conversations: React.FC<ConversationsProps> = ({
       return;
     }
 
-    if (!text && !pendingAttachment) return;
+    if (!text && pendingAttachments.length === 0) return;
     stopOutboundTyping(selectedConversation.id);
     setSending(true);
     try {
       const textMentions = Array.from(text.matchAll(/@(\d{8,16})/g)).map((m) => `${m[1]}@c.us`);
-      const newMsg = await api.sendConversationMessage(selectedConversation.id, {
-        body: text,
-        session: selectedSession || undefined,
-        mediaBase64: pendingAttachment?.base64,
-        mediaMimetype: pendingAttachment?.mimetype,
-        mediaName: pendingAttachment?.name,
-        replyToMessageId: replyingToMessage?.id,
-        mentions: textMentions.length > 0 ? textMentions : undefined,
-      });
+
+      if (pendingAttachments.length === 0) {
+        const newMsg = await api.sendConversationMessage(selectedConversation.id, {
+          body: text,
+          session: selectedSession || undefined,
+          replyToMessageId: replyingToMessage?.id,
+          mentions: textMentions.length > 0 ? textMentions : undefined,
+        });
+        setMessages((prev) => [...prev, newMsg]);
+        if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+          toast.error(newMsg.errorMessage || 'Gagal mengirim pesan WhatsApp');
+        }
+      } else {
+        const total = pendingAttachments.length;
+        const sentList: ChatMessage[] = [];
+        for (let idx = 0; idx < total; idx++) {
+          const item = pendingAttachments[idx];
+          const isFirst = idx === 0;
+          const msgCaption = isFirst ? text : '';
+          setSendingProgress({ current: idx + 1, total });
+          const newMsg = await api.sendConversationMessage(selectedConversation.id, {
+            body: msgCaption,
+            session: selectedSession || undefined,
+            mediaBase64: item.base64,
+            mediaMimetype: item.mimetype,
+            mediaName: item.name,
+            replyToMessageId: isFirst ? replyingToMessage?.id : undefined,
+            mentions: isFirst && textMentions.length > 0 ? textMentions : undefined,
+            asDocument: item.asDocument,
+            isHd: !item.asDocument && item.kind === 'image' && isHdMode,
+          });
+          sentList.push(newMsg);
+          if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
+            toast.error(newMsg.errorMessage || `Gagal mengirim ${item.name}`);
+          }
+        }
+        setMessages((prev) => [...prev, ...sentList]);
+      }
+
       setInputText('');
-      setPendingAttachment(null);
+      setPendingAttachments([]);
+      setSendingProgress(null);
       setReplyingToMessage(null);
       setShowEmojiPicker(false);
       setShowMentionPicker(false);
       setMentionFilter('');
       setMentionAnchorIndex(null);
-      setMessages((prev) => [...prev, newMsg]);
-      if (newMsg.status === 'FAILED' || newMsg.ackStatus < 0) {
-        toast.error(newMsg.errorMessage || 'Gagal mengirim pesan WhatsApp');
-      }
       void fetchConversations();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal mengirim pesan WhatsApp');
     } finally {
       setSending(false);
+      setSendingProgress(null);
     }
   };
 
@@ -4904,7 +5083,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 })
                               }
                               title="Klik untuk memperbesar gambar"
-                              className="block max-w-full rounded border border-gray-200 bg-white overflow-hidden hover:opacity-95 transition-opacity"
+                              className="block relative max-w-full rounded border border-gray-200 bg-white overflow-hidden hover:opacity-95 transition-opacity"
                             >
                               <img
                                 src={resolveMediaUrl(msg.mediaUrl)}
@@ -4912,6 +5091,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 loading="lazy"
                                 className="max-w-full max-h-60 object-contain"
                               />
+                              {msgMeta?.isHd && (
+                                <span
+                                  title="Foto Kualitas Tinggi (HD)"
+                                  className="absolute top-1.5 left-1.5 px-1 py-0.2 rounded bg-black/60 text-white font-bold text-[9px] tracking-wider uppercase pointer-events-none"
+                                >
+                                  HD
+                                </span>
+                              )}
                             </button>
                             <div className="flex items-center justify-end gap-2 text-[10px] text-gray-500">
                               <a
@@ -5015,9 +5202,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                       meta.linkPreview.caption,
                                       participantsLookup,
                                       msg.mentionedContacts,
-                                      handleOpenMentionContact,
-                                      contactsByPhone,
-                                      mySessionPhones
+                                      handleOpenMentionContact
                                     )}
                                   </div>
                                 )}
@@ -5071,9 +5256,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                     meta.interactiveButtons.body,
                                     participantsLookup,
                                     msg.mentionedContacts,
-                                    handleOpenMentionContact,
-                                    contactsByPhone,
-                                    mySessionPhones
+                                    handleOpenMentionContact
                                   )}
                                 </div>
                                 {meta.interactiveButtons.footer && (
@@ -5419,9 +5602,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 msg.body,
                                 participantsLookup,
                                 msg.mentionedContacts,
-                                handleOpenMentionContact,
-                                contactsByPhone,
-                                mySessionPhones
+                                handleOpenMentionContact
                               )}
                             </div>
                           );
@@ -5515,8 +5696,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         </div>
                         </div>
 
-                        {/* Directly Accessible Outside Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) */}
-                        {(canReplyConversation || canManageConversation) && (
+                        {/* Directly Accessible Outside Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) - Disembunyikan jika pesan sudah ditarik/dihapus */}
+                        {!isRevoked && (canReplyConversation || canManageConversation) && (
                           <div className="mt-1 flex flex-wrap items-center gap-1.5 px-0.5 text-[11px]">
                             {canReplyConversation && (
                               <button
@@ -5595,21 +5776,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 <span>Reaksi</span>
                               </button>
                             )}
-                            {!isRevoked && (
-                              <button
-                                type="button"
-                                onClick={() => setDeleteMessageTarget(msg)}
-                                title="Hapus Pesan (Tarik / Hapus Pribadi)"
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 text-gray-600 hover:text-red-600 font-medium transition-colors"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Hapus</span>
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => setDeleteMessageTarget(msg)}
+                              title="Hapus Pesan (Tarik / Hapus Pribadi)"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 bg-white hover:bg-red-50 hover:border-red-200 text-gray-600 hover:text-red-600 font-medium transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Hapus</span>
+                            </button>
                           </div>
                         )}
 
-                        {activeReactionMsgId === msg.id && (
+                        {!isRevoked && activeReactionMsgId === msg.id && (
                           <div className="mt-1 p-1 rounded-full bg-white border border-gray-200 shadow-sm inline-flex items-center gap-0.5 flex-wrap">
                             {QUICK_REACTION_EMOJIS.map((em) => (
                               <button
@@ -5673,7 +5852,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     type="button"
                     onClick={() => {
                       setComposerMode('NOTE');
-                      setPendingAttachment(null);
+                      setPendingAttachments([]);
                       openComposerPicker(null);
                       stopOutboundTyping(selectedConversation.id);
                     }}
@@ -5739,8 +5918,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       replyingToMessage.body || '',
                       mySessionPhones,
                       contactsByPhone,
-                      participantsLookup,
-                      replyingToMessage.mentionedContacts
+                      participantsLookup
                     )}
                   </p>
                 </div>
@@ -5755,48 +5933,128 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </div>
             )}
 
-            {pendingAttachment && (
-              <div className="flex items-center gap-2 p-2 rounded-md bg-indigo-50 border border-indigo-200 text-xs">
-                {pendingAttachment.kind === 'image' ? (
-                  <img
-                    src={pendingAttachment.base64}
-                    alt={pendingAttachment.name}
-                    className="w-10 h-10 rounded object-cover border border-indigo-200 shrink-0"
-                  />
-                ) : pendingAttachment.kind === 'video' ? (
-                  <div className="w-9 h-9 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-                    <Video className="w-4 h-4" />
+            {pendingAttachments.length > 0 && (
+              <div className="space-y-1.5 p-2 rounded-lg bg-indigo-50/70 border border-indigo-200 text-xs">
+                <div className="flex items-center justify-between gap-2 pb-1 border-b border-indigo-100">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-indigo-950 text-[11px]">
+                      {pendingAttachments.length} Lampiran Dipilih
+                    </span>
+                    {pendingAttachments.some((a) => a.kind === 'image' && !a.asDocument) && (
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleHdMode()}
+                        title={
+                          isHdMode
+                            ? 'Mode HD Aktif: Foto dikirim resolusi tinggi asli'
+                            : 'Mode Standar Aktif: Foto dikompresi WhatsApp (hemat kuota)'
+                        }
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                          isHdMode
+                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                        }`}
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>HD</span>
+                        <span className="text-[9px] font-normal opacity-90">
+                          {isHdMode ? 'Aktif' : 'Standar'}
+                        </span>
+                      </button>
+                    )}
+                    {pendingAttachments.some((a) => a.asDocument) && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-gray-100 text-gray-600 border border-gray-200">
+                        Mode Berkas Dokumen (Tanpa Pratinjau Foto)
+                      </span>
+                    )}
                   </div>
-                ) : pendingAttachment.kind === 'audio' ? (
-                  <div className="w-9 h-9 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-                    <Music className="w-4 h-4" />
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      title="Tambah Foto atau Video"
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium text-indigo-700 bg-white border border-indigo-200 hover:bg-indigo-50 transition-colors inline-flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Foto</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => docInputRef.current?.click()}
+                      title="Tambah Dokumen / Berkas"
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 transition-colors inline-flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Berkas</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingAttachments([])}
+                      title="Batalkan Semua Lampiran"
+                      className="p-1 rounded text-gray-400 hover:text-red-600 transition-colors"
+                      aria-label="Batalkan semua lampiran"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                ) : (
-                  <div className="w-9 h-9 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-                    <FileText className="w-4 h-4" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="font-mono text-[11px] truncate text-gray-900">
-                    {pendingAttachment.name}
-                  </div>
-                  {pendingAttachment.size !== undefined && (
-                    <div className="text-[10px] text-gray-500 font-mono">
-                      {pendingAttachment.kind.toUpperCase()} •{' '}
-                      {pendingAttachment.size >= 1024 * 1024
-                        ? `${(pendingAttachment.size / (1024 * 1024)).toFixed(2)} MB`
-                        : `${Math.max(1, Math.round(pendingAttachment.size / 1024))} KB`}
-                    </div>
-                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setPendingAttachment(null)}
-                  className="p-1 text-gray-500 hover:text-gray-800"
-                  aria-label="Hapus lampiran"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+
+                <div className="flex items-center gap-2 overflow-x-auto py-1">
+                  {pendingAttachments.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      className="relative shrink-0 flex items-center gap-2 p-1.5 rounded-md bg-white border border-indigo-200/90 shadow-2xs max-w-[210px]"
+                    >
+                      {item.kind === 'image' && !item.asDocument ? (
+                        <div className="relative w-10 h-10 rounded overflow-hidden border border-gray-200 shrink-0">
+                          <img
+                            src={item.base64}
+                            alt={item.name}
+                            className="w-full h-full object-cover"
+                          />
+                          {isHdMode && (
+                            <span className="absolute bottom-0 right-0 bg-emerald-600 text-white text-[8px] font-bold px-0.5 rounded-tl">
+                              HD
+                            </span>
+                          )}
+                        </div>
+                      ) : item.kind === 'video' ? (
+                        <div className="w-10 h-10 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                          <Video className="w-4 h-4" />
+                        </div>
+                      ) : item.kind === 'audio' ? (
+                        <div className="w-10 h-10 rounded bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                          <Music className="w-4 h-4" />
+                        </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded bg-gray-100 text-gray-700 flex items-center justify-center shrink-0">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1 pr-4">
+                        <div className="font-mono text-[11px] truncate text-gray-900" title={item.name}>
+                          {item.name}
+                        </div>
+                        <div className="text-[10px] text-gray-500 font-mono">
+                          {item.asDocument ? 'DOKUMEN' : item.kind.toUpperCase()} •{' '}
+                          {item.size >= 1024 * 1024
+                            ? `${(item.size / (1024 * 1024)).toFixed(1)} MB`
+                            : `${Math.max(1, Math.round(item.size / 1024))} KB`}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPendingAttachments((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        title={`Hapus ${item.name}`}
+                        className="absolute top-1 right-1 p-0.5 rounded text-gray-400 hover:text-red-600 hover:bg-gray-100 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -6862,7 +7120,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           setComposerMode('REPLY');
                         } else {
                           setComposerMode('NOTE');
-                          setPendingAttachment(null);
+                          setPendingAttachments([]);
                           openComposerPicker(null);
                           stopOutboundTyping(selectedConversation.id);
                         }
@@ -6930,12 +7188,36 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => openComposerPicker('MENTION')}
+                        onClick={() => {
+                          setShowComposerTools(false);
+                          imageInputRef.current?.click();
+                        }}
                         className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-indigo-700 hover:bg-gray-100"
                       >
-                        <AtSign className="w-4 h-4 text-indigo-600" />
-                        <span>Mention</span>
+                        <ImageIcon className="w-4 h-4 text-indigo-600" />
+                        <span>Foto/Video</span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowComposerTools(false);
+                          docInputRef.current?.click();
+                        }}
+                        className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100"
+                      >
+                        <FileText className="w-4 h-4 text-gray-600" />
+                        <span>Dokumen</span>
+                      </button>
+                      {isCurrentConversationGroup && (
+                        <button
+                          type="button"
+                          onClick={() => openComposerPicker('MENTION')}
+                          className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-indigo-700 hover:bg-gray-100"
+                        >
+                          <AtSign className="w-4 h-4 text-indigo-600" />
+                          <span>Mention</span>
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -7023,10 +7305,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
               <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               <input
-                ref={fileInputRef}
+                ref={imageInputRef}
                 type="file"
-                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar"
-                onChange={handleFilePick}
+                accept="image/*,video/*"
+                multiple
+                onChange={(e) => void handleAttachmentPick(e, false)}
+                className="hidden"
+              />
+              <input
+                ref={docInputRef}
+                type="file"
+                accept="*/*"
+                multiple
+                onChange={(e) => void handleAttachmentPick(e, true)}
                 className="hidden"
               />
               {/* Mobile Compact Trigger & Attachment */}
@@ -7044,14 +7335,24 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   {showComposerTools ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 </button>
                 {composerMode === 'REPLY' && (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    title="Lampirkan Gambar, Video, Audio, atau Dokumen (maks. 10 MB)"
-                    className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
-                  >
-                    <Paperclip className="w-4 h-4" />
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      title="Kirim Foto / Video (Mendukung HD & Multi-Foto)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-indigo-50 text-indigo-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => docInputRef.current?.click()}
+                      title="Kirim Dokumen / Berkas (Tanpa Pratinjau Foto Langsung)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
+                    >
+                      <Paperclip className="w-4 h-4" />
+                    </button>
+                  </>
                 )}
               </div>
 
@@ -7123,23 +7424,33 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     >
                       <ListChecks className="w-4 h-4" />
                     </button>
+                    {isCurrentConversationGroup && (
+                      <button
+                        type="button"
+                        onClick={() => openComposerPicker('MENTION')}
+                        title="Sebut / Mention Partisipan (@)"
+                        className={`h-9 w-9 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors ${
+                          showMentionPicker
+                            ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                            : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600'
+                        }`}
+                      >
+                        <AtSign className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      onClick={() => openComposerPicker('MENTION')}
-                      title="Sebut / Mention Partisipan (@)"
-                      className={`h-9 w-9 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors ${
-                        showMentionPicker
-                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                          : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-indigo-600'
-                      }`}
+                      onClick={() => imageInputRef.current?.click()}
+                      title="Kirim Foto atau Video (Mendukung HD & Multi-Foto)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-200 text-indigo-600 inline-flex items-center justify-center shrink-0 transition-colors"
                     >
-                      <AtSign className="w-4 h-4" />
+                      <ImageIcon className="w-4 h-4" />
                     </button>
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      title="Lampirkan Gambar, Video, Audio, atau Dokumen (maks. 10 MB)"
-                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0"
+                      onClick={() => docInputRef.current?.click()}
+                      title="Kirim Dokumen / Berkas (Tanpa Pratinjau Foto Langsung)"
+                      className="h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 inline-flex items-center justify-center shrink-0 transition-colors"
                     >
                       <Paperclip className="w-4 h-4" />
                     </button>
@@ -7158,7 +7469,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           CHANNEL_META[
                             ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType
                           ]?.short || 'WA'
-                        } (ketik / utk template, @ utk mention)...`
+                        } (ketik / utk template${isCurrentConversationGroup ? ', @ utk mention' : ''})...`
                   }
                   value={inputText}
                   onChange={(e) => handleReplyTextChange(e.target.value)}
@@ -7174,12 +7485,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   variant="primary"
                   size="md"
                   isLoading={sending}
-                  disabled={!inputText.trim() && !pendingAttachment}
+                  disabled={!inputText.trim() && pendingAttachments.length === 0}
                   className="shrink-0 h-9 px-2.5 sm:px-3.5"
                 >
                   <Send className="w-3.5 h-3.5 sm:hidden" />
                   <span className="hidden sm:inline">
-                    {composerMode === 'NOTE' ? 'Simpan' : 'Kirim'}
+                    {sending && sendingProgress
+                      ? `${sendingProgress.current}/${sendingProgress.total}`
+                      : composerMode === 'NOTE'
+                      ? 'Simpan'
+                      : 'Kirim'}
                   </span>
                 </Button>
               </div>
@@ -9036,15 +9351,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 Pratinjau Pesan
               </div>
               <p className="line-clamp-3 italic text-gray-800">
-                "{pinningMessageTarget.body
-                  ? formatMentionPlainText(
-                      pinningMessageTarget.body,
-                      mySessionPhones,
-                      contactsByPhone,
-                      participantsLookup,
-                      pinningMessageTarget.mentionedContacts
-                    )
-                  : pinningMessageTarget.mediaName || '[Pesan Media]'}"
+                "{pinningMessageTarget.body || pinningMessageTarget.mediaName || '[Pesan Media]'}"
               </p>
             </div>
           )}

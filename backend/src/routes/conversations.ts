@@ -1976,6 +1976,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       forwardedFromSender?: string;
       forwardedFromChannel?: string;
       messageKind?: OutboundMessageKind;
+      asDocument?: boolean;
+      isHd?: boolean;
       linkPreview?: OutboundLinkPreviewPayload;
       interactiveButtons?: OutboundButtonsPayload;
       poll?: OutboundPollPayload;
@@ -2002,6 +2004,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         forwardedFromSender,
         forwardedFromChannel,
         messageKind,
+        asDocument,
+        isHd,
         linkPreview,
         interactiveButtons,
         poll,
@@ -2472,7 +2476,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           };
         } else if (mediaBase64 && mediaMimetype) {
           persistedMessageType = 'MEDIA';
-          mediaType = mediaMimetype.startsWith('image/')
+          mediaType = asDocument
+            ? 'document'
+            : mediaMimetype.startsWith('image/')
             ? 'image'
             : mediaMimetype.startsWith('video/')
               ? 'video'
@@ -2504,15 +2510,25 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               caption: bodyText,
               replyTo: quotedWahaId,
               mentions: effectiveMentions.length > 0 ? effectiveMentions : undefined,
+              asDocument: Boolean(asDocument),
             },
             targetSession
           );
+          if (isHd || asDocument) {
+            metadataRecord = {
+              ...(metadataRecord || {}),
+              ...(isHd ? { isHd: true } : {}),
+              ...(asDocument ? { asDocument: true } : {}),
+            };
+          }
         } else if (mediaUrl) {
           const loadedMedia = await readUploadedMediaAsDataUri(mediaUrl, mediaMimetype || undefined);
           const resolvedMime = loadedMedia?.mimetype || mediaMimetype || 'application/octet-stream';
           persistedMessageType = 'MEDIA';
           storedMediaUrl = mediaUrl;
-          mediaType = resolvedMime.startsWith('image/')
+          mediaType = asDocument
+            ? 'document'
+            : resolvedMime.startsWith('image/')
             ? 'image'
             : resolvedMime.startsWith('video/')
               ? 'video'
@@ -2529,6 +2545,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
                 caption: bodyText,
                 replyTo: quotedWahaId,
                 mentions: effectiveMentions.length > 0 ? effectiveMentions : undefined,
+                asDocument: Boolean(asDocument),
               },
               targetSession
             );

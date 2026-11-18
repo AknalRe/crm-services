@@ -646,13 +646,15 @@ export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta 
     .toLowerCase();
 
   let mediaType: 'image' | 'video' | 'audio' | 'document' | null = null;
-  if (rawMime.startsWith('image/') || isSticker || imgMsg || rawType === 'image') {
+  if (docMsg || rawType === 'document') {
+    mediaType = 'document';
+  } else if (rawMime.startsWith('image/') || isSticker || imgMsg || rawType === 'image') {
     mediaType = 'image';
   } else if (rawMime.startsWith('video/') || vidMsg || rawType === 'video') {
     mediaType = 'video';
   } else if (rawMime.startsWith('audio/') || audMsg || rawType === 'audio' || rawType === 'ptt') {
     mediaType = 'audio';
-  } else if (docMsg || rawType === 'document' || payload?.hasMedia || rawMediaUrl || inlineBase64) {
+  } else if (payload?.hasMedia || rawMediaUrl || inlineBase64) {
     mediaType = 'document';
   }
 

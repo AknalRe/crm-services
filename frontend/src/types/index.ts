@@ -301,6 +301,8 @@ export interface ChatMessageMetadata {
   pinnedBy?: string | null;
   pinDuration?: number | null;
   pinExpiresAt?: string | null;
+  asDocument?: boolean;
+  isHd?: boolean;
   isStarred?: boolean;
   starredAt?: string | null;
   forwarded?: boolean;
