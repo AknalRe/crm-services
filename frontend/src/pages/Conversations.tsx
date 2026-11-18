@@ -5019,111 +5019,107 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     </button>
                   )}
 
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setShowMobileChatActions((v) => !v)}
-                      title="Aksi Percakapan (Status, Agent)"
-                      className={`h-8 px-2 rounded-md border text-[11px] font-semibold inline-flex items-center gap-1 transition-colors ${
-                        !isExcludedConv
-                          ? selectedConversation.status === 'RESOLVED'
+                  {!isExcludedConv && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowMobileChatActions((v) => !v)}
+                        title="Aksi Percakapan (Status, Agent)"
+                        className={`h-8 px-2 rounded-md border text-[11px] font-semibold inline-flex items-center gap-1 transition-colors ${
+                          selectedConversation.status === 'RESOLVED'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : selectedConversation.status === 'PENDING'
                             ? 'bg-amber-50 text-amber-700 border-amber-200'
                             : 'bg-blue-50 text-blue-700 border-blue-200'
-                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <span>
-                        {!isExcludedConv
-                          ? selectedConversation.status === 'RESOLVED'
+                        }`}
+                      >
+                        <span>
+                          {selectedConversation.status === 'RESOLVED'
                             ? 'Resolved'
                             : selectedConversation.status === 'PENDING'
                             ? 'Pending'
-                            : 'Open'
-                          : 'Aksi'}
-                      </span>
-                      <MoreVertical className="w-3.5 h-3.5" />
-                    </button>
+                            : 'Open'}
+                        </span>
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </button>
 
-                    {showMobileChatActions && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-20"
-                          onClick={() => setShowMobileChatActions(false)}
-                        />
-                        <div className="absolute right-0 mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg bg-white border border-gray-200 shadow-xl p-3 z-30 space-y-2.5 text-xs">
-                          <div className="flex items-center justify-between gap-2 pb-2 border-b border-gray-100">
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${channelMeta.cls}`}>
-                              {channelMeta.label}
-                            </span>
-                            {selectedConversation.contact?.nomor_whatsapp && (
-                              <a
-                                href={`https://wa.me/${selectedConversation.contact.nomor_whatsapp}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] font-mono text-indigo-600 hover:underline inline-flex items-center gap-1"
-                              >
-                                <Phone className="w-3 h-3" />
-                                +{selectedConversation.contact.nomor_whatsapp}
-                              </a>
-                            )}
-                          </div>
-
-                          {(ch === 'INSTAGRAM' || ch === 'FACEBOOK') && (() => {
-                            const latestInbound =
-                              selectedConversation.lastInboundAt ||
-                              [...messages].reverse().find((m) => m.direction === 'INBOUND')?.createdAt ||
-                              selectedConversation.firstInboundAt;
-                            if (!latestInbound) return null;
-                            const remainingMs = new Date(latestInbound).getTime() + 24 * 3600_000 - Date.now();
-                            const hrs = Math.max(0, Math.floor(remainingMs / 3600_000));
-                            const mins = Math.max(0, Math.floor((remainingMs % 3600_000) / 60_000));
-                            return (
-                              <div
-                                className={`px-2 py-1 rounded border text-[10px] font-semibold flex items-center gap-1.5 ${
-                                  remainingMs <= 0
-                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                    : hrs < 4
-                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : 'bg-sky-50 text-sky-700 border-sky-200'
-                                }`}
-                              >
-                                <Clock className="w-3 h-3 shrink-0" />
-                                <span>
-                                  {remainingMs <= 0
-                                    ? 'Jendela balas 24 jam Meta berakhir'
-                                    : `Jendela Meta tersisa: ${hrs}j ${mins}m`}
-                                </span>
-                              </div>
-                            );
-                          })()}
-
-                          {!isExcludedConv && assignableAgents.length > 0 && (
-                            <div className="space-y-1">
-                              <span className="block text-[10px] font-medium text-gray-500">
-                                Tugaskan CS
+                      {showMobileChatActions && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-20"
+                            onClick={() => setShowMobileChatActions(false)}
+                          />
+                          <div className="absolute right-0 mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg bg-white border border-gray-200 shadow-xl p-3 z-30 space-y-2.5 text-xs">
+                            <div className="flex items-center justify-between gap-2 pb-2 border-b border-gray-100">
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${channelMeta.cls}`}>
+                                {channelMeta.label}
                               </span>
-                              <select
-                                value={selectedConversation.assignedAgentId || ''}
-                                disabled={!canManageConversation}
-                                onChange={(e) => {
-                                  void handleAssignAgent(e.target.value || null);
-                                  setShowMobileChatActions(false);
-                                }}
-                                className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] text-gray-700 disabled:opacity-60"
-                              >
-                                <option value="">Belum Ditugaskan</option>
-                                {assignableAgents.map((ag) => (
-                                  <option key={ag.id} value={ag.id}>
-                                    {ag.name}
-                                  </option>
-                                ))}
-                              </select>
+                              {selectedConversation.contact?.nomor_whatsapp && (
+                                <a
+                                  href={`https://wa.me/${selectedConversation.contact.nomor_whatsapp}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[11px] font-mono text-indigo-600 hover:underline inline-flex items-center gap-1"
+                                >
+                                  <Phone className="w-3 h-3" />
+                                  +{selectedConversation.contact.nomor_whatsapp}
+                                </a>
+                              )}
                             </div>
-                          )}
 
-                          {!isExcludedConv && (
+                            {(ch === 'INSTAGRAM' || ch === 'FACEBOOK') && (() => {
+                              const latestInbound =
+                                selectedConversation.lastInboundAt ||
+                                [...messages].reverse().find((m) => m.direction === 'INBOUND')?.createdAt ||
+                                selectedConversation.firstInboundAt;
+                              if (!latestInbound) return null;
+                              const remainingMs = new Date(latestInbound).getTime() + 24 * 3600_000 - Date.now();
+                              const hrs = Math.max(0, Math.floor(remainingMs / 3600_000));
+                              const mins = Math.max(0, Math.floor((remainingMs % 3600_000) / 60_000));
+                              return (
+                                <div
+                                  className={`px-2 py-1 rounded border text-[10px] font-semibold flex items-center gap-1.5 ${
+                                    remainingMs <= 0
+                                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                      : hrs < 4
+                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                      : 'bg-sky-50 text-sky-700 border-sky-200'
+                                  }`}
+                                >
+                                  <Clock className="w-3 h-3 shrink-0" />
+                                  <span>
+                                    {remainingMs <= 0
+                                      ? 'Jendela balas 24 jam Meta berakhir'
+                                      : `Jendela Meta tersisa: ${hrs}j ${mins}m`}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+
+                            {assignableAgents.length > 0 && (
+                              <div className="space-y-1">
+                                <span className="block text-[10px] font-medium text-gray-500">
+                                  Tugaskan CS
+                                </span>
+                                <select
+                                  value={selectedConversation.assignedAgentId || ''}
+                                  disabled={!canManageConversation}
+                                  onChange={(e) => {
+                                    void handleAssignAgent(e.target.value || null);
+                                    setShowMobileChatActions(false);
+                                  }}
+                                  className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded text-[11px] text-gray-700 disabled:opacity-60"
+                                >
+                                  <option value="">Belum Ditugaskan</option>
+                                  {assignableAgents.map((ag) => (
+                                    <option key={ag.id} value={ag.id}>
+                                      {ag.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
                             <div className="space-y-1">
                               <span className="block text-[10px] font-medium text-gray-500">
                                 Status Percakapan
@@ -5149,25 +5145,25 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 ))}
                               </div>
                             </div>
-                          )}
 
-                          <div className="pt-1 border-t border-gray-100 space-y-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowMobileChatActions(false);
-                                toggleContactPanel(true);
-                              }}
-                              className="w-full h-8 px-2.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 text-[11px] font-semibold flex items-center gap-2"
-                            >
-                              <Info className="w-3.5 h-3.5" />
-                              <span>Lihat Detail Kontak</span>
-                            </button>
+                            <div className="pt-1 border-t border-gray-100 space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowMobileChatActions(false);
+                                  toggleContactPanel(true);
+                                }}
+                                className="w-full h-8 px-2.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 text-[11px] font-semibold flex items-center gap-2"
+                              >
+                                <Info className="w-3.5 h-3.5" />
+                                <span>Lihat Detail Kontak</span>
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   <button
                     type="button"
