@@ -601,6 +601,7 @@ export interface WahaSendResult {
   error?: string;
   usedFallbackText?: boolean;
   fallbackReason?: string;
+  unsupportedFeature?: boolean;
 }
 
 export function formatLinkPreviewFallbackText(data: {
@@ -2045,11 +2046,12 @@ export class WahaService {
         const payload = resData?.__wahaMeta ? resData.data : resData;
         const meta = resData?.__wahaMeta || {};
         return {
-          success: true,
+          success: !meta.unsupportedFeature,
           messageId: this.extractOutboundMessageId(payload),
           sessionUsed: sess,
           ...(meta.usedFallbackText ? { usedFallbackText: true } : {}),
           ...(meta.fallbackReason ? { fallbackReason: String(meta.fallbackReason) } : {}),
+          ...(meta.unsupportedFeature ? { unsupportedFeature: true, error: meta.fallbackReason } : {}),
         };
       };
 
@@ -2221,25 +2223,39 @@ export class WahaService {
       };
     }
     return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
-      try {
-        const res = await client.post(
-          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(cleanMsgId)}/pin`,
-          { duration: durationSeconds },
-          { timeout: 12000 }
-        );
-        return res.data;
-      } catch (err: any) {
-        const st = err?.response?.status;
-        if (st === 404 || st === 405 || st === 501) {
-          const fallbackRes = await client.post(
-            '/api/pinMessage',
-            { session: targetSession, chatId, messageId: cleanMsgId, duration: durationSeconds },
+      const stanzaId = cleanMsgId.includes('_') ? cleanMsgId.split('_').pop() : null;
+      const candidateIds = [cleanMsgId, ...(stanzaId && stanzaId !== cleanMsgId ? [stanzaId] : [])];
+
+      let lastErr: any = null;
+      for (const msgId of candidateIds) {
+        try {
+          const res = await client.post(
+            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(msgId)}/pin`,
+            { duration: durationSeconds },
             { timeout: 12000 }
           );
-          return fallbackRes.data;
+          return res.data;
+        } catch (err: any) {
+          lastErr = err;
+          const st = err?.response?.status;
+          if (st === 401 || st === 403) throw err;
         }
-        throw err;
       }
+
+      if (this.isWahaFeatureUnsupported(lastErr)) {
+        return {
+          __wahaMeta: {
+            unsupportedFeature: true,
+            fallbackReason: 'Fitur semat pesan belum didukung oleh engine WAHA aktif (misal engine GOWS).',
+          },
+          data: {
+            unsupported: true,
+            message: 'Fitur semat pesan belum didukung oleh engine WAHA aktif.',
+          },
+        };
+      }
+
+      throw lastErr;
     });
   }
 
@@ -2259,25 +2275,56 @@ export class WahaService {
       };
     }
     return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
-      try {
-        const res = await client.post(
-          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(cleanMsgId)}/unpin`,
-          {},
-          { timeout: 12000 }
-        );
-        return res.data;
-      } catch (err: any) {
-        const st = err?.response?.status;
-        if (st === 404 || st === 405 || st === 501) {
-          const fallbackRes = await client.post(
-            '/api/unpinMessage',
-            { session: targetSession, chatId, messageId: cleanMsgId },
+      const stanzaId = cleanMsgId.includes('_') ? cleanMsgId.split('_').pop() : null;
+      const candidateIds = [cleanMsgId, ...(stanzaId && stanzaId !== cleanMsgId ? [stanzaId] : [])];
+
+      let lastErr: any = null;
+      // 1. Primary: POST /api/{session}/chats/{chatId}/messages/{messageId}/unpin
+      for (const msgId of candidateIds) {
+        try {
+          const res = await client.post(
+            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(msgId)}/unpin`,
+            {},
             { timeout: 12000 }
           );
-          return fallbackRes.data;
+          return res.data;
+        } catch (err: any) {
+          lastErr = err;
+          const st = err?.response?.status;
+          if (st === 401 || st === 403) throw err;
         }
-        throw err;
       }
+
+      // 2. Alternative fallback: POST /api/{session}/chats/{chatId}/messages/{messageId}/pin with duration: 0
+      for (const msgId of candidateIds) {
+        try {
+          const res = await client.post(
+            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(msgId)}/pin`,
+            { duration: 0 },
+            { timeout: 12000 }
+          );
+          return res.data;
+        } catch (err: any) {
+          lastErr = err;
+          const st = err?.response?.status;
+          if (st === 401 || st === 403) throw err;
+        }
+      }
+
+      if (this.isWahaFeatureUnsupported(lastErr)) {
+        return {
+          __wahaMeta: {
+            unsupportedFeature: true,
+            fallbackReason: 'Fitur lepas sematan belum didukung oleh engine WAHA aktif (misal engine GOWS).',
+          },
+          data: {
+            unsupported: true,
+            message: 'Fitur lepas sematan belum didukung oleh engine WAHA aktif.',
+          },
+        };
+      }
+
+      throw lastErr;
     });
   }
 
@@ -2298,25 +2345,52 @@ export class WahaService {
       };
     }
     return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
-      try {
-        const res = await client.put(
-          '/api/star',
-          { session: targetSession, chatId, messageId: cleanMsgId, star },
-          { timeout: 12000 }
-        );
-        return res.data;
-      } catch (err: any) {
-        const st = err?.response?.status;
-        if (st === 404 || st === 405 || st === 501) {
-          const fallbackRes = await client.put(
-            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(cleanMsgId)}/star`,
-            { star },
+      const stanzaId = cleanMsgId.includes('_') ? cleanMsgId.split('_').pop() : null;
+      const candidateIds = [cleanMsgId, ...(stanzaId && stanzaId !== cleanMsgId ? [stanzaId] : [])];
+
+      let lastErr: any = null;
+      for (const msgId of candidateIds) {
+        try {
+          const res = await client.put(
+            '/api/star',
+            { session: targetSession, chatId, messageId: msgId, star },
             { timeout: 12000 }
           );
-          return fallbackRes.data;
+          return res.data;
+        } catch (err: any) {
+          lastErr = err;
+          const st = err?.response?.status;
+          if (st === 401 || st === 403) throw err;
+          if (st === 404 || st === 405 || st === 501) {
+            try {
+              const fallbackRes = await client.put(
+                `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(msgId)}/star`,
+                { star },
+                { timeout: 12000 }
+              );
+              return fallbackRes.data;
+            } catch (fallbackErr: any) {
+              lastErr = fallbackErr;
+              if (fallbackErr?.response?.status === 401 || fallbackErr?.response?.status === 403) throw fallbackErr;
+            }
+          }
         }
-        throw err;
       }
+
+      if (this.isWahaFeatureUnsupported(lastErr)) {
+        return {
+          __wahaMeta: {
+            unsupportedFeature: true,
+            fallbackReason: 'Fitur bintang pesan belum didukung oleh engine WAHA aktif.',
+          },
+          data: {
+            unsupported: true,
+            message: 'Fitur bintang pesan belum didukung oleh engine WAHA aktif.',
+          },
+        };
+      }
+
+      throw lastErr;
     });
   }
 

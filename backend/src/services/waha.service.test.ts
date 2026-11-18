@@ -2253,6 +2253,50 @@ test('pinMessage, unpinMessage, starMessage, and syncChatLabels dispatch accurat
   assert.deepEqual(labelPutCall?.data?.labels, [{ id: '10' }, { id: '11' }]);
 });
 
+test('pinMessage and unpinMessage handle WAHA engine 501 / 404 unsupported gracefully without throwing or calling /api/unpinMessage', async (t) => {
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha-gows.example.com',
+    apiKey: 'test-key',
+    session: 'sales',
+  });
+
+  const calls: Array<{ method: string; url: string; data?: any }> = [];
+  const origCreate = axios.create;
+  (axios as any).create = () => ({
+    get: async (url: string) => {
+      calls.push({ method: 'GET', url });
+      if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      if (url === '/api/sessions') return { data: [{ name: 'sales', status: 'WORKING' }] };
+      return { data: {} };
+    },
+    post: async (url: string, data?: any) => {
+      calls.push({ method: 'POST', url, data });
+      // Simulate 501 Not Implemented or 404 for pin/unpin on GOWS engine
+      const err: any = new Error('501 Not Implemented: feature not available on GOWS');
+      err.response = { status: 501, data: { message: 'Not Implemented' } };
+      throw err;
+    },
+  });
+  t.after(() => {
+    (axios as any).create = origCreate;
+  });
+
+  // Test unpinMessage: should NOT call /api/unpinMessage, should return unsupportedFeature: true
+  const unpinRes = await wahaService.unpinMessage('081234567890', 'false_081234567890@c.us_3EB0ABC', 'sales');
+  assert.equal(unpinRes.success, false);
+  assert.equal(unpinRes.unsupportedFeature, true);
+  const bogusCall = calls.find((c) => c.url === '/api/unpinMessage');
+  assert.equal(bogusCall, undefined, 'Must not dispatch non-existent /api/unpinMessage route');
+
+  // Test pinMessage: should NOT call /api/pinMessage, should return unsupportedFeature: true
+  const pinRes = await wahaService.pinMessage('081234567890', 'false_081234567890@c.us_3EB0ABC', 86400, 'sales');
+  assert.equal(pinRes.success, false);
+  assert.equal(pinRes.unsupportedFeature, true);
+  const bogusPinCall = calls.find((c) => c.url === '/api/pinMessage');
+  assert.equal(bogusPinCall, undefined, 'Must not dispatch non-existent /api/pinMessage route');
+});
+
 
 
 

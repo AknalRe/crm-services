@@ -3334,12 +3334,12 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           try {
             if (isPinned) {
               const pinRes = await wahaService.pinMessage(targetChat, msg.wahaMessageId, durationSeconds, session);
-              if (!pinRes.success) {
+              if (!pinRes.success && !pinRes.unsupportedFeature) {
                 wahaWarning = `Pesan disematkan di CRM, namun sinkronisasi WhatsApp gagal: ${pinRes.error}`;
               }
             } else {
               const unpinRes = await wahaService.unpinMessage(targetChat, msg.wahaMessageId, session);
-              if (!unpinRes.success) {
+              if (!unpinRes.success && !unpinRes.unsupportedFeature) {
                 wahaWarning = `Sematan dilepas di CRM, namun sinkronisasi WhatsApp gagal: ${unpinRes.error}`;
               }
             }
@@ -3421,7 +3421,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         if (targetChat) {
           try {
             const starRes = await wahaService.starMessage(targetChat, msg.wahaMessageId, isStarred, session);
-            if (!starRes.success) {
+            if (!starRes.success && !starRes.unsupportedFeature) {
               wahaWarning = `Status bintang di CRM diperbarui, namun sinkronisasi WhatsApp gagal: ${starRes.error}`;
             }
           } catch (syncErr: any) {
