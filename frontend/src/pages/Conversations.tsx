@@ -414,7 +414,7 @@ function renderTextWithClickableLinks(
             href={clean}
             target="_blank"
             rel="noopener noreferrer"
-            className="underline text-indigo-700 dark:text-indigo-400 hover:text-indigo-900 break-all"
+            className="underline text-indigo-700 hover:text-indigo-900 break-all font-medium"
           >
             {clean}
           </a>
@@ -450,7 +450,7 @@ function renderTextWithClickableLinks(
       const canOpen = Boolean(onMentionClick && (resolvedContactId || resolvedPhone || matchedName));
 
       const pillCls =
-        'inline-flex items-center gap-0.5 font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 rounded px-1.5 py-0.2 text-[11px] mx-0.5 align-baseline hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shadow-2xs';
+        'inline-flex items-center gap-0.5 font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/90 rounded px-1.5 py-0.2 text-[11px] sm:text-xs mx-0.5 align-baseline hover:bg-indigo-100 hover:text-indigo-800 transition-colors shadow-2xs';
 
       if (canOpen) {
         return (
@@ -4804,43 +4804,35 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
             return (
               <div className="shrink-0 px-3 py-1.5 bg-gradient-to-r from-indigo-50/95 via-sky-50/90 to-indigo-50/95 border-b border-indigo-200/90 shadow-2xs z-10 transition-all">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 flex-1 flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleJumpToMessage(curMsg.id, curMsg.body)}
-                      className="min-w-0 flex-1 flex items-center gap-2 text-left hover:opacity-85 transition-opacity cursor-pointer"
-                      title="Klik untuk melompat ke pesan yang disematkan"
-                    >
-                      <Pin className="w-3.5 h-3.5 text-indigo-600 shrink-0 rotate-45" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
-                          <span>Pesan Disematkan</span>
-                          {pinnedMessages.length > 1 && (
-                            <span className="px-1.5 py-0.2 rounded-full bg-indigo-200 text-indigo-800 text-[9px] font-mono font-medium">
-                              {safeIdx + 1}/{pinnedMessages.length}
-                            </span>
-                          )}
-                          {expiryText && (
-                            <span className="text-[9px] font-medium text-indigo-600/80 normal-case bg-white/70 px-1.5 py-0.2 rounded border border-indigo-100">
-                              {expiryText}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-indigo-950 truncate font-medium">
-                          {curMsg.body
-                            ? formatMentionPlainText(
-                                curMsg.body,
-                                mySessionPhones,
-                                contactsByPhone,
-                                participantsLookup,
-                                curMsg.mentionedContacts
-                              )
-                            : curMsg.mediaName || '[Media / Lampiran]'}
-                        </p>
-                      </div>
-                    </button>
-                  </div>
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleJumpToMessage(curMsg.id, curMsg.body)}
+                    className="min-w-0 flex-1 flex items-center gap-2 text-left hover:opacity-85 transition-opacity cursor-pointer"
+                    title="Klik untuk melompat ke pesan yang disematkan"
+                  >
+                    {pinnedMessages.length > 1 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-indigo-200 text-indigo-800 text-[10px] font-mono font-semibold shrink-0">
+                        {safeIdx + 1}/{pinnedMessages.length}
+                      </span>
+                    )}
+                    <p className="text-xs sm:text-[13px] text-indigo-950 truncate font-medium flex-1">
+                      {curMsg.body
+                        ? formatMentionPlainText(
+                            curMsg.body,
+                            mySessionPhones,
+                            contactsByPhone,
+                            participantsLookup,
+                            curMsg.mentionedContacts
+                          )
+                        : curMsg.mediaName || '[Media / Lampiran]'}
+                    </p>
+                    {expiryText && (
+                      <span className="text-[10px] font-medium text-indigo-600/80 bg-white/80 px-1.5 py-0.5 rounded border border-indigo-100 shrink-0">
+                        {expiryText}
+                      </span>
+                    )}
+                  </button>
 
                   <div className="flex items-center gap-1 shrink-0">
                     {pinnedMessages.length > 1 && (
@@ -4898,9 +4890,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       type="button"
                       onClick={() => void handleUnpinMessage(curMsg)}
                       title="Lepas sematan pesan ini"
-                      className="p-1 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100/70 transition-colors cursor-pointer"
+                      className="p-1 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100/80 transition-colors cursor-pointer"
                     >
-                      <PinOff className="w-3.5 h-3.5" />
+                      <PinOff className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -5200,14 +5192,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       className={`group relative flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[75%] md:max-w-[620px] lg:max-w-[560px] xl:max-w-[640px] min-w-0 transition-all duration-300 ${
+                        className={`flex flex-col ${isOutbound ? 'items-end' : 'items-start'} max-w-[90%] sm:max-w-[80%] md:max-w-[540px] lg:max-w-[580px] xl:max-w-[620px] min-w-0 transition-all duration-300 ${
                           highlightedMessageId === msg.id
                             ? 'scale-[1.02] ring-2 ring-indigo-500 ring-offset-2 rounded-lg'
                             : ''
                         }`}
                       >
                         <div
-                          className={`w-full min-w-0 rounded-lg px-3.5 py-2 text-xs border leading-relaxed space-y-1.5 ${
+                          className={`w-full min-w-0 rounded-lg px-3.5 py-2.5 text-[13px] sm:text-sm border leading-relaxed space-y-1.5 shadow-2xs ${
                             isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
                           } ${
                             isRevoked
@@ -5219,8 +5211,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               : isCsat
                               ? 'bg-amber-50/60 border-amber-200 text-gray-900'
                               : isOutbound
-                              ? 'bg-indigo-50 border-indigo-200 text-gray-900'
-                              : 'bg-white border-gray-200 text-gray-900'
+                              ? 'bg-indigo-50/90 border-indigo-200 text-gray-950'
+                              : 'bg-white border-gray-200/90 text-gray-950'
                           }`}
                         >
                         {isRevoked && (
@@ -5246,9 +5238,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         {!isOutbound &&
                           !isCsat &&
                           (selectedConversation.isGroup || msg.senderName || msg.senderPhone) && (
-                            <div className="flex items-center justify-between gap-2 pb-0.5 border-b border-gray-100">
+                            <div className="flex items-center gap-2 pb-1 border-b border-gray-100">
                               <span
-                                className={`text-[11px] font-semibold truncate ${getParticipantColorClass(
+                                className={`text-xs sm:text-[13px] font-semibold truncate ${getParticipantColorClass(
                                   msg.senderJid || msg.senderPhone || msg.senderName
                                 )}`}
                               >
@@ -5256,7 +5248,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               </span>
                               {msg.senderPhone &&
                                 resolveMessageSenderName(msg) !== `+${msg.senderPhone}` && (
-                                  <span className="text-[10px] font-mono text-gray-400 shrink-0">
+                                  <span className="text-[10px] sm:text-[11px] font-mono text-gray-400 shrink-0">
                                     +{msg.senderPhone}
                                   </span>
                                 )}
@@ -5286,14 +5278,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           <button
                             type="button"
                             onClick={() => handleJumpToMessage(msg.replyToMessageId, msg.replyToBody)}
-                            className="w-full text-left px-2.5 py-1.5 rounded bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 border-l-2 border-indigo-500 text-[11px] space-y-0.5 transition-colors cursor-pointer group"
+                            className="w-full text-left px-2.5 py-1.5 rounded-md bg-slate-100/80 hover:bg-slate-200/70 border-l-[3px] border-indigo-600 text-xs space-y-0.5 transition-colors cursor-pointer group"
                             title="Klik untuk melompat ke pesan yang dikutip"
                           >
-                            <div className="font-semibold text-indigo-700 dark:text-indigo-400 truncate flex items-center gap-1">
-                              <Reply className="w-3 h-3 shrink-0 inline text-indigo-500" />
+                            <div className="font-semibold text-indigo-700 truncate flex items-center gap-1 text-[11px] sm:text-xs">
+                              <Reply className="w-3 h-3 shrink-0 inline text-indigo-600" />
                               <span>{resolveReplySenderLabel(msg)}</span>
                             </div>
-                            <div className="text-gray-600 dark:text-gray-300 truncate">
+                            <div className="text-gray-800 truncate text-[11px] sm:text-xs font-normal">
                               {formatMentionPlainText(
                                 msg.replyToBody || 'Pesan dikutip',
                                 mySessionPhones,
@@ -5874,7 +5866,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             return null;
                           }
                           return (
-                            <div className="whitespace-pre-wrap break-words">
+                            <div className="whitespace-pre-wrap break-words text-[13px] sm:text-sm text-gray-950 font-normal leading-relaxed">
                               {renderTextWithClickableLinks(
                                 msg.body,
                                 participantsLookup,
@@ -7501,9 +7493,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
               )}
 
               {showMentionPicker && (
-                <div className="absolute bottom-full left-0 mb-2 z-30 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2.5 w-80 sm:w-96 max-w-[calc(100vw-2.5rem)] space-y-2">
-                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100 dark:border-gray-800">
-                    <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center gap-1.5 whitespace-nowrap truncate">
+                <div className="absolute bottom-full left-0 mb-2 z-30 bg-white border border-gray-200 rounded-lg shadow-lg p-2.5 w-80 sm:w-96 max-w-[calc(100vw-2.5rem)] space-y-2">
+                  <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-900 inline-flex items-center gap-1.5 whitespace-nowrap truncate">
                       <AtSign className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                       <span>Sebut / Mention Partisipan</span>
                     </span>
@@ -7536,10 +7528,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     placeholder="Cari nama atau nomor partisipan..."
                     value={mentionFilter}
                     onChange={(e) => setMentionFilter(e.target.value)}
-                    className="w-full h-8 px-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-[11px] focus:outline-none focus:border-indigo-500"
+                    className="w-full h-8 px-2.5 bg-gray-50 border border-gray-200 rounded text-[11px] focus:outline-none focus:border-indigo-500"
                   />
 
-                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
+                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-100">
                     {loadingParticipants && availableMentionCandidates.length === 0 ? (
                       <div className="py-4 text-center text-[11px] text-indigo-600">
                         Mengambil daftar partisipan dari WAHA...
@@ -7556,10 +7548,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           key={cand.jid || cand.phone || idx}
                           type="button"
                           onClick={() => handleSelectMention(cand)}
-                          className="w-full text-left py-2 px-2 hover:bg-indigo-50/80 dark:hover:bg-indigo-950/40 rounded flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                          className="w-full text-left py-2 px-2 hover:bg-indigo-50/80 rounded flex items-center justify-between gap-2 transition-colors cursor-pointer"
                         >
                           <div className="min-w-0">
-                            <div className="text-[11px] font-semibold text-gray-900 dark:text-gray-100 truncate">
+                            <div className="text-[11px] font-semibold text-gray-900 truncate">
                               {cand.name}
                             </div>
                             {cand.phone && (
