@@ -3332,8 +3332,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         }
       }
 
+      const mentionMap = await resolveMessageMentions({
+        companyId,
+        messages: [updatedMsg],
+      });
+      const enrichedMsg = {
+        ...updatedMsg,
+        mentionedContacts: mentionMap.get(updatedMsg.id) || [],
+      };
+
       liveEvents.emit('conversations:update', { conversationId: req.params.id }, companyId);
-      return reply.send({ success: true, isPinned, data: updatedMsg, warning: wahaWarning });
+      return reply.send({ success: true, isPinned, data: enrichedMsg, warning: wahaWarning });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
     }
@@ -3404,8 +3413,17 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         }
       }
 
+      const mentionMap = await resolveMessageMentions({
+        companyId,
+        messages: [updatedMsg],
+      });
+      const enrichedMsg = {
+        ...updatedMsg,
+        mentionedContacts: mentionMap.get(updatedMsg.id) || [],
+      };
+
       liveEvents.emit('conversations:update', { conversationId: req.params.id }, companyId);
-      return reply.send({ success: true, isStarred, data: updatedMsg, warning: wahaWarning });
+      return reply.send({ success: true, isStarred, data: enrichedMsg, warning: wahaWarning });
     } catch (err: any) {
       return reply.status(500).send({ success: false, error: err.message });
     }

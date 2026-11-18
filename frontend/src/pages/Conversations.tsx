@@ -241,13 +241,29 @@ function formatMentionPlainText(
   text: string,
   mySessionPhones?: Set<string>,
   contactsByPhone?: Map<string, string>,
-  participantsLookup?: Map<string, ParticipantLookupEntry>
+  participantsLookup?: Map<string, ParticipantLookupEntry>,
+  mentionedContacts?: ResolvedMentionItem[]
 ): string {
   if (!text) return '';
+  const mentionByToken = new Map<string, ResolvedMentionItem>();
+  if (Array.isArray(mentionedContacts)) {
+    for (const mc of mentionedContacts) {
+      if (mc?.token) mentionByToken.set(mc.token.toLowerCase(), mc);
+      if (mc?.phone) mentionByToken.set(mc.phone.replace(/\D/g, ''), mc);
+      if (mc?.jid) mentionByToken.set(mc.jid.replace(/@.*$/, '').toLowerCase(), mc);
+    }
+  }
+
   return text.replace(/@(\d{6,20}|[a-zA-Z0-9_.-]+)/g, (match, rawTarget) => {
     const cleanDigits = rawTarget.replace(/\D/g, '');
     if (cleanDigits && mySessionPhones?.has(cleanDigits)) {
       return '@Anda';
+    }
+    const fromMsg =
+      mentionByToken.get(rawTarget.toLowerCase()) ||
+      (cleanDigits ? mentionByToken.get(cleanDigits) : undefined);
+    if (fromMsg?.name) {
+      return `@${fromMsg.name}`;
     }
     const fromPart = cleanDigits ? participantsLookup?.get(cleanDigits) : participantsLookup?.get(rawTarget.toLowerCase());
     if (fromPart?.name) {
@@ -291,7 +307,9 @@ function renderTextWithClickableLinks(
   text: string,
   participantsLookup?: Map<string, ParticipantLookupEntry>,
   mentionedContacts?: ResolvedMentionItem[],
-  onMentionClick?: (target: ClickableMentionTarget) => void
+  onMentionClick?: (target: ClickableMentionTarget) => void,
+  contactsByPhone?: Map<string, string>,
+  mySessionPhones?: Set<string>
 ): React.ReactNode {
   if (!text) return null;
   const mentionByToken = new Map<string, ResolvedMentionItem>();
@@ -325,16 +343,20 @@ function renderTextWithClickableLinks(
     if (/^@(\d{6,20}|[a-zA-Z0-9_.-]+)$/.test(part)) {
       const rawTarget = part.slice(1);
       const cleanPhone = rawTarget.replace(/\D/g, '');
+      const isMe = Boolean(cleanPhone && mySessionPhones?.has(cleanPhone));
       const fromMsg =
         mentionByToken.get(rawTarget.toLowerCase()) ||
         (cleanPhone ? mentionByToken.get(cleanPhone) : undefined);
       const fromPart =
         (cleanPhone ? participantsLookup?.get(cleanPhone) : undefined) ||
         participantsLookup?.get(rawTarget.toLowerCase());
+      const fromContact = cleanPhone && contactsByPhone ? contactsByPhone.get(cleanPhone) : undefined;
 
       const matchedName =
+        (isMe ? 'Anda' : '') ||
         fromMsg?.name ||
         fromPart?.name ||
+        fromContact ||
         (fromMsg?.phone ? `+${fromMsg.phone}` : '') ||
         (cleanPhone ? `+${cleanPhone}` : rawTarget);
       const resolvedPhone =
@@ -342,7 +364,7 @@ function renderTextWithClickableLinks(
         fromPart?.phone ||
         (cleanPhone && cleanPhone.length <= 15 ? cleanPhone : null);
       const resolvedContactId = fromMsg?.contactId || fromPart?.contactId || null;
-      const canOpen = Boolean(onMentionClick && (resolvedContactId || resolvedPhone));
+      const canOpen = Boolean(onMentionClick && (resolvedContactId || resolvedPhone || matchedName));
 
       const pillCls =
         'inline-flex items-center gap-0.5 font-semibold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200/80 dark:border-indigo-800/60 rounded px-1.5 py-0.2 text-[11px] mx-0.5 align-baseline hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shadow-2xs';
@@ -2450,7 +2472,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
     if (!selectedConversation) return;
     try {
       const res = await api.pinConversationMessage(selectedConversation.id, msg.id, { unpin: true });
-      setMessages((prev) => prev.map((m) => (m.id === msg.id ? res.data : m)));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msg.id
+            ? {
+                ...m,
+                ...res.data,
+                mentionedContacts:
+                  res.data.mentionedContacts && res.data.mentionedContacts.length > 0
+                    ? res.data.mentionedContacts
+                    : m.mentionedContacts,
+              }
+            : m
+        )
+      );
       if (res.warning) {
         toast.info(res.warning);
       } else {
@@ -2468,7 +2503,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
       const res = await api.pinConversationMessage(selectedConversation.id, pinningMessageTarget.id, {
         duration: pinDurationSeconds,
       });
-      setMessages((prev) => prev.map((m) => (m.id === pinningMessageTarget.id ? res.data : m)));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === pinningMessageTarget.id
+            ? {
+                ...m,
+                ...res.data,
+                mentionedContacts:
+                  res.data.mentionedContacts && res.data.mentionedContacts.length > 0
+                    ? res.data.mentionedContacts
+                    : m.mentionedContacts,
+              }
+            : m
+        )
+      );
       if (res.warning) {
         toast.info(res.warning);
       } else {
@@ -2491,7 +2539,18 @@ export const Conversations: React.FC<ConversationsProps> = ({
     try {
       const res = await api.starConversationMessage(selectedConversation.id, msg.id);
       setMessages((prev) =>
-        prev.map((m) => (m.id === msg.id ? res.data : m))
+        prev.map((m) =>
+          m.id === msg.id
+            ? {
+                ...m,
+                ...res.data,
+                mentionedContacts:
+                  res.data.mentionedContacts && res.data.mentionedContacts.length > 0
+                    ? res.data.mentionedContacts
+                    : m.mentionedContacts,
+              }
+            : m
+        )
       );
       if (res.warning) {
         toast.info(res.warning);
@@ -4313,7 +4372,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           )}
                         </div>
                         <p className="text-xs text-indigo-950 truncate font-medium">
-                          {curMsg.body || curMsg.mediaName || '[Media / Lampiran]'}
+                          {curMsg.body
+                            ? formatMentionPlainText(
+                                curMsg.body,
+                                mySessionPhones,
+                                contactsByPhone,
+                                participantsLookup,
+                                curMsg.mentionedContacts
+                              )
+                            : curMsg.mediaName || '[Media / Lampiran]'}
                         </p>
                       </div>
                     </button>
@@ -4389,6 +4456,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       const pMeta = parseChatMessageMeta(pMsg);
                       const pExp = pMeta?.pinExpiresAt ? formatPinExpiry(pMeta.pinExpiresAt) : '';
                       const isCur = pIdx === safeIdx;
+                      const pText = pMsg.body
+                        ? formatMentionPlainText(
+                            pMsg.body,
+                            mySessionPhones,
+                            contactsByPhone,
+                            participantsLookup,
+                            pMsg.mentionedContacts
+                          )
+                        : pMsg.mediaName || '[Media]';
                       return (
                         <div
                           key={pMsg.id}
@@ -4405,7 +4481,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             className="min-w-0 flex-1 text-left flex items-center gap-1.5 cursor-pointer"
                           >
                             <span className="font-mono text-[10px] text-indigo-600">#{pIdx + 1}</span>
-                            <span className="truncate flex-1">{pMsg.body || pMsg.mediaName || '[Media]'}</span>
+                            <span className="truncate flex-1">{pText}</span>
                             {pExp && (
                               <span className="text-[10px] text-gray-400 shrink-0">({pExp})</span>
                             )}
@@ -4939,7 +5015,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                       meta.linkPreview.caption,
                                       participantsLookup,
                                       msg.mentionedContacts,
-                                      handleOpenMentionContact
+                                      handleOpenMentionContact,
+                                      contactsByPhone,
+                                      mySessionPhones
                                     )}
                                   </div>
                                 )}
@@ -4993,7 +5071,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                     meta.interactiveButtons.body,
                                     participantsLookup,
                                     msg.mentionedContacts,
-                                    handleOpenMentionContact
+                                    handleOpenMentionContact,
+                                    contactsByPhone,
+                                    mySessionPhones
                                   )}
                                 </div>
                                 {meta.interactiveButtons.footer && (
@@ -5339,7 +5419,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                 msg.body,
                                 participantsLookup,
                                 msg.mentionedContacts,
-                                handleOpenMentionContact
+                                handleOpenMentionContact,
+                                contactsByPhone,
+                                mySessionPhones
                               )}
                             </div>
                           );
@@ -5657,7 +5739,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       replyingToMessage.body || '',
                       mySessionPhones,
                       contactsByPhone,
-                      participantsLookup
+                      participantsLookup,
+                      replyingToMessage.mentionedContacts
                     )}
                   </p>
                 </div>
@@ -8953,7 +9036,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 Pratinjau Pesan
               </div>
               <p className="line-clamp-3 italic text-gray-800">
-                "{pinningMessageTarget.body || pinningMessageTarget.mediaName || '[Pesan Media]'}"
+                "{pinningMessageTarget.body
+                  ? formatMentionPlainText(
+                      pinningMessageTarget.body,
+                      mySessionPhones,
+                      contactsByPhone,
+                      participantsLookup,
+                      pinningMessageTarget.mentionedContacts
+                    )
+                  : pinningMessageTarget.mediaName || '[Pesan Media]'}"
               </p>
             </div>
           )}
