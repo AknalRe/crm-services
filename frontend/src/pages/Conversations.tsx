@@ -3653,7 +3653,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 onClick={() => setStatusFilter(st)}
                 className={`py-1 rounded font-medium transition-colors ${
                   statusFilter === st
-                    ? 'bg-white text-indigo-700 shadow-sm'
+                    ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
@@ -3668,7 +3668,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 value={accountFilter}
                 onChange={(e) => setAccountFilter(e.target.value)}
                 aria-label="Filter Sesi atau Akun Kanal"
-                className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500"
+                className="w-full h-8 px-2.5 bg-gray-50/80 hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
               >
                 <option value="ALL">
                   Semua Sesi / Akun ({filteredUnifiedSessionOptions.length})
@@ -3684,7 +3684,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   type="button"
                   onClick={() => setAccountFilter('ALL')}
                   title="Reset filter sesi"
-                  className="h-8 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[11px] font-medium text-gray-600 shrink-0"
+                  className="h-8 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[11px] font-medium text-gray-600 shrink-0 cursor-pointer"
                 >
                   Semua
                 </button>
@@ -3699,13 +3699,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 {[
                   metricFilter !== 'ALL'
                     ? metricFilter === 'ASSESSED'
-                      ? 'Dinilai'
-                      : metricFilter === 'EXCLUDED'
-                      ? 'Non-Nilai'
-                      : metricFilter === 'SLA_BREACH'
-                      ? 'Lewat SLA'
-                      : 'Grup WA'
-                    : null,
+                    ? 'Dinilai'
+                    : metricFilter === 'EXCLUDED'
+                    ? 'Non-Nilai'
+                    : metricFilter === 'SLA_BREACH'
+                    ? 'Lewat SLA'
+                    : 'Grup WA'
+                  : null,
                   channelFilter !== 'ALL' ? CHANNEL_META[channelFilter]?.short || channelFilter : null,
                   assigneeFilter !== 'ALL'
                     ? assigneeFilter === 'MINE'
@@ -3743,9 +3743,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
           )}
 
           {showListFilters && (
-            <div className="pt-2 border-t border-gray-100 space-y-2">
+            <div className="pt-2 border-t border-gray-200/80 space-y-2">
               {/* Metric & SLA Tabs */}
-              <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[10px]">
+              <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
                 {(
                   [
                     { id: 'ALL', label: 'Semua' },
@@ -3758,9 +3758,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     key={mf.id}
                     type="button"
                     onClick={() => setMetricFilter(mf.id)}
-                    className={`py-1 rounded font-medium transition-colors truncate px-1 ${
+                    className={`py-1 rounded font-medium transition-colors truncate px-0.5 text-center ${
                       metricFilter === mf.id
-                        ? 'bg-white text-indigo-700 shadow-sm font-semibold'
+                        ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
                         : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -3778,7 +3778,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     setAccountFilter('ALL');
                   }}
                   aria-label="Filter Channel"
-                  className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+                  className="w-full h-8 px-2.5 bg-gray-50/80 hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
                 >
                   <option value="ALL">Semua Channel</option>
                   <option value="WHATSAPP">WhatsApp</option>
@@ -3794,7 +3794,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     value={assigneeFilter}
                     onChange={(e) => setAssigneeFilter(e.target.value)}
                     aria-label="Filter Agent"
-                    className="w-full h-8 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500"
+                    className="w-full h-8 px-2.5 bg-gray-50/80 hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
                   >
                     <option value="ALL">
                       {canViewAllConversations ? 'Semua Agent' : 'Akses Saya & Terbuka'}
@@ -3813,62 +3813,38 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </div>
 
               {/* Dedicated Label Filter Section */}
-              <div className="space-y-1.5 bg-white p-2 rounded-md border border-gray-200">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="font-semibold text-gray-700 flex items-center gap-1">
-                    <Tag className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Filter Label / Tag Obrolan:</span>
-                  </span>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={labelFilter}
+                    onChange={(e) => setLabelFilter(e.target.value)}
+                    aria-label="Pilih Filter Label"
+                    className="w-full h-8 px-2.5 bg-gray-50/80 hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
+                  >
+                    <option value="ALL">
+                      Semua Label ({availableFilterLabels.reduce((acc, curr) => acc + curr.count, 0)} obrolan berlabel)
+                    </option>
+                    <option value="__NO_LABEL__">Tanpa Label</option>
+                    {availableFilterLabels.map((item) => (
+                      <option key={item.name} value={item.name}>
+                        #{item.name} {item.count > 0 ? `(${item.count})` : ''}
+                      </option>
+                    ))}
+                  </select>
                   {labelFilter !== 'ALL' && (
                     <button
                       type="button"
                       onClick={() => setLabelFilter('ALL')}
-                      className="text-[10px] text-indigo-600 hover:underline font-semibold"
+                      title="Reset filter label"
+                      className="h-8 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[11px] font-medium text-gray-600 shrink-0 cursor-pointer"
                     >
-                      Reset Label
+                      Reset
                     </button>
                   )}
                 </div>
 
-                <select
-                  value={labelFilter}
-                  onChange={(e) => setLabelFilter(e.target.value)}
-                  aria-label="Pilih Filter Label"
-                  className="w-full h-8 px-2 bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500"
-                >
-                  <option value="ALL">Semua Label ({availableFilterLabels.reduce((acc, curr) => acc + curr.count, 0)} obrolan berlabel)</option>
-                  <option value="__NO_LABEL__">Tanpa Label</option>
-                  {availableFilterLabels.map((item) => (
-                    <option key={item.name} value={item.name}>
-                      #{item.name} {item.count > 0 ? `(${item.count})` : ''}
-                    </option>
-                  ))}
-                </select>
-
                 {availableFilterLabels.length > 0 && (
-                  <div className="flex items-center gap-1 overflow-x-auto pt-1 pb-0.5 scrollbar-thin">
-                    <button
-                      type="button"
-                      onClick={() => setLabelFilter('ALL')}
-                      className={`px-2 py-0.5 rounded text-[10px] font-medium shrink-0 transition-colors ${
-                        labelFilter === 'ALL'
-                          ? 'bg-indigo-600 text-white font-semibold'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      Semua
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLabelFilter(labelFilter === '__NO_LABEL__' ? 'ALL' : '__NO_LABEL__')}
-                      className={`px-2 py-0.5 rounded text-[10px] font-medium shrink-0 transition-colors ${
-                        labelFilter === '__NO_LABEL__'
-                          ? 'bg-indigo-600 text-white font-semibold'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      Tanpa Label
-                    </button>
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
                     {availableFilterLabels.map((item) => {
                       const style = getLabelStyle(item.name);
                       const isSelected = labelFilter.toLowerCase() === item.name.toLowerCase();
@@ -3877,11 +3853,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           key={item.name}
                           type="button"
                           onClick={() => setLabelFilter(isSelected ? 'ALL' : item.name)}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border shrink-0 transition-all ${
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all cursor-pointer ${
                             isSelected
-                              ? `ring-2 ring-indigo-500 ring-offset-1 font-bold ${style.badge}`
-                              : `hover:opacity-90 bg-white ${style.badge}`
+                              ? `ring-2 ring-indigo-500 font-semibold shadow-2xs ${style.badge}`
+                              : `hover:opacity-90 opacity-75 bg-white ${style.badge}`
                           }`}
+                          title={`Filter obrolan berlabel #${item.name}`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
                           <span>#{item.name}</span>
@@ -3895,7 +3872,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center justify-between text-[11px] pt-0.5">
+              <div className="flex items-center justify-between text-[11px] pt-1 border-t border-gray-100">
                 <button
                   type="button"
                   onClick={() => {
@@ -3905,14 +3882,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     setAccountFilter('ALL');
                     setLabelFilter('ALL');
                   }}
-                  className="text-gray-500 hover:text-gray-800"
+                  className="text-gray-500 hover:text-red-600 transition-colors font-medium cursor-pointer"
                 >
                   Reset Semua Filter
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowListFilters(false)}
-                  className="font-medium text-indigo-700 hover:underline"
+                  className="font-semibold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
                 >
                   Tutup Filter
                 </button>
