@@ -1350,7 +1350,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         .from(conversations)
         .leftJoin(contacts, eq(conversations.contactId, contacts.id))
         .where(eq(conversations.companyId, companyId))
-        .orderBy(desc(conversations.updatedAt));
+        .orderBy(
+          desc(sql`COALESCE(${conversations.lastMessageAt}, ${conversations.updatedAt}, ${conversations.createdAt})`),
+          desc(conversations.updatedAt)
+        );
 
       const rows = canViewAll
         ? allRows

@@ -25,6 +25,40 @@ function parseWahaTimestamp(raw: unknown): Date {
   return new Date();
 }
 
+const CLOCK_SKEW_TOLERANCE_MS = 10_000;
+
+export function resolveConversationSyncBumpUpdate(params: {
+  isHistoricalOffset: boolean;
+  convLastMessageAt: Date | null | undefined;
+  latestMsgBody: string | null;
+  latestMsgAt: Date | null;
+  inserted: number;
+  newestInsertedBody: string | null;
+  newestInsertedAt: Date | null;
+  now?: Date;
+}): { lastMessage: string; lastMessageAt: Date; updatedAt: Date } | null {
+  if (params.isHistoricalOffset) return null;
+  const now = params.now ?? new Date();
+  if (params.latestMsgBody && params.latestMsgAt) {
+    return {
+      lastMessage: params.latestMsgBody,
+      lastMessageAt: params.latestMsgAt,
+      updatedAt: now,
+    };
+  }
+  if (params.inserted > 0 && params.newestInsertedBody && params.newestInsertedAt) {
+    const existingMs = params.convLastMessageAt ? new Date(params.convLastMessageAt).getTime() : 0;
+    if (!params.convLastMessageAt || params.newestInsertedAt.getTime() >= existingMs - CLOCK_SKEW_TOLERANCE_MS) {
+      return {
+        lastMessage: params.newestInsertedBody,
+        lastMessageAt: new Date(Math.max(params.newestInsertedAt.getTime(), existingMs)),
+        updatedAt: now,
+      };
+    }
+  }
+  return null;
+}
+
 export async function syncRecentWhatsAppChatMessages(
   conv: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
@@ -85,6 +119,8 @@ export async function syncRecentWhatsAppChatMessages(
   let acksUpdated = 0;
   let latestMsgBody: string | null = null;
   let latestMsgAt: Date | null = conv.lastMessageAt ? new Date(conv.lastMessageAt) : null;
+  let newestInsertedBody: string | null = null;
+  let newestInsertedAt: Date | null = null;
 
   for (const m of rawMessages) {
     if (!m || typeof m !== 'object') continue;
@@ -188,20 +224,30 @@ export async function syncRecentWhatsAppChatMessages(
     }
     inserted++;
     const previewText = conv.isGroup && !fromMe && senderName ? `${senderName}: ${body}` : body;
+    if (!newestInsertedAt || msgDate.getTime() >= newestInsertedAt.getTime()) {
+      newestInsertedAt = msgDate;
+      newestInsertedBody = previewText;
+    }
     if (!latestMsgAt || msgDate.getTime() > latestMsgAt.getTime()) {
       latestMsgAt = msgDate;
       latestMsgBody = previewText;
     }
   }
 
-  if (latestMsgBody && latestMsgAt) {
+  const bumpUpdate = resolveConversationSyncBumpUpdate({
+    isHistoricalOffset: Boolean(opts?.offset && opts.offset > 0),
+    convLastMessageAt: conv.lastMessageAt,
+    latestMsgBody,
+    latestMsgAt,
+    inserted,
+    newestInsertedBody,
+    newestInsertedAt,
+  });
+
+  if (bumpUpdate) {
     await db
       .update(conversations)
-      .set({
-        lastMessage: latestMsgBody,
-        lastMessageAt: latestMsgAt,
-        updatedAt: new Date(),
-      })
+      .set(bumpUpdate)
       .where(eq(conversations.id, conv.id))
       .catch(() => {});
   }
