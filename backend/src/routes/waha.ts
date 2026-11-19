@@ -1142,7 +1142,18 @@ export function extractWahaPresence(
   payload: any
 ): { chatId: string; status: 'typing' | 'recording' | 'online' | 'paused' } | null {
   if (!payload || typeof payload !== 'object') return null;
-  const firstEntry = Array.isArray(payload.presences) ? payload.presences[0] : null;
+  const presenceList = Array.isArray(payload.presences) ? payload.presences : [];
+  const firstEntry =
+    presenceList.find((p: any) => {
+      const st = String(
+        p?.lastKnownPresence || p?.presence || p?.state || p?.State || ''
+      )
+        .toLowerCase()
+        .trim();
+      return st === 'composing' || st === 'typing' || st === 'recording' || st === 'available' || st === 'online';
+    }) ||
+    presenceList[0] ||
+    null;
   const chatId = String(
     payload.id ||
       payload.chatId ||
@@ -2084,6 +2095,17 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             note: matchedConv
               ? `Presence: ${parsedPresence.status}`
               : `Presence (${parsedPresence.status}) tidak cocok dengan percakapan`,
+          }, companyId);
+        } else {
+          wahaService.recordWebhookEvent({
+            receivedAt: new Date().toISOString(),
+            event: 'presence.update',
+            session: webhookSession || null,
+            from: String(payload?.id || payload?.chatId || payload?.from || '').trim() || null,
+            outcome: 'IGNORED',
+            statusCode: 200,
+            payload: req.body,
+            note: 'Payload presence.update tidak dikenali',
           }, companyId);
         }
       }

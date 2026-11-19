@@ -6982,6 +6982,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </>
               );
             })()}
+            {(presenceByConvId[selectedConversation.id]?.status === 'typing' ||
+              presenceByConvId[selectedConversation.id]?.status === 'recording') && (
+              <div className="flex justify-start my-1">
+                <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg rounded-tl-xs bg-white border border-gray-200 text-xs text-gray-600 shadow-2xs">
+                  <span className="inline-flex items-center gap-1" aria-hidden="true">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.2s]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.1s]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
+                  </span>
+                  <span className="font-medium text-emerald-700">
+                    {presenceByConvId[selectedConversation.id]?.status === 'recording'
+                      ? 'Sedang merekam audio...'
+                      : 'Sedang mengetik...'}
+                  </span>
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
             </div>
             {pendingNewMsgCount > 0 && (
