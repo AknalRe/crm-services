@@ -62,7 +62,7 @@ const CHANNEL_BADGES: Record<string, { label: string; cls: string; dot: string }
     dot: 'bg-sky-500',
   },
   DIRECT: {
-    label: 'Pustaka',
+    label: 'Galeri',
     cls: 'bg-slate-50 text-slate-700 border-slate-200',
     dot: 'bg-indigo-500',
   },
@@ -117,13 +117,13 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
           mimeType: file.type || 'application/octet-stream',
           base64,
           channel: 'DIRECT',
-          label: 'Unggahan Pustaka',
+          label: 'Unggahan Galeri',
           source: 'UPLOAD',
         });
         okCount += 1;
       }
       if (okCount > 0) {
-        toast.success(`${okCount} aset media berhasil diunggah ke pustaka`);
+        toast.success(`${okCount} berkas berhasil diunggah ke galeri`);
         void loadMedia();
       }
     } catch (err: any) {
@@ -138,7 +138,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
     try {
       await api.deleteMediaFile(deleteTarget.filename);
       setItems((prev) => prev.filter((i) => i.filename !== deleteTarget.filename));
-      toast.info('Media dihapus dari pustaka');
+      toast.info('Berkas dihapus dari galeri');
       setDeleteTarget(null);
     } catch {
       toast.error('Gagal menghapus media');
@@ -192,10 +192,10 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
         <div>
           <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
             <ImageIcon className="w-5 h-5 text-indigo-600" />
-            <span>Pustaka Media CRM</span>
+            <span>Galeri</span>
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            Semua aset foto, video, dokumen (PDF/Word/Excel), dan audio dari percakapan pelanggan maupun unggahan langsung tersimpan aman dengan label asal sesi.
+            Foto, video, audio, dan dokumen dari percakapan pelanggan maupun unggahan langsung. Akses berkas memerlukan sesi login aktif.
           </p>
         </div>
         {canEdit && (
@@ -340,14 +340,14 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
       {/* Media Grid */}
       <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 shadow-2xs">
         {loading ? (
-          <LoadingState message="Memuat aset pustaka media..." />
+          <LoadingState message="Memuat berkas galeri..." />
         ) : filtered.length === 0 ? (
           <EmptyState
-            title="Tidak ada aset media"
+            title="Belum ada berkas media"
             description={
               searchTerm || filterChannel !== 'all' || filterSession !== 'all'
                 ? 'Tidak ada berkas yang sesuai dengan kriteria filter saat ini.'
-                : 'Aset media yang dikirim atau diterima di chat CRM akan otomatis diarsipkan di sini.'
+                : 'Berkas yang dikirim atau diterima lewat obrolan akan otomatis masuk ke galeri ini.'
             }
           />
         ) : (
@@ -479,7 +479,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
                           type="button"
                           onClick={() => setDeleteTarget(item)}
                           className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="Hapus media dari pustaka"
+                          title="Hapus berkas dari galeri"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -660,7 +660,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
           >
             <div className="flex items-center gap-2 text-rose-600 font-semibold text-sm">
               <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>Hapus Media dari Pustaka?</span>
+              <span>Hapus Berkas dari Galeri?</span>
             </div>
             <p className="text-xs text-gray-600 leading-relaxed">
               Berkas <strong className="font-mono text-gray-900">{deleteTarget.originalFileName || deleteTarget.filename}</strong> akan dihapus permanen dari server. Tindakan ini tidak dapat dibatalkan.

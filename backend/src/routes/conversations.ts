@@ -1298,17 +1298,34 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET proxy inbound WAHA media safely using unmasked X-Api-Key so internal Docker/localhost WAHA URLs render in browser
+  // GET proxy inbound WAHA media safely using unmasked X-Api-Key (authenticated CRM sessions only)
   fastify.get('/media-proxy', async (req: FastifyRequest<{
     Querystring: { url?: string };
   }>, reply: FastifyReply) => {
     try {
+      const authUser = await getCurrentAuthUser(req);
+      if (!authUser) {
+        return reply
+          .status(401)
+          .header('Cache-Control', 'no-store')
+          .send({ success: false, error: 'Autentikasi diperlukan untuk memuat media' });
+      }
       const rawUrl = String(req.query?.url || '').trim();
       if (!rawUrl) {
         return reply.status(400).send({ success: false, error: 'Invalid media url' });
       }
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(rawUrl);
+      } catch {
+        return reply.status(400).send({ success: false, error: 'Invalid media url' });
+      }
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return reply.status(400).send({ success: false, error: 'Invalid media protocol' });
+      }
       const downloaded = await wahaService.downloadMedia(rawUrl);
       reply.header('Content-Type', downloaded.contentType);
+      reply.header('Vary', 'Cookie');
       reply.header('Cache-Control', 'private, max-age=3600');
       return reply.send(downloaded.buffer);
     } catch (error: any) {

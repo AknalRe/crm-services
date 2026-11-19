@@ -1721,10 +1721,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
         });
         setSavedStickers((prev) => [sticker, ...prev.filter((s) => s.id !== sticker.id)]);
         toast.success(
-          alreadyExists ? 'Stiker sudah ada di koleksi Anda' : 'Stiker ditambahkan dari Pustaka Media'
+          alreadyExists ? 'Stiker sudah ada di koleksi Anda' : 'Stiker ditambahkan dari Galeri'
         );
       } catch (err: any) {
-        toast.error(err?.response?.data?.error || 'Gagal menyimpan stiker dari Pustaka Media');
+        toast.error(err?.response?.data?.error || 'Gagal menyimpan stiker dari Galeri');
       } finally {
         setSavingSticker(false);
       }
@@ -1744,12 +1744,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setSavingGroupInfo(true);
       try {
         const resp = await fetch(resolveCrmMediaUrl(asset.relativeUrl), { credentials: 'include' });
-        if (!resp.ok) throw new Error('Gagal mengunduh aset dari Pustaka Media');
+        if (!resp.ok) throw new Error('Gagal mengunduh berkas dari Galeri');
         const blob = await resp.blob();
         const base64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result || ''));
-          reader.onerror = () => reject(new Error('Gagal membaca gambar dari Pustaka Media'));
+          reader.onerror = () => reject(new Error('Gagal membaca gambar dari Galeri'));
           reader.readAsDataURL(blob);
         });
         await api.updateGroupPicture(
@@ -1757,7 +1757,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
           base64,
           selectedSession || selectedConversation.wahaSession || undefined
         );
-        toast.success('Foto profil grup berhasil diperbarui dari Pustaka Media');
+        toast.success('Foto profil grup berhasil diperbarui dari Galeri');
         void handleSyncConversationProfile();
       } catch (err: any) {
         toast.error(err?.response?.data?.error || err?.message || 'Gagal mengubah foto profil grup');
@@ -6998,11 +6998,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     <button
                       type="button"
                       onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
-                      title="Pilih Foto atau Dokumen dari Pustaka Media"
+                      title="Pilih Foto atau Dokumen dari Galeri"
                       className="px-1.5 py-0.5 rounded text-[10px] font-medium text-emerald-700 bg-white border border-emerald-200 hover:bg-emerald-50 transition-colors inline-flex items-center gap-0.5 cursor-pointer"
                     >
                       <FolderOpen className="w-3 h-3" />
-                      <span>Pustaka</span>
+                      <span>Galeri</span>
                     </button>
                     <button
                       type="button"
@@ -7053,7 +7053,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           {item.name}
                         </div>
                         <div className="text-[10px] text-gray-500 font-mono">
-                          {item.mediaUrl ? 'PUSTAKA • ' : ''}
+                          {item.mediaUrl ? 'GALERI • ' : ''}
                           {item.asDocument ? 'DOKUMEN' : item.kind.toUpperCase()} •{' '}
                           {item.size >= 1024 * 1024
                             ? `${(item.size / (1024 * 1024)).toFixed(1)} MB`
@@ -7254,10 +7254,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             size="sm"
                             disabled={savingSticker}
                             onClick={() => handleOpenMediaLibraryModal('STICKER')}
-                            title="Pilih gambar dari Pustaka Media menjadi Stiker"
+                            title="Pilih gambar dari Galeri menjadi Stiker"
                           >
                             <FolderOpen className="w-3 h-3" />
-                            <span>Pustaka</span>
+                            <span>Galeri</span>
                           </Button>
                           <Button
                             type="button"
@@ -7935,11 +7935,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         variant="secondary"
                         size="sm"
                         onClick={() => handleOpenMediaLibraryModal('LINK_THUMBNAIL')}
-                        title="Pilih gambar dari Pustaka Media"
+                        title="Pilih gambar dari Galeri"
                         className="shrink-0"
                       >
                         <FolderOpen className="w-3.5 h-3.5" />
-                        <span>Pustaka</span>
+                        <span>Galeri</span>
                       </Button>
                     </div>
                   </div>
@@ -8361,7 +8361,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-emerald-700 hover:bg-emerald-50 cursor-pointer"
                       >
                         <FolderOpen className="w-4 h-4 text-emerald-600" />
-                        <span>Pustaka Media</span>
+                        <span>Galeri</span>
                       </button>
                       {isCurrentConversationGroup && (
                         <button
@@ -8548,7 +8548,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         <button
                           type="button"
                           onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
-                          title="Pilih Foto, Video, atau Dokumen dari Pustaka Media Tersimpan"
+                          title="Pilih Foto, Video, atau Dokumen dari Galeri"
                           className="hidden sm:inline-flex h-8 w-8 rounded-md border border-gray-200 bg-white hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
                         >
                           <FolderOpen className="w-4 h-4" />
@@ -10193,7 +10193,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     />
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <p className="text-[10px] text-gray-400">
-                        Unggah berkas JPEG/PNG atau pilih dari Pustaka Media.
+                        Unggah berkas JPEG/PNG atau pilih dari Galeri.
                       </p>
                       <Button
                         type="button"
@@ -10204,7 +10204,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         className="shrink-0"
                       >
                         <FolderOpen className="w-3.5 h-3.5" />
-                        <span>Pilih dari Pustaka Media</span>
+                        <span>Pilih dari Galeri</span>
                       </Button>
                     </div>
                   </div>
@@ -11124,7 +11124,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
             ? 'Pilih Thumbnail Tautan'
             : mediaPickerMode === 'GROUP_AVATAR'
             ? 'Pilih Foto Profil Grup'
-            : 'Pilih Aset dari Pustaka Media'
+            : 'Pilih Berkas dari Galeri'
         }
         multiple={mediaPickerMode === 'CHAT_ATTACHMENT'}
         allowedKinds={

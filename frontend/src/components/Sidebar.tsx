@@ -131,7 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         { id: 'posts', label: 'Jadwal Post', icon: CalendarClock, locked: false, perm: 'broadcasts' },
         { id: 'ideas', label: 'Ide Konten', icon: Lightbulb, locked: false, perm: 'broadcasts' },
-        { id: 'media', label: 'Pustaka Media', icon: ImageIcon, locked: false, perm: 'broadcasts' },
+        { id: 'media', label: 'Galeri', icon: ImageIcon, locked: false, perm: 'broadcasts' },
       ],
     },
     {

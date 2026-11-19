@@ -13,7 +13,7 @@ import {
 import { liveEvents } from './events.service';
 import { wahaService } from './waha.service';
 import { fromWahaChatId, isPhoneWahaJid, normalizePhoneNumber } from './phone.utils';
-import { readUploadedMediaAsDataUri } from '../routes/media';
+import { createSignedMediaFetchUrl, readUploadedMediaAsDataUri } from '../routes/media';
 
 export interface PostTargetContact {
   contactId?: string | null;
@@ -398,12 +398,13 @@ export class PostService {
         if (!post.mediaUrl) {
           throw new Error('Postingan Instagram Feed memerlukan URL gambar/media publik.');
         }
+        const fetchableMediaUrl = await createSignedMediaFetchUrl(post.mediaUrl, 900);
         const containerRes = await axios.post(
           `https://graph.instagram.com/v21.0/${account.accountId}/media`,
           null,
           {
             params: {
-              image_url: post.mediaUrl,
+              image_url: fetchableMediaUrl,
               caption: post.caption,
               access_token: account.accessToken,
             },
@@ -427,12 +428,13 @@ export class PostService {
         externalPostId = publishRes.data?.id ? String(publishRes.data.id) : String(creationId);
       } else if (ch === 'FACEBOOK' && account) {
         if (post.mediaUrl) {
+          const fetchableMediaUrl = await createSignedMediaFetchUrl(post.mediaUrl, 900);
           const res = await axios.post(
             `https://graph.facebook.com/v21.0/${account.accountId}/photos`,
             null,
             {
               params: {
-                url: post.mediaUrl,
+                url: fetchableMediaUrl,
                 caption: post.caption,
                 access_token: account.accessToken,
               },
@@ -458,13 +460,16 @@ export class PostService {
         if (!account.accessToken) {
           throw new Error('Access token Threads belum dikonfigurasi pada akun kanal ini.');
         }
+        const fetchableMediaUrl = post.mediaUrl
+          ? await createSignedMediaFetchUrl(post.mediaUrl, 900)
+          : '';
         const params: Record<string, string> = {
-          media_type: post.mediaUrl ? 'IMAGE' : 'TEXT',
+          media_type: fetchableMediaUrl ? 'IMAGE' : 'TEXT',
           text: post.caption,
           access_token: account.accessToken,
         };
-        if (post.mediaUrl) {
-          params.image_url = post.mediaUrl;
+        if (fetchableMediaUrl) {
+          params.image_url = fetchableMediaUrl;
         }
         const createRes = await axios.post(
           `https://graph.threads.net/v1.0/${account.accountId}/threads`,
@@ -492,11 +497,12 @@ export class PostService {
           throw new Error('Target Channel / Group ID Telegram (mis. @namachannel) wajib diisi.');
         }
         if (post.mediaUrl) {
+          const fetchableMediaUrl = await createSignedMediaFetchUrl(post.mediaUrl, 900);
           const res = await axios.post(
             `https://api.telegram.org/bot${account.accessToken}/sendPhoto`,
             {
               chat_id: target,
-              photo: post.mediaUrl,
+              photo: fetchableMediaUrl,
               caption: post.caption,
             },
             { timeout: 15_000 }

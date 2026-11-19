@@ -61,37 +61,37 @@ const MODULE_TABS = [
   {
     id: 'inbox',
     num: '01',
-    title: 'Kotak Masuk Omnichannel & Multi-Sesi',
+    title: 'Kotak Masuk 6 Kanal & Multi-Sesi WA',
     summary:
-      'Satukan pesan WhatsApp QR multi-nomor, WhatsApp Cloud API, Instagram DM & komentar, Facebook Messenger, Threads, serta Telegram ke satu ruang kerja ringkas.',
+      'Gabungkan pesan WhatsApp QR multi-nomor, WhatsApp Cloud API, Instagram DM & komentar, Facebook Messenger, Threads, dan Telegram di satu antrean kerja.',
     icon: MessageSquare,
     highlights: [
       'Pemisahan percakapan per nomor WA & push name sambil tetap tertaut pada 1 profil kontak.',
       'Kirim media (foto, video, audio, dokumen), balasan kutipan (quote reply), tombol interaktif, polling WA, dan Quick Quote produk.',
       'Dukungan penuh chat Grup WhatsApp (@g.us) beserta daftar partisipan dan resolusi @mention.',
     ],
-    techNote: 'Sinkronisasi real-time SSE + status pesan terkirim/dibaca & indikator mengetik.',
+    techNote: 'Sinkronisasi real-time SSE dengan status pesan terkirim/dibaca dan indikator mengetik.',
   },
   {
     id: 'rbac',
     num: '02',
     title: 'Role Multi-CS & Kontrol Non-Penilaian',
     summary:
-      'Susun struktur tim Customer Service dari level shift hingga supervisor tanpa membuka akses penuh ke database pelanggan atau kredensial server.',
+      'Atur hak akses staf shift hingga supervisor tanpa membuka akses ekspor database kontak atau pengaturan WAHA.',
     icon: ShieldCheck,
     highlights: [
       'Builder role custom dengan 18+ izin menu hingga level tombol dan endpoint API.',
       'Grup WhatsApp otomatis berstatus Non-Penilaian agar tidak merusak skor SLA dan CSAT.',
       'Penandaan kontak internal/vendor sebagai Non-Penilaian permanen berlaku lintas sesi.',
     ],
-    techNote: 'Autentikasi session cookie HttpOnly terisolasi per ruang kerja perusahaan.',
+    techNote: 'Autentikasi cookie HttpOnly terpisah per ruang kerja perusahaan.',
   },
   {
     id: 'sla',
     num: '03',
     title: 'Batas Sesi Tiket, SLA & CSAT Multi-Sesi',
     summary:
-      'Audit siklus penanganan pelanggan dari awal sesi dibuka hingga tiket ditutup tanpa pernah menghapus riwayat percakapan terdahulu.',
+      'Catat siklus penanganan pelanggan dari awal sesi dibuka hingga tiket ditutup tanpa pernah menghapus riwayat percakapan terdahulu.',
     icon: Clock,
     highlights: [
       'Penanda visual Batas Mulai Sesi dan Batas Selesai Sesi otomatis di linimasa obrolan.',
@@ -105,28 +105,28 @@ const MODULE_TABS = [
     num: '04',
     title: 'Siaran Anti-Ban & WhatsApp Story Terjadwal',
     summary:
-      'Kelola kampanye siaran dan jadwal publikasi konten rutin lintas media sosial sekaligus WhatsApp Status dari satu kalender kerja.',
+      'Kelola kampanye siaran dan jadwal posting media sosial serta WhatsApp Status dari satu kalender kerja.',
     icon: Radio,
     highlights: [
       'Antrean siaran BullMQ dengan jeda natural antar pesan dan rotasi multi-sesi WA.',
       'Jadwalkan WhatsApp Story (teks, foto, video, audio) ke daftar kontak pilihan & cek penonton Story.',
       'Otomasi balasan komentar Instagram, Facebook, dan Threads sekaligus pembuka DM.',
     ],
-    techNote: 'Worker antrean Redis terpisah untuk reliabilitas pengiriman berjadwal.',
+    techNote: 'Worker antrean Redis menjalankan jeda kirim dan jadwal posting tanpa membebani proses chat.',
   },
   {
     id: 'ai',
     num: '05',
     title: 'Agent AI Multi-Model, Knowledge Book & MCP',
     summary:
-      'Hadirkan asisten AI berbasis panduan produk internal untuk merespons di luar jam kerja atau menyusun draf balasan cepat untuk tim CS.',
+      'Gunakan panduan produk Markdown agar AI menjawab pertanyaan dasar di luar jam kerja atau menyiapkan draf balasan CS.',
     icon: Bot,
     highlights: [
       'Mendukung OpenAI, Gemini, Anthropic, hingga model lokal Ollama tanpa kunci vendor.',
       'Knowledge Book terstruktur, skill kustom Markdown, dan failover otomatis antar penyedia model.',
       'Koneksi eksternal ke sistem katalog/ERP melalui Model Context Protocol (MCP) tools.',
     ],
-    techNote: 'Dapat membalas terarah berdasar jam operasional, tag obrolan, atau eskalasi agen.',
+    techNote: 'Bisa diatur membalas berdasarkan jam operasional, tag obrolan, atau eskalasi ke agen manusia.',
   },
 ];
 
@@ -267,8 +267,8 @@ const STEPS = [
 
 const FAQS = [
   {
-    q: 'Apa itu Reneo CRM dan untuk siapa platform ini dibuat?',
-    a: 'Reneo CRM adalah perangkat lunak manajemen komunikasi pelanggan (CRM Omnichannel) self-hosted yang dirancang untuk toko online, tim Customer Service multi-agen, dan bisnis multi-cabang yang membutuhkan kendali penuh atas data pelanggan serta performa SLA/CSAT.',
+    q: 'Apa itu Reneo CRM dan untuk siapa aplikasi ini dibuat?',
+    a: 'Reneo CRM adalah aplikasi inbox pelanggan self-hosted untuk toko online, tim Customer Service multi-admin, dan usaha multi-cabang. Seluruh data kontak dan riwayat chat disimpan langsung di database PostgreSQL server Anda sendiri.',
   },
   {
     q: 'Apakah bisa memakai banyak nomor WhatsApp QR dan WhatsApp Bisnis Resmi bersamaan?',
@@ -429,16 +429,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div className="lg:col-span-6 space-y-5">
                 <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200 text-[11px] font-mono font-medium text-slate-700">
                   <Server className="w-3.5 h-3.5 text-[#2563eb]" strokeWidth={1.75} />
-                  <span>Platform CRM Omnichannel · Self-Hosted &amp; Terkendali</span>
+                  <span>Self-Hosted CRM · PostgreSQL &amp; Redis</span>
                 </div>
 
                 <h1 className="text-2xl sm:text-4xl font-bold text-slate-900 tracking-tight leading-[1.18]">
-                  Satu Panel Kerja untuk Semua Chat Pelanggan &amp; Tim CS Usaha Anda
+                  Satu Kotak Masuk untuk Chat Pelanggan &amp; Pengaturan Tim CS
                 </h1>
 
                 <p className="text-sm sm:text-[15px] text-slate-600 leading-relaxed">
-                  Satukan pesan WhatsApp (Multi-Nomor QR, Grup WA, Story &amp; Bisnis Resmi),
-                  komentar dan DM Instagram, Facebook, Threads, serta Telegram di satu kotak masuk.
+                  Kelola WhatsApp (Multi-Nomor QR, Grup WA, Story &amp; Bisnis Resmi),
+                  komentar dan DM Instagram, Facebook, Threads, serta Telegram dari satu halaman.
                   Dilengkapi builder Role Multi-CS granular, filter Non-Penilaian, Batas Mulai &amp;
                   Selesai Sesi SLA/CSAT, siaran terjadwal, dan Agent AI (MCP).
                 </p>
@@ -498,7 +498,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <div className="flex items-center gap-2 min-w-0">
                       <ReneoCrmLogo className="w-4 h-4 shrink-0" />
                       <span className="text-xs font-semibold text-slate-800 truncate">
-                        Reneo CRM · Kotak Masuk Terpadu
+                        Reneo CRM · Kotak Masuk
                       </span>
                     </div>
                     <div className="flex items-center gap-1 text-slate-500 shrink-0">
@@ -633,7 +633,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               Modul Kerja &amp; Arsitektur Sistem CRM
             </h2>
             <p className="text-xs sm:text-sm text-slate-600">
-              Setiap kapabilitas dibangun sebagai komponen produksi terpadu untuk operasional CS dan pemasaran harian.
+              Lima bagian utama untuk pekerjaan harian admin CS dan tim promosi: balas chat, ukur SLA, batasi akses staf, siarkan promo, dan pasang AI.
             </p>
           </div>
 
@@ -715,10 +715,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
             <div className="space-y-1 max-w-2xl">
               <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-                Masalah di Lapangan &amp; Penyelesaiannya
+                Masalah Harian Tim CS &amp; Cara Menanganinya
               </h2>
               <p className="text-xs sm:text-sm text-slate-600">
-                Dirancang untuk kendala nyata pemilik toko online, tim CS, dan pengelola iklan media sosial.
+                Contoh kendala di toko online, tim shift CS, dan pengelola iklan media sosial beserta cara kerjanya di Reneo CRM.
               </p>
             </div>
 
@@ -959,10 +959,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <ReneoCrmLogo className="w-10 h-10 shrink-0" />
               <div className="space-y-2.5">
                 <h2 className="text-base sm:text-lg font-bold">
-                  Siap Mengelola Semua Chat Pelanggan di Reneo CRM?
+                  Siap Memindahkan Chat Pelanggan ke Server Sendiri?
                 </h2>
                 <p className="text-xs sm:text-sm text-blue-100 leading-relaxed">
-                  Masuk ke ruang kerja CRM Anda atau kelola infrastruktur server dari{' '}
+                  Masuk ke ruang kerja CRM Anda atau kelola kontainer dan domain lewat{' '}
                   <a
                     href={PANEL_URL}
                     target="_top"

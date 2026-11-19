@@ -91,8 +91,8 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   {
     id: 'broadcasts',
     group: 'Siaran & Konten Sosial',
-    label: 'Akses Menu Siaran, Jadwal Post & Media',
-    description: 'Melihat daftar kampanye, kalender postingan, WA Story, ide konten & pustaka media.',
+    label: 'Akses Menu Siaran, Jadwal Post & Galeri',
+    description: 'Melihat daftar kampanye, kalender postingan, WA Story, ide konten & galeri.',
     kind: 'menu',
   },
   {
@@ -230,7 +230,7 @@ export const DEFAULT_STARTER_ROLES: Array<{
   {
     id: 'role_content',
     name: 'Marketing & Konten',
-    description: 'Mengelola siaran promo, jadwal posting sosial media, WhatsApp Story, pustaka media & pelacakan.',
+    description: 'Mengelola siaran promo, jadwal posting sosial media, WhatsApp Story, galeri & pelacakan.',
     permissions: [
       'dashboard',
       'contacts',

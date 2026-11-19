@@ -69,8 +69,8 @@ export const PERMISSION_CATALOG_UI: PermissionCatalogItem[] = [
   {
     id: 'broadcasts',
     group: 'Siaran & Konten Sosial',
-    label: 'Akses Menu Siaran, Jadwal Post & Media',
-    description: 'Melihat daftar kampanye, kalender postingan, WA Story, ide konten & pustaka media.',
+    label: 'Akses Menu Siaran, Jadwal Post & Galeri',
+    description: 'Melihat daftar kampanye, kalender postingan, WA Story, ide konten & galeri.',
     kind: 'menu',
   },
   {

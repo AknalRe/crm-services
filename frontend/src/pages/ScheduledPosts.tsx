@@ -831,7 +831,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                     className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer"
                   >
                     <FolderOpen className="w-3 h-3" />
-                    <span>Pilih dari Pustaka</span>
+                    <span>Pilih dari Galeri</span>
                   </button>
                   <button
                     type="button"
@@ -848,7 +848,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                 <ImageIcon className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
                 <input
                   type="url"
-                  placeholder="https://domain.com/media.jpg, Upload Media, atau Pilih dari Pustaka"
+                  placeholder="https://domain.com/media.jpg, Upload Media, atau Pilih dari Galeri"
                   value={mediaUrl}
                   onChange={(e) => setMediaUrl(e.target.value)}
                   className="w-full h-9 pl-8 pr-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
@@ -1700,7 +1700,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
       <MediaLibraryPickerModal
         isOpen={showMediaPickerModal}
         onClose={() => setShowMediaPickerModal(false)}
-        title="Pilih Media dari Pustaka"
+        title="Pilih Media dari Galeri"
         allowedKinds={
           channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VOICE'
             ? ['audio']
@@ -1717,7 +1717,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
         }
         onConfirm={(picked) => {
           if (picked[0]) {
-            setMediaUrl(picked[0].relativeUrl);
+            setMediaUrl(picked[0].url || picked[0].relativeUrl);
           }
         }}
       />

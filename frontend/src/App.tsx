@@ -379,7 +379,7 @@ function AppShell() {
       case 'ideas':
         return 'Ide Konten';
       case 'media':
-        return 'Pustaka Media';
+        return 'Galeri';
       case 'birthday':
         return 'Ucapan Ulang Tahun Otomatis';
       case 'tracking':

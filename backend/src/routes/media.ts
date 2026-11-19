@@ -11,7 +11,76 @@ import {
   conversations,
   persistedMedia,
 } from '../db/schema';
-import { requirePermission } from './auth';
+import {
+  AuthUserSession,
+  getAuthSigningSecret,
+  getCurrentAuthUser,
+  requirePermission,
+} from './auth';
+
+export interface MediaRouterOptions {
+  resolveAuthUser?: (req: FastifyRequest) => Promise<AuthUserSession | null>;
+  resolveSigningSecret?: () => Promise<string>;
+  uploadsDir?: string;
+}
+
+export function extractUploadedMediaFilename(rawUrl?: string | null): string | null {
+  const match = String(rawUrl || '').trim().match(/\/api\/media\/files\/([a-zA-Z0-9._-]+)(?:[?#].*)?$/);
+  if (!match) return null;
+  const filename = match[1];
+  if (!/^[a-zA-Z0-9._-]+$/.test(filename) || filename === '.' || filename === '..') {
+    return null;
+  }
+  return filename;
+}
+
+export function signMediaAccessToken(filename: string, secret: string, ttlSeconds = 900): string {
+  const exp = Math.floor(Date.now() / 1000) + Math.max(30, Math.floor(ttlSeconds));
+  const sig = crypto.createHmac('sha256', secret).update(`${filename}:${exp}`).digest('base64url');
+  return `${exp}.${sig}`;
+}
+
+export function verifyMediaAccessToken(
+  filename: string,
+  token: string,
+  secret: string,
+  nowSec = Math.floor(Date.now() / 1000)
+): boolean {
+  if (!filename || !token || !secret) return false;
+  const dotIdx = token.indexOf('.');
+  if (dotIdx <= 0) return false;
+  const expStr = token.slice(0, dotIdx);
+  const sig = token.slice(dotIdx + 1);
+  if (!/^\d+$/.test(expStr) || !sig) return false;
+  const exp = Number(expStr);
+  if (!Number.isSafeInteger(exp) || exp < nowSec) return false;
+  const expected = crypto.createHmac('sha256', secret).update(`${filename}:${exp}`).digest('base64url');
+  const sigBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expected);
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
+}
+
+export async function createSignedMediaFetchUrl(
+  rawUrl: string,
+  ttlSeconds = 900,
+  secretOverride?: string
+): Promise<string> {
+  const trimmed = String(rawUrl || '').trim();
+  const filename = extractUploadedMediaFilename(trimmed);
+  if (!filename) return trimmed;
+  const secret = secretOverride || (await getAuthSigningSecret());
+  if (!secret) return trimmed;
+  const tok = signMediaAccessToken(filename, secret, ttlSeconds);
+  const hashIdx = trimmed.indexOf('#');
+  const hash = hashIdx >= 0 ? trimmed.slice(hashIdx) : '';
+  const withoutHash = hashIdx >= 0 ? trimmed.slice(0, hashIdx) : trimmed;
+  const qIdx = withoutHash.indexOf('?');
+  const basePath = qIdx >= 0 ? withoutHash.slice(0, qIdx) : withoutHash;
+  const params = new URLSearchParams(qIdx >= 0 ? withoutHash.slice(qIdx + 1) : '');
+  params.set('m_tok', tok);
+  return `${basePath}?${params.toString()}${hash}`;
+}
 
 export function resolveUploadsDir(
   cwd = process.cwd(),
@@ -443,7 +512,15 @@ function resolveMediaAppPrefix(req: FastifyRequest): string {
   return refMatch ? refMatch[1] : '';
 }
 
-export default async function mediaRouter(fastify: FastifyInstance) {
+export default async function mediaRouter(
+  fastify: FastifyInstance,
+  opts: MediaRouterOptions = {}
+) {
+  const resolveAuthUser = opts.resolveAuthUser || getCurrentAuthUser;
+  const resolveSigningSecret = opts.resolveSigningSecret || getAuthSigningSecret;
+  const activeUploadsDir = opts.uploadsDir ? path.resolve(opts.uploadsDir) : UPLOADS_DIR;
+  const activeProfilesDir = path.join(activeUploadsDir, 'profiles');
+
   // List all uploaded media files in uploads/
   fastify.get(
     '/',
@@ -587,16 +664,34 @@ export default async function mediaRouter(fastify: FastifyInstance) {
     }
   );
 
-  // Public file serving endpoint with HTTP Range support so browser images, video, audio & docs render reliably
-  fastify.get<{ Params: { filename: string } }>(
+  // Authenticated file serving endpoint (or signed short-lived m_tok for external channel publishing) with HTTP Range support
+  fastify.get<{ Params: { filename: string }; Querystring: { m_tok?: string } }>(
     '/files/:filename',
-    async (req: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
+    async (
+      req: FastifyRequest<{ Params: { filename: string }; Querystring: { m_tok?: string } }>,
+      reply: FastifyReply
+    ) => {
       try {
         const filename = String(req.params.filename || '').trim();
         if (!/^[a-zA-Z0-9._-]+$/.test(filename) || filename === '.' || filename === '..') {
           return reply.status(400).send({ success: false, error: 'Invalid filename' });
         }
-        const filePath = path.join(UPLOADS_DIR, filename);
+
+        const rawTok = typeof req.query?.m_tok === 'string' ? req.query.m_tok.trim() : '';
+        const authUser = await resolveAuthUser(req);
+        let tokenAuthorized = false;
+        if (!authUser && rawTok) {
+          const secret = await resolveSigningSecret().catch(() => '');
+          tokenAuthorized = Boolean(secret && verifyMediaAccessToken(filename, rawTok, secret));
+        }
+        if (!authUser && !tokenAuthorized) {
+          return reply
+            .status(401)
+            .header('Cache-Control', 'no-store')
+            .send({ success: false, error: 'Autentikasi diperlukan untuk mengakses berkas media' });
+        }
+
+        const filePath = path.join(activeUploadsDir, filename);
         if (!fs.existsSync(filePath)) {
           return reply.status(404).send({ success: false, error: 'File not found' });
         }
@@ -608,7 +703,8 @@ export default async function mediaRouter(fastify: FastifyInstance) {
         reply.header('Content-Disposition', `inline; filename="${filename.replace(/"/g, '')}"`);
         reply.header('X-Content-Type-Options', 'nosniff');
         reply.header('Accept-Ranges', 'bytes');
-        reply.header('Cache-Control', 'public, max-age=86400');
+        reply.header('Vary', 'Cookie');
+        reply.header('Cache-Control', tokenAuthorized ? 'private, no-store' : 'private, max-age=3600');
 
         const rangeHeader = String(req.headers.range || '').trim();
         const rangeMatch = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
@@ -633,7 +729,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
     }
   );
 
-  // Serve cached WhatsApp profile photos (auto-restoring from PostgreSQL or healing from WAHA if container disk was recreated)
+  // Serve cached WhatsApp profile photos strictly to authenticated CRM users
   fastify.get<{ Params: { filename: string } }>(
     '/profiles/:filename',
     async (req: FastifyRequest<{ Params: { filename: string } }>, reply: FastifyReply) => {
@@ -642,7 +738,16 @@ export default async function mediaRouter(fastify: FastifyInstance) {
         if (!/^[a-zA-Z0-9._-]+$/.test(filename) || filename === '.' || filename === '..') {
           return reply.status(400).send({ success: false, error: 'Invalid filename' });
         }
-        const filePath = path.join(PROFILES_DIR, filename);
+
+        const authUser = await resolveAuthUser(req);
+        if (!authUser) {
+          return reply
+            .status(401)
+            .header('Cache-Control', 'no-store')
+            .send({ success: false, error: 'Autentikasi diperlukan untuk mengakses foto profil' });
+        }
+
+        const filePath = path.join(activeProfilesDir, filename);
         const ext = path.extname(filename).toLowerCase();
         const fallbackMime = PROFILE_EXT_MIME[ext] || 'image/jpeg';
         const key = `profiles/${filename}`;
@@ -656,6 +761,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
               .catch(() => {});
           }
           reply.header('Content-Type', fallbackMime);
+          reply.header('Vary', 'Cookie');
           reply.header('Cache-Control', 'private, max-age=3600');
           return reply.send(fs.createReadStream(filePath));
         }
@@ -663,6 +769,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
         const restored = await restorePersistedProfilePicture(`/api/media/profiles/${filename}`);
         if (restored && fs.existsSync(filePath)) {
           reply.header('Content-Type', fallbackMime);
+          reply.header('Vary', 'Cookie');
           reply.header('Cache-Control', 'private, max-age=3600');
           return reply.send(fs.createReadStream(filePath));
         }
@@ -670,6 +777,7 @@ export default async function mediaRouter(fastify: FastifyInstance) {
         const healed = await healMissingProfilePicture(filename);
         if (healed) {
           reply.header('Content-Type', healed.mimeType);
+          reply.header('Vary', 'Cookie');
           reply.header('Cache-Control', 'no-store');
           return reply.send(healed.buffer);
         }

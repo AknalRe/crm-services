@@ -63,7 +63,7 @@ test('publicSeoRouter serves robots.txt, sitemap.xml, llms.txt, llms-full.txt an
   assert.match(landingHtmlRes.body, /application\/ld\+json/);
   assert.match(landingHtmlRes.body, /SoftwareApplication/);
   assert.match(landingHtmlRes.body, /FAQPage/);
-  assert.match(landingHtmlRes.body, /<h1>Satu Ruang Kerja Layanan Pelanggan Omnichannel/);
+  assert.match(landingHtmlRes.body, /<h1>Satu Kotak Masuk WhatsApp/);
 
   const landingMdRes = await app.inject({
     method: 'GET',

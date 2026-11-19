@@ -9,9 +9,9 @@ const DOCKER_IMAGE = 'ghcr.io/aknalre/crm-services';
 
 export const CRM_SEO_META = {
   name: 'Reneo CRM',
-  fullTitle: 'Reneo CRM — Platform Layanan Pelanggan Omnichannel Self-Hosted (WhatsApp, IG, FB, Threads, Telegram & AI)',
+  fullTitle: 'Reneo CRM — Kotak Masuk WhatsApp & Media Sosial Self-Hosted',
   description:
-    'Reneo CRM adalah platform layanan pelanggan dan kotak masuk omnichannel self-hosted di server Linux sendiri: kelola WhatsApp (Multi-Nomor QR WAHA, Grup WA, Story, Meta Cloud API), Instagram DM & Komentar, Facebook Messenger, Threads, dan Telegram dalam satu ruang kerja tim CS dengan Role granular, filter Non-Penilaian, SLA, CSAT multi-sesi, siaran anti-ban, dan Agent AI (OpenAI, Gemini, Anthropic, Ollama, MCP).',
+    'Reneo CRM adalah aplikasi layanan pelanggan self-hosted di server Linux untuk mengelola WhatsApp Multi-Nomor (WAHA QR & Cloud API), Instagram DM & Komentar, Facebook Messenger, Threads, dan Telegram dalam satu kotak masuk tim CS. Dilengkapi pengaturan Role granular, filter Non-Penilaian, Batas Mulai & Selesai Sesi SLA/CSAT, siaran terjadwal, dan Agent AI (OpenAI, Gemini, Anthropic, Ollama, MCP).',
   keywords:
     'Reneo CRM, CRM omnichannel, WhatsApp CRM self-hosted, inbox multi admin WhatsApp, WhatsApp Cloud API, WAHA CRM, CSAT multi sesi, SLA customer service, Agent AI MCP, WhatsApp Story terjadwal, CRM toko online Indonesia',
 };
@@ -248,8 +248,8 @@ function buildSemanticHtmlBody(baseUrl: string): string {
 
   return `<main style="max-width:960px;margin:0 auto;padding:32px 20px;font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6;color:#0f172a">
   <header>
-    <p><strong>${escapeHtml(CRM_SEO_META.name)}</strong> · Platform CRM Omnichannel Self-Hosted</p>
-    <h1>Satu Ruang Kerja Layanan Pelanggan Omnichannel &amp; Tim CS Modern</h1>
+    <p><strong>${escapeHtml(CRM_SEO_META.name)}</strong> · Aplikasi CRM Self-Hosted</p>
+    <h1>Satu Kotak Masuk WhatsApp &amp; Media Sosial untuk Tim Customer Service</h1>
     <p>${escapeHtml(CRM_SEO_META.description)}</p>
     <nav aria-label="Tautan Penting">
       <a href="${escapeHtml(rootUrl)}">Beranda</a> ·
@@ -280,7 +280,7 @@ function buildSemanticHtmlBody(baseUrl: string): string {
     ${faqHtml}
   </section>
   <footer>
-    <p>Bagian dari ekosistem <a href="${escapeHtml(PANEL_URL)}">Reneo Panel</a> · Container resmi: <code>${escapeHtml(DOCKER_IMAGE)}</code></p>
+    <p>Bagian dari <a href="${escapeHtml(PANEL_URL)}">Reneo Panel</a> · Image Docker: <code>${escapeHtml(DOCKER_IMAGE)}</code></p>
   </footer>
 </main>`;
 }
@@ -359,7 +359,7 @@ function buildLlmsTxt(baseUrl: string, full: boolean): string {
     `- Nama Produk: ${CRM_SEO_META.name} (Reneo CRM Omnichannel Services)`,
     `- URL Halaman Utama: ${baseUrl}/`,
     `- Halaman Profil Produk (Compro): ${baseUrl}/landing`,
-    `- Ekosistem Panel Utama: ${PANEL_URL}`,
+    `- Panel Manajemen Server: ${PANEL_URL}`,
     `- Pemesanan Hosting + CRM (Trial 7 Hari): ${PANEL_ORDER_URL}`,
     `- Instalasi Self-Hosted di Server Linux: ${PANEL_INSTALL_URL}`,
     `- Registry Container Resmi: ${DOCKER_IMAGE}`,

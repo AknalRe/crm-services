@@ -42,7 +42,7 @@ interface MediaLibraryPickerModalProps {
 export const MediaLibraryPickerModal: React.FC<MediaLibraryPickerModalProps> = ({
   isOpen,
   onClose,
-  title = 'Pilih Aset dari Pustaka Media',
+  title = 'Pilih Berkas dari Galeri',
   subtitle,
   multiple = false,
   allowedKinds,
@@ -68,7 +68,7 @@ export const MediaLibraryPickerModal: React.FC<MediaLibraryPickerModalProps> = (
       const list = await api.getMediaLibrary();
       setItems(list || []);
     } catch {
-      toast.error('Gagal memuat daftar pustaka media');
+      toast.error('Gagal memuat daftar galeri');
     } finally {
       setLoading(false);
     }
@@ -159,7 +159,7 @@ export const MediaLibraryPickerModal: React.FC<MediaLibraryPickerModalProps> = (
           mimeType: file.type || 'application/octet-stream',
           base64,
           channel: 'DIRECT',
-          label: 'Unggahan Pustaka',
+          label: 'Unggahan Galeri',
           source: 'UPLOAD',
         });
         if (res?.filename) uploadedNames.push(res.filename);
@@ -169,10 +169,10 @@ export const MediaLibraryPickerModal: React.FC<MediaLibraryPickerModalProps> = (
         setSelectedNames((prev) =>
           multiple ? Array.from(new Set([...uploadedNames, ...prev])) : [uploadedNames[0]]
         );
-        toast.success(`${uploadedNames.length} aset diunggah ke Pustaka Media`);
+        toast.success(`${uploadedNames.length} berkas diunggah ke Galeri`);
       }
     } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Gagal mengunggah berkas ke Pustaka Media');
+      toast.error(err?.response?.data?.error || 'Gagal mengunggah berkas ke Galeri');
     } finally {
       setUploading(false);
     }
@@ -295,11 +295,11 @@ export const MediaLibraryPickerModal: React.FC<MediaLibraryPickerModalProps> = (
 
         <div className="max-h-[380px] overflow-y-auto pr-0.5">
           {loading ? (
-            <LoadingState message="Memuat aset pustaka media..." />
+            <LoadingState message="Memuat berkas galeri..." />
           ) : filteredItems.length === 0 ? (
             <EmptyState
-              title="Tidak ada aset media cocok"
-              description="Unggah berkas baru melalui tombol Upload Baru di atas atau terima/kirim media lewat obrolan CRM."
+              title="Belum ada berkas yang sesuai"
+              description="Unggah berkas baru melalui tombol Upload Baru di atas atau kirim/terima media di obrolan."
             />
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
