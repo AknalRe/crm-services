@@ -661,8 +661,42 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 Kenapa Kami Membuat Reneo CRM
               </h2>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Reneo CRM tidak dibuat dari teori buku teks, melainkan dari kerepotan yang kami alami sendiri saat mengelola operasional chat pelanggan di banyak nomor WhatsApp dan akun media sosial dengan tim CS bergantian shift.
+                Reneo CRM tidak dibuat karena ingin membuat software baru, melainkan lahir dari pengalaman nyata tim kami sendiri saat mengelola chat pelanggan setiap hari.
               </p>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl bg-slate-50/70 divide-y divide-slate-200 overflow-hidden">
+              {[
+                {
+                  step: 'Kami pernah mengalami',
+                  text: 'Chat pelanggan tersebar di banyak HP admin dan akun media sosial; saat staf berganti shift atau perangkat bermasalah, riwayat obrolan terputus, sementara pesan kurir, supplier, dan grup internal bercampur dengan chat pembeli.',
+                },
+                {
+                  step: 'Kami menyadari',
+                  text: 'Masalah tersebut ternyata bukan sekadar persoalan kecil: ketika percakapan makin ramai, pelanggan menunggu terlalu lama, tim mengulang pertanyaan yang sama, dan laporan respon CS maupun kepuasan layanan menjadi tidak akurat.',
+                },
+                {
+                  step: 'Kami merasa',
+                  text: 'Solusi yang tersedia belum menjawab kebutuhan operasional kami — biayanya membengkak seiring jumlah admin dan pesan, data pelanggan bergantung pada server luar, dan chat non-pelanggan masih mengacaukan metrik SLA maupun CSAT.',
+                },
+                {
+                  step: 'Karena itu, kami membuat Reneo CRM',
+                  text: 'Satu kotak masuk self-hosted yang dibangun langsung dari alur kerja nyata tim CS kami sendiri di atas PostgreSQL dan Redis pada server sendiri.',
+                },
+                {
+                  step: 'Tujuan kami',
+                  text: 'Membuat pengelolaan percakapan pelanggan, pembagian tugas tim, batas sesi penanganan, dan evaluasi layanan yang sebelumnya menyulitkan menjadi lebih terstruktur, terukur, dan mudah dilakukan.',
+                },
+              ].map((story) => (
+                <div key={story.step} className="px-4 sm:px-5 py-3 bg-white flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
+                  <span className="text-xs font-semibold text-[#1d4ed8] sm:w-64 shrink-0">
+                    {story.step}
+                  </span>
+                  <p className="text-xs sm:text-[13px] text-slate-700 leading-relaxed">
+                    {story.text}
+                  </p>
+                </div>
+              ))}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 border border-slate-200 rounded-xl bg-slate-50/50 divide-y md:divide-y-0 md:divide-x md:grid-flow-row overflow-hidden">

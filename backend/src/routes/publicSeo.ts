@@ -16,6 +16,29 @@ export const CRM_SEO_META = {
     'Reneo CRM, CRM omnichannel, WhatsApp CRM self-hosted, inbox multi admin WhatsApp, WhatsApp Cloud API, WAHA CRM, CSAT multi sesi, SLA customer service, Agent AI MCP, WhatsApp Story terjadwal, CRM toko online Indonesia',
 };
 
+const CRM_STORY_BEATS = [
+  {
+    step: 'Kami pernah mengalami',
+    text: 'Chat pelanggan tersebar di banyak HP admin dan akun media sosial; saat staf berganti shift atau perangkat bermasalah, riwayat obrolan terputus, sementara pesan kurir, supplier, dan grup internal bercampur dengan chat pembeli.',
+  },
+  {
+    step: 'Kami menyadari',
+    text: 'Masalah tersebut ternyata bukan sekadar persoalan kecil: ketika percakapan makin ramai, pelanggan menunggu terlalu lama, tim mengulang pertanyaan yang sama, dan laporan respon CS maupun kepuasan layanan menjadi tidak akurat.',
+  },
+  {
+    step: 'Kami merasa',
+    text: 'Solusi yang tersedia belum menjawab kebutuhan operasional kami — biayanya membengkak seiring jumlah admin dan pesan, data pelanggan bergantung pada server luar, dan chat non-pelanggan masih mengacaukan metrik SLA maupun CSAT.',
+  },
+  {
+    step: 'Karena itu, kami membuat Reneo CRM',
+    text: 'Satu kotak masuk self-hosted yang dibangun langsung dari alur kerja nyata tim CS kami sendiri di atas PostgreSQL dan Redis pada server sendiri, bukan sekadar ingin membuat software baru.',
+  },
+  {
+    step: 'Tujuan kami',
+    text: 'Membuat pengelolaan percakapan pelanggan, pembagian tugas tim, batas sesi penanganan, dan evaluasi layanan yang sebelumnya menyulitkan menjadi lebih terstruktur, terukur, dan mudah dilakukan.',
+  },
+];
+
 const CRM_WHY_WE_BUILT_IT = [
   {
     title: 'Chat tersebar di banyak HP admin, lalu hilang saat staf berganti',
@@ -273,6 +296,9 @@ function buildJsonLd(baseUrl: string): Record<string, unknown> {
 function buildSemanticHtmlBody(baseUrl: string): string {
   const rootUrl = `${baseUrl}/`;
   const landingUrl = `${baseUrl}/landing`;
+  const storyHtml = CRM_STORY_BEATS.map(
+    (s) => `<li><strong>${escapeHtml(s.step)}:</strong> ${escapeHtml(s.text)}</li>`
+  ).join('\n');
   const whyHtml = CRM_WHY_WE_BUILT_IT.map(
     (w, i) => `<li><h3>0${i + 1}. ${escapeHtml(w.title)}</h3><p>${escapeHtml(w.detail)}</p></li>`
   ).join('\n');
@@ -309,7 +335,8 @@ function buildSemanticHtmlBody(baseUrl: string): string {
   </header>
   <section id="kenapa-dibuat">
     <h2>Kenapa Kami Membuat Reneo CRM</h2>
-    <p>Reneo CRM tidak dibuat dari teori buku teks, melainkan dari kerepotan yang kami alami sendiri saat mengelola chat pelanggan di banyak nomor WhatsApp dan akun media sosial dengan tim CS bergantian shift.</p>
+    <p>Reneo CRM tidak dibuat karena ingin membuat software baru, melainkan lahir dari pengalaman nyata tim kami sendiri saat mengelola chat pelanggan setiap hari.</p>
+    <ul>${storyHtml}</ul>
     <ul>${whyHtml}</ul>
     <p>Dari pengalaman itulah detail seperti status Non-Penilaian untuk grup WA dan kontak internal, penanda Batas Mulai &amp; Selesai Sesi, serta pembatasan izin hingga level tombol menjadi pondasi utama aplikasi ini.</p>
   </section>
@@ -452,6 +479,8 @@ function buildLlmsTxt(baseUrl: string, full: boolean): string {
     '8. Pertanyaan Umum (FAQ) & CTA Penutup',
     '',
     '## Kenapa Kami Membuat Reneo CRM',
+    ...CRM_STORY_BEATS.map((s) => `- **${s.step}**: ${s.text}`),
+    '',
     ...CRM_WHY_WE_BUILT_IT.map((w) => `- **${w.title}**: ${w.detail}`),
     '',
     '## Kanal Komunikasi yang Didukung',
