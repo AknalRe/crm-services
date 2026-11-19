@@ -3110,6 +3110,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
         session: selectedSession || undefined,
       });
       setSavedSharedPhones((prev) => ({ ...prev, [rawPhone]: true }));
+      const contactObj = res?.contact as { nama_lengkap?: string; namaLengkap?: string } | undefined;
+      const savedDisplayName =
+        contactObj?.nama_lengkap || contactObj?.namaLengkap || sc.fullName || `+${rawPhone.replace(/^\+/, '')}`;
       if (openChat && res.conversation) {
         const list = await api.getConversations().catch(() => []);
         const target = list.find((c) => c.id === res.conversation?.id) || null;
@@ -3117,12 +3120,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
         if (target) {
           setSelectedConversation(target);
         }
-        toast.success(`Membuka percakapan dengan ${res.contact.nama_lengkap}`);
+        toast.success(`Membuka percakapan dengan ${savedDisplayName}`);
       } else {
         toast.success(
           res.createdNew
-            ? `Kontak "${res.contact.nama_lengkap}" disimpan ke CRM`
-            : `Kontak "${res.contact.nama_lengkap}" sudah terdaftar di CRM`
+            ? `Kontak "${savedDisplayName}" disimpan ke CRM`
+            : `Kontak "${savedDisplayName}" sudah terdaftar di CRM`
         );
       }
     } catch (err: any) {
