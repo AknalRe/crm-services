@@ -294,6 +294,9 @@ const FAQS = [
   },
 ];
 
+const FOCUS_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb] focus-visible:ring-offset-2';
+
 function RevealSection({
   children,
   className = '',
@@ -308,7 +311,12 @@ function RevealSection({
 
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === 'undefined') {
+    if (
+      !el ||
+      typeof IntersectionObserver === 'undefined' ||
+      (typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+    ) {
       setVisible(true);
       return;
     }
@@ -319,7 +327,7 @@ function RevealSection({
           observer.disconnect();
         }
       },
-      { threshold: 0.08, rootMargin: '0px 0px -32px 0px' }
+      { threshold: 0.08, rootMargin: '0px 0px -24px 0px' }
     );
     observer.observe(el);
     return () => observer.disconnect();
@@ -329,8 +337,8 @@ function RevealSection({
     <section
       id={id}
       ref={ref}
-      className={`transition-all duration-700 ease-out ${
-        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'
+      className={`transition-all duration-300 ease-out motion-reduce:transition-none motion-reduce:transform-none ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
       } ${className}`}
     >
       {children}
@@ -410,7 +418,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div className="text-sm font-bold text-slate-900 tracking-tight truncate">
                 Reneo CRM
               </div>
-              <div className="text-[11px] text-slate-500 hidden sm:block">
+              <div className="text-xs text-slate-500 hidden sm:block">
                 Satu Ruang Kerja Layanan Pelanggan
               </div>
             </div>
@@ -421,7 +429,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <a
                 key={link.href}
                 href={link.href}
-                className="hover:text-slate-900 transition-colors"
+                className={`hover:text-slate-900 rounded-md px-1 py-1 transition-colors ${FOCUS_RING}`}
               >
                 {link.label}
               </a>
@@ -432,14 +440,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <button
               type="button"
               onClick={onEnterLogin}
-              className="hidden sm:inline-flex h-10 px-4 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium items-center transition-colors"
+              className={`hidden sm:inline-flex h-11 px-4 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium items-center transition-colors ${FOCUS_RING}`}
             >
               {authenticated ? 'Buka Workspace' : initialized ? 'Masuk' : 'Lanjutkan Setup'}
             </button>
             <a
               href={PANEL_ORDER_URL}
               target="_top"
-              className="h-10 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center gap-1.5 transition-colors shadow-xs"
+              className={`h-11 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center gap-1.5 transition-colors ${FOCUS_RING}`}
             >
               <span>Coba Gratis 7 Hari</span>
               <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
@@ -448,7 +456,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               type="button"
               onClick={() => setMobileMenuOpen((v) => !v)}
               aria-label="Toggle navigasi"
-              className="lg:hidden h-10 w-10 rounded-lg border border-slate-200 bg-white text-slate-700 inline-flex items-center justify-center hover:bg-slate-50"
+              aria-expanded={mobileMenuOpen}
+              className={`lg:hidden h-11 w-11 rounded-lg border border-slate-200 bg-white text-slate-700 inline-flex items-center justify-center hover:bg-slate-50 ${FOCUS_RING}`}
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -501,15 +510,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-16 space-y-10">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
               <div className="lg:col-span-6 space-y-5">
-                <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Instagram · WhatsApp · Facebook · Threads · Telegram
                 </div>
 
-                <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-bold text-slate-900 tracking-tight leading-[1.18]">
+                <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight leading-tight">
                   Jangan Biarkan Pembeli Kabur Cuma Karena Chat Tercecer di Banyak HP
                 </h1>
 
-                <p className="text-base sm:text-[17px] text-slate-600 leading-relaxed">
+                <p className="text-base text-slate-600 leading-relaxed max-w-prose">
                   Satukan pesan dari <strong className="font-semibold text-slate-800">Instagram, WhatsApp, Facebook, Threads, dan Telegram</strong> dalam satu kotak masuk bersama tim Anda. Balas lebih cepat, bagi tugas lebih rapi, dan pantau kepuasan pelanggan tanpa ribet.
                 </p>
 
@@ -518,14 +527,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <a
                       href={PANEL_ORDER_URL}
                       target="_top"
-                      className="min-h-[46px] py-2.5 px-6 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                      className={`min-h-[44px] py-2.5 px-6 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
                     >
                       <span>Mulai Coba Gratis 7 Hari</span>
                       <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                     </a>
                     <a
                       href="#modul"
-                      className="min-h-[46px] py-2.5 px-5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                      className={`min-h-[44px] py-2.5 px-5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
                     >
                       Lihat Cara Kerjanya
                     </a>
@@ -539,7 +548,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <button
                       type="button"
                       onClick={onEnterLogin}
-                      className="text-[#2563eb] hover:text-[#1d4ed8] font-semibold underline underline-offset-2"
+                      className={`text-[#2563eb] hover:text-[#1d4ed8] font-semibold underline underline-offset-2 rounded ${FOCUS_RING}`}
                     >
                       {authenticated ? 'Buka Workspace' : 'Sudah punya akun? Masuk'}
                     </button>
@@ -549,7 +558,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
               {/* Interactive Omnichannel Inbox Preview */}
               <div className="lg:col-span-6">
-                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                   {/* Channel Switcher Bar */}
                   <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
@@ -558,17 +567,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       </span>
                       <span className="text-xs text-slate-500">Klik kanal untuk melihat</span>
                     </div>
-                    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                    <div
+                      role="tablist"
+                      aria-label="Pilih kanal simulasi kotak masuk"
+                      className="flex items-center gap-1.5 overflow-x-auto pb-0.5"
+                    >
                       {HERO_CHANNEL_PREVIEWS.map((ch) => {
                         const active = ch.id === activeHeroChannel.id;
                         return (
                           <button
                             key={ch.id}
                             type="button"
+                            role="tab"
+                            aria-selected={active}
                             onClick={() => setActiveHeroChannelId(ch.id)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all inline-flex items-center gap-1.5 shrink-0 ${
+                            className={`min-h-[40px] px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors inline-flex items-center gap-1.5 shrink-0 ${FOCUS_RING} ${
                               active
-                                ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                                ? 'bg-slate-900 text-white border-slate-900'
                                 : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
                             }`}
                           >
@@ -668,32 +683,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <RevealSection id="kenapa-dibuat" className="bg-white border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
             <div className="max-w-3xl space-y-2.5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Cerita di Balik Reneo CRM
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
                 Kenapa Kami Membuat Reneo CRM
               </h2>
-              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed max-w-prose">
                 Reneo CRM tidak dibuat karena sekadar ingin meluncurkan software baru, melainkan lahir dari pengalaman nyata tim kami sendiri saat melayani pelanggan setiap hari.
               </p>
             </div>
 
-            <div className="border border-slate-200 rounded-2xl bg-slate-50/60 divide-y divide-slate-200 overflow-hidden">
-              {STORY_BEATS.map((story, idx) => (
+            <div className="border border-slate-200 rounded-xl bg-slate-50/60 divide-y divide-slate-200 overflow-hidden">
+              {STORY_BEATS.map((story) => (
                 <div
                   key={story.step}
-                  className="p-4 sm:px-6 sm:py-5 bg-white flex flex-col md:flex-row md:items-baseline gap-2 md:gap-6"
+                  className="p-4 sm:px-6 sm:py-5 bg-white flex flex-col md:flex-row md:items-baseline gap-1.5 md:gap-6"
                 >
-                  <div className="flex items-center gap-2.5 md:w-72 shrink-0">
-                    <span className="w-6 h-6 rounded-full bg-blue-50 text-[#1d4ed8] border border-blue-200 text-xs font-bold inline-flex items-center justify-center shrink-0">
-                      {idx + 1}
-                    </span>
-                    <span className="text-sm sm:text-base font-bold text-[#1d4ed8]">
-                      {story.step}
-                    </span>
-                  </div>
-                  <p className="text-sm sm:text-[15px] text-slate-700 leading-relaxed">
+                  <span className="text-sm sm:text-base font-bold text-slate-900 md:w-72 shrink-0">
+                    {story.step}
+                  </span>
+                  <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
                     {story.text}
                   </p>
                 </div>
@@ -706,7 +716,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <RevealSection id="modul" className="bg-[#f8fafc] border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
             <div className="max-w-2xl space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Cara Kerja Reneo CRM
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
@@ -718,7 +728,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Mobile Horizontal Scrollable Pill Tabs */}
-            <div className="flex lg:hidden items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 snap-x">
+            <div
+              role="tablist"
+              aria-label="Pilih modul kerja Reneo CRM"
+              className="flex lg:hidden items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 snap-x"
+            >
               {MODULE_TABS.map((tab) => {
                 const active = tab.id === activeModule.id;
                 const Icon = tab.icon;
@@ -726,10 +740,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <button
                     key={tab.id}
                     type="button"
+                    role="tab"
+                    aria-selected={active}
                     onClick={() => setActiveModuleId(tab.id)}
-                    className={`snap-start shrink-0 px-3.5 py-2.5 rounded-xl border text-sm font-semibold inline-flex items-center gap-2 transition-all ${
+                    className={`snap-start shrink-0 min-h-[44px] px-3.5 py-2 rounded-lg border text-sm font-semibold inline-flex items-center gap-2 transition-colors ${FOCUS_RING} ${
                       active
-                        ? 'bg-[#2563eb] text-white border-[#2563eb] shadow-xs'
+                        ? 'bg-[#2563eb] text-white border-[#2563eb]'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
@@ -742,18 +758,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
               {/* Desktop Vertical Tabs */}
-              <div className="hidden lg:flex lg:col-span-4 flex-col gap-2">
-                {MODULE_TABS.map((tab, idx) => {
+              <div
+                role="tablist"
+                aria-label="Daftar modul kerja Reneo CRM"
+                className="hidden lg:flex lg:col-span-4 flex-col gap-2"
+              >
+                {MODULE_TABS.map((tab) => {
                   const active = tab.id === activeModule.id;
                   const Icon = tab.icon;
                   return (
                     <button
                       key={tab.id}
                       type="button"
+                      role="tab"
+                      aria-selected={active}
                       onClick={() => setActiveModuleId(tab.id)}
-                      className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all flex items-center gap-3 ${
+                      className={`w-full min-h-[52px] text-left px-4 py-3 rounded-xl border transition-colors flex items-center gap-3 ${FOCUS_RING} ${
                         active
-                          ? 'bg-white border-[#2563eb] ring-1 ring-[#2563eb]/20 shadow-xs'
+                          ? 'bg-white border-[#2563eb] ring-1 ring-[#2563eb]/20'
                           : 'bg-white/70 border-slate-200 hover:bg-white hover:border-slate-300'
                       }`}
                     >
@@ -766,18 +788,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       >
                         <Icon className="w-4 h-4" strokeWidth={1.75} />
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-semibold text-slate-400">
-                          0{idx + 1}
-                        </div>
-                        <div
-                          className={`text-sm font-semibold leading-snug ${
-                            active ? 'text-slate-900' : 'text-slate-700'
-                          }`}
-                        >
-                          {tab.shortLabel}
-                        </div>
-                      </div>
+                      <span
+                        className={`text-sm font-semibold leading-snug ${
+                          active ? 'text-slate-900' : 'text-slate-700'
+                        }`}
+                      >
+                        {tab.shortLabel}
+                      </span>
                     </button>
                   );
                 })}
@@ -786,10 +803,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               {/* Active Module Detail Card */}
               <div
                 key={activeModule.id}
-                className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-5 sm:p-7 space-y-5 shadow-xs transition-all duration-300"
+                role="tabpanel"
+                className="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-5 sm:p-7 space-y-5"
               >
                 <div className="flex items-start gap-3.5">
-                  <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 text-[#2563eb] flex items-center justify-center shrink-0">
+                  <div className="w-11 h-11 rounded-lg bg-blue-50 border border-blue-200 text-[#2563eb] flex items-center justify-center shrink-0">
                     <ActiveModuleIcon className="w-5 h-5" strokeWidth={1.75} />
                   </div>
                   <div className="space-y-1.5 min-w-0">
@@ -806,9 +824,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   {activeModule.highlights.map((item) => (
                     <li
                       key={item}
-                      className="flex items-start gap-3 text-sm sm:text-[15px] text-slate-700 leading-relaxed"
+                      className="flex items-start gap-3 text-sm sm:text-base text-slate-700 leading-relaxed"
                     >
-                      <Check className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
+                      <Check className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={1.75} />
                       <span>{item}</span>
                     </li>
                   ))}
@@ -943,8 +961,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <div key={item.q}>
                     <button
                       type="button"
+                      aria-expanded={isOpen}
                       onClick={() => setOpenFaq(isOpen ? null : idx)}
-                      className="w-full px-5 py-4 text-left flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors"
+                      className={`w-full min-h-[52px] px-5 py-4 text-left flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors ${FOCUS_RING}`}
                     >
                       <span className="text-sm sm:text-base font-semibold text-slate-900">
                         {item.q}
@@ -956,7 +975,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       />
                     </button>
                     {isOpen && (
-                      <div className="px-5 pb-4 text-sm sm:text-[15px] text-slate-600 leading-relaxed">
+                      <div className="px-5 pb-4 text-sm sm:text-base text-slate-600 leading-relaxed">
                         {item.a}
                       </div>
                     )}
@@ -1003,10 +1022,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       <button
                         key={opt}
                         type="button"
+                        aria-pressed={selected}
                         onClick={() => setInquiryType(opt)}
-                        className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold border transition-all ${
+                        className={`min-h-[44px] px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold border transition-colors ${FOCUS_RING} ${
                           selected
-                            ? 'bg-[#2563eb] text-white border-[#2563eb] shadow-xs'
+                            ? 'bg-[#2563eb] text-white border-[#2563eb]'
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                         }`}
                       >
@@ -1114,7 +1134,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         {/* Final CTA */}
         <RevealSection className="bg-slate-900 text-white">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-18 text-center space-y-5">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-16 text-center space-y-5">
             <div className="text-xs font-semibold uppercase tracking-wide text-blue-300">
               Uji Coba Gratis 7 Hari · Tanpa Kartu Kredit
             </div>
@@ -1131,7 +1151,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <a
                 href={PANEL_ORDER_URL}
                 target="_top"
-                className="min-h-[48px] py-3 px-6 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                className={`min-h-[44px] py-2.5 px-6 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
               >
                 <span>Mulai Coba Gratis 7 Hari</span>
                 <ArrowUpRight className="w-4 h-4" />
@@ -1139,7 +1159,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <button
                 type="button"
                 onClick={onEnterLogin}
-                className="min-h-[48px] py-3 px-6 rounded-xl bg-white/10 hover:bg-white/15 text-white border border-white/20 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+                className={`min-h-[44px] py-2.5 px-6 rounded-lg bg-white/10 hover:bg-white/15 text-white border border-white/20 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
               >
                 <span>
                   {authenticated
