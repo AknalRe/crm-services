@@ -725,7 +725,9 @@ export interface WahaWebhookTelemetry {
   session?: string | null;
   from?: string | null;
   outcome: 'PROCESSED' | 'DEDUP' | 'IGNORED' | 'ERROR';
+  statusCode?: number | null;
   note?: string;
+  payload?: unknown;
 }
 
 export interface WahaProfileInfo {
@@ -791,9 +793,25 @@ export class WahaService {
 
   public recordWebhookEvent(entry: WahaWebhookTelemetry, companyId?: string): void {
     const cid = getActiveCompanyId(companyId);
-    this.lastWebhookEventByCompany.set(cid, entry);
+    let compactPayload = entry.payload;
+    if (compactPayload !== undefined) {
+      try {
+        const serialized = JSON.stringify(compactPayload);
+        if (serialized && serialized.length > 6000) {
+          compactPayload = `${serialized.slice(0, 6000)}... [truncated ${serialized.length} chars]`;
+        }
+      } catch {
+        compactPayload = String(compactPayload);
+      }
+    }
+    const normalizedEntry: WahaWebhookTelemetry = {
+      ...entry,
+      statusCode: entry.statusCode ?? (entry.outcome === 'ERROR' ? 500 : 200),
+      ...(compactPayload !== undefined ? { payload: compactPayload } : {}),
+    };
+    this.lastWebhookEventByCompany.set(cid, normalizedEntry);
     const prev = this.webhookEventLogByCompany.get(cid) || [];
-    const next = [entry, ...prev].slice(0, 120);
+    const next = [normalizedEntry, ...prev].slice(0, 120);
     this.webhookEventLogByCompany.set(cid, next);
   }
 

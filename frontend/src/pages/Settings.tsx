@@ -555,11 +555,14 @@ export const Settings: React.FC<SettingsProps> = ({
       session?: string | null;
       from?: string | null;
       outcome: 'PROCESSED' | 'DEDUP' | 'IGNORED' | 'ERROR';
+      statusCode?: number | null;
       note?: string;
+      payload?: unknown;
     }>
   >([]);
   const [wahaLogsLoading, setWahaLogsLoading] = useState(false);
   const [wahaLogFilter, setWahaLogFilter] = useState<'ALL' | 'MESSAGE' | 'SYNC' | 'ISSUE'>('ALL');
+  const [expandedWahaLogKey, setExpandedWahaLogKey] = useState<string | null>(null);
 
   const fetchWahaLogs = useCallback(async (silent = false) => {
     if (!silent) setWahaLogsLoading(true);
@@ -2137,44 +2140,103 @@ export const Settings: React.FC<SettingsProps> = ({
                 </div>
               );
             }
-            return visibleLogs.map((log, idx) => (
-              <div key={`${log.receivedAt}-${log.event}-${idx}`} className="px-4 py-2.5 text-xs flex flex-wrap items-center gap-2 hover:bg-gray-50/60">
-                <span className="font-mono text-[11px] text-gray-400 shrink-0">
-                  {new Date(log.receivedAt).toLocaleTimeString('id-ID')}
-                </span>
-                <span
-                  className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
-                    log.outcome === 'ERROR'
-                      ? 'bg-red-100 text-red-700'
-                      : log.outcome === 'IGNORED'
-                      ? 'bg-amber-100 text-amber-800'
-                      : log.outcome === 'DEDUP'
-                      ? 'bg-gray-100 text-gray-600'
-                      : 'bg-emerald-100 text-emerald-700'
-                  }`}
-                >
-                  {log.outcome}
-                </span>
-                <span className="font-mono text-[11px] font-semibold text-gray-800 shrink-0">
-                  {log.event}
-                </span>
-                {log.session && (
-                  <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
-                    {log.session}
+            return visibleLogs.map((log, idx) => {
+              const rowKey = `${log.receivedAt}-${log.event}-${idx}`;
+              const isExpanded = expandedWahaLogKey === rowKey;
+              const hasJson = log.payload !== undefined;
+              const formattedJson =
+                typeof log.payload === 'string'
+                  ? log.payload
+                  : JSON.stringify(log.payload ?? {
+                      receivedAt: log.receivedAt,
+                      event: log.event,
+                      session: log.session ?? null,
+                      from: log.from ?? null,
+                      outcome: log.outcome,
+                      statusCode: log.statusCode ?? null,
+                      note: log.note ?? null,
+                    }, null, 2);
+              return (
+              <div key={rowKey} className="px-4 py-2.5 text-xs hover:bg-gray-50/60">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-[11px] text-gray-400 shrink-0">
+                    {new Date(log.receivedAt).toLocaleTimeString('id-ID')}
                   </span>
-                )}
-                {log.from && (
-                  <span className="font-mono text-[11px] text-gray-600 truncate max-w-[200px]" title={log.from}>
-                    {log.from}
+                  <span
+                    className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
+                      log.outcome === 'ERROR'
+                        ? 'bg-red-100 text-red-700'
+                        : log.outcome === 'IGNORED'
+                        ? 'bg-amber-100 text-amber-800'
+                        : log.outcome === 'DEDUP'
+                        ? 'bg-gray-100 text-gray-600'
+                        : 'bg-emerald-100 text-emerald-700'
+                    }`}
+                  >
+                    {log.outcome}
                   </span>
-                )}
-                {log.note && (
-                  <span className="text-gray-600 text-[11px] flex-1 min-w-[180px]">
-                    {log.note}
+                  {log.statusCode != null && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
+                        log.statusCode >= 500
+                          ? 'bg-red-50 text-red-700 border border-red-200'
+                          : log.statusCode >= 400
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      HTTP {log.statusCode}
+                    </span>
+                  )}
+                  <span className="font-mono text-[11px] font-semibold text-gray-800 shrink-0">
+                    {log.event}
                   </span>
+                  {log.session && (
+                    <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
+                      {log.session}
+                    </span>
+                  )}
+                  {log.from && (
+                    <span className="font-mono text-[11px] text-gray-600 truncate max-w-[200px]" title={log.from}>
+                      {log.from}
+                    </span>
+                  )}
+                  {log.note && (
+                    <span className="text-gray-600 text-[11px] flex-1 min-w-[180px]">
+                      {log.note}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedWahaLogKey(isExpanded ? null : rowKey)}
+                    className="ml-auto px-2 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-mono text-gray-600 hover:bg-gray-100 shrink-0"
+                  >
+                    {isExpanded ? 'Tutup JSON' : hasJson ? 'Lihat JSON' : 'Detail'}
+                  </button>
+                </div>
+                {isExpanded && (
+                  <div className="mt-2 rounded border border-gray-200 bg-gray-900 text-gray-100 p-2.5 overflow-x-auto">
+                    <div className="flex items-center justify-between mb-1.5 text-[10px] text-gray-400 font-mono">
+                      <span>{hasJson ? 'Webhook Payload JSON' : 'Ringkasan Log'}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(formattedJson);
+                          toast.success('JSON disalin.');
+                        }}
+                        className="px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200"
+                      >
+                        Salin JSON
+                      </button>
+                    </div>
+                    <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all max-h-56 overflow-y-auto">
+                      {formattedJson}
+                    </pre>
+                  </div>
                 )}
               </div>
-            ));
+              );
+            });
           })()}
         </div>
       </div>

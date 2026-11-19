@@ -3654,7 +3654,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 : existingConv.sessionStartedAt || existingConv.firstInboundAt || existingConv.createdAt,
               resolvedAt: isReopeningFromResolved ? null : existingConv.resolvedAt,
               firstInboundAt: isFromMe ? existingConv.firstInboundAt : (existingConv.firstInboundAt || now),
-              firstResponseAt: isFromMe ? sql`COALESCE(${conversations.firstResponseAt}, ${now})` : existingConv.firstResponseAt,
+              firstResponseAt: isFromMe ? (existingConv.firstResponseAt || now) : existingConv.firstResponseAt,
               lastInboundAt: isFromMe ? existingConv.lastInboundAt : now,
               lastMessage: effectiveConversationPreview,
               lastMessageAt: now,
@@ -3881,6 +3881,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           session: inboundSession,
           from: isGroupChat ? (groupSenderPhone || groupJid || rawFrom) : (fromPhone || rawFrom),
           outcome: 'PROCESSED',
+          statusCode: 200,
+          payload: req.body,
           note: isFromMe
             ? 'Pesan keluar dari WA langsung (fromMe) dicatat ke inbox'
             : existingConv
@@ -3945,6 +3947,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         session: req.body?.session || null,
         from: req.body?.payload?.from || null,
         outcome: 'ERROR',
+        statusCode: 500,
+        payload: req.body,
         note: error.message,
       }, companyId);
       console.error('[WAHA Webhook] Error:', error.message);

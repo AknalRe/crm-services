@@ -575,7 +575,9 @@ export const api = {
       session?: string | null;
       from?: string | null;
       outcome: 'PROCESSED' | 'DEDUP' | 'IGNORED' | 'ERROR';
+      statusCode?: number | null;
       note?: string;
+      payload?: unknown;
     }>
   > => {
     const res = await client.get('/waha/logs');
