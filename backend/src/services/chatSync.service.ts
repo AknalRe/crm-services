@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, or } from 'drizzle-orm';
 import { db } from '../db';
 import { chatMessages, contacts, conversations } from '../db/schema';
 import { liveEvents } from './events.service';
@@ -13,7 +13,13 @@ import {
   normalizeWahaAck,
 } from '../routes/waha';
 import { saveBase64MediaFile, saveMediaBufferFile } from '../routes/media';
-import { toWahaChatId } from './phone.utils';
+import {
+  fromWahaChatId,
+  isPersonalWahaJid,
+  normalizePhoneNumber,
+  toWahaChatId,
+} from './phone.utils';
+import { listActiveCompanyIds, runWithCompany } from './tenantContext';
 
 const CHAT_SYNC_COOLDOWN_MS = 15_000;
 const lastChatSyncAt = new Map<string, number>();
@@ -383,4 +389,195 @@ export async function syncRecentWhatsAppChatMessages(
   }
 
   return { inserted, acksUpdated, fetchedCount: rawMessages.length };
+}
+
+let wahaBgSyncTimer: NodeJS.Timeout | null = null;
+let wahaBgSyncRunning = false;
+
+export async function syncCompanyRecentWhatsAppChats(companyId: string): Promise<number> {
+  let totalInserted = 0;
+  let sessions: Array<{ name: string; status: string }> = [];
+  try {
+    const listed = await wahaService.listSessions();
+    sessions = listed.sessions || [];
+  } catch {
+    return 0;
+  }
+  const workingSessions = sessions.filter((s) => String(s.status || '').toUpperCase() === 'WORKING');
+  if (workingSessions.length === 0) return 0;
+
+  for (const sess of workingSessions) {
+    const recentChats = await wahaService.fetchRecentChats(sess.name, 12);
+    if (recentChats.length === 0) continue;
+
+    for (const chat of recentChats) {
+      if (!chat || typeof chat !== 'object') continue;
+      const rawChatId = String(
+        typeof chat.id === 'string'
+          ? chat.id
+          : chat.id?._serialized || chat.chatId || chat._serialized || ''
+      ).trim();
+      const lowerChatId = rawChatId.toLowerCase();
+      if (
+        !rawChatId ||
+        lowerChatId === 'status@broadcast' ||
+        lowerChatId.endsWith('@broadcast') ||
+        lowerChatId.endsWith('@newsletter')
+      ) {
+        continue;
+      }
+
+      const isGroup = lowerChatId.endsWith('@g.us');
+      if (!isGroup && !isPersonalWahaJid(rawChatId)) continue;
+
+      const lastMsg = chat.lastMessage && typeof chat.lastMessage === 'object' ? chat.lastMessage : null;
+      if (lastMsg) {
+        const { exactIds, stanzaIds } = extractWahaMessageIds(lastMsg);
+        const dedupIds = Array.from(new Set([...exactIds, ...stanzaIds]));
+        if (dedupIds.length > 0) {
+          const idMatchConditions = [
+            inArray(chatMessages.wahaMessageId, dedupIds),
+            ...stanzaIds.map((stanza) => {
+              const escaped = stanza.replace(/[\\%_]/g, '\\$&');
+              return like(chatMessages.wahaMessageId, `%_${escaped}`);
+            }),
+          ];
+          const existingLast = await db
+            .select({
+              id: chatMessages.id,
+              mediaUrl: chatMessages.mediaUrl,
+            })
+            .from(chatMessages)
+            .where(and(eq(chatMessages.companyId, companyId), or(...idMatchConditions)))
+            .limit(1);
+          const lastHasMedia = Boolean(lastMsg.hasMedia || lastMsg.media?.url);
+          if (existingLast[0] && (!lastHasMedia || existingLast[0].mediaUrl)) {
+            continue;
+          }
+        }
+      }
+
+      let matchedConv: typeof conversations.$inferSelect | undefined;
+      let matchedContact: typeof contacts.$inferSelect | undefined;
+
+      if (isGroup) {
+        const groupRows = await db
+          .select({ conv: conversations, contact: contacts })
+          .from(conversations)
+          .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+          .where(
+            and(
+              eq(conversations.companyId, companyId),
+              eq(conversations.channel, 'WHATSAPP'),
+              eq(conversations.externalThreadId, rawChatId)
+            )
+          )
+          .orderBy(desc(conversations.updatedAt));
+        const picked =
+          groupRows.find(
+            (r) => (r.conv.wahaSession || '').trim().toLowerCase() === sess.name.toLowerCase()
+          ) || groupRows[0];
+        if (picked?.conv && picked?.contact) {
+          matchedConv = picked.conv;
+          matchedContact = picked.contact;
+        }
+      } else {
+        const lidRows = await db
+          .select({ conv: conversations, contact: contacts })
+          .from(conversations)
+          .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+          .where(
+            and(
+              eq(conversations.companyId, companyId),
+              eq(conversations.channel, 'WHATSAPP'),
+              eq(conversations.externalThreadId, rawChatId)
+            )
+          )
+          .orderBy(desc(conversations.updatedAt));
+        const lidPicked =
+          lidRows.find(
+            (r) => (r.conv.wahaSession || '').trim().toLowerCase() === sess.name.toLowerCase()
+          ) || lidRows[0];
+        if (lidPicked?.conv && lidPicked?.contact) {
+          matchedConv = lidPicked.conv;
+          matchedContact = lidPicked.contact;
+        } else {
+          let phone = !lowerChatId.endsWith('@lid') ? fromWahaChatId(rawChatId) : '';
+          if (!phone && lowerChatId.endsWith('@lid')) {
+            const resolved = await wahaService.resolveLidToPhone(rawChatId, sess.name);
+            if (resolved) phone = normalizePhoneNumber(resolved);
+          }
+          if (phone) {
+            const phoneCandidates = Array.from(
+              new Set([phone, `+${phone}`, phone.startsWith('62') ? `0${phone.slice(2)}` : ''].filter(Boolean))
+            );
+            const contactRows = await db
+              .select()
+              .from(contacts)
+              .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, phoneCandidates)))
+              .limit(1);
+            if (contactRows[0]) {
+              matchedContact = contactRows[0];
+              const convRows = await db
+                .select()
+                .from(conversations)
+                .where(
+                  and(
+                    eq(conversations.companyId, companyId),
+                    eq(conversations.contactId, contactRows[0].id),
+                    eq(conversations.channel, 'WHATSAPP'),
+                    eq(conversations.isGroup, false)
+                  )
+                )
+                .orderBy(desc(conversations.updatedAt));
+              matchedConv =
+                convRows.find(
+                  (c) => (c.wahaSession || '').trim().toLowerCase() === sess.name.toLowerCase()
+                ) || convRows.find((c) => !c.wahaSession);
+            }
+          }
+        }
+      }
+
+      if (matchedConv && matchedContact) {
+        const res = await syncRecentWhatsAppChatMessages(matchedConv, matchedContact, {
+          force: true,
+          limit: 15,
+        });
+        if (res.inserted > 0) {
+          totalInserted += res.inserted;
+          wahaService.recordWebhookEvent(
+            {
+              receivedAt: new Date().toISOString(),
+              event: 'chat.sync',
+              session: sess.name,
+              from: rawChatId,
+              outcome: 'PROCESSED',
+              note: `Sinkronisasi otomatis ${res.inserted} pesan baru`,
+            },
+            companyId
+          );
+        }
+      }
+    }
+  }
+  return totalInserted;
+}
+
+export function startWahaBackgroundSyncMonitor(): void {
+  if (wahaBgSyncTimer) return;
+  wahaBgSyncTimer = setInterval(async () => {
+    if (wahaBgSyncRunning) return;
+    wahaBgSyncRunning = true;
+    try {
+      const companyIds = await listActiveCompanyIds();
+      for (const cid of companyIds) {
+        await runWithCompany(cid, () => syncCompanyRecentWhatsAppChats(cid)).catch(() => 0);
+      }
+    } catch {
+      // ignore transient poll errors
+    } finally {
+      wahaBgSyncRunning = false;
+    }
+  }, 12_000);
 }

@@ -1570,6 +1570,28 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     }
   });
 
+  // GET recent WAHA webhook & background sync logs
+  fastify.get('/logs', { preHandler: requireWahaRead }, async (req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const logs = wahaService.getWebhookEventLog(companyId, 100);
+      return reply.send({ success: true, data: logs });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // DELETE clear WAHA logs for current company
+  fastify.delete('/logs', { preHandler: requireWahaManage }, async (req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      wahaService.clearWebhookEventLog(companyId);
+      return reply.send({ success: true });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
   // POST manually sync CRM webhook URL to WAHA sessions
   fastify.post('/webhook/sync', { preHandler: requireWahaManage }, async (req: FastifyRequest, reply: FastifyReply) => {
     try {

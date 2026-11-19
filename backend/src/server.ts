@@ -32,6 +32,7 @@ import masterDataRouter from './routes/masterData';
 import { BirthdayService } from './services/birthday.service';
 import { PostService } from './services/post.service';
 import { startSlaMonitor } from './services/automation.service';
+import { startWahaBackgroundSyncMonitor } from './services/chatSync.service';
 import {
   evaluateDomainGuardRequest,
   verifyReneoRuntimeEnvironment,
@@ -143,6 +144,7 @@ async function main() {
     await BirthdayService.initScheduler();
     await PostService.initPostScheduler();
     startSlaMonitor();
+    startWahaBackgroundSyncMonitor();
   } catch (err) {
     fastify.log.error('[BirthdayService] Failed to initialize scheduler: ' + err);
   }

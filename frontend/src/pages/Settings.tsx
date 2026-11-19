@@ -548,6 +548,50 @@ export const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const [wahaLogs, setWahaLogs] = useState<
+    Array<{
+      receivedAt: string;
+      event: string;
+      session?: string | null;
+      from?: string | null;
+      outcome: 'PROCESSED' | 'DEDUP' | 'IGNORED' | 'ERROR';
+      note?: string;
+    }>
+  >([]);
+  const [wahaLogsLoading, setWahaLogsLoading] = useState(false);
+  const [wahaLogFilter, setWahaLogFilter] = useState<'ALL' | 'MESSAGE' | 'SYNC' | 'ISSUE'>('ALL');
+
+  const fetchWahaLogs = useCallback(async (silent = false) => {
+    if (!silent) setWahaLogsLoading(true);
+    try {
+      const rows = await api.getWahaLogs();
+      setWahaLogs(rows);
+    } catch {
+      // ignore transient error
+    } finally {
+      if (!silent) setWahaLogsLoading(false);
+    }
+  }, []);
+
+  const handleClearWahaLogs = async () => {
+    try {
+      await api.clearWahaLogs();
+      setWahaLogs([]);
+      toast.success('Log WAHA dibersihkan.');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal membersihkan log WAHA');
+    }
+  };
+
+  useEffect(() => {
+    if (settingsTab !== 'whatsapp') return;
+    void fetchWahaLogs();
+    const timer = window.setInterval(() => {
+      void fetchWahaLogs(true);
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [settingsTab, fetchWahaLogs]);
+
   const fetchSessions = useCallback(async () => {
     setSessionsLoading(true);
     try {
@@ -2021,6 +2065,117 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Log Aktivitas & Webhook WAHA */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-gray-200 bg-gray-50/70 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-gray-900 font-semibold text-sm">Log Aktivitas &amp; Webhook WAHA</h3>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Memantau event webhook masuk (<code className="font-mono">message</code>, <code className="font-mono">message.any</code>, <code className="font-mono">message.ack</code>) serta hasil sinkronisasi otomatis WAHA.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {([
+              { id: 'ALL', label: 'Semua' },
+              { id: 'MESSAGE', label: 'Pesan' },
+              { id: 'SYNC', label: 'Sync' },
+              { id: 'ISSUE', label: 'Error / Diabaikan' },
+            ] as const).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setWahaLogFilter(tab.id)}
+                className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+                  wahaLogFilter === tab.id
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => void fetchWahaLogs()}
+              disabled={wahaLogsLoading}
+              className="px-2.5 py-1 rounded text-[11px] font-medium border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {wahaLogsLoading ? 'Memuat...' : 'Refresh'}
+            </button>
+            {canEditSettings && wahaLogs.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearWahaLogs}
+                className="px-2.5 py-1 rounded text-[11px] font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+              >
+                Bersihkan
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="max-h-72 overflow-y-auto divide-y divide-gray-100">
+          {(() => {
+            const visibleLogs = wahaLogs.filter((item) => {
+              if (wahaLogFilter === 'MESSAGE') {
+                return item.event === 'message' || item.event === 'message.any';
+              }
+              if (wahaLogFilter === 'SYNC') {
+                return item.event === 'chat.sync';
+              }
+              if (wahaLogFilter === 'ISSUE') {
+                return item.outcome === 'ERROR' || item.outcome === 'IGNORED';
+              }
+              return true;
+            });
+            if (visibleLogs.length === 0) {
+              return (
+                <div className="px-4 py-6 text-center text-xs text-gray-500">
+                  Belum ada log WAHA yang tercatat untuk filter ini.
+                </div>
+              );
+            }
+            return visibleLogs.map((log, idx) => (
+              <div key={`${log.receivedAt}-${log.event}-${idx}`} className="px-4 py-2.5 text-xs flex flex-wrap items-center gap-2 hover:bg-gray-50/60">
+                <span className="font-mono text-[11px] text-gray-400 shrink-0">
+                  {new Date(log.receivedAt).toLocaleTimeString('id-ID')}
+                </span>
+                <span
+                  className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
+                    log.outcome === 'ERROR'
+                      ? 'bg-red-100 text-red-700'
+                      : log.outcome === 'IGNORED'
+                      ? 'bg-amber-100 text-amber-800'
+                      : log.outcome === 'DEDUP'
+                      ? 'bg-gray-100 text-gray-600'
+                      : 'bg-emerald-100 text-emerald-700'
+                  }`}
+                >
+                  {log.outcome}
+                </span>
+                <span className="font-mono text-[11px] font-semibold text-gray-800 shrink-0">
+                  {log.event}
+                </span>
+                {log.session && (
+                  <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
+                    {log.session}
+                  </span>
+                )}
+                {log.from && (
+                  <span className="font-mono text-[11px] text-gray-600 truncate max-w-[200px]" title={log.from}>
+                    {log.from}
+                  </span>
+                )}
+                {log.note && (
+                  <span className="text-gray-600 text-[11px] flex-1 min-w-[180px]">
+                    {log.note}
+                  </span>
+                )}
+              </div>
+            ));
+          })()}
         </div>
       </div>
       </div>

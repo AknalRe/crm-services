@@ -568,6 +568,22 @@ export const api = {
     const res = await client.get('/waha/status');
     return res.data.data;
   },
+  getWahaLogs: async (): Promise<
+    Array<{
+      receivedAt: string;
+      event: string;
+      session?: string | null;
+      from?: string | null;
+      outcome: 'PROCESSED' | 'DEDUP' | 'IGNORED' | 'ERROR';
+      note?: string;
+    }>
+  > => {
+    const res = await client.get('/waha/logs');
+    return res.data.data || [];
+  },
+  clearWahaLogs: async (): Promise<void> => {
+    await client.delete('/waha/logs');
+  },
   getWahaQr: async (session?: string): Promise<{ qr?: string; status: string; error?: string }> => {
     const res = await client.get('/waha/qr', { params: session ? { session } : undefined });
     return res.data.data;

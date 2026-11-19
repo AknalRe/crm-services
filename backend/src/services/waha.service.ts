@@ -780,6 +780,7 @@ export class WahaService {
   >();
   private readonly EXTERNAL_ENGINE_CACHE_MS = 60_000;
   private lastWebhookEventByCompany = new Map<string, WahaWebhookTelemetry>();
+  private webhookEventLogByCompany = new Map<string, WahaWebhookTelemetry[]>();
   private detectedPublicUrlByCompany = new Map<string, string>();
 
   private constructor() { }
@@ -791,11 +792,25 @@ export class WahaService {
   public recordWebhookEvent(entry: WahaWebhookTelemetry, companyId?: string): void {
     const cid = getActiveCompanyId(companyId);
     this.lastWebhookEventByCompany.set(cid, entry);
+    const prev = this.webhookEventLogByCompany.get(cid) || [];
+    const next = [entry, ...prev].slice(0, 120);
+    this.webhookEventLogByCompany.set(cid, next);
   }
 
   public getLastWebhookEvent(companyId?: string): WahaWebhookTelemetry | null {
     const cid = getActiveCompanyId(companyId);
     return this.lastWebhookEventByCompany.get(cid) || null;
+  }
+
+  public getWebhookEventLog(companyId?: string, limit = 80): WahaWebhookTelemetry[] {
+    const cid = getActiveCompanyId(companyId);
+    const items = this.webhookEventLogByCompany.get(cid) || [];
+    return items.slice(0, Math.max(1, limit));
+  }
+
+  public clearWebhookEventLog(companyId?: string): void {
+    const cid = getActiveCompanyId(companyId);
+    this.webhookEventLogByCompany.delete(cid);
   }
 
   public static getInstance(): WahaService {
@@ -3429,6 +3444,31 @@ export class WahaService {
         );
         return Array.isArray(res.data) ? res.data : [];
       }
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Fetch recent chat summaries from WAHA for background inbox synchronization
+   */
+  public async fetchRecentChats(sessionName?: string, limit = 12): Promise<any[]> {
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      try {
+        const res = await client.get(
+          `/api/${encodeURIComponent(targetSession)}/chats/overview`,
+          { params: { limit }, timeout: 8000 }
+        );
+        if (Array.isArray(res.data)) return res.data;
+      } catch {
+        // Fallback to /chats on engines/versions without /chats/overview
+      }
+      const res = await client.get(
+        `/api/${encodeURIComponent(targetSession)}/chats`,
+        { params: { limit }, timeout: 8000 }
+      );
+      return Array.isArray(res.data) ? res.data : [];
     } catch {
       return [];
     }
