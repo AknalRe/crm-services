@@ -161,8 +161,8 @@ export function resolvePublicOriginAndBase(req: FastifyRequest): {
     rawProto === 'http' || rawProto === 'https'
       ? rawProto
       : /^(localhost|127\.0\.0\.1)(:|$)/i.test(fwdHost)
-      ? 'http'
-      : 'https';
+        ? 'http'
+        : 'https';
   const rawPrefix = firstHeader(req.headers['x-forwarded-prefix']);
   let prefix = rawPrefix.replace(/\/+$/, '');
   if (prefix && !prefix.startsWith('/')) {
