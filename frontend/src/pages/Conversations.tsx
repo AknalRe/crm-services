@@ -1081,8 +1081,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
     const el = replyInputRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
-  }, [inputText]);
+    const maxHeight = 180;
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [inputText, selectedConversation?.id, composerMode]);
 
   // Right panel: Labels & Contact Notes
   const [newLabel, setNewLabel] = useState('');
@@ -6767,44 +6769,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
               </span>
             </div>
           ) : (
-          <div className="bg-white border-t border-gray-200 p-2 sm:p-3 space-y-1.5 sm:space-y-2 shrink-0">
-            <div className="hidden sm:flex items-center justify-between gap-2 overflow-x-auto">
-              <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50 text-[11px] shrink-0">
-                {canReplyConversation && (
-                  <button
-                    type="button"
-                    onClick={() => setComposerMode('REPLY')}
-                    className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
-                      composerMode === 'REPLY'
-                        ? 'bg-white text-indigo-700 shadow-sm'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <MessageSquare className="w-3 h-3 shrink-0" />
-                    <span>Balas WhatsApp</span>
-                  </button>
-                )}
-                {canManageConversation && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setComposerMode('NOTE');
-                      setPendingAttachments([]);
-                      openComposerPicker(null);
-                      stopOutboundTyping(selectedConversation.id);
-                    }}
-                    className={`h-7 px-2.5 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors ${
-                      composerMode === 'NOTE'
-                        ? 'bg-amber-100 text-amber-900 shadow-sm'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <StickyNote className="w-3 h-3 shrink-0" />
-                    <span>Catatan Internal</span>
-                  </button>
-                )}
-              </div>
-            </div>
+          <div className="bg-white border-t border-gray-200 p-2 sm:p-2.5 space-y-1.5 shrink-0">
 
             {composerMode === 'NOTE' && (
               <div className="sm:hidden flex items-center justify-between gap-2 px-2.5 py-1 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
@@ -8387,74 +8352,36 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               )}
 
-              <form onSubmit={handleSendMessage} className="flex items-end gap-1.5 sm:gap-2 min-w-0">
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*,video/*"
-                multiple
-                onChange={(e) => void handleAttachmentPick(e, false)}
-                className="hidden"
-              />
-              <input
-                ref={docInputRef}
-                type="file"
-                accept="*/*"
-                multiple
-                onChange={(e) => void handleAttachmentPick(e, true)}
-                className="hidden"
-              />
-              {/* Unified Compact Pintasan & Attachment Bar (Mobile + Desktop) */}
-              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowComposerTools((v) => !v)}
-                  title="Buka Pintasan Alat Pesan (Emotikon, Stiker, Template, Produk, Lokasi, Kontak, Tautan, Tombol)"
-                  className={`h-9 w-9 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
-                    showComposerTools || composerMode === 'NOTE'
-                      ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                      : 'border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600'
-                  }`}
-                >
-                  {showComposerTools ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                </button>
-                {composerMode === 'REPLY' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => imageInputRef.current?.click()}
-                      title="Kirim Foto / Video (Mendukung HD & Multi-Foto)"
-                      className="hidden sm:inline-flex h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
-                    >
-                      <ImageIcon className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => docInputRef.current?.click()}
-                      title="Kirim Dokumen / Berkas (Tanpa Pratinjau Foto Langsung)"
-                      className="hidden sm:inline-flex h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
-                    >
-                      <Paperclip className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
-                      title="Pilih Foto, Video, atau Dokumen dari Pustaka Media Tersimpan"
-                      className="hidden sm:inline-flex h-9 w-9 rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
-                    >
-                      <FolderOpen className="w-4 h-4" />
-                    </button>
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-end gap-1.5 flex-1 min-w-0">
+              <form
+                onSubmit={handleSendMessage}
+                className={`rounded-lg border transition-colors min-w-0 flex flex-col overflow-hidden ${
+                  composerMode === 'NOTE'
+                    ? 'bg-amber-50/50 border-amber-300 focus-within:border-amber-500 focus-within:ring-1 focus-within:ring-amber-500/20'
+                    : 'bg-white border-gray-200 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500/20'
+                }`}
+              >
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  multiple
+                  onChange={(e) => void handleAttachmentPick(e, false)}
+                  className="hidden"
+                />
+                <input
+                  ref={docInputRef}
+                  type="file"
+                  accept="*/*"
+                  multiple
+                  onChange={(e) => void handleAttachmentPick(e, true)}
+                  className="hidden"
+                />
                 <textarea
                   ref={replyInputRef}
-                  rows={1}
+                  rows={3}
                   placeholder={
                     composerMode === 'NOTE'
-                      ? 'Catatan internal tim... (Enter simpan, Shift+Enter baris baru)'
+                      ? 'Tulis catatan internal tim... (Enter simpan, Shift+Enter baris baru)'
                       : `Balas ${
                           CHANNEL_META[
                             ((selectedConversation.channel || 'WHATSAPP').toUpperCase()) as OmnichannelType
@@ -8470,31 +8397,120 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     }
                   }}
                   onBlur={() => stopOutboundTyping(selectedConversation.id)}
-                  className={`flex-1 min-w-0 min-h-[36px] max-h-[132px] px-3 py-2 border rounded-md text-[13px] leading-5 placeholder-gray-400 focus:outline-none resize-none overflow-y-auto ${
-                    composerMode === 'NOTE'
-                      ? 'bg-amber-50/70 border-amber-200 focus:border-amber-500'
-                      : 'bg-gray-50 border-gray-200 focus:border-indigo-500'
+                  className={`w-full min-w-0 min-h-[66px] sm:min-h-[76px] max-h-[180px] px-3 py-2 text-[13px] leading-5 placeholder-gray-400 focus:outline-none resize-none bg-transparent ${
+                    composerMode === 'NOTE' ? 'text-amber-950' : 'text-gray-900'
                   }`}
                 />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="md"
-                  isLoading={sending}
-                  disabled={!inputText.trim() && pendingAttachments.length === 0}
-                  className="shrink-0 h-9 px-2.5 sm:px-3.5"
+                <div
+                  className={`flex items-center justify-between gap-2 px-2 py-1.5 border-t ${
+                    composerMode === 'NOTE'
+                      ? 'border-amber-200/80 bg-amber-50/80'
+                      : 'border-gray-100 bg-gray-50/70'
+                  }`}
                 >
-                  <Send className="w-3.5 h-3.5 sm:hidden" />
-                  <span className="hidden sm:inline">
-                    {sending && sendingProgress
-                      ? `${sendingProgress.current}/${sendingProgress.total}`
-                      : composerMode === 'NOTE'
-                      ? 'Simpan'
-                      : 'Kirim'}
-                  </span>
-                </Button>
-              </div>
-            </form>
+                  <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowComposerTools((v) => !v)}
+                      title="Buka Pintasan Alat Pesan (Emotikon, Stiker, Template, Produk, Lokasi, Kontak, Tautan, Tombol)"
+                      className={`h-8 w-8 rounded-md border inline-flex items-center justify-center shrink-0 transition-colors cursor-pointer ${
+                        showComposerTools || composerMode === 'NOTE'
+                          ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 bg-white hover:bg-gray-100 text-gray-600'
+                      }`}
+                    >
+                      {showComposerTools ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    </button>
+                    {composerMode === 'REPLY' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => imageInputRef.current?.click()}
+                          title="Kirim Foto / Video (Mendukung HD & Multi-Foto)"
+                          className="hidden sm:inline-flex h-8 w-8 rounded-md border border-gray-200 bg-white hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
+                        >
+                          <ImageIcon className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => docInputRef.current?.click()}
+                          title="Kirim Dokumen / Berkas (Tanpa Pratinjau Foto Langsung)"
+                          className="hidden sm:inline-flex h-8 w-8 rounded-md border border-gray-200 bg-white hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
+                        >
+                          <Paperclip className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenMediaLibraryModal('CHAT_ATTACHMENT')}
+                          title="Pilih Foto, Video, atau Dokumen dari Pustaka Media Tersimpan"
+                          className="hidden sm:inline-flex h-8 w-8 rounded-md border border-gray-200 bg-white hover:bg-gray-100 text-slate-600 items-center justify-center shrink-0 transition-colors cursor-pointer"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                    {canReplyConversation && canManageConversation && (
+                      <>
+                        <div className="h-4 w-px bg-gray-200 mx-0.5 shrink-0" />
+                        <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-white text-[11px] shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setComposerMode('REPLY')}
+                            className={`h-6 px-2 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors cursor-pointer ${
+                              composerMode === 'REPLY'
+                                ? 'bg-indigo-50 text-indigo-700'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            <MessageSquare className="w-3 h-3 shrink-0" />
+                            <span className="sm:hidden">Balas</span>
+                            <span className="hidden sm:inline">Balas WA</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setComposerMode('NOTE');
+                              setPendingAttachments([]);
+                              openComposerPicker(null);
+                              stopOutboundTyping(selectedConversation.id);
+                            }}
+                            className={`h-6 px-2 rounded font-medium inline-flex items-center gap-1 whitespace-nowrap transition-colors cursor-pointer ${
+                              composerMode === 'NOTE'
+                                ? 'bg-amber-100 text-amber-900'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            <StickyNote className="w-3 h-3 shrink-0" />
+                            <span>Catatan</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="hidden lg:inline text-[11px] text-gray-400 select-none">
+                      Enter kirim • Shift+Enter baris baru
+                    </span>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      isLoading={sending}
+                      disabled={!inputText.trim() && pendingAttachments.length === 0}
+                      className="shrink-0 h-8 px-3 sm:px-3.5"
+                    >
+                      <Send className="w-3.5 h-3.5 sm:hidden" />
+                      <span>
+                        {sending && sendingProgress
+                          ? `${sendingProgress.current}/${sendingProgress.total}`
+                          : composerMode === 'NOTE'
+                          ? 'Simpan'
+                          : 'Kirim'}
+                      </span>
+                    </Button>
+                  </div>
+                </div>
+              </form>
             </div>
           </div>
           )}
