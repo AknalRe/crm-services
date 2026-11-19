@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import axios from 'axios';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 const PANEL_URL = 'https://panel.reneo.my.id';
@@ -613,5 +614,71 @@ export default async function publicSeoRouter(fastify: FastifyInstance) {
       .header('X-Robots-Tag', 'index, follow')
       .header('Cache-Control', 'public, max-age=300')
       .send(renderLandingHtmlDocument(req));
+  });
+
+  fastify.post<{
+    Body: {
+      name?: string;
+      phone?: string;
+      businessName?: string;
+      inquiryType?: string;
+      message?: string;
+    };
+  }>('/inquiry', async (req, reply) => {
+    const name = String(req.body?.name || '').trim();
+    const phone = String(req.body?.phone || '').trim();
+    const businessName = String(req.body?.businessName || '').trim();
+    const inquiryType = String(req.body?.inquiryType || 'Tambah Fitur / Beli Aset Program').trim();
+    const message = String(req.body?.message || '').trim();
+
+    if (!name || !phone || !message) {
+      return reply.status(400).send({
+        success: false,
+        error: 'Nama, nomor WhatsApp, dan pesan wajib diisi.',
+      });
+    }
+
+    const reneoBase = (
+      process.env.RENEO_PANEL_URL ||
+      process.env.RENEO_URL ||
+      'http://host.docker.internal:8787'
+    ).replace(/\/+$/, '');
+    const appToken = (process.env.RENEO_APP_TOKEN || '').trim();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (appToken) headers['X-Reneo-App-Token'] = appToken;
+
+    try {
+      const res = await axios.post(
+        `${reneoBase}/api/v1/app-catalog/inquiry`,
+        {
+          catalogId: 'reneo-crm',
+          name,
+          phone,
+          businessName,
+          inquiryType,
+          message,
+        },
+        { headers, timeout: 10000 }
+      );
+      return reply.send({
+        success: true,
+        message:
+          res.data?.message ||
+          'Permintaan Anda sudah kami terima. Anda akan segera mendapat balasan oleh tim kami.',
+        data: {
+          adminNotified: res.data?.adminNotified ?? 0,
+          buyerNotified: Boolean(res.data?.buyerNotified),
+        },
+      });
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const errMsg =
+        err?.response?.data?.error ||
+        'Gagal mengirim permintaan saat ini. Silakan coba beberapa saat lagi.';
+      return reply.status(status && status >= 400 && status < 500 ? status : 502).send({
+        success: false,
+        error: errMsg,
+      });
+    }
   });
 }

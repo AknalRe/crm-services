@@ -847,6 +847,16 @@ export const api = {
     const res = await client.post('/license/trial', { planSlug, buyerPhone });
     return res.data.data;
   },
+  submitPublicInquiry: async (payload: {
+    name: string;
+    phone: string;
+    businessName?: string;
+    inquiryType: string;
+    message: string;
+  }): Promise<{ success: boolean; message: string }> => {
+    const res = await client.post('/public/seo/inquiry', payload);
+    return res.data;
+  },
   createLicenseOrder: async (data: {
     planSlug: string;
     quantity?: number;

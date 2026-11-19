@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { ReneoCrmLogo } from '../components/ReneoCrmLogo';
+import { api } from '../services/api';
 
 interface LandingPageProps {
   initialized: boolean;
@@ -37,6 +38,7 @@ const NAV_LINKS = [
   { href: '#kanal', label: 'Semua Kanal' },
   { href: '#perbandingan', label: 'Perbandingan' },
   { href: '#faq', label: 'FAQ' },
+  { href: '#hubungi-kami', label: 'Hubungi Kami' },
 ];
 
 const HERO_CHANNEL_PREVIEWS = [
@@ -349,6 +351,52 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [activeHeroChannelId, setActiveHeroChannelId] = useState(HERO_CHANNEL_PREVIEWS[0].id);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [inquiryType, setInquiryType] = useState<'Tambah Fitur Khusus' | 'Beli Aset Program' | 'Konsultasi & Implementasi'>('Tambah Fitur Khusus');
+  const [inquiryName, setInquiryName] = useState('');
+  const [inquiryPhone, setInquiryPhone] = useState('');
+  const [inquiryBusiness, setInquiryBusiness] = useState('');
+  const [inquiryMessage, setInquiryMessage] = useState('');
+  const [inquirySubmitting, setInquirySubmitting] = useState(false);
+  const [inquiryStatus, setInquiryStatus] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const handleInquirySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inquirySubmitting) return;
+    if (!inquiryName.trim() || !inquiryPhone.trim() || !inquiryMessage.trim()) {
+      setInquiryStatus({ ok: false, text: 'Mohon lengkapi nama, nomor WhatsApp, dan detail kebutuhan Anda.' });
+      return;
+    }
+    try {
+      setInquirySubmitting(true);
+      setInquiryStatus(null);
+      const res = await api.submitPublicInquiry({
+        name: inquiryName.trim(),
+        phone: inquiryPhone.trim(),
+        businessName: inquiryBusiness.trim() || undefined,
+        inquiryType,
+        message: inquiryMessage.trim(),
+      });
+      setInquiryStatus({
+        ok: true,
+        text:
+          res.message ||
+          'Permintaan Anda sudah kami terima. Anda akan segera mendapat balasan oleh tim kami melalui WhatsApp.',
+      });
+      setInquiryName('');
+      setInquiryPhone('');
+      setInquiryBusiness('');
+      setInquiryMessage('');
+    } catch (err: any) {
+      setInquiryStatus({
+        ok: false,
+        text:
+          err?.response?.data?.error ||
+          'Gagal mengirim permintaan saat ini. Silakan coba beberapa saat lagi.',
+      });
+    } finally {
+      setInquirySubmitting(false);
+    }
+  };
 
   const activeModule = MODULE_TABS.find((m) => m.id === activeModuleId) || MODULE_TABS[0];
   const activeHeroChannel =
@@ -928,6 +976,151 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 );
               })}
             </div>
+          </div>
+        </RevealSection>
+
+        {/* Custom Feature / Program Asset Inquiry Form */}
+        <RevealSection id="hubungi-kami" className="bg-[#f8fafc] border-b border-slate-200">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
+            <div className="max-w-2xl space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                Kebutuhan Khusus &amp; Aset Program
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+                Ingin Tambah Fitur Khusus atau Beli Aset Program? Hubungi Kami
+              </h2>
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                Butuh penyesuaian alur kerja khusus untuk perusahaan Anda, integrasi tambahan, atau ingin memiliki aset program secara penuh? Kirim detail kebutuhan Anda di bawah ini — tim kami akan langsung menghubungi Anda lewat WhatsApp.
+              </p>
+            </div>
+
+            <form
+              onSubmit={handleInquirySubmit}
+              className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7 space-y-5 shadow-xs"
+            >
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-slate-800">
+                  Kebutuhan Anda
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      'Tambah Fitur Khusus',
+                      'Beli Aset Program',
+                      'Konsultasi & Implementasi',
+                    ] as const
+                  ).map((opt) => {
+                    const selected = inquiryType === opt;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setInquiryType(opt)}
+                        className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold border transition-all ${
+                          selected
+                            ? 'bg-[#2563eb] text-white border-[#2563eb] shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="inquiry-name" className="block text-sm font-semibold text-slate-800">
+                    Nama Lengkap <span className="text-rose-600">*</span>
+                  </label>
+                  <input
+                    id="inquiry-name"
+                    type="text"
+                    required
+                    value={inquiryName}
+                    onChange={(e) => setInquiryName(e.target.value)}
+                    placeholder="Contoh: Budi Santoso"
+                    className="w-full h-11 px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="inquiry-phone" className="block text-sm font-semibold text-slate-800">
+                    Nomor WhatsApp Aktif <span className="text-rose-600">*</span>
+                  </label>
+                  <input
+                    id="inquiry-phone"
+                    type="tel"
+                    required
+                    value={inquiryPhone}
+                    onChange={(e) => setInquiryPhone(e.target.value)}
+                    placeholder="081234567890"
+                    className="w-full h-11 px-3.5 rounded-xl border border-slate-300 bg-white text-sm font-mono text-slate-900 focus:outline-none focus:border-[#2563eb]"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="inquiry-business" className="block text-sm font-semibold text-slate-800">
+                  Nama Usaha / Perusahaan <span className="text-xs font-normal text-slate-400">(Opsional)</span>
+                </label>
+                <input
+                  id="inquiry-business"
+                  type="text"
+                  value={inquiryBusiness}
+                  onChange={(e) => setInquiryBusiness(e.target.value)}
+                  placeholder="Contoh: Toko Clarice Official / PT Maju Bersama"
+                  className="w-full h-11 px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="inquiry-message" className="block text-sm font-semibold text-slate-800">
+                  Ceritakan Kebutuhan Anda <span className="text-rose-600">*</span>
+                </label>
+                <textarea
+                  id="inquiry-message"
+                  rows={4}
+                  required
+                  value={inquiryMessage}
+                  onChange={(e) => setInquiryMessage(e.target.value)}
+                  placeholder="Contoh: Kami ingin menambah laporan khusus cabang atau ingin menanyakan pembelian aset program penuh..."
+                  className="w-full p-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
+                />
+              </div>
+
+              {inquiryStatus && (
+                <div
+                  className={`p-4 rounded-xl border text-sm font-medium flex items-start gap-2.5 ${
+                    inquiryStatus.ok
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border-rose-200 text-rose-800'
+                  }`}
+                >
+                  {inquiryStatus.ok ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  )}
+                  <span>{inquiryStatus.text}</span>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                <span className="text-xs sm:text-sm text-slate-500">
+                  Pesan langsung diteruskan ke tim kami dan Anda akan menerima konfirmasi di WhatsApp.
+                </span>
+                <button
+                  type="submit"
+                  disabled={inquirySubmitting}
+                  className="min-h-[46px] px-6 py-2.5 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-60 text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors shrink-0"
+                >
+                  <span>{inquirySubmitting ? 'Mengirim...' : 'Kirim Permintaan'}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </form>
           </div>
         </RevealSection>
 
