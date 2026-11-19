@@ -1040,7 +1040,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs items-stretch">
             <button
               type="button"
               onClick={() =>
@@ -1053,13 +1053,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                   shortcutLabel: 'Buka Live Chat',
                 })
               }
-              className="p-3 rounded-md bg-gray-50 hover:bg-indigo-50/40 border border-gray-200 hover:border-indigo-300 text-left transition-colors cursor-pointer"
+              className="h-full flex flex-col justify-between p-3 rounded-md bg-gray-50 hover:bg-indigo-50/40 border border-gray-200 hover:border-indigo-300 text-left transition-colors cursor-pointer"
             >
-              <span className="text-[11px] text-gray-500 block">Rata-rata Respon Awal</span>
-              <span className="text-base font-bold text-gray-900 font-mono tabular-nums mt-0.5 block">
-                {formatDurationShort(convAnalytics.avgFirstResponseSeconds)}
-              </span>
-              <span className="text-[10px] text-indigo-600 inline-flex items-center gap-0.5">
+              <div>
+                <span className="text-[11px] text-gray-500 block">Rata-rata Respon Awal</span>
+                <span className="text-base font-bold text-gray-900 font-mono tabular-nums mt-0.5 block">
+                  {formatDurationShort(convAnalytics.avgFirstResponseSeconds)}
+                </span>
+              </div>
+              <span className="text-[10px] text-indigo-600 inline-flex items-center gap-0.5 mt-1.5">
                 First Response Time <ChevronRight className="w-2.5 h-2.5" />
               </span>
             </button>
@@ -1075,17 +1077,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                   shortcutLabel: 'Buka Live Chat',
                 })
               }
-              className="p-3 rounded-md bg-gray-50 hover:bg-indigo-50/40 border border-gray-200 hover:border-indigo-300 text-left transition-colors cursor-pointer"
+              className="h-full flex flex-col justify-between p-3 rounded-md bg-gray-50 hover:bg-indigo-50/40 border border-gray-200 hover:border-indigo-300 text-left transition-colors cursor-pointer"
             >
-              <span className="text-[11px] text-gray-500 block">Rata-rata Penyelesaian</span>
-              <span className="text-base font-bold text-gray-900 font-mono tabular-nums mt-0.5 block">
-                {formatDurationShort(convAnalytics.avgResolutionSeconds)}
-              </span>
-              <span className="text-[10px] text-indigo-600 inline-flex items-center gap-0.5">
+              <div>
+                <span className="text-[11px] text-gray-500 block">Rata-rata Penyelesaian</span>
+                <span className="text-base font-bold text-gray-900 font-mono tabular-nums mt-0.5 block">
+                  {formatDurationShort(convAnalytics.avgResolutionSeconds)}
+                </span>
+              </div>
+              <span className="text-[10px] text-indigo-600 inline-flex items-center gap-0.5 mt-1.5">
                 Resolution Time <ChevronRight className="w-2.5 h-2.5" />
               </span>
             </button>
-            <div className="p-3 rounded-md bg-gray-50 border border-gray-200 space-y-1">
+            <div className="h-full flex flex-col justify-between p-3 rounded-md bg-gray-50 border border-gray-200">
               <button
                 type="button"
                 onClick={() =>
@@ -1110,7 +1114,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                     : '-'}
                 </span>
               </button>
-              <div className="flex items-center justify-between gap-1 text-[10px]">
+              <div className="flex items-center justify-between gap-1 text-[10px] mt-1.5">
                 <span className="text-gray-500">
                   {convAnalytics.slaMetCount}/{convAnalytics.slaMeasuredCount} tepat waktu
                 </span>
@@ -1134,9 +1138,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                 )}
               </div>
             </div>
-            <div className="p-3 rounded-md bg-gray-50 border border-gray-200">
-              <span className="text-[11px] text-gray-500 block">Status Percakapan</span>
-              <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] font-semibold tabular-nums">
+            <div className="h-full flex flex-col justify-between p-3 rounded-md bg-gray-50 border border-gray-200">
+              <div>
+                <span className="text-[11px] text-gray-500 block">Status Percakapan</span>
+                <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] font-semibold tabular-nums">
                 <button
                   type="button"
                   onClick={() =>
@@ -1182,8 +1187,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                 >
                   {convAnalytics.resolvedCount} Done
                 </button>
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-1 text-[10px] mt-1">
+              <div className="flex items-center justify-between gap-1 text-[10px] mt-1.5">
                 <button
                   type="button"
                   onClick={() =>
