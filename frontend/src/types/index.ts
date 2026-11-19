@@ -134,6 +134,7 @@ export interface Conversation {
   assignedAgentId?: string | null;
   assignedAgentName?: string | null;
   unreadCount: number;
+  sessionStartedAt?: string | null;
   firstInboundAt?: string | null;
   firstResponseAt?: string | null;
   lastInboundAt?: string | null;

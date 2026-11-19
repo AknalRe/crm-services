@@ -65,6 +65,7 @@ import {
   Sparkles,
   FolderOpen,
   BookmarkPlus,
+  Play,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -4124,7 +4125,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const activeAdvancedFilterCount =
     (metricFilter !== 'ALL' ? 1 : 0) +
     (channelFilter !== 'ALL' ? 1 : 0) +
-    (accountFilter !== 'ALL' ? 1 : 0) +
     (assigneeFilter !== 'ALL' ? 1 : 0) +
     (labelFilter !== 'ALL' ? 1 : 0);
 
@@ -4136,16 +4136,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
           selectedConversation ? 'hidden md:flex' : 'flex flex-1 md:flex-none min-h-0'
         }`}
       >
-        <div className="p-2.5 sm:p-3 border-b border-gray-200 bg-white space-y-2">
+        <div className="p-2 sm:p-2.5 border-b border-gray-200 bg-white space-y-1.5">
+          {/* Row 1: Search + Filter Drawer Toggle + New Chat */}
           <div className="flex items-center gap-1.5">
             <div className="relative flex-1 min-w-0">
               <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Cari obrolan, label, sesi..."
+                placeholder="Cari obrolan, kontak, atau sesi..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full h-8 sm:h-9 pl-8 pr-7 bg-gray-50 border border-gray-200 rounded-md text-xs placeholder-gray-400 focus:outline-none focus:border-indigo-500"
+                className="w-full h-8 pl-8 pr-7 bg-gray-50 border border-gray-200 rounded-md text-xs placeholder-gray-400 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
               />
               {search && (
                 <button
@@ -4161,8 +4162,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
             <button
               type="button"
               onClick={() => setShowListFilters((v) => !v)}
-              title="Filter lanjutan (Penilaian, Channel, Agent, Akun)"
-              className={`h-8 sm:h-9 px-2 rounded-md border text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors ${
+              title="Filter lanjutan (Penilaian, Channel, Agent, Label)"
+              className={`h-8 px-2 rounded-md border text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer ${
                 showListFilters || activeAdvancedFilterCount > 0
                   ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
                   : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'
@@ -4180,7 +4181,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 type="button"
                 onClick={() => void handleOpenNewChatModal()}
                 title="Buka Percakapan Baru"
-                className="h-8 sm:h-9 px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors"
+                className="h-8 px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Baru</span>
@@ -4188,38 +4189,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
             )}
           </div>
 
-          {/* Chat Type Filter Pills: Semua, Chat Pribadi, Grup, Belum Dibaca */}
-          <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
-            {(
-              [
-                { id: 'ALL', label: 'Semua' },
-                { id: 'PERSONAL', label: 'Pribadi' },
-                { id: 'GROUP', label: 'Grup' },
-                { id: 'UNREAD', label: 'Belum Dibaca' },
-              ] as const
-            ).map((ct) => (
-              <button
-                key={ct.id}
-                type="button"
-                onClick={() => setChatTypeFilter(ct.id)}
-                className={`py-1 rounded font-medium transition-colors truncate px-0.5 ${
-                  chatTypeFilter === ct.id
-                    ? 'bg-white text-indigo-700 shadow-sm font-semibold'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                {ct.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
+          {/* Row 2: Compact Status Tabs */}
+          <div className="bg-gray-100/90 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
             {(['ALL', 'OPEN', 'PENDING', 'RESOLVED'] as const).map((st) => (
               <button
                 key={st}
                 type="button"
                 onClick={() => setStatusFilter(st)}
-                className={`py-1 rounded font-medium transition-colors ${
+                className={`py-1 rounded font-medium transition-colors cursor-pointer ${
                   statusFilter === st
                     ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
                     : 'text-gray-600 hover:text-gray-900'
@@ -4230,16 +4207,37 @@ export const Conversations: React.FC<ConversationsProps> = ({
             ))}
           </div>
 
-          {unifiedSessionOptions.length > 0 && (
-            <div className="flex items-center gap-1.5">
+          {/* Row 3: Compact Tipe & Sesi/Akun Bar */}
+          {unifiedSessionOptions.length > 0 ? (
+            <div className="grid grid-cols-2 gap-1.5">
+              <select
+                value={chatTypeFilter}
+                onChange={(e) => setChatTypeFilter(e.target.value as any)}
+                aria-label="Filter Tipe Obrolan"
+                className={`w-full h-7 px-2 border rounded-md text-[11px] font-medium focus:outline-none focus:border-indigo-500 transition-colors ${
+                  chatTypeFilter !== 'ALL'
+                    ? 'bg-indigo-50/70 border-indigo-200 text-indigo-800'
+                    : 'bg-gray-50/80 border-gray-200 text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <option value="ALL">Semua Tipe</option>
+                <option value="PERSONAL">Chat Pribadi</option>
+                <option value="GROUP">Grup WA</option>
+                <option value="UNREAD">Belum Dibaca</option>
+              </select>
+
               <select
                 value={accountFilter}
                 onChange={(e) => setAccountFilter(e.target.value)}
                 aria-label="Filter Sesi atau Akun Kanal"
-                className="w-full h-8 px-2.5 bg-gray-50/80 hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
+                className={`w-full h-7 px-2 border rounded-md text-[11px] font-medium focus:outline-none focus:border-indigo-500 transition-colors ${
+                  accountFilter !== 'ALL'
+                    ? 'bg-indigo-50/70 border-indigo-200 text-indigo-800'
+                    : 'bg-gray-50/80 border-gray-200 text-gray-700 hover:bg-gray-50'
+                }`}
               >
                 <option value="ALL">
-                  Semua Sesi / Akun ({filteredUnifiedSessionOptions.length})
+                  Semua Sesi ({filteredUnifiedSessionOptions.length})
                 </option>
                 {filteredUnifiedSessionOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -4247,73 +4245,91 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   </option>
                 ))}
               </select>
-              {accountFilter !== 'ALL' && (
+            </div>
+          ) : (
+            <div className="bg-gray-100/90 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
+              {(
+                [
+                  { id: 'ALL', label: 'Semua' },
+                  { id: 'PERSONAL', label: 'Pribadi' },
+                  { id: 'GROUP', label: 'Grup' },
+                  { id: 'UNREAD', label: 'Belum Dibaca' },
+                ] as const
+              ).map((ct) => (
+                <button
+                  key={ct.id}
+                  type="button"
+                  onClick={() => setChatTypeFilter(ct.id)}
+                  className={`py-1 rounded font-medium transition-colors truncate px-0.5 cursor-pointer ${
+                    chatTypeFilter === ct.id
+                      ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {ct.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Collapsed Active Filter Summary (single slim bar) */}
+          {!showListFilters &&
+            (metricFilter !== 'ALL' ||
+              channelFilter !== 'ALL' ||
+              assigneeFilter !== 'ALL' ||
+              accountFilter !== 'ALL' ||
+              labelFilter !== 'ALL') && (
+              <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-indigo-50/80 border border-indigo-100 text-[10.5px] text-indigo-900">
+                <span className="truncate font-medium">
+                  {[
+                    metricFilter !== 'ALL'
+                      ? metricFilter === 'ASSESSED'
+                        ? 'Dinilai'
+                        : metricFilter === 'EXCLUDED'
+                        ? 'Non-Nilai'
+                        : 'Lewat SLA'
+                      : null,
+                    channelFilter !== 'ALL' ? CHANNEL_META[channelFilter]?.short || channelFilter : null,
+                    assigneeFilter !== 'ALL'
+                      ? assigneeFilter === 'MINE'
+                        ? 'Milik Saya'
+                        : assigneeFilter === 'UNASSIGNED'
+                        ? 'Belum Ditugaskan'
+                        : assignableAgents.find((a) => `AGENT:${a.id}` === assigneeFilter)?.name || 'Agent'
+                      : null,
+                    accountFilter !== 'ALL'
+                      ? unifiedSessionOptions.find((o) => o.value === accountFilter)?.label || 'Sesi Khusus'
+                      : null,
+                    labelFilter !== 'ALL'
+                      ? labelFilter === '__NO_LABEL__'
+                        ? 'Tanpa Label'
+                        : `#${labelFilter}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
                 <button
                   type="button"
-                  onClick={() => setAccountFilter('ALL')}
-                  title="Reset filter sesi"
-                  className="h-8 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[11px] font-medium text-gray-600 shrink-0 cursor-pointer"
+                  onClick={() => {
+                    setMetricFilter('ALL');
+                    setChannelFilter('ALL');
+                    setAssigneeFilter('ALL');
+                    setAccountFilter('ALL');
+                    setLabelFilter('ALL');
+                  }}
+                  className="font-semibold text-indigo-700 hover:text-indigo-900 hover:underline shrink-0 cursor-pointer"
                 >
-                  Semua
+                  Reset
                 </button>
-              )}
-            </div>
-          )}
+              </div>
+            )}
 
-          {!showListFilters && activeAdvancedFilterCount > 0 && (
-            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-indigo-50/70 border border-indigo-100 text-[10px] text-indigo-800">
-              <span className="truncate font-medium">
-                Filter aktif:{' '}
-                {[
-                  metricFilter !== 'ALL'
-                    ? metricFilter === 'ASSESSED'
-                    ? 'Dinilai'
-                    : metricFilter === 'EXCLUDED'
-                    ? 'Non-Nilai'
-                    : metricFilter === 'SLA_BREACH'
-                    ? 'Lewat SLA'
-                    : 'Grup WA'
-                  : null,
-                  channelFilter !== 'ALL' ? CHANNEL_META[channelFilter]?.short || channelFilter : null,
-                  assigneeFilter !== 'ALL'
-                    ? assigneeFilter === 'MINE'
-                      ? 'Milik Saya'
-                      : assigneeFilter === 'UNASSIGNED'
-                      ? 'Belum Ditugaskan'
-                      : assignableAgents.find((a) => `AGENT:${a.id}` === assigneeFilter)?.name || 'Agent'
-                    : null,
-                  accountFilter !== 'ALL'
-                    ? unifiedSessionOptions.find((o) => o.value === accountFilter)?.label || 'Sesi/Akun Khusus'
-                    : null,
-                  labelFilter !== 'ALL'
-                    ? labelFilter === '__NO_LABEL__'
-                      ? 'Tanpa Label'
-                      : `#${labelFilter}`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(' • ')}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setMetricFilter('ALL');
-                  setChannelFilter('ALL');
-                  setAssigneeFilter('ALL');
-                  setAccountFilter('ALL');
-                  setLabelFilter('ALL');
-                }}
-                className="font-semibold text-indigo-700 hover:underline shrink-0"
-              >
-                Reset
-              </button>
-            </div>
-          )}
-
+          {/* Compact Expandable Advanced Filter Card */}
           {showListFilters && (
-            <div className="pt-2 border-t border-gray-200/80 space-y-2">
-              {/* Metric & SLA Tabs */}
-              <div className="bg-gray-100 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[11px]">
+            <div className="p-2 rounded-lg bg-slate-50/90 border border-slate-200/90 space-y-1.5">
+              {/* Penilaian & SLA Tabs */}
+              <div className="bg-white border border-gray-200/80 p-0.5 rounded-md grid grid-cols-4 gap-0.5 text-[10.5px]">
                 {(
                   [
                     { id: 'ALL', label: 'Semua' },
@@ -4326,10 +4342,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     key={mf.id}
                     type="button"
                     onClick={() => setMetricFilter(mf.id)}
-                    className={`py-1 rounded font-medium transition-colors truncate px-0.5 text-center ${
+                    className={`py-1 rounded font-medium transition-colors truncate px-0.5 text-center cursor-pointer ${
                       metricFilter === mf.id
-                        ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
-                        : 'text-gray-600 hover:text-gray-900'
+                        ? 'bg-indigo-600 text-white font-semibold'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                     }`}
                   >
                     {mf.label}
@@ -4346,11 +4362,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     setAccountFilter('ALL');
                   }}
                   aria-label="Filter Channel"
-                  className="w-full h-8 px-2.5 bg-gray-50/80 hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
+                  className="w-full h-7 px-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:border-indigo-500 transition-colors"
                 >
                   <option value="ALL">Semua Channel</option>
                   <option value="WHATSAPP">WhatsApp</option>
-                  <option value="WHATSAPP_CLOUD">WA Business Cloud</option>
+                  <option value="WHATSAPP_CLOUD">WA Cloud</option>
                   <option value="INSTAGRAM">Instagram</option>
                   <option value="FACEBOOK">Facebook</option>
                   <option value="THREADS">Threads</option>
@@ -4362,10 +4378,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     value={assigneeFilter}
                     onChange={(e) => setAssigneeFilter(e.target.value)}
                     aria-label="Filter Agent"
-                    className="w-full h-8 px-2.5 bg-gray-50/80 hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
+                    className="w-full h-7 px-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:border-indigo-500 transition-colors"
                   >
                     <option value="ALL">
-                      {canViewAllConversations ? 'Semua Agent' : 'Akses Saya & Terbuka'}
+                      {canViewAllConversations ? 'Semua Agent' : 'Akses Saya'}
                     </option>
                     <option value="MINE">Milik Saya</option>
                     <option value="UNASSIGNED">Belum Ditugaskan</option>
@@ -4380,114 +4396,77 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 )}
               </div>
 
-              {/* Dedicated Label Filter Section */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={labelFilter}
-                    onChange={(e) => setLabelFilter(e.target.value)}
-                    aria-label="Pilih Filter Label"
-                    className="w-full h-8 px-2.5 bg-gray-50/80 hover:bg-gray-50 border border-gray-200 rounded-md text-[11px] font-medium text-gray-700 focus:outline-none focus:bg-white focus:border-indigo-500 transition-colors"
-                  >
-                    <option value="ALL">
-                      Semua Label ({availableFilterLabels.reduce((acc, curr) => acc + curr.count, 0)} obrolan berlabel)
-                    </option>
-                    <option value="__NO_LABEL__">Tanpa Label</option>
-                    {availableFilterLabels.map((item) => (
-                      <option key={item.name} value={item.name}>
-                        #{item.name} {item.count > 0 ? `(${item.count})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  {labelFilter !== 'ALL' && (
+              {/* Single Unified Label Chip Strip (no redundant select dropdown) */}
+              <div className="flex flex-wrap items-center gap-1 max-h-20 overflow-y-auto pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => setLabelFilter(labelFilter === '__NO_LABEL__' ? 'ALL' : '__NO_LABEL__')}
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors cursor-pointer ${
+                    labelFilter === '__NO_LABEL__'
+                      ? 'bg-indigo-600 text-white border-indigo-600 font-semibold'
+                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  Tanpa Label
+                </button>
+                {availableFilterLabels.map((item) => {
+                  const style = getLabelStyle(item.name);
+                  const isSelected = labelFilter.toLowerCase() === item.name.toLowerCase();
+                  return (
                     <button
+                      key={item.name}
                       type="button"
-                      onClick={() => setLabelFilter('ALL')}
-                      title="Reset filter label"
-                      className="h-8 px-2 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-[11px] font-medium text-gray-600 shrink-0 cursor-pointer"
+                      onClick={() => setLabelFilter(isSelected ? 'ALL' : item.name)}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all cursor-pointer ${
+                        isSelected
+                          ? `ring-1 ring-indigo-500 font-semibold ${style.badge}`
+                          : `bg-white hover:opacity-95 ${style.badge}`
+                      }`}
+                      title={`Filter #${item.name}`}
                     >
-                      Reset
+                      <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                      <span>#{item.name}</span>
+                      {item.count > 0 && (
+                        <span className="text-[9px] opacity-75 font-mono">{item.count}</span>
+                      )}
                     </button>
-                  )}
-                </div>
-
-                {availableFilterLabels.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                    {availableFilterLabels.map((item) => {
-                      const style = getLabelStyle(item.name);
-                      const isSelected = labelFilter.toLowerCase() === item.name.toLowerCase();
-                      return (
-                        <button
-                          key={item.name}
-                          type="button"
-                          onClick={() => setLabelFilter(isSelected ? 'ALL' : item.name)}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all cursor-pointer ${
-                            isSelected
-                              ? `ring-2 ring-indigo-500 font-semibold shadow-2xs ${style.badge}`
-                              : `hover:opacity-90 opacity-75 bg-white ${style.badge}`
-                          }`}
-                          title={`Filter obrolan berlabel #${item.name}`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-                          <span>#{item.name}</span>
-                          {item.count > 0 && (
-                            <span className="text-[9px] opacity-75 font-mono">({item.count})</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                  );
+                })}
               </div>
 
-              <div className="flex items-center justify-between text-[11px] pt-1 border-t border-gray-100">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMetricFilter('ALL');
-                    setChannelFilter('ALL');
-                    setAssigneeFilter('ALL');
-                    setAccountFilter('ALL');
-                    setLabelFilter('ALL');
-                  }}
-                  className="text-gray-500 hover:text-red-600 transition-colors font-medium cursor-pointer"
-                >
-                  Reset Semua Filter
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowListFilters(false)}
-                  className="font-semibold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
-                >
-                  Tutup Filter
-                </button>
+              {/* Compact Footer */}
+              <div className="flex items-center justify-between text-[10.5px] pt-1 border-t border-slate-200/80">
+                <span className="text-slate-500 font-mono">
+                  {filteredConversations.length} obrolan
+                </span>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChatTypeFilter('ALL');
+                      setStatusFilter('ALL');
+                      setMetricFilter('ALL');
+                      setChannelFilter('ALL');
+                      setAssigneeFilter('ALL');
+                      setAccountFilter('ALL');
+                      setLabelFilter('ALL');
+                    }}
+                    className="text-slate-600 hover:text-rose-600 transition-colors font-medium cursor-pointer"
+                  >
+                    Reset Semua
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowListFilters(false)}
+                    className="font-semibold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
+                  >
+                    Tutup
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </div>
-
-        {labelFilter !== 'ALL' && (
-          <div className="flex items-center justify-between gap-1.5 px-3 py-1.5 bg-indigo-50/90 border-b border-indigo-100 text-[11px] text-indigo-900 shrink-0">
-            <span className="flex items-center gap-1.5 min-w-0">
-              <Tag className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="text-gray-600">Filter Label:</span>
-              <span className="font-bold underline truncate">
-                {labelFilter === '__NO_LABEL__' ? 'Tanpa Label' : `#${labelFilter}`}
-              </span>
-              <span className="text-[10px] text-indigo-600 font-mono">
-                ({filteredConversations.length})
-              </span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setLabelFilter('ALL')}
-              title="Hapus filter label"
-              className="p-0.5 rounded text-indigo-600 hover:text-indigo-900 hover:bg-indigo-100 shrink-0 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
 
         <div className="relative flex-1 min-h-0 flex flex-col">
         {pendingNewConvIds.length > 0 && (
@@ -5396,31 +5375,54 @@ export const Conversations: React.FC<ConversationsProps> = ({
             ) : messages.length === 0 ? (
               <EmptyState title="Belum ada pesan" description="Kirim pesan pertama ke pelanggan ini." />
             ) : (() => {
-              const orderedCsatSessions = [...(selectedConversation.csatHistory || [])].sort(
-                (a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime()
-              );
+              const isAssessedConv = !selectedConversation.excludeFromMetrics && !selectedConversation.isGroup;
+              const orderedCsatSessions = isAssessedConv
+                ? [...(selectedConversation.csatHistory || [])].sort(
+                    (a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime()
+                  )
+                : [];
 
-              // Determine exact message index where each CSAT session closes (either its CSAT CTA bubble or last message before resolution)
+              const isTrailingClosingActivity = (msg: ChatMessage, closeMs: number) => {
+                const msgMeta = parseChatMessageMeta(msg);
+                const isAct = msg.messageType === 'ACTIVITY' || msgMeta?.kind === 'ACTIVITY';
+                if (!isAct) return false;
+                const diff = new Date(msg.createdAt).getTime() - closeMs;
+                if (diff < -5000 || diff > 120_000) return false;
+                const action = String(msgMeta?.action || '').toUpperCase();
+                return (
+                  action === 'CSAT_SENT' ||
+                  (msg.body || '').toLowerCase().includes('survei csat')
+                );
+              };
+
+              // Determine exact message index where each CSAT session closes (wrapping its trailing auto-CSAT activity log inside the closing session)
               const sessionEndIndexById = new Map<string, number>();
-              orderedCsatSessions.forEach((sess) => {
-                const tokenIdx = sess.token
-                  ? messages.findIndex((m) => m.body && m.body.includes(sess.token))
-                  : -1;
-                if (tokenIdx >= 0) {
-                  sessionEndIndexById.set(sess.id, tokenIdx);
-                  return;
-                }
-                const endMs = new Date(sess.conversationResolvedAt || sess.sentAt).getTime();
-                let lastIdx = -1;
-                messages.forEach((m, mIdx) => {
-                  if (new Date(m.createdAt).getTime() <= endMs + 5000) {
-                    lastIdx = mIdx;
+              if (isAssessedConv) {
+                orderedCsatSessions.forEach((sess) => {
+                  const tokenIdx = sess.token
+                    ? messages.findIndex((m) => m.body && m.body.includes(sess.token))
+                    : -1;
+                  const endMs = new Date(sess.conversationResolvedAt || sess.sentAt).getTime();
+                  let resolvedEndIdx = tokenIdx;
+                  if (resolvedEndIdx < 0) {
+                    messages.forEach((m, mIdx) => {
+                      if (new Date(m.createdAt).getTime() <= endMs + 5000) {
+                        resolvedEndIdx = mIdx;
+                      }
+                    });
+                  }
+                  if (resolvedEndIdx >= 0) {
+                    const anchorMs = Math.max(endMs, new Date(messages[resolvedEndIdx].createdAt).getTime());
+                    while (
+                      resolvedEndIdx + 1 < messages.length &&
+                      isTrailingClosingActivity(messages[resolvedEndIdx + 1], anchorMs)
+                    ) {
+                      resolvedEndIdx += 1;
+                    }
+                    sessionEndIndexById.set(sess.id, resolvedEndIdx);
                   }
                 });
-                if (lastIdx >= 0) {
-                  sessionEndIndexById.set(sess.id, lastIdx);
-                }
-              });
+              }
 
               const closingSessionsAtMsgIdx = new Map<
                 number,
@@ -5435,29 +5437,84 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 }
               });
 
-              // Track session start divider indices: Sesi #1 at idx 0 (when multi/CSAT exists), and each message right after a closing CSAT bubble
+              // Track Batas Mulai Sesi indices: Sesi #1 at idx 0 for all assessed conversations, plus each new session after a closing boundary
               const startBannerAtMsgIdx = new Map<
                 number,
-                { number: number; timestamp: string; label?: string }
+                {
+                  number: number;
+                  timestamp: string;
+                  isActive?: boolean;
+                  session?: typeof orderedCsatSessions[number];
+                }
               >();
-              if (orderedCsatSessions.length > 0 && messages.length > 0) {
+              let trailingStartBanner: {
+                number: number;
+                timestamp: string;
+                isActive: boolean;
+              } | null = null;
+
+              if (isAssessedConv && messages.length > 0) {
+                const firstSess = orderedCsatSessions[0];
+                const firstStartTs =
+                  firstSess?.conversationStartedAt ||
+                  (orderedCsatSessions.length === 0
+                    ? selectedConversation.sessionStartedAt ||
+                      selectedConversation.firstInboundAt ||
+                      selectedConversation.createdAt
+                    : null) ||
+                  messages[0].createdAt;
                 startBannerAtMsgIdx.set(0, {
                   number: 1,
-                  timestamp:
-                    orderedCsatSessions[0].conversationStartedAt || messages[0].createdAt,
+                  timestamp: firstStartTs,
+                  isActive:
+                    orderedCsatSessions.length === 0 &&
+                    selectedConversation.status !== 'RESOLVED',
+                  session: firstSess,
                 });
-                orderedCsatSessions.forEach((sess, sIdx) => {
+
+                for (let sIdx = 0; sIdx < orderedCsatSessions.length; sIdx += 1) {
+                  const sess = orderedCsatSessions[sIdx];
                   const endIdx = sessionEndIndexById.get(sess.id);
-                  if (endIdx !== undefined && endIdx + 1 < messages.length) {
-                    const nextSess = orderedCsatSessions[sIdx + 1];
+                  if (endIdx === undefined) continue;
+                  const nextSess = orderedCsatSessions[sIdx + 1];
+                  const isLastClosed = sIdx === orderedCsatSessions.length - 1;
+                  const sessCloseMs = new Date(
+                    sess.conversationResolvedAt || sess.sentAt
+                  ).getTime();
+
+                  if (endIdx + 1 < messages.length) {
+                    const nextMsg = messages[endIdx + 1];
+                    const convSessionMs = selectedConversation.sessionStartedAt
+                      ? new Date(selectedConversation.sessionStartedAt).getTime()
+                      : 0;
+                    const activeStartTs =
+                      isLastClosed && convSessionMs > sessCloseMs
+                        ? selectedConversation.sessionStartedAt!
+                        : nextMsg.createdAt;
                     startBannerAtMsgIdx.set(endIdx + 1, {
                       number: sIdx + 2,
-                      timestamp:
-                        nextSess?.conversationStartedAt || messages[endIdx + 1].createdAt,
-                      label: nextSess ? undefined : 'Sesi Berjalan',
+                      timestamp: nextSess?.conversationStartedAt || activeStartTs,
+                      isActive: !nextSess && selectedConversation.status !== 'RESOLVED',
+                      session: nextSess,
                     });
+                  } else if (
+                    isLastClosed &&
+                    selectedConversation.status !== 'RESOLVED'
+                  ) {
+                    const convSessionMs = selectedConversation.sessionStartedAt
+                      ? new Date(selectedConversation.sessionStartedAt).getTime()
+                      : 0;
+                    const reopenTs =
+                      convSessionMs > sessCloseMs
+                        ? selectedConversation.sessionStartedAt!
+                        : selectedConversation.updatedAt || sess.sentAt;
+                    trailingStartBanner = {
+                      number: sIdx + 2,
+                      timestamp: reopenTs,
+                      isActive: true,
+                    };
                   }
-                });
+                }
               }
 
               const formatDividerTime = (iso: string) =>
@@ -5468,7 +5525,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   minute: '2-digit',
                 });
 
-              return messages.map((msg, msgIndex) => {
+              const renderedItems = messages.map((msg, msgIndex) => {
                 const msgMeta = parseChatMessageMeta(msg);
                 const isActivity = msg.messageType === 'ACTIVITY' || msgMeta?.kind === 'ACTIVITY';
                 const isNote = msg.messageType === 'NOTE';
@@ -5517,15 +5574,42 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                 const startDividerNode = startBanner ? (
                   <div className="flex items-center gap-2 py-1.5">
-                    <div className="flex-1 h-px bg-gray-200" />
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white border border-gray-200 text-[10px] font-medium text-gray-600 shadow-2xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                    <div className="flex-1 h-px bg-indigo-200" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (startBanner.session) {
+                          const endTime =
+                            startBanner.session.conversationResolvedAt ||
+                            startBanner.session.sentAt;
+                          setHighlightedCsatWindow({
+                            token: startBanner.session.token,
+                            startedAt:
+                              startBanner.session.conversationStartedAt ||
+                              startBanner.timestamp,
+                            resolvedAt: endTime,
+                          });
+                        }
+                      }}
+                      title={
+                        startBanner.session
+                          ? 'Klik untuk menyorot pesan pada sesi ini'
+                          : 'Batas dimulainya sesi percakapan'
+                      }
+                      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-[10px] font-medium text-indigo-800 transition-colors"
+                    >
+                      <Play className="w-2.5 h-2.5 fill-indigo-600 text-indigo-600 shrink-0" />
                       <span>
-                        Sesi #{startBanner.number} • Dibuka {formatDividerTime(startBanner.timestamp)}
-                        {startBanner.label ? ` (${startBanner.label})` : ''}
+                        Batas Mulai Sesi #{startBanner.number} •{' '}
+                        {formatDividerTime(startBanner.timestamp)}
                       </span>
-                    </span>
-                    <div className="flex-1 h-px bg-gray-200" />
+                      {startBanner.isActive && (
+                        <span className="px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-900 font-semibold text-[9px]">
+                          Sesi Berjalan
+                        </span>
+                      )}
+                    </button>
+                    <div className="flex-1 h-px bg-indigo-200" />
                   </div>
                 ) : null;
 
@@ -6743,6 +6827,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   </React.Fragment>
                 );
               });
+              const trailingStartNode = trailingStartBanner ? (
+                <div className="flex items-center gap-2 py-1.5">
+                  <div className="flex-1 h-px bg-indigo-200" />
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-[10px] font-medium text-indigo-800">
+                    <Play className="w-2.5 h-2.5 fill-indigo-600 text-indigo-600 shrink-0" />
+                    <span>
+                      Batas Mulai Sesi #{trailingStartBanner.number} •{' '}
+                      {formatDividerTime(trailingStartBanner.timestamp)}
+                    </span>
+                    <span className="px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-900 font-semibold text-[9px]">
+                      Sesi Berjalan
+                    </span>
+                  </span>
+                  <div className="flex-1 h-px bg-indigo-200" />
+                </div>
+              ) : null;
+              return (
+                <>
+                  {renderedItems}
+                  {trailingStartNode}
+                </>
+              );
             })()}
             <div ref={messagesEndRef} />
             </div>

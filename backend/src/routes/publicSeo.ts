@@ -1,0 +1,498 @@
+import fs from 'fs';
+import path from 'path';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+const PANEL_URL = 'https://panel.reneo.my.id';
+const PANEL_INSTALL_URL = 'https://panel.reneo.my.id/install';
+const PANEL_ORDER_URL = 'https://panel.reneo.my.id/order?addon=reneo-crm';
+const DOCKER_IMAGE = 'ghcr.io/aknalre/crm-services';
+
+export const CRM_SEO_META = {
+  name: 'Reneo CRM',
+  fullTitle: 'Reneo CRM — Platform Layanan Pelanggan Omnichannel Self-Hosted (WhatsApp, IG, FB, Threads, Telegram & AI)',
+  description:
+    'Reneo CRM adalah platform layanan pelanggan dan kotak masuk omnichannel self-hosted di server Linux sendiri: kelola WhatsApp (Multi-Nomor QR WAHA, Grup WA, Story, Meta Cloud API), Instagram DM & Komentar, Facebook Messenger, Threads, dan Telegram dalam satu ruang kerja tim CS dengan Role granular, filter Non-Penilaian, SLA, CSAT multi-sesi, siaran anti-ban, dan Agent AI (OpenAI, Gemini, Anthropic, Ollama, MCP).',
+  keywords:
+    'Reneo CRM, CRM omnichannel, WhatsApp CRM self-hosted, inbox multi admin WhatsApp, WhatsApp Cloud API, WAHA CRM, CSAT multi sesi, SLA customer service, Agent AI MCP, WhatsApp Story terjadwal, CRM toko online Indonesia',
+};
+
+const CRM_CHANNELS = [
+  { name: 'WhatsApp (Multi-Nomor QR / WAHA)', mode: 'Chat, Grup & Story WA', detail: 'Hubungkan banyak nomor WA sekaligus, tampilkan daftar partisipan grup @g.us, dan jadwalkan WhatsApp Story ke kontak terpilih.' },
+  { name: 'WhatsApp Business Cloud API (Meta)', mode: 'API Resmi', detail: 'Kirim pesan interaktif, template resmi, dan kelola percakapan bisnis skala tim tanpa batasan sesi lokal.' },
+  { name: 'Instagram', mode: 'DM, Feed & Komentar', detail: 'Balas Direct Message, jadwalkan unggahan feed, dan otomasi balasan DM dari komentar iklan/postingan.' },
+  { name: 'Facebook Messenger & Page', mode: 'Messenger & Komentar', detail: 'Kelola pesan masuk halaman bisnis, jadwal post Page, serta interaksi komentar dalam satu inbox.' },
+  { name: 'Threads', mode: 'Post & Mentions', detail: 'Jadwalkan utas Threads dan pantau komentar akun usaha terpusat.' },
+  { name: 'Telegram', mode: 'Bot Bisnis & Channel', detail: 'Terima pertanyaan pelanggan melalui bot Telegram dan publikasikan pembaruan ke channel.' },
+];
+
+const CRM_CAPABILITIES = [
+  {
+    title: 'Multi-CS Role & Batasan Akses Granular',
+    detail: 'Atur hak akses per menu hingga tombol (lihat semua chat vs milik sendiri, balas/kelola tiket, ekspor CSV, edit kontak, siaran, hingga pengaturan WAHA).',
+  },
+  {
+    title: 'Kontrol Penilaian SLA, CSAT Multi-Sesi & Filter Non-Penilaian',
+    detail: 'Catat batas mulai dan batas selesai setiap sesi tanpa mereset riwayat pesan, kirim survei CSAT per sesi selesai, dan kecualikan grup WA maupun kontak internal/vendor melalui status Non-Penilaian.',
+  },
+  {
+    title: 'Analitik Dashboard Klik-untuk-Detail (Drilldown)',
+    detail: 'Telusuri kartu KPI, tren harian, jam sibuk, funnel siaran, performa CS, dan skor CSAT langsung ke daftar obrolan serta segmen chat terkait.',
+  },
+  {
+    title: 'Siaran Terjadwal Anti-Ban, Katalog Produk & WhatsApp Story',
+    detail: 'Kirim siaran terjadwal multi-sesi dengan jeda natural, bagikan Quick Quote produk langsung di chat, dan jadwalkan WhatsApp Story dengan pembacaan daftar penonton.',
+  },
+  {
+    title: 'Agent AI Multi-Model, Knowledge Book & MCP Tools',
+    detail: 'Hubungkan OpenAI, Gemini, Anthropic, atau Ollama lokal dengan buku panduan Markdown, skill, serta MCP server eksternal dan sistem failover otomatis.',
+  },
+  {
+    title: 'Self-Hosted 100% di Server Sendiri',
+    detail: 'Data pelanggan dan riwayat chat tersimpan utuh di PostgreSQL dan Redis pada server Anda sendiri (image Docker ghcr.io/aknalre/crm-services), tanpa biaya tambahan per pesan dari panel.',
+  },
+];
+
+const CRM_COMPARISON = [
+  {
+    aspect: 'Kotak masuk 6 kanal (WA QR, WA Cloud, IG, FB, Threads, Telegram)',
+    manual: 'Buka banyak HP dan aplikasi terpisah',
+    saas: 'Tersedia, umumnya dibatasi kuota kanal & kursi mahal',
+    reneo: '6 kanal + multi-nomor WA dalam satu layar tanpa biaya kursi per pesan panel',
+  },
+  {
+    aspect: 'Role CS Custom (pembatasan menu, aksi & ekspor data)',
+    manual: 'Semua staf pegang akses penuh',
+    saas: 'Biasanya terkunci di paket Enterprise mahal',
+    reneo: 'Termasuk builder Role & izin granular bawaan',
+  },
+  {
+    aspect: 'Pengecualian grup WA & kontak Non-Penilaian pada laporan SLA/CSAT',
+    manual: 'Sulit dipilah manual di spreadsheet',
+    saas: 'Chat non-pelanggan sering ikut menghitung SLA',
+    reneo: 'Otomatis mengecualikan grup WA (@g.us) & kontak berstatus Non-Penilaian',
+  },
+  {
+    aspect: 'Kepemilikan data pelanggan & privasi',
+    manual: 'Risiko chat hilang bila HP rusak / staf keluar',
+    saas: 'Data bergantung server pihak ketiga',
+    reneo: '100% tersimpan di database PostgreSQL/Redis server Anda sendiri',
+  },
+  {
+    aspect: 'Analitik Drilldown + Agent AI Multi-Model & MCP',
+    manual: 'Tidak tersedia',
+    saas: 'Umumnya biaya add-on terpisah',
+    reneo: 'Bawaan langsung dan mendukung API key sendiri / Ollama lokal',
+  },
+];
+
+const CRM_FAQS = [
+  {
+    q: 'Apa itu Reneo CRM?',
+    a: 'Reneo CRM adalah aplikasi layanan pelanggan (CRM) omnichannel self-hosted yang menyatukan WhatsApp Multi-Nomor (WAHA QR), WhatsApp Business Cloud API, Instagram, Facebook Messenger, Threads, dan Telegram ke satu ruang kerja tim CS.',
+  },
+  {
+    q: 'Apakah bisa memakai banyak nomor WhatsApp QR dan WhatsApp Cloud API sekaligus?',
+    a: 'Ya. Percakapan pelanggan dipisahkan berdasarkan sesi WA / kanal sumbernya dengan push name masing-masing, tetapi tetap terhubung ke satu profil kontak CRM terpadu.',
+  },
+  {
+    q: 'Bagaimana agar grup WhatsApp atau chat tim internal tidak merusak laporan SLA dan CSAT?',
+    a: 'Obrolan grup WhatsApp otomatis berstatus Non-Penilaian dengan daftar partisipan tetap terlihat. Kontak internal atau vendor dapat ditandai Non-Penilaian sekali agar percakapan berikutnya otomatis dikecualikan dari SLA, Status, Penugasan, dan CSAT.',
+  },
+  {
+    q: 'Bagaimana sistem sesi dan survei CSAT bekerja tanpa menghapus riwayat chat?',
+    a: 'Riwayat chat dipertahankan utuh dalam satu utas dengan penanda Batas Mulai Sesi dan Batas Selesai Sesi per siklus tiket. Setiap sesi yang selesai dapat memicu survei CSAT multi-kriteria baru beserta penyorotan segmen pesan terkait.',
+  },
+  {
+    q: 'Apakah data dan biaya per pesan dikendalikan sendiri?',
+    a: 'Ya. Aplikasi dijalankan di server Linux sendiri atau paket Hosting Reneo memakai image Docker ghcr.io/aknalre/crm-services, PostgreSQL, dan Redis tanpa biaya tambahan per pesan dari panel Reneo.',
+  },
+  {
+    q: 'Bagaimana cara mendapatkan atau memasang Reneo CRM?',
+    a: `Anda dapat memesan paket Hosting + Reneo CRM siap pakai dengan trial 7 hari melalui ${PANEL_ORDER_URL}, atau memasang panel Reneo di server Linux pribadi lewat ${PANEL_INSTALL_URL}.`,
+  },
+];
+
+let cachedIndexTemplate: string | null | undefined;
+
+function readBuiltIndexTemplate(): string | null {
+  if (cachedIndexTemplate !== undefined) return cachedIndexTemplate;
+  const candidates = [
+    '/usr/share/nginx/html/index.html',
+    path.resolve(process.cwd(), '../frontend/dist/index.html'),
+    path.resolve(process.cwd(), 'frontend/dist/index.html'),
+  ];
+  for (const filePath of candidates) {
+    try {
+      if (fs.existsSync(filePath)) {
+        cachedIndexTemplate = fs.readFileSync(filePath, 'utf-8');
+        return cachedIndexTemplate;
+      }
+    } catch {
+      // Ignore missing filesystem path
+    }
+  }
+  cachedIndexTemplate = null;
+  return null;
+}
+
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function firstHeader(value: string | string[] | undefined): string {
+  if (!value) return '';
+  const raw = Array.isArray(value) ? value[0] : value;
+  return String(raw || '').split(',')[0].trim();
+}
+
+export function resolvePublicOriginAndBase(req: FastifyRequest): {
+  origin: string;
+  baseUrl: string;
+  prefix: string;
+} {
+  const fwdHost = firstHeader(req.headers['x-forwarded-host']) || firstHeader(req.headers.host) || 'panel.reneo.my.id';
+  const rawProto = firstHeader(req.headers['x-forwarded-proto']);
+  const proto =
+    rawProto === 'http' || rawProto === 'https'
+      ? rawProto
+      : /^(localhost|127\.0\.0\.1)(:|$)/i.test(fwdHost)
+      ? 'http'
+      : 'https';
+  const rawPrefix = firstHeader(req.headers['x-forwarded-prefix']);
+  let prefix = rawPrefix.replace(/\/+$/, '');
+  if (prefix && !prefix.startsWith('/')) {
+    prefix = `/${prefix}`;
+  }
+  const origin = `${proto}://${fwdHost}`;
+  const baseUrl = prefix ? `${origin}${prefix}` : origin;
+  return { origin, baseUrl, prefix };
+}
+
+function buildJsonLd(baseUrl: string): Record<string, unknown> {
+  const rootUrl = `${baseUrl}/`;
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': `${PANEL_URL}/#organization`,
+        name: 'Reneo',
+        url: PANEL_URL,
+        sameAs: ['https://github.com/friskipradana/y-panel'],
+      },
+      {
+        '@type': 'WebSite',
+        '@id': `${rootUrl}#website`,
+        name: CRM_SEO_META.name,
+        url: rootUrl,
+        inLanguage: 'id-ID',
+        publisher: { '@id': `${PANEL_URL}/#organization` },
+      },
+      {
+        '@type': 'SoftwareApplication',
+        '@id': `${rootUrl}#software`,
+        name: CRM_SEO_META.name,
+        alternateName: 'Reneo CRM Omnichannel Services',
+        applicationCategory: 'BusinessApplication',
+        applicationSubCategory: 'Customer Relationship Management (CRM)',
+        operatingSystem: 'Linux, Docker, Web',
+        softwareRequirements: 'Docker, PostgreSQL, Redis, WAHA (opsional)',
+        url: rootUrl,
+        description: CRM_SEO_META.description,
+        featureList: CRM_CAPABILITIES.map((c) => `${c.title}: ${c.detail}`),
+        offers: {
+          '@type': 'Offer',
+          url: PANEL_ORDER_URL,
+          availability: 'https://schema.org/OnlineOnly',
+          priceCurrency: 'IDR',
+        },
+        publisher: { '@id': `${PANEL_URL}/#organization` },
+      },
+      {
+        '@type': 'FAQPage',
+        '@id': `${rootUrl}#faq`,
+        mainEntity: CRM_FAQS.map((item) => ({
+          '@type': 'Question',
+          name: item.q,
+          acceptedAnswer: {
+            '@type': 'Answer',
+            text: item.a,
+          },
+        })),
+      },
+    ],
+  };
+}
+
+function buildSemanticHtmlBody(baseUrl: string): string {
+  const rootUrl = `${baseUrl}/`;
+  const landingUrl = `${baseUrl}/landing`;
+  const channelsHtml = CRM_CHANNELS.map(
+    (ch) => `<li><strong>${escapeHtml(ch.name)}</strong> (${escapeHtml(ch.mode)}): ${escapeHtml(ch.detail)}</li>`
+  ).join('\n');
+  const capsHtml = CRM_CAPABILITIES.map(
+    (cap) => `<li><h3>${escapeHtml(cap.title)}</h3><p>${escapeHtml(cap.detail)}</p></li>`
+  ).join('\n');
+  const compHtml = CRM_COMPARISON.map(
+    (row) =>
+      `<tr><td>${escapeHtml(row.aspect)}</td><td>${escapeHtml(row.manual)}</td><td>${escapeHtml(row.saas)}</td><td>${escapeHtml(row.reneo)}</td></tr>`
+  ).join('\n');
+  const faqHtml = CRM_FAQS.map(
+    (f) => `<article><h3>${escapeHtml(f.q)}</h3><p>${escapeHtml(f.a)}</p></article>`
+  ).join('\n');
+
+  return `<main style="max-width:960px;margin:0 auto;padding:32px 20px;font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6;color:#0f172a">
+  <header>
+    <p><strong>${escapeHtml(CRM_SEO_META.name)}</strong> · Platform CRM Omnichannel Self-Hosted</p>
+    <h1>Satu Ruang Kerja Layanan Pelanggan Omnichannel &amp; Tim CS Modern</h1>
+    <p>${escapeHtml(CRM_SEO_META.description)}</p>
+    <nav aria-label="Tautan Penting">
+      <a href="${escapeHtml(rootUrl)}">Beranda</a> ·
+      <a href="${escapeHtml(landingUrl)}">Profil Produk</a> ·
+      <a href="${escapeHtml(baseUrl)}/login">Masuk CRM</a> ·
+      <a href="${escapeHtml(baseUrl)}/llms.txt">Ringkasan AI (llms.txt)</a> ·
+      <a href="${escapeHtml(PANEL_ORDER_URL)}">Beli Hosting + CRM</a> ·
+      <a href="${escapeHtml(PANEL_INSTALL_URL)}">Pasang di Server Sendiri</a>
+    </nav>
+  </header>
+  <section id="kanal">
+    <h2>6 Kanal Komunikasi Terhubung</h2>
+    <ul>${channelsHtml}</ul>
+  </section>
+  <section id="fitur">
+    <h2>Arsitektur &amp; Kapabilitas Utama</h2>
+    <ul>${capsHtml}</ul>
+  </section>
+  <section id="perbandingan">
+    <h2>Perbandingan Cara Manual vs CRM Cloud Lain vs Reneo CRM</h2>
+    <table>
+      <thead><tr><th>Aspek</th><th>Manual</th><th>CRM Cloud Lain</th><th>Reneo CRM</th></tr></thead>
+      <tbody>${compHtml}</tbody>
+    </table>
+  </section>
+  <section id="faq">
+    <h2>Pertanyaan Umum (FAQ)</h2>
+    ${faqHtml}
+  </section>
+  <footer>
+    <p>Bagian dari ekosistem <a href="${escapeHtml(PANEL_URL)}">Reneo Panel</a> · Container resmi: <code>${escapeHtml(DOCKER_IMAGE)}</code></p>
+  </footer>
+</main>`;
+}
+
+function renderLandingHtmlDocument(req: FastifyRequest): string {
+  const { baseUrl } = resolvePublicOriginAndBase(req);
+  const canonicalUrl = `${baseUrl}/`;
+  const llmsUrl = `${baseUrl}/llms.txt`;
+  const logoUrl = `${baseUrl}/logo.svg`;
+  const jsonLd = JSON.stringify(buildJsonLd(baseUrl)).replace(/<\//g, '<\\/');
+  const semanticBody = buildSemanticHtmlBody(baseUrl);
+
+  const extraHead = `
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="googlebot" content="index, follow" />
+    <meta name="keywords" content="${escapeHtml(CRM_SEO_META.keywords)}" />
+    <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />
+    <link rel="alternate" type="text/markdown" title="AI Product Briefing (llms.txt)" href="${escapeHtml(llmsUrl)}" />
+    <meta property="og:site_name" content="${escapeHtml(CRM_SEO_META.name)}" />
+    <meta property="og:url" content="${escapeHtml(canonicalUrl)}" />
+    <meta property="og:image" content="${escapeHtml(logoUrl)}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapeHtml(CRM_SEO_META.fullTitle)}" />
+    <meta name="twitter:description" content="${escapeHtml(CRM_SEO_META.description)}" />
+    <script type="application/ld+json">${jsonLd}</script>`;
+
+  const builtHtml = readBuiltIndexTemplate();
+  if (builtHtml) {
+    let html = builtHtml;
+    html = html.replace(/<title>[^<]*<\/title>/i, `<title>${escapeHtml(CRM_SEO_META.fullTitle)}</title>`);
+    html = html.replace(
+      /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/i,
+      `<meta name="description" content="${escapeHtml(CRM_SEO_META.description)}" />`
+    );
+    html = html.replace(
+      /<meta\s+property="og:title"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:title" content="${escapeHtml(CRM_SEO_META.fullTitle)}" />`
+    );
+    html = html.replace(
+      /<meta\s+property="og:description"\s+content="[^"]*"\s*\/?>/i,
+      `<meta property="og:description" content="${escapeHtml(CRM_SEO_META.description)}" />`
+    );
+    html = html.replace('</head>', `${extraHead}\n  </head>`);
+    if (/<div id="root"><\/div>/i.test(html)) {
+      html = html.replace(/<div id="root"><\/div>/i, `<div id="root">${semanticBody}</div>`);
+    } else if (/<div id="root">[\s\S]*?<\/div>/i.test(html)) {
+      html = html.replace(/<div id="root">[\s\S]*?<\/div>/i, `<div id="root">${semanticBody}</div>`);
+    }
+    return html;
+  }
+
+  return `<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(CRM_SEO_META.fullTitle)}</title>
+    <meta name="description" content="${escapeHtml(CRM_SEO_META.description)}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${escapeHtml(CRM_SEO_META.fullTitle)}" />
+    <meta property="og:description" content="${escapeHtml(CRM_SEO_META.description)}" />${extraHead}
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased">
+    <div id="root">${semanticBody}</div>
+  </body>
+</html>`;
+}
+
+function buildLlmsTxt(baseUrl: string, full: boolean): string {
+  const lines: string[] = [
+    `# ${CRM_SEO_META.name}`,
+    '',
+    `> ${CRM_SEO_META.description}`,
+    '',
+    '## Ringkasan Produk & Identitas Resmi',
+    `- Nama Produk: ${CRM_SEO_META.name} (Reneo CRM Omnichannel Services)`,
+    `- URL Halaman Utama: ${baseUrl}/`,
+    `- Halaman Profil Produk (Compro): ${baseUrl}/landing`,
+    `- Ekosistem Panel Utama: ${PANEL_URL}`,
+    `- Pemesanan Hosting + CRM (Trial 7 Hari): ${PANEL_ORDER_URL}`,
+    `- Instalasi Self-Hosted di Server Linux: ${PANEL_INSTALL_URL}`,
+    `- Registry Container Resmi: ${DOCKER_IMAGE}`,
+    '',
+    '## Kanal Komunikasi yang Didukung',
+    ...CRM_CHANNELS.map((c) => `- **${c.name}** (${c.mode}): ${c.detail}`),
+    '',
+    '## Fitur Utama & Kapabilitas',
+    ...CRM_CAPABILITIES.map((c) => `- **${c.title}**: ${c.detail}`),
+  ];
+
+  if (full) {
+    lines.push(
+      '',
+      '## Perbandingan: Manual vs CRM Cloud Lain vs Reneo CRM',
+      '| Kebutuhan | Cara Manual | CRM Cloud Lain | Reneo CRM |',
+      '| --- | --- | --- | --- |',
+      ...CRM_COMPARISON.map((r) => `| ${r.aspect} | ${r.manual} | ${r.saas} | ${r.reneo} |`),
+      '',
+      '## Arsitektur Teknis & Keamanan',
+      '- Stack: React + TypeScript + Vite (Frontend), Fastify + Drizzle ORM + PostgreSQL + Redis BullMQ (Backend), WAHA untuk multi-sesi WhatsApp QR.',
+      '- Isolasi data tenant/perusahaan, autentikasi berbasis cookie HttpOnly & RBAC role builder dengan 18+ izin granular.',
+      '- Riwayat obrolan persisten dengan penanda Batas Mulai Sesi dan Batas Selesai Sesi per tiket, plus metrik SLA dan CSAT multi-kriteria.',
+      '- Grup WhatsApp (@g.us) dan kontak bertanda Non-Penilaian dikecualikan otomatis dari perhitungan SLA, Status, dan survei CSAT.',
+      '',
+      '## Pertanyaan Umum (FAQ)',
+      ...CRM_FAQS.flatMap((f) => [`### ${f.q}`, f.a, ''])
+    );
+  } else {
+    lines.push(
+      '',
+      '## Tautan Dokumentasi Mesin',
+      `- [Halaman Profil & Fitur Lengkap](${baseUrl}/): ringkasan produk, studi kasus, perbandingan & FAQ`,
+      `- [Dokumen Riset AI Lengkap](${baseUrl}/llms-full.txt): spesifikasi teknis, perbandingan & seluruh FAQ dalam Markdown`,
+      `- [Sitemap XML](${baseUrl}/sitemap.xml): daftar URL publik yang dapat diindeks`
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+export default async function publicSeoRouter(fastify: FastifyInstance) {
+  fastify.get('/robots.txt', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { baseUrl } = resolvePublicOriginAndBase(req);
+    const bots = [
+      '*',
+      'OAI-SearchBot',
+      'ChatGPT-User',
+      'GPTBot',
+      'ClaudeBot',
+      'Claude-Web',
+      'Claude-SearchBot',
+      'Claude-User',
+      'PerplexityBot',
+      'Perplexity-User',
+      'Googlebot',
+      'Google-Extended',
+      'Bingbot',
+      'Applebot-Extended',
+      'DuckAssistBot',
+      'MistralAI-User',
+    ];
+    const body = [
+      '# Reneo CRM: landing page and AI research endpoints are publicly indexable',
+      ...bots.map(
+        (ua) =>
+          `User-agent: ${ua}\nAllow: /\nAllow: /landing\nAllow: /llms.txt\nAllow: /llms-full.txt\nAllow: /sitemap.xml\nDisallow: /api/\nDisallow: /login\nDisallow: /csat\nDisallow: /connect-channel\n`
+      ),
+      `Sitemap: ${baseUrl}/sitemap.xml`,
+      '',
+    ].join('\n');
+
+    return reply
+      .header('Content-Type', 'text/plain; charset=utf-8')
+      .header('Cache-Control', 'public, max-age=3600')
+      .send(body);
+  });
+
+  fastify.get('/sitemap.xml', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { baseUrl } = resolvePublicOriginAndBase(req);
+    const today = new Date().toISOString().split('T')[0];
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${escapeHtml(`${baseUrl}/`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>${escapeHtml(`${baseUrl}/landing`)}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+</urlset>
+`;
+    return reply
+      .header('Content-Type', 'application/xml; charset=utf-8')
+      .header('Cache-Control', 'public, max-age=3600')
+      .send(xml);
+  });
+
+  fastify.get('/llms.txt', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { baseUrl } = resolvePublicOriginAndBase(req);
+    return reply
+      .header('Content-Type', 'text/plain; charset=utf-8')
+      .header('X-Robots-Tag', 'index, follow')
+      .header('Cache-Control', 'public, max-age=1800')
+      .send(buildLlmsTxt(baseUrl, false));
+  });
+
+  fastify.get('/llms-full.txt', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { baseUrl } = resolvePublicOriginAndBase(req);
+    return reply
+      .header('Content-Type', 'text/plain; charset=utf-8')
+      .header('X-Robots-Tag', 'index, follow')
+      .header('Cache-Control', 'public, max-age=1800')
+      .send(buildLlmsTxt(baseUrl, true));
+  });
+
+  fastify.get('/landing', async (req: FastifyRequest, reply: FastifyReply) => {
+    const accept = String(req.headers.accept || '').toLowerCase();
+    const { baseUrl } = resolvePublicOriginAndBase(req);
+    if (accept.includes('text/markdown')) {
+      return reply
+        .header('Content-Type', 'text/markdown; charset=utf-8')
+        .header('X-Robots-Tag', 'index, follow')
+        .send(buildLlmsTxt(baseUrl, true));
+    }
+    return reply
+      .header('Content-Type', 'text/html; charset=utf-8')
+      .header('X-Robots-Tag', 'index, follow')
+      .header('Cache-Control', 'public, max-age=300')
+      .send(renderLandingHtmlDocument(req));
+  });
+}

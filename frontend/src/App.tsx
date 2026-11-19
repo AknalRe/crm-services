@@ -256,6 +256,15 @@ function AppShell() {
   const fetchAuthStatus = async () => {
     try {
       const data = await api.getAuthStatus();
+      try {
+        if (data?.authenticated) {
+          localStorage.setItem('crm_auth_hint', '1');
+        } else {
+          localStorage.removeItem('crm_auth_hint');
+        }
+      } catch {
+        // Ignore storage errors
+      }
       setAuthStatus(data);
     } catch (err) {
       console.error('Failed to get Auth status:', err);
@@ -419,6 +428,23 @@ function AppShell() {
   };
 
   if (!authChecked) {
+    let hasAuthHint = false;
+    try {
+      hasAuthHint = localStorage.getItem('crm_auth_hint') === '1';
+    } catch {
+      hasAuthHint = false;
+    }
+    if (!hasAuthHint && !isLoginRoute) {
+      return (
+        <LandingPage
+          initialized={true}
+          authenticated={false}
+          onEnterLogin={() => {
+            navigatePath(loginPath);
+          }}
+        />
+      );
+    }
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F5F6FA] text-gray-600 text-sm">
         Memeriksa sesi CRM...
@@ -443,6 +469,11 @@ function AppShell() {
       <SetupLoginGate
         initialized={Boolean(authStatus?.initialized)}
         onAuthenticated={(user) => {
+          try {
+            localStorage.setItem('crm_auth_hint', '1');
+          } catch {
+            // Ignore storage errors
+          }
           setShowLandingPage(false);
           setAuthStatus({
             initialized: true,
@@ -488,6 +519,11 @@ function AppShell() {
             } catch {
               // ignore
             }
+            try {
+              localStorage.removeItem('crm_auth_hint');
+            } catch {
+              // ignore
+            }
             setShowLandingPage(false);
             setAuthStatus({ initialized: true, authenticated: false, user: null });
             navigatePath(loginPath, '', true);
@@ -521,6 +557,11 @@ function AppShell() {
         onLogout={async () => {
           try {
             await api.logoutAuth();
+          } catch {
+            // ignore
+          }
+          try {
+            localStorage.removeItem('crm_auth_hint');
           } catch {
             // ignore
           }

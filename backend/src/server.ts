@@ -17,6 +17,7 @@ import authRouter, { getCurrentAuthUser, getRequestCompanyId } from './routes/au
 import tenantsRouter from './routes/tenants';
 import eventsRouter from './routes/events';
 import publicCsatRouter from './routes/publicCsat';
+import publicSeoRouter from './routes/publicSeo';
 import agentsRouter from './routes/agents';
 import productsRouter from './routes/products';
 import channelsRouter from './routes/channels';
@@ -158,6 +159,7 @@ async function main() {
   await fastify.register(licenseRouter, { prefix: '/api/license' });
   await fastify.register(eventsRouter, { prefix: '/api/events' });
   await fastify.register(publicCsatRouter, { prefix: '/api/public/csat' });
+  await fastify.register(publicSeoRouter, { prefix: '/api/public/seo' });
   await fastify.register(agentsRouter, { prefix: '/api/agents' });
   await fastify.register(productsRouter, { prefix: '/api/products' });
   await fastify.register(channelsRouter, { prefix: '/api/channels' });

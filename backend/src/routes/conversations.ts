@@ -1463,6 +1463,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         lastMessageMentionedContacts: listMentionMap.get(r.conv.id) || [],
         lastMessageAt: r.conv.lastMessageAt,
         unreadCount: r.conv.unreadCount,
+        sessionStartedAt: r.conv.sessionStartedAt || null,
         firstInboundAt: r.conv.firstInboundAt,
         firstResponseAt: r.conv.firstResponseAt,
         lastInboundAt: r.conv.lastInboundAt,
