@@ -20,6 +20,9 @@ export interface Contact {
   profile_picture_url?: string | null;
   profile_about?: string | null;
   profile_synced_at?: string | null;
+  is_verified?: boolean;
+  verified_name?: string | null;
+  verified_level?: string | null;
   identities?: ContactIdentityItem[];
   createdAt: string;
   updatedAt: string;

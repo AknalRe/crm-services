@@ -19,12 +19,16 @@ export interface SyncWhatsAppProfileResult {
   name: string | null;
   profilePictureUrl: string | null;
   profileAbout: string | null;
+  isVerified: boolean;
+  verifiedName: string | null;
+  verifiedLevel: string | null;
 }
 
 // Decide which display name to store for a contact after reading WAHA profile data
 export function resolveProfileDisplayName(params: {
   isGroup: boolean;
   currentName: string;
+  profileVerifiedName?: string | null;
   profileName?: string | null;
   profilePushName?: string | null;
 }): string | null {
@@ -35,7 +39,7 @@ export function resolveProfileDisplayName(params: {
     return null;
   }
   if (!isGenericDisplayName(current)) return null;
-  const candidates = [params.profileName, params.profilePushName];
+  const candidates = [params.profileVerifiedName, params.profileName, params.profilePushName];
   for (const raw of candidates) {
     const name = (raw || '').trim();
     if (name && !isGenericDisplayName(name) && name !== current) return name;
@@ -56,6 +60,9 @@ export async function syncWhatsAppProfile(params: {
     name: null,
     profilePictureUrl: null,
     profileAbout: null,
+    isVerified: false,
+    verifiedName: null,
+    verifiedLevel: null,
   };
 
   const rows = await db
@@ -79,6 +86,9 @@ export async function syncWhatsAppProfile(params: {
         name: contact.namaLengkap,
         profilePictureUrl: hasRestorablePicture ? contact.profilePictureUrl || null : null,
         profileAbout: contact.profileAbout || null,
+        isVerified: Boolean(contact.isVerified),
+        verifiedName: contact.verifiedName || null,
+        verifiedLevel: contact.verifiedLevel || null,
       };
     }
   }
@@ -91,6 +101,9 @@ export async function syncWhatsAppProfile(params: {
       name: contact.namaLengkap,
       profilePictureUrl: contact.profilePictureUrl || null,
       profileAbout: contact.profileAbout || null,
+      isVerified: Boolean(contact.isVerified),
+      verifiedName: contact.verifiedName || null,
+      verifiedLevel: contact.verifiedLevel || null,
     };
   }
 
@@ -99,10 +112,27 @@ export async function syncWhatsAppProfile(params: {
   const nextName = resolveProfileDisplayName({
     isGroup: params.isGroup,
     currentName: contact.namaLengkap,
+    profileVerifiedName: profile.verifiedName,
     profileName: profile.name,
     profilePushName: profile.pushName,
   });
   if (nextName) updates.namaLengkap = nextName;
+
+  if (!params.isGroup) {
+    if (profile.isVerified !== undefined && Boolean(profile.isVerified) !== Boolean(contact.isVerified)) {
+      updates.isVerified = Boolean(profile.isVerified);
+    }
+    if (profile.verifiedName && profile.verifiedName !== contact.verifiedName) {
+      updates.verifiedName = profile.verifiedName;
+    } else if (profile.isVerified === false && contact.verifiedName) {
+      updates.verifiedName = null;
+    }
+    if (profile.verifiedLevel && profile.verifiedLevel !== contact.verifiedLevel) {
+      updates.verifiedLevel = profile.verifiedLevel;
+    } else if (profile.isVerified === false && contact.verifiedLevel) {
+      updates.verifiedLevel = null;
+    }
+  }
 
   if (profile.about && profile.about !== contact.profileAbout) {
     updates.profileAbout = profile.about;
@@ -136,7 +166,12 @@ export async function syncWhatsAppProfile(params: {
   }
 
   const visibleChange = Boolean(
-    updates.namaLengkap || updates.profilePictureUrl || updates.profileAbout
+    updates.namaLengkap ||
+      updates.profilePictureUrl ||
+      updates.profileAbout ||
+      updates.isVerified !== undefined ||
+      updates.verifiedName !== undefined ||
+      updates.verifiedLevel !== undefined
   );
   if (visibleChange) {
     if (params.isGroup && updates.namaLengkap) {
@@ -191,5 +226,8 @@ export async function syncWhatsAppProfile(params: {
     name: updates.namaLengkap || contact.namaLengkap,
     profilePictureUrl: updates.profilePictureUrl || contact.profilePictureUrl || null,
     profileAbout: updates.profileAbout || contact.profileAbout || null,
+    isVerified: updates.isVerified !== undefined ? Boolean(updates.isVerified) : Boolean(contact.isVerified),
+    verifiedName: updates.verifiedName !== undefined ? (updates.verifiedName || null) : (contact.verifiedName || null),
+    verifiedLevel: updates.verifiedLevel !== undefined ? (updates.verifiedLevel || null) : (contact.verifiedLevel || null),
   };
 }

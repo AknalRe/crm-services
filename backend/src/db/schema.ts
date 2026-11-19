@@ -55,6 +55,9 @@ export const contacts = pgTable('contacts', {
   profilePictureUrl: text('profile_picture_url'),
   profileAbout: text('profile_about'),
   profileSyncedAt: timestamp('profile_synced_at'),
+  isVerified: boolean('is_verified').default(false).notNull(),
+  verifiedName: text('verified_name'),
+  verifiedLevel: text('verified_level'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

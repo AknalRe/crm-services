@@ -34,6 +34,9 @@ export function formatContact(c: any) {
     profile_picture_url: c.profilePictureUrl || null,
     profile_about: c.profileAbout || null,
     profile_synced_at: c.profileSyncedAt || null,
+    is_verified: Boolean(c.isVerified),
+    verified_name: c.verifiedName || null,
+    verified_level: c.verifiedLevel || null,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
   };
@@ -777,6 +780,9 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           namaLengkap: contacts.namaLengkap,
           namaPanggilan: contacts.namaPanggilan,
           nomorWhatsapp: contacts.nomorWhatsapp,
+          isVerified: contacts.isVerified,
+          verifiedName: contacts.verifiedName,
+          verifiedLevel: contacts.verifiedLevel,
         })
         .from(contacts)
         .where(eq(contacts.companyId, companyId));
@@ -815,7 +821,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           skipped++;
           continue;
         }
-        const preferredName = (item.name || item.pushName || '').trim();
+        const preferredName = (item.verifiedName || item.name || item.pushName || '').trim();
         const existing = phoneMap.get(item.phone);
 
         if (existing) {
@@ -827,18 +833,36 @@ export default async function contactsRouter(fastify: FastifyInstance) {
             preferredName && (overwriteNames || isPlaceholderName) ? preferredName : null;
           const nextNick =
             !existing.namaPanggilan && item.pushName ? item.pushName.trim() : null;
+          const nextVerified =
+            item.isVerified !== undefined && Boolean(item.isVerified) !== Boolean(existing.isVerified)
+              ? Boolean(item.isVerified)
+              : null;
+          const nextVerifiedName =
+            item.verifiedName && item.verifiedName !== existing.verifiedName
+              ? item.verifiedName
+              : null;
+          const nextVerifiedLevel =
+            item.verifiedLevel && item.verifiedLevel !== existing.verifiedLevel
+              ? item.verifiedLevel
+              : null;
 
-          if (nextName || nextNick) {
+          if (nextName || nextNick || nextVerified !== null || nextVerifiedName || nextVerifiedLevel) {
             await db
               .update(contacts)
               .set({
                 ...(nextName ? { namaLengkap: nextName } : {}),
                 ...(nextNick ? { namaPanggilan: nextNick } : {}),
+                ...(nextVerified !== null ? { isVerified: nextVerified } : {}),
+                ...(nextVerifiedName ? { verifiedName: nextVerifiedName } : {}),
+                ...(nextVerifiedLevel ? { verifiedLevel: nextVerifiedLevel } : {}),
                 updatedAt: now,
               })
               .where(eq(contacts.id, existing.id));
             if (nextName) existing.namaLengkap = nextName;
             if (nextNick) existing.namaPanggilan = nextNick;
+            if (nextVerified !== null) existing.isVerified = nextVerified;
+            if (nextVerifiedName) existing.verifiedName = nextVerifiedName;
+            if (nextVerifiedLevel) existing.verifiedLevel = nextVerifiedLevel;
             updated++;
           } else {
             skipped++;
@@ -872,6 +896,9 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           namaLengkap: finalName,
           namaPanggilan: item.pushName?.trim() || null,
           nomorWhatsapp: item.phone,
+          isVerified: Boolean(item.isVerified),
+          verifiedName: item.verifiedName || null,
+          verifiedLevel: item.verifiedLevel || null,
         };
         phoneMap.set(item.phone, pendingEntry);
         currentTotal++;
@@ -883,6 +910,9 @@ export default async function contactsRouter(fastify: FastifyInstance) {
           namaLengkap: finalName,
           namaPanggilan: pendingEntry.namaPanggilan,
           nomorWhatsapp: item.phone,
+          isVerified: pendingEntry.isVerified,
+          verifiedName: pendingEntry.verifiedName,
+          verifiedLevel: pendingEntry.verifiedLevel,
           tags: 'WhatsApp Sync',
           createdAt: now,
           updatedAt: now,

@@ -1509,6 +1509,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             exclude_reason: r.contact.excludeReason || null,
             profile_picture_url: r.contact.profilePictureUrl || null,
             profile_about: r.contact.profileAbout || null,
+            is_verified: Boolean(r.contact.isVerified),
+            verified_name: r.contact.verifiedName || null,
+            verified_level: r.contact.verifiedLevel || null,
           }
           : undefined,
       }));
@@ -1960,6 +1963,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           name: synced.name,
           profile_picture_url: synced.profilePictureUrl,
           profile_about: synced.profileAbout,
+          is_verified: synced.isVerified,
+          verified_name: synced.verifiedName,
+          verified_level: synced.verifiedLevel,
         },
       });
     } catch (error: any) {
@@ -2215,6 +2221,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           exclude_reason: contact.excludeReason || null,
           profile_picture_url: contact.profilePictureUrl || null,
           profile_about: contact.profileAbout || null,
+          is_verified: Boolean(contact.isVerified),
+          verified_name: contact.verifiedName || null,
+          verified_level: contact.verifiedLevel || null,
         },
       };
 

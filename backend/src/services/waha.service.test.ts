@@ -2594,6 +2594,141 @@ test('extractInboundWahaMentions & GOWS PascalCase forwarding helpers preserve f
   assert.deepEqual(nameOnly, { phone: null, name: 'Aldona HRD' });
 });
 
+test('extractWahaVerification distinguishes Verified Meta accounts from plain WhatsApp Business names', () => {
+  const { extractWahaVerification, normalizeWahaContactEntries } = require('./waha.service') as typeof import('./waha.service');
+  const { resolveProfileDisplayName } = require('./profile.service') as typeof import('./profile.service');
+
+  const plainBusiness = extractWahaVerification({
+    BusinessName: 'Toko Maju Jaya',
+    verifiedLevel: 'unknown',
+  });
+  assert.deepEqual(plainBusiness, {
+    isVerified: false,
+    verifiedName: null,
+    verifiedLevel: null,
+  });
+
+  const gowsVerified = extractWahaVerification({
+    VerifiedName: {
+      Details: {
+        VerifiedName: 'Bank Contoh Resmi',
+        VerifiedLevel: 'HIGH',
+      },
+    },
+  });
+  assert.deepEqual(gowsVerified, {
+    isVerified: true,
+    verifiedName: 'Bank Contoh Resmi',
+    verifiedLevel: 'high',
+  });
+
+  const contactsNormalized = normalizeWahaContactEntries([
+    {
+      id: '628111222333@c.us',
+      verifiedName: 'Reneo Official',
+      verifiedLevel: 'high',
+      pushname: 'CS Reneo',
+    },
+    {
+      id: '628444555666@c.us',
+      BusinessName: 'Warung Kopi',
+      pushname: 'Kopi',
+    },
+  ]);
+  assert.equal(contactsNormalized[0].isVerified, true);
+  assert.equal(contactsNormalized[0].verifiedName, 'Reneo Official');
+  assert.equal(contactsNormalized[0].verifiedLevel, 'high');
+  assert.equal(contactsNormalized[1].isVerified, false);
+  assert.equal(contactsNormalized[1].verifiedName, null);
+
+  assert.equal(
+    resolveProfileDisplayName({
+      isGroup: false,
+      currentName: 'Kontak 2333',
+      profileVerifiedName: 'Reneo Official',
+      profileName: 'CS Reneo',
+      profilePushName: 'CS',
+    }),
+    'Reneo Official'
+  );
+});
+
+test('resolveInboundWahaTargetJid skips self @lid and extracts nested DeviceSentMessage destinations for fromMe messages', () => {
+  const { resolveInboundWahaTargetJid, extractDeviceSentDestinationJid } = require('../routes/waha') as typeof import('../routes/waha');
+
+  const gowsFromMeWithSelfLid = {
+    id: 'true_628999888777@c.us_3EB0123456',
+    fromMe: true,
+    from: '628111111111@c.us',
+    chatId: '160602458619101:0@lid',
+    to: '628999888777@c.us',
+    _data: {
+      Info: {
+        Chat: '160602458619101@lid',
+        RecipientAlt: '628999888777@s.whatsapp.net',
+      },
+    },
+  };
+  assert.equal(
+    resolveInboundWahaTargetJid(
+      gowsFromMeWithSelfLid,
+      { id: '628111111111@c.us', lid: '160602458619101@lid' },
+      true
+    ),
+    '628999888777@c.us'
+  );
+
+  const nestedDeviceSent = {
+    fromMe: true,
+    from: '628111111111@c.us',
+    _data: {
+      Message: {
+        viewOnceMessage: {
+          message: {
+            DeviceSentMessage: {
+              DestinationJID: '628555444333@s.whatsapp.net',
+              message: { conversation: 'Dikirim dari HP' },
+            },
+          },
+        },
+      },
+    },
+  };
+  assert.equal(extractDeviceSentDestinationJid(nestedDeviceSent), '628555444333@s.whatsapp.net');
+  assert.equal(
+    resolveInboundWahaTargetJid(nestedDeviceSent, { id: '628111111111@c.us' }, true),
+    '628555444333@s.whatsapp.net'
+  );
+});
+
+test('extractWahaPresence and normalizeWahaAck/extractWahaMessageIds handle GOWS presence, audio recording, and batch read receipts', () => {
+  const { extractWahaPresence, extractWahaMessageIds, normalizeWahaAck } = require('../routes/waha') as typeof import('../routes/waha');
+
+  assert.deepEqual(
+    extractWahaPresence({
+      id: '160602458619101@lid',
+      presences: [{ participant: '628111222333@s.whatsapp.net', State: 'composing', Media: 'audio' }],
+    }),
+    { chatId: '160602458619101@lid', status: 'recording' }
+  );
+
+  assert.deepEqual(
+    extractWahaPresence({
+      _data: { Chat: '628111222333@s.whatsapp.net', State: 'composing' },
+    }),
+    { chatId: '628111222333@s.whatsapp.net', status: 'typing' }
+  );
+
+  assert.equal(normalizeWahaAck({ ack: 'READ' }), 3);
+  assert.equal(normalizeWahaAck({ _data: { Type: 'read' } }), 3);
+  assert.equal(normalizeWahaAck({ _data: { Type: 'played' } }), 4);
+
+  const ids = extractWahaMessageIds({
+    _data: { Receipt: { MessageIDs: ['3EB0AAA111', '3EB0BBB222'] } },
+  });
+  assert.deepEqual(ids.stanzaIds, ['3EB0AAA111', '3EB0BBB222']);
+});
+
 
 
 

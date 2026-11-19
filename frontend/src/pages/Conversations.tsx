@@ -103,6 +103,7 @@ import {
   renderPresetStickerToWebp,
 } from '../lib/emojiStickers';
 import { LABEL_COLOR_MAP } from '../components/MasterDataSettings';
+import { VerifiedMetaBadge } from '../components/VerifiedMetaBadge';
 import { hasPerm } from '../lib/permissions';
 
 const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls: string; dot: string }> = {
@@ -826,6 +827,7 @@ function getConversationDisplayTitle(conv?: Conversation | null): string {
   return (
     conv.channelDisplayName?.trim() ||
     conv.contextTitle?.trim() ||
+    conv.contact?.verified_name?.trim() ||
     conv.pushName?.trim() ||
     conv.contact?.nama_lengkap?.trim() ||
     conv.contact?.nomor_whatsapp?.trim() ||
@@ -4548,8 +4550,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       return (
                         <>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold text-gray-900 text-xs truncate">
-                              {getConversationDisplayTitle(conv)}
+                            <span className="font-semibold text-gray-900 text-xs truncate inline-flex items-center gap-1 min-w-0">
+                              <span className="truncate">{getConversationDisplayTitle(conv)}</span>
+                              {!conv.isGroup && <VerifiedMetaBadge contact={conv.contact} />}
                             </span>
                             <div className="flex items-center gap-1.5 shrink-0">
                               {isMentionedMe && (
@@ -4769,6 +4772,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         <h4 className="font-semibold text-gray-900 text-xs sm:text-[13px] truncate">
                           {getConversationDisplayTitle(selectedConversation)}
                         </h4>
+                        {!selectedConversation.isGroup && (
+                          <VerifiedMetaBadge contact={selectedConversation.contact} />
+                        )}
                         <span
                           className={`hidden sm:inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium border shrink-0 ${
                             ch === 'WHATSAPP' && selectedConversation.wahaSession
@@ -8669,9 +8675,20 @@ export const Conversations: React.FC<ConversationsProps> = ({
               }}
               title={selectedConversation.contact?.profile_picture_url ? "Klik untuk melihat foto profil penuh" : undefined}
             />
-            <h4 className="font-semibold text-gray-900 text-sm break-words">
-              {getConversationDisplayTitle(selectedConversation)}
+            <h4 className="font-semibold text-gray-900 text-sm break-words inline-flex flex-wrap items-center justify-center gap-1.5">
+              <span>{getConversationDisplayTitle(selectedConversation)}</span>
+              {!selectedConversation.isGroup && (
+                <VerifiedMetaBadge contact={selectedConversation.contact} showLabel />
+              )}
             </h4>
+            {!selectedConversation.isGroup &&
+              selectedConversation.contact?.verified_name &&
+              selectedConversation.contact.verified_name.trim().toLowerCase() !==
+                getConversationDisplayTitle(selectedConversation).trim().toLowerCase() && (
+                <span className="text-[11px] text-sky-700 font-medium block mt-0.5">
+                  Nama Verified Meta: {selectedConversation.contact.verified_name}
+                </span>
+              )}
             {getConversationDisplayTitle(selectedConversation).toLowerCase() !==
               selectedConversation.contact.nama_lengkap.trim().toLowerCase() && (
               <span className="text-[11px] text-indigo-600 font-medium block mt-0.5">

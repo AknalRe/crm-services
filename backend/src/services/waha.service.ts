@@ -262,6 +262,65 @@ export interface WahaContactRecord {
   isMyContact: boolean;
   isGroup: boolean;
   isMe: boolean;
+  isVerified?: boolean;
+  verifiedName?: string | null;
+  verifiedLevel?: string | null;
+}
+
+export interface WahaVerificationInfo {
+  isVerified: boolean;
+  verifiedName: string | null;
+  verifiedLevel: string | null;
+}
+
+export function extractWahaVerification(raw: any): WahaVerificationInfo {
+  if (!raw || typeof raw !== 'object') {
+    return { isVerified: false, verifiedName: null, verifiedLevel: null };
+  }
+  const sources = [
+    raw,
+    raw.verifiedName && typeof raw.verifiedName === 'object' ? raw.verifiedName : null,
+    raw.VerifiedName && typeof raw.VerifiedName === 'object' ? raw.VerifiedName : null,
+    raw.VerifiedName?.Details && typeof raw.VerifiedName.Details === 'object' ? raw.VerifiedName.Details : null,
+    raw.businessProfile && typeof raw.businessProfile === 'object' ? raw.businessProfile : null,
+  ].filter(Boolean);
+
+  let verifiedName: string | null = null;
+  for (const src of sources) {
+    for (const key of ['verifiedName', 'VerifiedName', 'verified_name']) {
+      const val = src[key];
+      if (typeof val === 'string' && val.trim()) {
+        verifiedName = val.trim();
+        break;
+      }
+    }
+    if (verifiedName) break;
+  }
+
+  let verifiedLevel: string | null = null;
+  for (const src of sources) {
+    const rawLevel = src.verifiedLevel ?? src.VerifiedLevel ?? src.verified_level;
+    if (typeof rawLevel === 'string') {
+      const lower = rawLevel.trim().toLowerCase();
+      if (lower && lower !== 'unknown' && lower !== 'none' && lower !== '0' && lower !== 'false') {
+        verifiedLevel = lower;
+        break;
+      }
+    } else if (typeof rawLevel === 'number' && Number.isFinite(rawLevel) && rawLevel > 0) {
+      verifiedLevel = String(rawLevel);
+      break;
+    }
+  }
+
+  const explicitVerified = Boolean(
+    raw.isVerified ||
+    raw.is_verified ||
+    raw.verified ||
+    raw.isOfficial ||
+    raw.isEnterprise
+  );
+  const isVerified = Boolean(explicitVerified || verifiedName || verifiedLevel);
+  return { isVerified, verifiedName, verifiedLevel };
 }
 
 export interface WahaGroupParticipant {
@@ -339,11 +398,12 @@ export function normalizeWahaContactEntries(
       }
     }
 
+    const verification = extractWahaVerification(item);
     const nameRaw =
       item.name ||
       item.FullName ||
       item.fullName ||
-      item.verifiedName ||
+      verification.verifiedName ||
       item.shortName ||
       item.FirstName ||
       item.BusinessName ||
@@ -366,6 +426,9 @@ export function normalizeWahaContactEntries(
         isMyContact,
         isGroup: false,
         isMe: false,
+        isVerified: verification.isVerified,
+        verifiedName: verification.verifiedName,
+        verifiedLevel: verification.verifiedLevel,
       });
     } else {
       byKey.set(dedupKey, {
@@ -375,6 +438,9 @@ export function normalizeWahaContactEntries(
         name: prev.name || name,
         pushName: prev.pushName || pushName,
         isMyContact: prev.isMyContact || isMyContact,
+        isVerified: Boolean(prev.isVerified || verification.isVerified),
+        verifiedName: prev.verifiedName || verification.verifiedName,
+        verifiedLevel: prev.verifiedLevel || verification.verifiedLevel,
       });
     }
   }
@@ -669,6 +735,9 @@ export interface WahaProfileInfo {
   pushName?: string;
   about?: string;
   pictureUrl?: string;
+  isVerified?: boolean;
+  verifiedName?: string | null;
+  verifiedLevel?: string | null;
 }
 
 export interface WahaConfig {
@@ -3382,7 +3451,12 @@ export class WahaService {
           .get('/api/contacts', { params, timeout: 8000 })
           .catch(() => null);
         const contactData = contactRes?.data;
+        const verification = extractWahaVerification(contactData);
+        result.isVerified = verification.isVerified;
+        result.verifiedName = verification.verifiedName;
+        result.verifiedLevel = verification.verifiedLevel;
         result.name = pickString(
+          verification.verifiedName,
           contactData?.name,
           contactData?.Name,
           contactData?.fullName,

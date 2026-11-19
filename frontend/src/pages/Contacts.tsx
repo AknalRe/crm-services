@@ -32,6 +32,7 @@ import { Button } from '../components/ui/Button';
 import { TablePagination } from '../components/ui/Pagination';
 import { Modal } from '../components/ui/Modal';
 import { ConfirmModal } from '../components/ui/ConfirmModal';
+import { VerifiedMetaBadge } from '../components/VerifiedMetaBadge';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 
@@ -1023,6 +1024,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                           <div className="min-w-0 flex-1">
                             <div className="font-semibold text-gray-900 text-[13px] leading-snug break-words flex flex-wrap items-center gap-1.5">
                               <span>{contact.nama_lengkap}</span>
+                              <VerifiedMetaBadge contact={contact} />
                               {contact.exclude_from_metrics && (
                                 <span
                                   title={contact.exclude_reason || 'Dikecualikan dari penilaian SLA/CSAT'}
@@ -1234,6 +1236,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="font-semibold text-gray-900">{contact.nama_lengkap}</span>
+                                <VerifiedMetaBadge contact={contact} />
                                 {contact.exclude_from_metrics && (
                                   <span
                                     title={contact.exclude_reason || 'Dikecualikan dari penilaian SLA/CSAT'}
@@ -1486,9 +1489,16 @@ export const Contacts: React.FC<ContactsProps> = ({
                   )}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-xs font-semibold text-gray-900 truncate">
-                    {editingContact.nama_lengkap}
+                  <div className="text-xs font-semibold text-gray-900 truncate flex items-center gap-1.5">
+                    <span className="truncate">{editingContact.nama_lengkap}</span>
+                    <VerifiedMetaBadge contact={editingContact} showLabel />
                   </div>
+                  {editingContact.verified_name &&
+                    editingContact.verified_name.trim().toLowerCase() !== editingContact.nama_lengkap.trim().toLowerCase() && (
+                      <div className="text-[11px] text-sky-700 font-medium truncate">
+                        Nama Verified Meta: {editingContact.verified_name}
+                      </div>
+                    )}
                   <div className="text-[11px] text-gray-500 truncate">
                     {editingContact.profile_about || 'Belum ada bio/deskripsi WhatsApp'}
                   </div>

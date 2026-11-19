@@ -12,6 +12,7 @@ import {
 } from '../db/schema';
 import { upsertWhatsappStatusView } from '../services/post.service';
 import {
+  extractWahaVerification,
   parseVCardString,
   WahaLocationData,
   wahaService,
@@ -99,8 +100,10 @@ export function isWahaFromMe(payload: any): boolean {
   if (!payload || typeof payload !== 'object') return false;
   if (payload.fromMe === true || payload.fromMe === 'true') return true;
   if (
+    payload._data?.isFromMe === true ||
     payload._data?.key?.fromMe === true ||
     payload._data?.Info?.IsFromMe === true ||
+    payload._data?.Info?.isFromMe === true ||
     payload._data?.Info?.MessageSource?.IsFromMe === true
   ) {
     return true;
@@ -171,13 +174,99 @@ export function extractDeviceSentDestinationJid(payload: any): string {
     payload?.message,
   ];
   for (const root of roots) {
-    const dest =
-      root?.deviceSentMessage?.destinationJid ||
-      root?.deviceSentMessage?.DestinationJID ||
-      root?.ephemeralMessage?.message?.deviceSentMessage?.destinationJid;
-    if (typeof dest === 'string' && dest.trim()) return dest.trim();
+    let cur = root;
+    for (let depth = 0; depth < 5 && cur && typeof cur === 'object'; depth++) {
+      const dsm = cur.deviceSentMessage || cur.DeviceSentMessage;
+      const dest =
+        dsm?.destinationJid ||
+        dsm?.DestinationJID ||
+        dsm?.DestinationJid ||
+        dsm?.destinationJID;
+      if (typeof dest === 'string' && dest.trim()) return dest.trim();
+      cur =
+        cur.ephemeralMessage?.message ||
+        cur.EphemeralMessage?.Message ||
+        cur.viewOnceMessage?.message ||
+        cur.ViewOnceMessage?.Message ||
+        cur.viewOnceMessageV2?.message ||
+        cur.ViewOnceMessageV2?.Message ||
+        cur.deviceSentMessage?.message ||
+        cur.DeviceSentMessage?.Message;
+    }
   }
   return '';
+}
+
+function extractJidFromSerializedMessageId(payload: any): string {
+  const candidates = [
+    typeof payload?.id === 'string' ? payload.id : payload?.id?._serialized,
+    payload?._data?.id?._serialized,
+  ];
+  for (const raw of candidates) {
+    if (typeof raw !== 'string') continue;
+    const match = raw.trim().match(/^(?:true|false)_([^_]+@(?:c\.us|s\.whatsapp\.net|lid|g\.us))_[^_]+$/i);
+    if (match?.[1]) return match[1].trim();
+  }
+  return '';
+}
+
+export function resolveInboundWahaTargetJid(
+  payload: any,
+  me?: { id?: string | null; lid?: string | null } | null,
+  isFromMe?: boolean
+): string {
+  const fromMeFlag = isFromMe !== undefined ? isFromMe : isWahaFromMe(payload);
+  if (!fromMeFlag) {
+    return String(
+      payload?.from ||
+        payload?.chatId ||
+        payload?._data?.Info?.Chat ||
+        payload?._data?.key?.remoteJid ||
+        ''
+    ).trim();
+  }
+
+  const selfId = String(me?.id || '').trim();
+  const selfLid = String(me?.lid || '').trim();
+  const selfIdUser = selfId ? fromWahaChatId(selfId).toLowerCase() : '';
+  const selfIdDigits = selfId && isPhoneWahaJid(selfId) ? normalizePhoneNumber(fromWahaChatId(selfId)) : '';
+  const selfLidUser = selfLid ? fromWahaChatId(selfLid).toLowerCase() : '';
+
+  const isSelfCandidate = (v: string): boolean => {
+    const user = fromWahaChatId(v).toLowerCase();
+    if (selfIdUser && user === selfIdUser) return true;
+    if (selfLidUser && user === selfLidUser) return true;
+    if (selfIdDigits && isPhoneWahaJid(v)) {
+      const candDigits = normalizePhoneNumber(fromWahaChatId(v));
+      if (candDigits && candDigits === selfIdDigits) return true;
+    }
+    return false;
+  };
+
+  const deviceDest = extractDeviceSentDestinationJid(payload);
+  const embeddedIdJid = extractJidFromSerializedMessageId(payload);
+  const candidates = [
+    deviceDest,
+    payload?.chatId,
+    payload?._data?.Info?.Chat,
+    payload?._data?.key?.remoteJid,
+    payload?.to,
+    payload?._data?.Info?.RecipientAlt,
+    payload?._data?.key?.remoteJidAlt,
+    embeddedIdJid,
+    payload?.from,
+  ]
+    .map((v) => String(v || '').trim())
+    .filter((v) => v && v.toLowerCase() !== 'me');
+
+  const groupCandidate = candidates.find((v) => v.toLowerCase().endsWith('@g.us'));
+  if (groupCandidate) return groupCandidate;
+
+  const nonSelfPersonal = candidates.find((v) => !isSelfCandidate(v) && isPersonalWahaJid(v));
+  if (nonSelfPersonal) return nonSelfPersonal;
+
+  const nonSelfCandidate = candidates.find((v) => !isSelfCandidate(v));
+  return nonSelfCandidate || candidates[0] || '';
 }
 
 export function detectWahaOutboundOrigin(payload: any): {
@@ -1053,22 +1142,43 @@ export function extractWahaPresence(
   payload: any
 ): { chatId: string; status: 'typing' | 'recording' | 'online' | 'paused' } | null {
   if (!payload || typeof payload !== 'object') return null;
-  const chatId = String(payload.id || payload.chatId || payload.from || '').trim();
+  const firstEntry = Array.isArray(payload.presences) ? payload.presences[0] : null;
+  const chatId = String(
+    payload.id ||
+      payload.chatId ||
+      payload.from ||
+      payload._data?.Chat ||
+      payload._data?.From ||
+      firstEntry?.id ||
+      ''
+  ).trim();
   if (!chatId || !isPersonalWahaJid(chatId)) return null;
 
-  const firstEntry = Array.isArray(payload.presences) ? payload.presences[0] : null;
+  const rawMedia = String(
+    firstEntry?.media || firstEntry?.Media || payload.media || payload.Media || payload._data?.Media || ''
+  )
+    .toLowerCase()
+    .trim();
   const rawPresence = String(
     firstEntry?.lastKnownPresence ||
       firstEntry?.presence ||
+      firstEntry?.state ||
+      firstEntry?.State ||
       payload.lastKnownPresence ||
       payload.presence ||
+      payload.state ||
+      payload.State ||
+      payload._data?.State ||
       ''
   )
     .toLowerCase()
     .trim();
 
   if (rawPresence === 'composing' || rawPresence === 'typing') {
-    return { chatId, status: 'typing' };
+    return {
+      chatId,
+      status: rawMedia === 'audio' ? 'recording' : 'typing',
+    };
   }
   if (rawPresence === 'recording') {
     return { chatId, status: 'recording' };
@@ -1085,7 +1195,11 @@ export function extractWahaPresence(
 export function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: string[] } {
   const batchIds = [
     ...(Array.isArray(payload?.ids) ? payload.ids : []),
+    ...(Array.isArray(payload?.messageIds) ? payload.messageIds : []),
     ...(Array.isArray(payload?._data?.Info?.IDs) ? payload._data.Info.IDs : []),
+    ...(Array.isArray(payload?._data?.Info?.MessageIDs) ? payload._data.Info.MessageIDs : []),
+    ...(Array.isArray(payload?._data?.MessageIDs) ? payload._data.MessageIDs : []),
+    ...(Array.isArray(payload?._data?.Receipt?.MessageIDs) ? payload._data.Receipt.MessageIDs : []),
   ];
   const rawCandidates = [
     payload?.id?._serialized,
@@ -1412,7 +1526,7 @@ export function upsertPollVoteInMetadata(
   };
 }
 
-function normalizeWahaAck(payload: any): number | null {
+export function normalizeWahaAck(payload: any): number | null {
   if (typeof payload?.ack === 'number' && !Number.isNaN(payload.ack)) {
     return payload.ack;
   }
@@ -1424,10 +1538,18 @@ function normalizeWahaAck(payload: any): number | null {
   ) {
     return Number(payload.ack);
   }
-  const ackName = String(payload?.ackName || '').toUpperCase().trim();
-  if (ackName === 'READ') return 3;
+  const ackName = String(
+    payload?.ackName ||
+      (typeof payload?.ack === 'string' ? payload.ack : '') ||
+      payload?._data?.Type ||
+      payload?._data?.type ||
+      ''
+  )
+    .toUpperCase()
+    .trim();
+  if (ackName === 'READ' || ackName === 'READ-SELF') return 3;
   if (ackName === 'PLAYED') return 4;
-  if (ackName === 'DEVICE' || ackName === 'DELIVERED') return 2;
+  if (ackName === 'DEVICE' || ackName === 'DELIVERED' || ackName === 'DELIVERY') return 2;
   if (ackName === 'SERVER' || ackName === 'SENT') return 1;
   if (ackName === 'ERROR' || ackName === 'FAILED') return -1;
   if (ackName === 'PENDING') return 0;
@@ -1822,67 +1944,112 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       if (event === 'presence.update' && payload) {
         const parsedPresence = extractWahaPresence(payload);
         if (parsedPresence) {
-          const phoneCandidate = extractPhoneCandidatesFromWahaPayload({
-            from: parsedPresence.chatId,
-            ...payload,
-          })[0];
-          let matchedContactId: string | null = null;
+          const isGroupPresence = parsedPresence.chatId.toLowerCase().endsWith('@g.us');
+          const normSession = (webhookSession || '').trim().toLowerCase();
+          let matchedConv: { id: string; wahaSession: string | null } | undefined;
 
-          if (phoneCandidate) {
-            const variants = Array.from(
-              new Set([
-                phoneCandidate,
-                `+${phoneCandidate}`,
-                phoneCandidate.startsWith('62') ? `0${phoneCandidate.slice(2)}` : '',
-              ].filter(Boolean))
-            );
-            const found = await db
-              .select({ id: contacts.id })
-              .from(contacts)
-              .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
-              .limit(1);
-            matchedContactId = found[0]?.id || null;
-          }
-
-          if (!matchedContactId) {
-            const idRow = await db
-              .select({ contactId: contactIdentities.contactId })
-              .from(contactIdentities)
-              .where(
-                and(
-                  eq(contactIdentities.companyId, companyId),
-                  eq(contactIdentities.channel, 'WHATSAPP'),
-                  eq(contactIdentities.externalId, parsedPresence.chatId)
-                )
-              )
-              .limit(1);
-            matchedContactId = idRow[0]?.contactId || null;
-          }
-
-          if (matchedContactId) {
-            const convCandidates = await db
+          if (isGroupPresence) {
+            const groupConvs = await db
               .select({ id: conversations.id, wahaSession: conversations.wahaSession })
               .from(conversations)
               .where(
                 and(
                   eq(conversations.companyId, companyId),
-                  eq(conversations.contactId, matchedContactId),
-                  eq(conversations.channel, 'WHATSAPP')
+                  eq(conversations.channel, 'WHATSAPP'),
+                  eq(conversations.externalThreadId, parsedPresence.chatId)
                 )
               )
               .orderBy(desc(conversations.updatedAt));
-            const matchedConv =
-              (webhookSession
-                ? convCandidates.find((c) => c.wahaSession === webhookSession)
-                : undefined) || convCandidates[0];
-            if (matchedConv) {
-              liveEvents.emit('conversations:presence', {
-                conversationId: matchedConv.id,
-                presence: parsedPresence.status,
-                session: webhookSession || null,
-                updatedAt: new Date().toISOString(),
-              }, companyId);
+            matchedConv =
+              (normSession
+                ? groupConvs.find((c) => (c.wahaSession || '').trim().toLowerCase() === normSession)
+                : undefined) || groupConvs[0];
+          } else {
+            let phoneCandidate: string | undefined = extractPhoneCandidatesFromWahaPayload({
+              from: parsedPresence.chatId,
+              ...payload,
+            })[0];
+            if (!phoneCandidate && parsedPresence.chatId.toLowerCase().endsWith('@lid')) {
+              phoneCandidate =
+                (await wahaService
+                  .resolveLidToPhone(webhookSession || undefined, parsedPresence.chatId)
+                  .catch(() => null)) || undefined;
             }
+            let matchedContactId: string | null = null;
+
+            if (phoneCandidate) {
+              const variants = Array.from(
+                new Set([
+                  phoneCandidate,
+                  `+${phoneCandidate}`,
+                  phoneCandidate.startsWith('62') ? `0${phoneCandidate.slice(2)}` : '',
+                ].filter(Boolean))
+              );
+              const found = await db
+                .select({ id: contacts.id })
+                .from(contacts)
+                .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
+                .limit(1);
+              matchedContactId = found[0]?.id || null;
+            }
+
+            if (!matchedContactId) {
+              const idRow = await db
+                .select({ contactId: contactIdentities.contactId })
+                .from(contactIdentities)
+                .where(
+                  and(
+                    eq(contactIdentities.companyId, companyId),
+                    eq(contactIdentities.channel, 'WHATSAPP'),
+                    eq(contactIdentities.externalId, parsedPresence.chatId)
+                  )
+                )
+                .limit(1);
+              matchedContactId = idRow[0]?.contactId || null;
+            }
+
+            if (matchedContactId) {
+              const convCandidates = await db
+                .select({ id: conversations.id, wahaSession: conversations.wahaSession })
+                .from(conversations)
+                .where(
+                  and(
+                    eq(conversations.companyId, companyId),
+                    eq(conversations.contactId, matchedContactId),
+                    eq(conversations.channel, 'WHATSAPP')
+                  )
+                )
+                .orderBy(desc(conversations.updatedAt));
+              matchedConv =
+                (normSession
+                  ? convCandidates.find((c) => (c.wahaSession || '').trim().toLowerCase() === normSession)
+                  : undefined) || convCandidates[0];
+            } else {
+              const threadConvs = await db
+                .select({ id: conversations.id, wahaSession: conversations.wahaSession })
+                .from(conversations)
+                .where(
+                  and(
+                    eq(conversations.companyId, companyId),
+                    eq(conversations.channel, 'WHATSAPP'),
+                    eq(conversations.externalThreadId, parsedPresence.chatId)
+                  )
+                )
+                .orderBy(desc(conversations.updatedAt));
+              matchedConv =
+                (normSession
+                  ? threadConvs.find((c) => (c.wahaSession || '').trim().toLowerCase() === normSession)
+                  : undefined) || threadConvs[0];
+            }
+          }
+
+          if (matchedConv) {
+            liveEvents.emit('conversations:presence', {
+              conversationId: matchedConv.id,
+              presence: parsedPresence.status,
+              session: webhookSession || null,
+              updatedAt: new Date().toISOString(),
+            }, companyId);
           }
         }
       }
@@ -2560,41 +2727,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       // 2. Incoming & Direct Outgoing Messages (message / message.any)
       const isInboundMessageEvent = event === 'message' || event === 'message.any';
       const isFromMe = isWahaFromMe(payload);
-      const rawTarget = isFromMe
-        ? (() => {
-            const selfJid = String(req.body?.me?.id || '').trim().toLowerCase();
-            const selfDigits = selfJid ? normalizePhoneNumber(fromWahaChatId(selfJid)) : '';
-            const deviceDest = extractDeviceSentDestinationJid(payload);
-            const candidates = [
-              deviceDest,
-              payload?.chatId,
-              payload?._data?.Info?.Chat,
-              payload?._data?.key?.remoteJid,
-              payload?.to,
-              payload?._data?.Info?.RecipientAlt,
-              payload?._data?.key?.remoteJidAlt,
-              payload?.from,
-            ]
-              .map((v) => String(v || '').trim())
-              .filter((v) => v && v.toLowerCase() !== 'me');
-            const groupCandidate = candidates.find((v) => v.toLowerCase().endsWith('@g.us'));
-            if (groupCandidate) return groupCandidate;
-            const nonSelfCandidate = candidates.find((v) => {
-              const lower = v.toLowerCase();
-              if (selfJid && lower === selfJid) return false;
-              const candDigits = isPhoneWahaJid(v) ? normalizePhoneNumber(fromWahaChatId(v)) : '';
-              if (selfDigits && candDigits && candDigits === selfDigits) return false;
-              return true;
-            });
-            return nonSelfCandidate || candidates[0] || '';
-          })()
-        : String(
-            payload?.from ||
-            payload?.chatId ||
-            payload?._data?.Info?.Chat ||
-            payload?._data?.key?.remoteJid ||
-            ''
-          ).trim();
+      const rawTarget = resolveInboundWahaTargetJid(payload, req.body?.me, isFromMe);
 
       const rawFrom = rawTarget;
       const rawChatId = String(payload?.chatId || rawFrom).trim();
@@ -3169,9 +3302,16 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             }
           }
 
+          const inboundVerification = !isFromMe
+            ? extractWahaVerification(payload?._data?.Info || payload?._data || payload)
+            : { isVerified: false, verifiedName: null, verifiedLevel: null };
+
           if (!contact) {
             const fallbackSuffix = fromPhone ? fromPhone.slice(-4) : rawFrom.split('@')[0].slice(-4);
-            const contactName = (!isFromMe && notifyName) || `Kontak ${fallbackSuffix}`;
+            const contactName =
+              inboundVerification.verifiedName ||
+              (!isFromMe && notifyName) ||
+              `Kontak ${fallbackSuffix}`;
             try {
               const insertedContacts = await db
                 .insert(contacts)
@@ -3180,6 +3320,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                   companyId,
                   namaLengkap: contactName,
                   nomorWhatsapp: fromPhone || null,
+                  isVerified: inboundVerification.isVerified,
+                  verifiedName: inboundVerification.verifiedName,
+                  verifiedLevel: inboundVerification.verifiedLevel,
                   tags: 'Inbound Lead',
                   createdAt: now,
                   updatedAt: now,
@@ -3201,14 +3344,26 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             if (fromPhone && !contact.nomorWhatsapp) {
               updates.nomorWhatsapp = fromPhone;
             }
+            const preferredInboundName = inboundVerification.verifiedName || (!isFromMe ? notifyName : null);
             if (
-              !isFromMe &&
-              notifyName &&
-              !isGenericDisplayName(notifyName) &&
+              preferredInboundName &&
+              !isGenericDisplayName(preferredInboundName) &&
               isGenericDisplayName(contact.namaLengkap)
             ) {
-              updates.namaLengkap = notifyName;
-              contact.namaLengkap = notifyName;
+              updates.namaLengkap = preferredInboundName;
+              contact.namaLengkap = preferredInboundName;
+            }
+            if (inboundVerification.isVerified && !contact.isVerified) {
+              updates.isVerified = true;
+              contact.isVerified = true;
+            }
+            if (inboundVerification.verifiedName && inboundVerification.verifiedName !== contact.verifiedName) {
+              updates.verifiedName = inboundVerification.verifiedName;
+              contact.verifiedName = inboundVerification.verifiedName;
+            }
+            if (inboundVerification.verifiedLevel && inboundVerification.verifiedLevel !== contact.verifiedLevel) {
+              updates.verifiedLevel = inboundVerification.verifiedLevel;
+              contact.verifiedLevel = inboundVerification.verifiedLevel;
             }
             if (Object.keys(updates).length > 0) {
               updates.updatedAt = now;
