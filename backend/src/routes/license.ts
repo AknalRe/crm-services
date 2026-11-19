@@ -140,11 +140,15 @@ export default async function licenseRouter(fastify: FastifyInstance) {
 
   // POST start a trial for active company
   fastify.post<{
-    Body: { planSlug?: string };
+    Body: { planSlug?: string; buyerPhone?: string };
   }>('/trial', { preHandler: requireAdminUser }, async (req, reply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const license = await licenseService.startTrial(req.body?.planSlug || 'pro-monthly', companyId);
+      const license = await licenseService.startTrial(
+        req.body?.planSlug || 'pro-monthly',
+        companyId,
+        req.body?.buyerPhone
+      );
       liveEvents.emit('license:update', { action: 'trial', companyId });
       return reply.send({
         success: true,

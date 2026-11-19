@@ -202,9 +202,16 @@ export const PlansModal: React.FC<PlansModalProps> = ({
 
   const handleStartTrial = async (planSlug: string) => {
     if (startingTrialSlug || isSubmitting) return;
+    const cleanPhone = buyerPhone.trim();
+    if (!cleanPhone) {
+      toast.error('Masukkan nomor WhatsApp aktif terlebih dahulu untuk mengaktifkan trial.');
+      const input = document.getElementById('plans-trial-whatsapp-input') as HTMLInputElement | null;
+      input?.focus();
+      return;
+    }
     try {
       setStartingTrialSlug(planSlug);
-      const lic = await api.startLicenseTrial(planSlug);
+      const lic = await api.startLicenseTrial(planSlug, cleanPhone);
       toast.success(`Paket ${lic.plan} berhasil diaktifkan!`);
       onLicenseUpdated();
       onClose();
@@ -810,7 +817,31 @@ export const PlansModal: React.FC<PlansModalProps> = ({
             ) : plansError ? (
               <ErrorState message={plansError} onRetry={loadPlans} />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+              <>
+                {(!currentLicense ||
+                  currentLicense.status === 'UNLICENSED' ||
+                  currentLicense.status === 'EXPIRED' ||
+                  currentLicense.isExpired) && (
+                  <div className="p-3 rounded-lg border border-gray-200 bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="min-w-0">
+                      <label htmlFor="plans-trial-whatsapp-input" className="font-semibold text-gray-800 block">
+                        Nomor WhatsApp Aktif (Kolektif untuk Trial &amp; Tagihan)
+                      </label>
+                      <span className="text-[11px] text-gray-500">
+                        Wajib diisi sekali untuk aktivasi Coba Gratis atau penerbitan invoice paket.
+                      </span>
+                    </div>
+                    <input
+                      id="plans-trial-whatsapp-input"
+                      type="tel"
+                      value={buyerPhone}
+                      onChange={(e) => setBuyerPhone(e.target.value)}
+                      placeholder="081234567890"
+                      className="w-full sm:w-56 h-9 px-3 rounded-md border border-gray-300 bg-white text-xs font-mono text-gray-900 focus:outline-none focus:border-indigo-500 shrink-0"
+                    />
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                 {plans.map((p) => {
                   const isSelected = selectedPlanSlug === p.slug;
                   const isCurrentTier = Boolean(
@@ -945,7 +976,8 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                     </div>
                   );
                 })}
-              </div>
+                </div>
+              </>
             )}
 
             {/* Multi-Qty Duration Selector + Summary */}

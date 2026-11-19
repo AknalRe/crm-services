@@ -1335,10 +1335,11 @@ export class LicenseService {
     return getResearchedDefaultPlans();
   }
 
-  public async startTrial(planSlug: string, companyId?: string): Promise<LicenseInfo> {
+  public async startTrial(planSlug: string, companyId?: string, buyerPhone?: string): Promise<LicenseInfo> {
     const cid = getActiveCompanyId(companyId);
     const reneoUrl = this.getReneoUrl();
     const slug = (planSlug || 'pro-monthly').trim();
+    const cleanPhone = (buyerPhone || '').trim();
 
     const company = await this.getCompanyRow(cid);
     if (!company) {
@@ -1357,7 +1358,7 @@ export class LicenseService {
       try {
         const res = await axios.post(
           `${reneoUrl}/api/v1/app-catalog/trial`,
-          { catalogId: 'reneo-crm', planSlug: slug },
+          { catalogId: 'reneo-crm', planSlug: slug, ...(cleanPhone ? { buyerPhone: cleanPhone } : {}) },
           { headers: this.getReneoHeaders(), timeout: 6000 }
         );
         if (res.data?.ok) {
