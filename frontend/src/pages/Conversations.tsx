@@ -1056,6 +1056,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [presenceByConvId, setPresenceByConvId] = useState<
     Record<string, { status: 'typing' | 'recording' | 'online' | 'paused'; expiresAt: number }>
   >({});
+  const [groupPresenceByConvId, setGroupPresenceByConvId] = useState<
+    Record<
+      string,
+      Record<
+        string,
+        { status: 'typing' | 'recording' | 'online'; name: string; avatarUrl?: string | null; expiresAt: number }
+      >
+    >
+  >({});
   const outboundTypingRef = useRef<{
     convId: string;
     active: boolean;
@@ -1380,8 +1389,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
       const d = evt?.data || evt;
       const convId = String(d?.conversationId || '').trim();
       const status = String(d?.presence || '').toLowerCase();
+      const isGroup = Boolean(d?.isGroup);
+      const participantKey = String(d?.participantKey || '').trim();
+      const participantName = String(d?.participantName || '').trim() || 'Anggota Grup';
+      const participantAvatarUrl = d?.participantAvatarUrl ? String(d.participantAvatarUrl) : null;
       if (!convId) return;
       if (status === 'paused' || status === 'unavailable' || status === 'offline') {
+        if (isGroup && participantKey) {
+          setGroupPresenceByConvId((prev) => {
+            const groupMap = prev[convId];
+            if (!groupMap || !groupMap[participantKey]) return prev;
+            const nextGroup = { ...groupMap };
+            delete nextGroup[participantKey];
+            const next = { ...prev };
+            if (Object.keys(nextGroup).length === 0) {
+              delete next[convId];
+            } else {
+              next[convId] = nextGroup;
+            }
+            return next;
+          });
+          return;
+        }
         setPresenceByConvId((prev) => {
           if (!prev[convId]) return prev;
           const next = { ...prev };
@@ -1392,9 +1421,27 @@ export const Conversations: React.FC<ConversationsProps> = ({
       }
       if (status === 'typing' || status === 'recording' || status === 'online') {
         const ttlMs = status === 'online' ? 12000 : 8500;
+        const expiresAt = Date.now() + ttlMs;
+        if (isGroup && participantKey) {
+          if (status === 'typing' || status === 'recording') {
+            setGroupPresenceByConvId((prev) => ({
+              ...prev,
+              [convId]: {
+                ...(prev[convId] || {}),
+                [participantKey]: {
+                  status,
+                  name: participantName,
+                  avatarUrl: participantAvatarUrl,
+                  expiresAt,
+                },
+              },
+            }));
+          }
+          return;
+        }
         setPresenceByConvId((prev) => ({
           ...prev,
-          [convId]: { status, expiresAt: Date.now() + ttlMs },
+          [convId]: { status, expiresAt },
         }));
       }
     });
@@ -1410,6 +1457,27 @@ export const Conversations: React.FC<ConversationsProps> = ({
             next[k] = prev[k];
           } else {
             changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+      setGroupPresenceByConvId((prev) => {
+        const convKeys = Object.keys(prev);
+        if (convKeys.length === 0) return prev;
+        let changed = false;
+        const next: typeof prev = {};
+        for (const cId of convKeys) {
+          const inner = prev[cId];
+          const innerNext: (typeof prev)[string] = {};
+          for (const pKey of Object.keys(inner)) {
+            if (inner[pKey].expiresAt > now) {
+              innerNext[pKey] = inner[pKey];
+            } else {
+              changed = true;
+            }
+          }
+          if (Object.keys(innerNext).length > 0) {
+            next[cId] = innerNext;
           }
         }
         return changed ? next : prev;
@@ -4688,17 +4756,38 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           </div>
 
                           <p className="text-[11px] text-gray-500 truncate mt-0.5">
-                            {presenceByConvId[conv.id]?.status === 'typing' ? (
-                              <span className="text-emerald-600 font-medium italic">
-                                Sedang mengetik...
-                              </span>
-                            ) : presenceByConvId[conv.id]?.status === 'recording' ? (
-                              <span className="text-emerald-600 font-medium italic">
-                                Merekam pesan suara...
-                              </span>
-                            ) : (
-                              previewText
-                            )}
+                            {(() => {
+                              const gTypers = Object.values(groupPresenceByConvId[conv.id] || {});
+                              if (gTypers.length > 0) {
+                                const hasRec = gTypers.some((t) => t.status === 'recording');
+                                const names =
+                                  gTypers.length === 1
+                                    ? gTypers[0].name
+                                    : gTypers.length === 2
+                                    ? `${gTypers[0].name}, ${gTypers[1].name}`
+                                    : `${gTypers[0].name}, +${gTypers.length - 1}`;
+                                return (
+                                  <span className="text-emerald-600 font-medium italic">
+                                    {names} {hasRec ? 'merekam audio...' : 'sedang mengetik...'}
+                                  </span>
+                                );
+                              }
+                              if (presenceByConvId[conv.id]?.status === 'typing') {
+                                return (
+                                  <span className="text-emerald-600 font-medium italic">
+                                    Sedang mengetik...
+                                  </span>
+                                );
+                              }
+                              if (presenceByConvId[conv.id]?.status === 'recording') {
+                                return (
+                                  <span className="text-emerald-600 font-medium italic">
+                                    Merekam pesan suara...
+                                  </span>
+                                );
+                              }
+                              return previewText;
+                            })()}
                           </p>
                         </>
                       );
@@ -6985,56 +7074,143 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </>
               );
             })()}
-            {(presenceByConvId[selectedConversation.id]?.status === 'typing' ||
-              presenceByConvId[selectedConversation.id]?.status === 'recording') && (
-              <div className="flex justify-start my-1">
-                <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg rounded-tl-xs bg-white border border-gray-200 text-xs text-gray-600 shadow-2xs">
-                  <span className="inline-flex items-center gap-1" aria-hidden="true">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.2s]" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.1s]" />
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
-                  </span>
-                  <span className="font-medium text-emerald-700">
-                    {presenceByConvId[selectedConversation.id]?.status === 'recording'
-                      ? 'Sedang merekam audio...'
-                      : 'Sedang mengetik...'}
-                  </span>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-            </div>
             {(() => {
-              const activeChatPresence = presenceByConvId[selectedConversation.id]?.status;
-              const showFloatingPresence =
-                !isAtChatBottom &&
-                (activeChatPresence === 'typing' || activeChatPresence === 'recording');
-              if (!showFloatingPresence && pendingNewMsgCount <= 0) return null;
+              const groupTypers = Object.values(
+                groupPresenceByConvId[selectedConversation.id] || {}
+              );
+              const singleStatus = presenceByConvId[selectedConversation.id]?.status;
+              const isSingleActive = singleStatus === 'typing' || singleStatus === 'recording';
+              if (groupTypers.length === 0 && !isSingleActive) return null;
+
+              const isRecording =
+                groupTypers.length > 0
+                  ? groupTypers.every((t) => t.status === 'recording')
+                  : singleStatus === 'recording';
+              const labelText =
+                groupTypers.length > 0
+                  ? groupTypers.length === 1
+                    ? `${groupTypers[0].name} ${isRecording ? 'sedang merekam audio...' : 'sedang mengetik...'}`
+                    : groupTypers.length === 2
+                    ? `${groupTypers[0].name} & ${groupTypers[1].name} ${isRecording ? 'sedang merekam audio...' : 'sedang mengetik...'}`
+                    : `${groupTypers[0].name}, ${groupTypers[1].name}, +${groupTypers.length - 2} ${isRecording ? 'sedang merekam audio...' : 'sedang mengetik...'}`
+                  : isRecording
+                  ? 'Sedang merekam audio...'
+                  : 'Sedang mengetik...';
+
+              const avatars =
+                groupTypers.length > 0
+                  ? groupTypers.slice(0, 4).map((t, idx) => ({
+                      key: `${t.name}-${idx}`,
+                      name: t.name,
+                      url: t.avatarUrl || undefined,
+                    }))
+                  : [
+                      {
+                        key: selectedConversation.id,
+                        name: getConversationDisplayTitle(selectedConversation),
+                        url: selectedConversation.contact?.profile_picture_url || undefined,
+                      },
+                    ];
+
               return (
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 pointer-events-none">
-                  {showFloatingPresence && (
-                    <button
-                      type="button"
-                      onClick={() => scrollToBottom('smooth')}
-                      className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/95 hover:bg-white text-emerald-700 text-xs font-semibold shadow-md border border-emerald-200 backdrop-blur-xs transition-all cursor-pointer"
-                    >
-                      <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+                <>
+                  <div className="flex justify-start my-1">
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg rounded-tl-xs bg-white border border-gray-200 text-xs text-gray-600 shadow-2xs">
+                      <div className="flex items-center -space-x-1.5 shrink-0">
+                        {avatars.map((av) => (
+                          <ContactAvatar
+                            key={av.key}
+                            url={av.url}
+                            label={av.name}
+                            className="w-5 h-5 rounded-full ring-2 ring-white bg-slate-600 text-white text-[9px] font-semibold"
+                          />
+                        ))}
+                      </div>
+                      <span className="inline-flex items-center gap-0.5 shrink-0" aria-hidden="true">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.2s]" />
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.1s]" />
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
                       </span>
-                      <span>
-                        {activeChatPresence === 'recording'
-                          ? 'Sedang merekam audio...'
-                          : 'Sedang mengetik...'}
+                      <span className="font-medium text-emerald-700">{labelText}</span>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+            <div ref={messagesEndRef} />
+            </div>
+            {(() => {
+              const groupTypers = Object.values(
+                groupPresenceByConvId[selectedConversation.id] || {}
+              );
+              const activeChatPresence = presenceByConvId[selectedConversation.id]?.status;
+              const isSingleActive =
+                activeChatPresence === 'typing' || activeChatPresence === 'recording';
+              const showFloatingPresence =
+                !isAtChatBottom && (groupTypers.length > 0 || isSingleActive);
+              if (!showFloatingPresence && pendingNewMsgCount <= 0) return null;
+
+              const isRecording =
+                groupTypers.length > 0
+                  ? groupTypers.every((t) => t.status === 'recording')
+                  : activeChatPresence === 'recording';
+              const floatingLabel =
+                groupTypers.length > 0
+                  ? groupTypers.length === 1
+                    ? `${groupTypers[0].name} ${isRecording ? 'sedang merekam audio...' : 'sedang mengetik...'}`
+                    : groupTypers.length === 2
+                    ? `${groupTypers[0].name} & ${groupTypers[1].name} ${isRecording ? 'sedang merekam audio...' : 'sedang mengetik...'}`
+                    : `${groupTypers[0].name}, ${groupTypers[1].name}, +${groupTypers.length - 2} ${isRecording ? 'sedang merekam audio...' : 'sedang mengetik...'}`
+                  : isRecording
+                  ? 'Sedang merekam audio...'
+                  : 'Sedang mengetik...';
+
+              const avatars =
+                groupTypers.length > 0
+                  ? groupTypers.slice(0, 4).map((t, idx) => ({
+                      key: `${t.name}-${idx}`,
+                      name: t.name,
+                      url: t.avatarUrl || undefined,
+                    }))
+                  : [
+                      {
+                        key: selectedConversation.id,
+                        name: getConversationDisplayTitle(selectedConversation),
+                        url: selectedConversation.contact?.profile_picture_url || undefined,
+                      },
+                    ];
+
+              return (
+                <>
+                  {showFloatingPresence && (
+                    <button
+                      type="button"
+                      onClick={() => scrollToBottom('smooth')}
+                      className="absolute bottom-3 left-4 z-20 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/95 hover:bg-white text-emerald-700 text-xs font-semibold shadow-md border border-emerald-200 backdrop-blur-xs transition-all cursor-pointer max-w-[calc(100%-2rem)]"
+                    >
+                      <div className="flex items-center -space-x-1.5 shrink-0">
+                        {avatars.map((av) => (
+                          <ContactAvatar
+                            key={av.key}
+                            url={av.url}
+                            label={av.name}
+                            className="w-5 h-5 rounded-full ring-2 ring-white bg-slate-600 text-white text-[9px] font-semibold"
+                          />
+                        ))}
+                      </div>
+                      <span className="inline-flex items-center gap-0.5 shrink-0" aria-hidden="true">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.2s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.1s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
                       </span>
+                      <span className="truncate">{floatingLabel}</span>
                     </button>
                   )}
                   {pendingNewMsgCount > 0 && (
                     <button
                       type="button"
                       onClick={() => scrollToBottom('smooth')}
-                      className="pointer-events-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md border border-indigo-500 transition-all cursor-pointer"
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md border border-indigo-500 transition-all cursor-pointer"
                     >
                       <ChevronDown className="w-3.5 h-3.5 shrink-0" />
                       <span>
@@ -7042,7 +7218,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       </span>
                     </button>
                   )}
-                </div>
+                </>
               );
             })()}
           </div>

@@ -1138,9 +1138,14 @@ export function extractGroupParticipant(payload: any): {
   return { participantJid, participantPhone };
 }
 
-export function extractWahaPresence(
+export function extractWahaPresenceDetail(
   payload: any
-): { chatId: string; status: 'typing' | 'recording' | 'online' | 'paused' } | null {
+): {
+  chatId: string;
+  isGroup: boolean;
+  participantJid: string | null;
+  status: 'typing' | 'recording' | 'online' | 'paused';
+} | null {
   if (!payload || typeof payload !== 'object') return null;
   const presenceList = Array.isArray(payload.presences) ? payload.presences : [];
   const firstEntry =
@@ -1163,7 +1168,17 @@ export function extractWahaPresence(
       firstEntry?.id ||
       ''
   ).trim();
-  if (!chatId || !isPersonalWahaJid(chatId)) return null;
+  const isGroup = chatId.toLowerCase().endsWith('@g.us');
+  if (!chatId || (!isPersonalWahaJid(chatId) && !isGroup)) return null;
+
+  const participantJid =
+    String(
+      firstEntry?.participant ||
+        firstEntry?.Participant ||
+        payload.participant ||
+        payload._data?.Participant ||
+        (!isGroup ? chatId : '')
+    ).trim() || null;
 
   const rawMedia = String(
     firstEntry?.media || firstEntry?.Media || payload.media || payload.Media || payload._data?.Media || ''
@@ -1188,19 +1203,29 @@ export function extractWahaPresence(
   if (rawPresence === 'composing' || rawPresence === 'typing') {
     return {
       chatId,
+      isGroup,
+      participantJid,
       status: rawMedia === 'audio' ? 'recording' : 'typing',
     };
   }
   if (rawPresence === 'recording') {
-    return { chatId, status: 'recording' };
+    return { chatId, isGroup, participantJid, status: 'recording' };
   }
   if (rawPresence === 'available' || rawPresence === 'online') {
-    return { chatId, status: 'online' };
+    return { chatId, isGroup, participantJid, status: 'online' };
   }
   if (rawPresence === 'paused' || rawPresence === 'unavailable' || rawPresence === 'offline') {
-    return { chatId, status: 'paused' };
+    return { chatId, isGroup, participantJid, status: 'paused' };
   }
   return null;
+}
+
+export function extractWahaPresence(
+  payload: any
+): { chatId: string; status: 'typing' | 'recording' | 'online' | 'paused' } | null {
+  const detail = extractWahaPresenceDetail(payload);
+  if (!detail || detail.isGroup) return null;
+  return { chatId: detail.chatId, status: detail.status };
 }
 
 export function extractWahaMessageIds(payload: any): { exactIds: string[]; stanzaIds: string[] } {
@@ -1975,11 +2000,14 @@ export default async function wahaRouter(fastify: FastifyInstance) {
 
       // 1b. Typing & Presence Updates (presence.update)
       if (event === 'presence.update' && payload) {
-        const parsedPresence = extractWahaPresence(payload);
+        const parsedPresence = extractWahaPresenceDetail(payload);
         if (parsedPresence) {
-          const isGroupPresence = parsedPresence.chatId.toLowerCase().endsWith('@g.us');
+          const isGroupPresence = parsedPresence.isGroup;
           const normSession = (webhookSession || '').trim().toLowerCase();
           let matchedConv: { id: string; wahaSession: string | null } | undefined;
+          let participantName: string | null = null;
+          let participantPhone: string | null = null;
+          let participantAvatarUrl: string | null = null;
 
           if (isGroupPresence) {
             const groupConvs = await db
@@ -1997,6 +2025,48 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               (normSession
                 ? groupConvs.find((c) => (c.wahaSession || '').trim().toLowerCase() === normSession)
                 : undefined) || groupConvs[0];
+
+            if (matchedConv && parsedPresence.participantJid) {
+              const rawPart = parsedPresence.participantJid;
+              let resolvedPhone: string | undefined = extractPhoneCandidatesFromWahaPayload({
+                from: rawPart,
+              })[0];
+              if (!resolvedPhone && rawPart.toLowerCase().endsWith('@lid')) {
+                resolvedPhone =
+                  (await wahaService
+                    .resolveLidToPhone(webhookSession || undefined, rawPart)
+                    .catch(() => null)) || undefined;
+              }
+              participantPhone = resolvedPhone || null;
+              if (resolvedPhone) {
+                const variants = Array.from(
+                  new Set([
+                    resolvedPhone,
+                    `+${resolvedPhone}`,
+                    resolvedPhone.startsWith('62') ? `0${resolvedPhone.slice(2)}` : '',
+                  ].filter(Boolean))
+                );
+                const partContacts = await db
+                  .select({
+                    namaLengkap: contacts.namaLengkap,
+                    profilePictureUrl: contacts.profilePictureUrl,
+                  })
+                  .from(contacts)
+                  .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
+                  .limit(1);
+                if (partContacts[0]) {
+                  participantName = partContacts[0].namaLengkap || null;
+                  participantAvatarUrl = partContacts[0].profilePictureUrl || null;
+                }
+              }
+              if (!participantName) {
+                const fallbackPush = String(
+                  payload?.notifyName || payload?._data?.PushName || ''
+                ).trim();
+                participantName =
+                  fallbackPush || (participantPhone ? `+${participantPhone}` : 'Anggota Grup');
+              }
+            }
           } else {
             let phoneCandidate: string | undefined = extractPhoneCandidatesFromWahaPayload({
               from: parsedPresence.chatId,
@@ -2080,6 +2150,11 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             liveEvents.emit('conversations:presence', {
               conversationId: matchedConv.id,
               presence: parsedPresence.status,
+              isGroup: isGroupPresence,
+              participantKey: parsedPresence.participantJid || participantPhone || 'contact',
+              participantName,
+              participantPhone,
+              participantAvatarUrl,
               session: webhookSession || null,
               updatedAt: new Date().toISOString(),
             }, companyId);
