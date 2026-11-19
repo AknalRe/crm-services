@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ShieldAlert } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import QRCodeModal from './components/QRCodeModal';
@@ -112,6 +113,11 @@ function AppShell() {
   const initialLoc = getInitialLocation();
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [accessRestriction, setAccessRestriction] = useState<{
+    code: string;
+    error: string;
+    host?: string;
+  } | null>(null);
   const [currentTab, setCurrentTabState] = useState<string>(initialLoc.tab);
   const [settingsSection, setSettingsSectionState] = useState<SettingsSection>(
     initialLoc.settingsSection
@@ -256,6 +262,7 @@ function AppShell() {
   const fetchAuthStatus = async () => {
     try {
       const data = await api.getAuthStatus();
+      setAccessRestriction(null);
       try {
         if (data?.authenticated) {
           localStorage.setItem('crm_auth_hint', '1');
@@ -266,7 +273,25 @@ function AppShell() {
         // Ignore storage errors
       }
       setAuthStatus(data);
-    } catch (err) {
+    } catch (err: any) {
+      const errCode = String(err?.response?.data?.code || '');
+      if (
+        err?.response?.status === 403 &&
+        (errCode === 'DOMAIN_NOT_ALLOWED' || errCode === 'RENEO_ENV_REQUIRED')
+      ) {
+        try {
+          localStorage.removeItem('crm_auth_hint');
+        } catch {
+          // Ignore storage errors
+        }
+        setAccessRestriction({
+          code: errCode,
+          error:
+            String(err?.response?.data?.error || '') ||
+            'CRM ini hanya dapat diinstal dan diakses dari hostname serta domain yang diizinkan di lingkungan Reneo.',
+          host: err?.response?.data?.host ? String(err.response.data.host) : undefined,
+        });
+      }
       console.error('Failed to get Auth status:', err);
       setAuthStatus({ initialized: true, authenticated: false, user: null });
     } finally {
@@ -426,6 +451,30 @@ function AppShell() {
     setShowLandingPage(true);
     navigatePath(landingPath, '');
   };
+
+  if (accessRestriction) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-4 font-sans">
+        <div className="max-w-md w-full bg-white border border-rose-200 rounded-xl p-6 space-y-3 shadow-xs">
+          <div className="flex items-center gap-2.5 text-rose-700">
+            <ShieldAlert className="w-5 h-5 shrink-0" />
+            <h1 className="text-base font-bold">Akses Lingkungan &amp; Domain Dibatasi</h1>
+          </div>
+          <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            {accessRestriction.error}
+          </p>
+          <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] font-mono text-slate-700 space-y-1">
+            <div>Kode: {accessRestriction.code}</div>
+            {(accessRestriction.host || (typeof window !== 'undefined' ? window.location.host : '')) && (
+              <div>
+                Host: {accessRestriction.host || window.location.host}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!authChecked) {
     let hasAuthHint = false;

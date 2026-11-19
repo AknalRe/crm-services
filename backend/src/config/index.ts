@@ -1,6 +1,22 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+function parseAllowedHostRules(raw?: string | null): string[] {
+  return String(raw || '')
+    .split(',')
+    .map((entry) =>
+      entry
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .split('/')[0]
+        .replace(/:\d+$/, '')
+    )
+    .filter((entry) => Boolean(entry) && entry !== '*');
+}
+
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
 export const config = {
   port: parseInt(process.env.PORT || '5000', 10),
   databaseUrl: process.env.DATABASE_URL || 'postgresql://crm_user:crm_password@localhost:5432/crm_db?schema=public',
@@ -16,11 +32,10 @@ export const config = {
     panelUrl: process.env.RENEO_PANEL_URL || 'http://host.docker.internal:8000',
     oauthUrl: process.env.RENEO_OAUTH_URL || '',
     appToken: process.env.RENEO_APP_TOKEN || '',
-    enforceDomain: process.env.CRM_ENFORCE_DOMAIN === 'true',
-    allowedDomains: (process.env.CRM_ALLOWED_DOMAINS || '')
-      .split(',')
-      .map((d) => d.trim().toLowerCase())
-      .filter(Boolean),
+    // Production containers always enforce Reneo runtime + hostname/domain allowlist.
+    requireReneoEnv: IS_PRODUCTION || process.env.CRM_REQUIRE_RENEO_ENV === 'true',
+    enforceDomain: IS_PRODUCTION || process.env.CRM_ENFORCE_DOMAIN === 'true',
+    allowedDomains: parseAllowedHostRules(process.env.CRM_ALLOWED_DOMAINS),
   },
   meta: {
     appId: process.env.META_APP_ID || '',

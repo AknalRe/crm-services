@@ -32,6 +32,10 @@ import masterDataRouter from './routes/masterData';
 import { BirthdayService } from './services/birthday.service';
 import { PostService } from './services/post.service';
 import { startSlaMonitor } from './services/automation.service';
+import {
+  evaluateDomainGuardRequest,
+  verifyReneoRuntimeEnvironment,
+} from './services/domainGuard';
 import './services/queue.service'; // Start BullMQ worker
 
 const fastify = Fastify({
@@ -46,80 +50,24 @@ async function main() {
   await fastify.register(cors, { origin: '*' });
   await fastify.register(formbody);
 
-  // Domain & Reneo-only installation guard
-  let cachedPublicHosts: string[] = [];
-  let cachedPublicHostsAt = 0;
-
-  const matchesDomainRule = (host: string, rule: string): boolean => {
-    if (rule.startsWith('*.')) {
-      const suffix = rule.slice(1); // .domain.com
-      return host === rule.slice(2) || host.endsWith(suffix);
-    }
-    return host === rule;
-  };
-
+  // Strict Reneo-only installation + allowed hostname & domain guard
   fastify.addHook('onRequest', async (req, reply) => {
-    if (!config.reneo.enforceDomain && config.reneo.allowedDomains.length === 0) {
-      return;
-    }
-    const urlPath = req.url.split('?')[0];
-    if (
-      urlPath === '/health' ||
-      urlPath.startsWith('/api/channels/webhook/') ||
-      urlPath === '/api/waha/webhook' ||
-      urlPath.startsWith('/api/waha/webhook/')
-    ) {
-      return;
-    }
-
-    const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '')
-      .split(',')[0]
-      .trim()
-      .toLowerCase();
-    const hostname = rawHost.replace(/:\d+$/, '');
-    if (!hostname) return;
-
-    if (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname === '::1' ||
-      hostname === 'host.docker.internal'
-    ) {
-      return;
-    }
-
-    if (config.reneo.allowedDomains.some((rule) => matchesDomainRule(hostname, rule))) {
-      return;
-    }
-
-    if (Date.now() - cachedPublicHostsAt > 60_000) {
-      try {
-        const lic = await licenseService.getLicense(DEFAULT_COMPANY_ID);
-        cachedPublicHosts = (lic.publicUrls || [])
-          .map((u: string) => {
-            try {
-              return new URL(u).hostname.toLowerCase();
-            } catch {
-              return u.toLowerCase().replace(/^https?:\/\//, '').split('/')[0].replace(/:\d+$/, '');
-            }
-          })
-          .filter(Boolean);
-        cachedPublicHostsAt = Date.now();
-      } catch {
-        // ignore license lookup error
-      }
-    }
-
-    if (cachedPublicHosts.some((rule) => matchesDomainRule(hostname, rule))) {
-      return;
-    }
-
-    return reply.status(403).send({
-      success: false,
-      code: 'DOMAIN_NOT_ALLOWED',
-      error:
-        'Domain tidak diizinkan. CRM ini hanya dapat diinstal dan diakses dari lingkungan Reneo atau domain yang diizinkan.',
+    const decision = await evaluateDomainGuardRequest({
+      urlPath: req.url,
+      hostHeader: req.headers.host,
+      forwardedHostHeader: req.headers['x-forwarded-host'],
     });
+
+    if (!decision.allowed) {
+      return reply.status(decision.statusCode || 403).send({
+        success: false,
+        code: decision.code || 'DOMAIN_NOT_ALLOWED',
+        host: decision.hostname || undefined,
+        error:
+          decision.error ||
+          'Domain atau lingkungan tidak diizinkan. CRM ini hanya dapat diinstal dan diakses dari lingkungan Reneo.',
+      });
+    }
   });
 
   // Bind AsyncLocalStorage tenant workspace context for authenticated requests
@@ -139,11 +87,15 @@ async function main() {
 
   // Health check
   fastify.get('/health', async () => {
+    const status = config.reneo.requireReneoEnv
+      ? await verifyReneoRuntimeEnvironment()
+      : { verified: true };
     return {
-      status: 'ok',
+      status: status.verified ? 'ok' : 'restricted',
+      reneoVerified: status.verified,
       engine: 'Fastify + Drizzle ORM',
       timestamp: new Date().toISOString(),
-      service: 'CRM WhatsApp Broadcast API',
+      service: 'Reneo CRM Omnichannel API',
     };
   });
 
@@ -179,7 +131,14 @@ async function main() {
     fastify.log.error(`[DB Init] Failed to init DB schema: ${err.message}`);
   }
 
-  // Start background cron jobs (Birthday automatic scheduler + SLA monitor)
+  // Start background verification + cron jobs
+  if (config.reneo.requireReneoEnv) {
+    void verifyReneoRuntimeEnvironment({ force: true }).then((st) => {
+      if (!st.verified) {
+        fastify.log.warn(`[ReneoGuard] ${st.lastFailureReason}`);
+      }
+    });
+  }
   try {
     await BirthdayService.initScheduler();
     await PostService.initPostScheduler();

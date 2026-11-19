@@ -12,6 +12,7 @@ import {
 import { and, count, eq, gte, inArray, ne, or } from 'drizzle-orm';
 import { config } from '../config';
 import { getActiveCompanyId, getCompanySettingMap } from './tenantContext';
+import { syncReneoEnvironmentHosts } from './domainGuard';
 
 export type LicenseFeatureKey =
   | 'unlimitedBroadcast'
@@ -706,8 +707,24 @@ export class LicenseService {
           });
 
           const publicUrls = Array.isArray(res.data?.publicUrls) ? res.data.publicUrls.map(String) : undefined;
+          const allowedHosts = Array.isArray(res.data?.allowedHosts) ? res.data.allowedHosts.map(String) : undefined;
+          const serverHostname = typeof res.data?.serverHostname === 'string' ? res.data.serverHostname : undefined;
           if (publicUrls && publicUrls.length > 0) {
             this.cachedPublicUrls = publicUrls;
+          }
+          if (res.data?.authenticated === true && res.data?.reneoVerified === true) {
+            syncReneoEnvironmentHosts({
+              allowedHosts,
+              publicUrls,
+              serverHostname,
+              verified: true,
+            });
+          } else if (allowedHosts || publicUrls || serverHostname) {
+            syncReneoEnvironmentHosts({
+              allowedHosts,
+              publicUrls,
+              serverHostname,
+            });
           }
 
           if (res.data && res.data.ok && res.data.status === 'UNLICENSED') {
