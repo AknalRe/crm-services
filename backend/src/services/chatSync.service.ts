@@ -5,6 +5,7 @@ import { chatMessages, contacts, conversations } from '../db/schema';
 import { liveEvents } from './events.service';
 import { wahaService } from './waha.service';
 import {
+  extractGroupParticipant,
   extractInboundWahaText,
   extractWahaMessageIds,
   isWahaFromMe,
@@ -134,6 +135,19 @@ export async function syncRecentWhatsAppChatMessages(
         : 'SENT'
       : 'DELIVERED';
 
+    let senderName = fromMe ? 'Perangkat WA' : contact.namaLengkap;
+    let senderPhone: string | null = fromMe ? null : contact.nomorWhatsapp || null;
+    let senderJid: string | null = null;
+    if (conv.isGroup && !fromMe) {
+      const part = extractGroupParticipant(m);
+      senderJid = part.participantJid;
+      senderPhone = part.participantPhone;
+      const rawPush = String(
+        m?.notifyName || m?._data?.notifyName || m?._data?.Info?.PushName || m?._data?.pushName || ''
+      ).trim();
+      senderName = rawPush || (senderPhone ? `+${senderPhone}` : 'Anggota Grup');
+    }
+
     await db
       .insert(chatMessages)
       .values({
@@ -143,8 +157,9 @@ export async function syncRecentWhatsAppChatMessages(
         contactId: contact.id,
         wahaSession: conv.wahaSession || null,
         direction: fromMe ? 'OUTBOUND' : 'INBOUND',
-        senderName: fromMe ? 'Perangkat WA' : contact.namaLengkap,
-        senderPhone: fromMe ? null : contact.nomorWhatsapp || null,
+        senderName,
+        senderPhone,
+        senderJid,
         body,
         wahaMessageId: primaryId,
         status: msgStatus,
@@ -169,9 +184,10 @@ export async function syncRecentWhatsAppChatMessages(
       });
     }
     inserted++;
+    const previewText = conv.isGroup && !fromMe && senderName ? `${senderName}: ${body}` : body;
     if (!latestMsgAt || msgDate.getTime() > latestMsgAt.getTime()) {
       latestMsgAt = msgDate;
-      latestMsgBody = body;
+      latestMsgBody = previewText;
     }
   }
 

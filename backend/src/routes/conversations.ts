@@ -1573,9 +1573,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               messages,
               req.query?.forceSeen === '1'
             ).catch(() => { });
-            if (!row.conv.isGroup) {
-              void syncRecentWhatsAppChatMessages(row.conv, row.contact).catch(() => {});
-            }
+            void syncRecentWhatsAppChatMessages(row.conv, row.contact).catch(() => {});
           }
         }
       }
@@ -1960,9 +1958,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         isGroup,
         force: true,
       });
-      if (!isGroup) {
-        void syncRecentWhatsAppChatMessages(row.conv, row.contact, { force: true }).catch(() => {});
-      }
+      void syncRecentWhatsAppChatMessages(row.conv, row.contact, { force: true }).catch(() => {});
       return reply.send({
         success: true,
         data: {
