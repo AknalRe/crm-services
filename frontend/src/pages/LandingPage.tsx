@@ -1,21 +1,21 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  AlertCircle,
+  ArrowRight,
   ArrowUpRight,
   Bot,
+  CalendarClock,
   Check,
   CheckCircle2,
   ChevronDown,
   Clock,
-  Layers,
-  Maximize2,
+  HeartHandshake,
   Menu,
   MessageSquare,
-  Minus,
-  Play,
-  Radio,
-  Server,
   ShieldCheck,
+  Sparkles,
   Star,
+  TrendingUp,
   X,
 } from 'lucide-react';
 import { ReneoCrmLogo } from '../components/ReneoCrmLogo';
@@ -31,400 +31,406 @@ const PANEL_INSTALL_URL = 'https://panel.reneo.my.id/install';
 const PANEL_ORDER_URL = 'https://panel.reneo.my.id/order?addon=reneo-crm';
 
 const NAV_LINKS = [
-  { href: '#kenapa-dibuat', label: 'Kenapa Kami Buat' },
-  { href: '#modul', label: 'Modul' },
-  { href: '#studi-kasus', label: 'Studi Kasus' },
-  { href: '#kanal', label: 'Kanal' },
+  { href: '#masalah', label: 'Kenapa Penting' },
+  { href: '#kenapa-dibuat', label: 'Cerita Kami' },
+  { href: '#modul', label: 'Fitur Utama' },
+  { href: '#kanal', label: 'Semua Kanal' },
   { href: '#perbandingan', label: 'Perbandingan' },
   { href: '#faq', label: 'FAQ' },
 ];
 
-const WHY_WE_BUILT_IT = [
+const HERO_CHANNEL_PREVIEWS = [
   {
-    title: 'Chat tersebar di banyak HP admin, lalu hilang saat staf berganti',
-    detail:
-      'Saat mengurus penjualan di banyak nomor WhatsApp dan akun sosial media, tiap admin memegang perangkat sendiri. Begitu admin shift berganti atau ada staf keluar, riwayat chat lama terputus dan pelanggan harus menjelaskan kendalanya dari awal.',
+    id: 'instagram',
+    label: 'Instagram',
+    badgeClass: 'bg-pink-50 text-pink-700 border-pink-200',
+    dotClass: 'bg-pink-500',
+    customerName: '@nadia.beautystore',
+    customerSub: 'DM dari Komentar Reels Promo',
+    statusLabel: 'Ditangani Rina',
+    incoming: 'Kak, paket skincare yang di video tadi masih promo ongkir gratis hari ini?',
+    outgoing: 'Masih berlaku sampai jam 21.00 ya Kak Nadia! Mau dibantu pilih varian yang cocok?',
+    footerNote: 'Komentar iklan otomatis dibalas & masuk ke kotak masuk CS.',
   },
   {
-    title: 'Chat internal, kurir, dan grup WA mengacaukan laporan SLA',
-    detail:
-      'Dalam praktik harian, nomor CS tidak hanya menerima pesan pembeli, tetapi juga pesan kurir, supplier, tim internal, dan grup operasional. Di alat CRM biasa, semua ikut dihitung sebagai antrean SLA dan malah mendapat survei rating CSAT.',
+    id: 'whatsapp',
+    label: 'WhatsApp',
+    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    dotClass: 'bg-emerald-500',
+    customerName: 'Siti Aminah',
+    customerSub: 'WhatsApp Cabang Pusat · Sesi #2',
+    statusLabel: 'Rating 5/5',
+    incoming: 'Halo kak, mau repeat order paket bundling 3 pcs seperti bulan lalu ya.',
+    outgoing: 'Siap Kak Siti! Data alamat & pesanan sebelumnya sudah tercatat. Total Rp 245.000 ya.',
+    footerNote: 'Riwayat order lama tetap utuh meski ditangani admin shift berbeda.',
   },
   {
-    title: 'Sulit memisahkan batas sesi tanpa memutus riwayat pelanggan',
-    detail:
-      'Pembeli lama sering kembali bertanya minggu berikutnya. Kami ingin riwayat percakapan tetap utuh dalam satu benang, tetapi setiap siklus penanganan tetap punya penanda Batas Mulai Sesi dan Batas Selesai Sesi beserta penilaian CSAT masing-masing.',
+    id: 'facebook',
+    label: 'Facebook',
+    badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
+    dotClass: 'bg-blue-600',
+    customerName: 'Budi Santoso',
+    customerSub: 'Facebook Messenger · Halaman Toko',
+    statusLabel: 'Respon 1 mnt',
+    incoming: 'Min, kalau kirim ke Surabaya hari ini estimasi sampai kapan ya?',
+    outgoing: 'Kalau transfer sebelum jam 15.00 ikut pengiriman hari ini Pak Budi, estimasi 1–2 hari sampai.',
+    footerNote: 'Pesan Halaman Facebook & komentar postingan dibalas dari satu layar.',
   },
   {
-    title: 'Biaya per pesan membengkak dan database tersandera di server luar',
-    detail:
-      'Ketika tim CS bertumbuh, biaya per kursi dan biaya per pesan terus naik, sementara data kontak serta histori pelanggan tidak berada di server sendiri. Kami ingin perangkat yang berjalan penuh di PostgreSQL & Redis milik sendiri.',
+    id: 'telegram',
+    label: 'Telegram',
+    badgeClass: 'bg-sky-50 text-sky-700 border-sky-200',
+    dotClass: 'bg-sky-500',
+    customerName: 'Reseller Malang',
+    customerSub: 'Telegram · Mitra Grosir',
+    statusLabel: 'Prioritas',
+    incoming: 'Kak, stok katalog grosir minggu ini sudah update belum?',
+    outgoing: 'Sudah siap Kak! Ini daftar harga grosir terbaru langsung saya kirimkan ya.',
+    footerNote: 'Semua pesan pelanggan dari berbagai aplikasi terkumpul tanpa pindah tab.',
   },
 ];
 
-const ARCHITECTURE_SPECS = [
+const HIDDEN_COSTS = [
   {
-    label: '6+ Kanal Resmi & QR',
-    detail: 'Multi-sesi WA, Grup @g.us, WA Cloud API, IG, FB, Threads, Telegram',
+    stat: '15 Menit',
+    title: 'Telat balas sedikit, calon pembeli pindah ke toko sebelah',
+    detail:
+      'Saat chat dari Instagram, Facebook, Telegram, dan beberapa nomor WhatsApp menumpuk di HP terpisah, pesan pembeli yang siap bayar sering baru terbaca saat mereka sudah membeli di tempat lain.',
   },
   {
-    label: 'RBAC 18+ Kontrol Izin',
-    detail: 'Batasi akses menu, ekspor CSV, aksi balas & pengaturan per role',
+    stat: 'Ganti Shift',
+    title: 'Admin berganti, konteks pelanggan langsung hilang',
+    detail:
+      'Pembeli paling malas diminta menjelaskan ulang keluhan atau pesanan yang sudah dibahas kemarin. Tanpa riwayat terpusat, tim Anda terlihat kurang kompak di mata pelanggan.',
   },
   {
-    label: 'Sesi SLA & CSAT Akurat',
-    detail: 'Batas Mulai/Selesai Sesi tanpa reset chat & filter Non-Penilaian',
+    stat: 'Tanpa Ukur',
+    title: 'Sulit tahu mana CS yang sigap dan mana iklan yang benar-benar menghasilkan',
+    detail:
+      'Karena chat pembeli bercampur dengan pesan kurir, vendor, dan grup internal, Anda tidak pernah tahu kecepatan balas sebenarnya maupun tingkat kepuasan pelanggan.',
+  },
+];
+
+const STORY_BEATS = [
+  {
+    step: 'Kami pernah mengalami',
+    text: 'Pesan pelanggan tersebar di beberapa HP admin dan akun media sosial yang berbeda. Saat staf berganti shift atau perangkat bermasalah, riwayat obrolan terputus, sementara pesan kurir, supplier, dan grup internal bercampur dengan chat pembeli.',
   },
   {
-    label: 'Self-Hosted PG + Redis',
-    detail: 'Data persisten di server sendiri, nol biaya tambahan per pesan',
+    step: 'Kami menyadari',
+    text: 'Masalah tersebut ternyata bukan sekadar persoalan kecil. Ketika jumlah pesan meningkat, pembeli menunggu terlalu lama, admin mengulang pertanyaan yang sama, dan kualitas pelayanan tim menjadi sulit diukur.',
+  },
+  {
+    step: 'Kami merasa',
+    text: 'Solusi yang tersedia saat ini belum benar-benar menjawab kebutuhan operasional harian kami — banyak yang biayanya terus membengkak tiap tambah admin atau pesan, menyimpan data pelanggan di tempat lain, dan belum rapi memisahkan chat non-pelanggan.',
+  },
+  {
+    step: 'Karena itu, kami membuat Reneo CRM',
+    text: 'Bukan karena sekadar ingin membuat aplikasi baru, melainkan membangun ruang kerja yang lahir langsung dari kebutuhan nyata tim kami sendiri agar semua pesan pelanggan di berbagai kanal bisa ditangani dengan tenang.',
+  },
+  {
+    step: 'Tujuan kami',
+    text: 'Membuat pengelolaan percakapan pelanggan, pembagian kerja tim, batas sesi layanan, dan evaluasi kepuasan yang sebelumnya melelahkan menjadi jauh lebih terstruktur, terukur, dan mudah dilakukan setiap hari.',
   },
 ];
 
 const MODULE_TABS = [
   {
     id: 'inbox',
-    num: '01',
-    title: 'Kotak Masuk 6 Kanal & Multi-Sesi WA',
+    shortLabel: 'Kotak Masuk',
+    title: 'Satu Kotak Masuk untuk Semua Kanal Pelanggan',
     summary:
-      'Gabungkan pesan WhatsApp QR multi-nomor, WhatsApp Cloud API, Instagram DM & komentar, Facebook Messenger, Threads, dan Telegram di satu antrean kerja.',
+      'Balas pesan dari Instagram, Facebook, Threads, Telegram, hingga banyak nomor WhatsApp dari satu tempat yang sama — tanpa lagi oper-operan HP di kantor.',
     icon: MessageSquare,
     highlights: [
-      'Pemisahan percakapan per nomor WA & push name sambil tetap tertaut pada 1 profil kontak.',
-      'Kirim media (foto, video, audio, dokumen), balasan kutipan (quote reply), tombol interaktif, polling WA, dan Quick Quote produk.',
-      'Dukungan penuh chat Grup WhatsApp (@g.us) beserta daftar partisipan dan resolusi @mention.',
+      'Semua pesan masuk dari media sosial dan WhatsApp langsung rapi dalam satu antrean yang mudah dicari.',
+      'Kirim foto, video, dokumen, katalog harga produk, hingga balasan cepat pakai template dalam satu klik.',
+      'Pesan dari komentar iklan atau postingan Instagram & Facebook bisa otomatis dibalas dan dilanjutkan ke DM.',
     ],
-    techNote: 'Sinkronisasi real-time SSE dengan status pesan terkirim/dibaca dan indikator mengetik.',
+    benefitNote: 'Tim lebih fokus melayani pembeli, bukan sibuk membuka banyak aplikasi dan layar berbeda.',
   },
   {
-    id: 'rbac',
-    num: '02',
-    title: 'Role Multi-CS & Kontrol Non-Penilaian',
+    id: 'team',
+    shortLabel: 'Tim & Akses',
+    title: 'Bagi Tugas Tim CS Tanpa Khawatir Data Bocor',
     summary:
-      'Atur hak akses staf shift hingga supervisor tanpa membuka akses ekspor database kontak atau pengaturan WAHA.',
+      'Atur siapa menangani obrolan mana dan batasi akses tiap staf sesuai perannya — sehingga data pelanggan tetap aman meski tim terus bertambah.',
     icon: ShieldCheck,
     highlights: [
-      'Builder role custom dengan 18+ izin menu hingga level tombol dan endpoint API.',
-      'Grup WhatsApp otomatis berstatus Non-Penilaian agar tidak merusak skor SLA dan CSAT.',
-      'Penandaan kontak internal/vendor sebagai Non-Penilaian permanen berlaku lintas sesi.',
+      'Pilih hak akses tiap staf secara fleksibel: staf baru cukup melihat obrolan miliknya tanpa bisa mengunduh daftar kontak.',
+      'Tandai chat internal, kurir, supplier, atau grup kantor sebagai Non-Penilaian agar tidak mengacaukan laporan CS.',
+      'Supervisor tetap bisa memantau seluruh antrean percakapan dan membantu kapan saja dibutuhkan.',
     ],
-    techNote: 'Autentikasi cookie HttpOnly terpisah per ruang kerja perusahaan.',
+    benefitNote: 'Database pelanggan tetap utuh dan aman di ruang milik usaha Anda sendiri.',
   },
   {
     id: 'sla',
-    num: '03',
-    title: 'Batas Sesi Tiket, SLA & CSAT Multi-Sesi',
+    shortLabel: 'Kecepatan & Rating',
+    title: 'Ukur Kecepatan Balas & Kepuasan Pelanggan Secara Nyata',
     summary:
-      'Catat siklus penanganan pelanggan dari awal sesi dibuka hingga tiket ditutup tanpa pernah menghapus riwayat percakapan terdahulu.',
+      'Pantau berapa menit rata-rata tim membalas dan kumpulkan penilaian langsung dari pelanggan setiap kali satu sesi layanan selesai.',
     icon: Clock,
     highlights: [
-      'Penanda visual Batas Mulai Sesi dan Batas Selesai Sesi otomatis di linimasa obrolan.',
-      'Survei CSAT multi-kriteria (profil penilaian bisa dibedakan per kanal, label, atau sesi WA).',
-      'Analitik klik-untuk-detail (drilldown) pada KPI dashboard untuk melompat ke segmen sesi terkait.',
+      'Setiap kali pelanggan kembali menghubungi di hari lain, sistem menandai batas mulai dan selesai sesi baru tanpa menghapus chat lama.',
+      'Kirim tautan penilaian bintang & masukan pelanggan otomatis setelah obrolan ditandai selesai.',
+      'Lihat jam paling sibuk dan performa tiap admin langsung dari dashboard agar jadwal shift lebih tepat.',
     ],
-    techNote: 'Pelacakan waktu respons pertama, kepatuhan SLA, dan rekam histori survei CSAT.',
+    benefitNote: 'Keputusan bisnis berbasis data nyata, bukan lagi sekadar kira-kira.',
   },
   {
-    id: 'broadcast',
-    num: '04',
-    title: 'Siaran Anti-Ban & WhatsApp Story Terjadwal',
+    id: 'campaign',
+    shortLabel: 'Konten & Promosi',
+    title: 'Jadwalkan Konten Sosial & Pesan Promosi Lebih Teratur',
     summary:
-      'Kelola kampanye siaran dan jadwal posting media sosial serta WhatsApp Status dari satu kalender kerja.',
-    icon: Radio,
+      'Selain membalas chat, tim Anda juga bisa menjadwalkan postingan media sosial, pengingat ulang tahun pelanggan, dan siaran promo secara terarah.',
+    icon: CalendarClock,
     highlights: [
-      'Antrean siaran BullMQ dengan jeda natural antar pesan dan rotasi multi-sesi WA.',
-      'Jadwalkan WhatsApp Story (teks, foto, video, audio) ke daftar kontak pilihan & cek penonton Story.',
-      'Otomasi balasan komentar Instagram, Facebook, dan Threads sekaligus pembuka DM.',
+      'Jadwalkan unggahan Instagram, Facebook, Threads, hingga pembaruan status WhatsApp dari satu kalender kerja.',
+      'Kirim pengingat promo atau info produk baru ke segmen pelanggan terpilih dengan jeda pengiriman yang aman.',
+      'Kirim ucapan ulang tahun otomatis agar pelanggan lama merasa diperhatikan dan kembali berbelanja.',
     ],
-    techNote: 'Worker antrean Redis menjalankan jeda kirim dan jadwal posting tanpa membebani proses chat.',
+    benefitNote: 'Promosi rutin berjalan konsisten tanpa perlu dilakukan manual satu per satu.',
   },
   {
     id: 'ai',
-    num: '05',
-    title: 'Agent AI Multi-Model, Knowledge Book & MCP',
+    shortLabel: 'Asisten AI',
+    title: 'Asisten AI yang Menjawab Cepat Sesuai Gaya Bahasa Toko Anda',
     summary:
-      'Gunakan panduan produk Markdown agar AI menjawab pertanyaan dasar di luar jam kerja atau menyiapkan draf balasan CS.',
+      'Saat antrean sedang ramai atau di luar jam kerja, Asisten AI membantu menjawab pertanyaan dasar berdasarkan panduan produk dan kebijakan bisnis Anda sendiri.',
     icon: Bot,
     highlights: [
-      'Mendukung OpenAI, Gemini, Anthropic, hingga model lokal Ollama tanpa kunci vendor.',
-      'Knowledge Book terstruktur, skill kustom Markdown, dan failover otomatis antar penyedia model.',
-      'Koneksi eksternal ke sistem katalog/ERP melalui Model Context Protocol (MCP) tools.',
+      'Cukup unggah daftar harga, FAQ, atau panduan produk Anda agar jawaban AI selalu akurat dan tidak mengarang.',
+      'Atur gaya bahasa ramah sesuai karakter merek Anda — bisa membantu di jam malam atau saat CS sedang penuh.',
+      'Kapan saja pelanggan butuh bantuan manusia, admin bisa langsung mengambil alih percakapan dengan mulus.',
     ],
-    techNote: 'Bisa diatur membalas berdasarkan jam operasional, tag obrolan, atau eskalasi ke agen manusia.',
+    benefitNote: 'Calon pembeli tetap mendapat sambutan cepat meski menghubungi di luar jam operasional.',
   },
 ];
 
-const USE_CASE_ROWS = [
-  {
-    segment: 'Toko Online & Multi-Nomor WhatsApp',
-    problem:
-      'Pelanggan menghubungi Nomor Admin A dan Nomor Cabang B — chat tercampur jadi satu benang, atau nama kontak berubah-ubah saat push name baru masuk.',
-    solution:
-      'Percakapan dipisah per nomor WhatsApp dan kanal sosial dengan push name atau label khusus per kanal, namun tetap tertaut ke profil pelanggan tunggal beserta identitas lintas kanalnya.',
-  },
-  {
-    segment: 'Tim Multi-CS dengan Kebutuhan Role Ketat',
-    problem:
-      'Semua akun staf punya akses yang sama — CS baru berisiko menghapus kontak, mengunduh seluruh database CSV, membuka chat agen lain, atau mengubah integrasi WAHA.',
-    solution:
-      'Buat Role custom dari checklist batasan menu, aksi, dan tombol (termasuk izin lihat semua chat, balas/kelola tiket, ekspor CSV, edit kontak, kirim siaran, hingga kelola pengaturan).',
-  },
-  {
-    segment: 'Grup WhatsApp & Chat Internal Mengacaukan Laporan',
-    problem:
-      'Pesan dari grup WhatsApp operasional, kurir, vendor, atau bot ikut masuk perhitungan SLA keterlambatan balas dan memicu survei CSAT otomatis.',
-    solution:
-      'Grup WhatsApp (@g.us) masuk lengkap dengan daftar partisipan & otomatis berstatus Non-Penilaian. Kontak non-customer juga bisa ditandai Non-Penilaian permanen agar obrolan seterusnya tetap dikecualikan.',
-  },
-  {
-    segment: 'Promosi WhatsApp Story & Jadwal Konten Harian',
-    problem:
-      'Admin lupa posting Story WA atau unggahan IG/FB/Threads saat jam promo, tidak bisa menyasar kontak WA tertentu, dan tidak tahu siapa saja yang menonton Story.',
-    solution:
-      'Jadwalkan postingan lintas kanal serta WhatsApp Story (teks, gambar, video, suara) ke daftar kontak terpilih, lengkap dengan sinkronisasi data penonton Story dari WhatsApp.',
-  },
-  {
-    segment: 'Evaluasi SLA, CSAT Multi-Sesi & Analitik Terlalu Dangkal',
-    problem:
-      'Pelanggan bertanya berkali-kali di hari berbeda, tetapi riwayat chat tertimpa/terputus dan angka grafik dashboard tidak menjelaskan percakapan mana yang lambat dibalas.',
-    solution:
-      'Riwayat chat tetap utuh tanpa reset; setiap sesi mencatat Batas Mulai Sesi hingga Batas Selesai Sesi dan mengirim survei CSAT multi-kriteria baru dengan fitur drilldown langsung dari grafik dashboard.',
-  },
-  {
-    segment: 'Komentar Iklan IG / FB / Threads & Pertanyaan Luar Jam Kerja',
-    problem:
-      'Komentar "harga?" di postingan iklan menumpuk tanpa DM balasan, sementara chat malam hari menunggu admin pagi hingga calon pembeli keburu pindah toko.',
-    solution:
-      'Balas komentar & kirim pembuka DM otomatis, jalankan auto-reply kata kunci/jam operasional, atau aktifkan Agent AI (OpenAI, Gemini, Anthropic, Ollama, Knowledge Book & MCP Tools).',
-  },
-];
-
-const CHANNEL_ROWS = [
-  {
-    name: 'WhatsApp (Scan QR Multi-Sesi)',
-    mode: 'Chat, Grup & Story',
-    detail: 'Hubungkan banyak nomor WA sekaligus, sinkronkan kontak & grup WA, plus jadwalkan WhatsApp Story.',
-  },
-  {
-    name: 'WhatsApp Bisnis Resmi',
-    mode: 'Meta Cloud API',
-    detail: 'Nomor resmi terverifikasi untuk komunikasi terstruktur, media interaktif, dan siaran bisnis.',
-  },
+const CHANNELS = [
   {
     name: 'Instagram',
-    mode: 'DM, Feed & Komentar',
-    detail: 'Balas DM, jadwalkan postingan feed, dan kirim DM otomatis ke komentar iklan dari satu layar.',
+    role: 'DM, Komentar & Postingan',
+    desc: 'Balas DM pelanggan, tanggapi komentar postingan/iklan otomatis jadi DM, dan jadwalkan konten feed.',
+    badge: 'bg-pink-50 text-pink-700 border-pink-200',
   },
   {
-    name: 'Facebook Messenger',
-    mode: 'Halaman & Komentar',
-    detail: 'Kelola pesan masuk halaman bisnis, penjadwalan post Page, dan komentar tanpa pindah aplikasi.',
+    name: 'WhatsApp',
+    role: 'Multi-Nomor, Grup & Story',
+    desc: 'Hubungkan banyak nomor admin maupun akun bisnis resmi sekaligus, lengkap dengan riwayat grup dan jadwal Story.',
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  },
+  {
+    name: 'Facebook',
+    role: 'Messenger & Halaman Bisnis',
+    desc: 'Tangani pesan masuk halaman toko, balas komentar calon pembeli, dan jadwalkan unggahan berkala.',
+    badge: 'bg-blue-50 text-blue-700 border-blue-200',
   },
   {
     name: 'Threads',
-    mode: 'Post & Mentions',
-    detail: 'Jadwalkan utas Threads serta pantau dan balas interaksi komentar akun usaha Anda.',
+    role: 'Utas & Interaksi Akun',
+    desc: 'Jadwalkan utas rutin dan pantau interaksi audiens merek Anda bersama kanal komunikasi lainnya.',
+    badge: 'bg-slate-100 text-slate-800 border-slate-200',
   },
   {
     name: 'Telegram',
-    mode: 'Bot Bisnis & Channel',
-    detail: 'Terima pertanyaan pelanggan lewat bot Telegram atau jadwalkan pengumuman ke channel.',
+    role: 'Pesan Pelanggan & Channel',
+    desc: 'Layani pertanyaan pembeli, mitra, atau reseller melalui Telegram langsung dari kotak masuk utama.',
+    badge: 'bg-sky-50 text-sky-700 border-sky-200',
+  },
+  {
+    name: 'Komentar Iklan & Post',
+    role: 'Ubah Komentar Jadi Pembeli',
+    desc: 'Jangan biarkan komentar "mau dong" atau "cek harga" tenggelam — balas otomatis dan arahkan ke obrolan pribadi.',
+    badge: 'bg-amber-50 text-amber-800 border-amber-200',
   },
 ];
 
 const COMPARISON_ROWS = [
   {
-    aspect: 'Semua chat WA, WA Bisnis, IG, FB, Threads & Telegram di 1 layar',
-    manual: { ok: false, text: 'Harus buka banyak HP & aplikasi' },
-    saas: { ok: true, text: 'Ada, umumnya dibatasi kuota kanal' },
-    reneo: { ok: true, text: '6 kanal + multi-nomor WA terpisah per sesi' },
+    aspect: 'Mengelola banyak kanal sekaligus',
+    manual: 'Buka HP dan aplikasi satu per satu, chat mudah terlewat',
+    other: 'Tersedia, tetapi sering dibatasi kuota kanal & biaya tambah admin tinggi',
+    reneo: 'Instagram, WhatsApp, Facebook, Threads & Telegram menyatu di satu layar',
   },
   {
-    aspect: 'Role CS Custom dengan batasan menu, aksi & tombol di UI/API',
-    manual: { ok: false, text: 'Semua pegang HP akses penuh' },
-    saas: { ok: true, text: 'Umumnya terkunci di paket Enterprise' },
-    reneo: { ok: true, text: 'Termasuk builder Role & izin granular' },
+    aspect: 'Keamanan & kepemilikan data pelanggan',
+    manual: 'Rawan hilang saat HP rusak atau staf keluar',
+    other: 'Data tersimpan di tempat penyedia luar',
+    reneo: 'Data pelanggan tersimpan aman di ruang milik usaha Anda sendiri',
   },
   {
-    aspect: 'Pengecualian grup WA & kontak Non-Penilaian pada metrik SLA/CSAT',
-    manual: { ok: false, text: 'Sulit dipilah di spreadsheet' },
-    saas: { ok: false, text: 'Semua chat masuk rata dihitung laporan' },
-    reneo: { ok: true, text: 'Otomatis untuk grup WA & melekat di kontak' },
+    aspect: 'Kebersihan laporan kecepatan & kepuasan CS',
+    manual: 'Harus rekap manual dan sulit objektif',
+    other: 'Chat kurir, vendor, atau grup kantor ikut mengacaukan angka laporan',
+    reneo: 'Bisa menandai chat non-pelanggan agar laporan SLA & kepuasan tetap akurat',
   },
   {
-    aspect: 'WhatsApp Story terjadwal + pilih target kontak + sinkron penonton',
-    manual: { ok: false, text: 'Posting manual tiap hari dari HP' },
-    saas: { ok: false, text: 'Tidak tersedia untuk WA Status/Story' },
-    reneo: { ok: true, text: 'Terjadwal multi-format + daftar penonton' },
-  },
-  {
-    aspect: 'Kepemilikan data pelanggan & biaya per pesan dari panel',
-    manual: { ok: false, text: 'Chat hilang jika HP rusak / staf resign' },
-    saas: { ok: false, text: 'Data di server vendor + biaya per pesan' },
-    reneo: { ok: true, text: '100% di server sendiri, nol biaya pesan panel' },
-  },
-  {
-    aspect: 'Analitik Drilldown klik-untuk-detail + Agent AI (Multi-Model & MCP)',
-    manual: { ok: false, text: 'Tidak ada metrik SLA & AI' },
-    saas: { ok: true, text: 'Biasanya add-on berbayar terpisah' },
-    reneo: { ok: true, text: 'Bawaan langsung & fleksibel bawa API key sendiri' },
-  },
-];
-
-const STEPS = [
-  {
-    num: '01',
-    title: 'Pilih Hosting Siap Pakai atau Server Sendiri',
-    desc: 'Beli paket Hosting + Reneo CRM dalam satu tagihan agar langsung aktif, atau pasang image Docker CRM ini di server Linux milik Anda sendiri.',
-  },
-  {
-    num: '02',
-    title: 'Setup Akun & Aktifkan Lisensi (Trial 7 Hari)',
-    desc: 'Buka alamat CRM Anda, buat akun pemilik usaha pertama, lalu aktifkan Trial 7 Hari gratis atau pilih paket lisensi yang sesuai.',
-  },
-  {
-    num: '03',
-    title: 'Sambungkan Kanal, Sinkron Kontak & Atur Role CS',
-    desc: 'Scan QR WhatsApp multi-nomor, sinkronkan kontak WhatsApp, hubungkan kanal sosial media, lalu buat Role & akun tim CS sesuai batas wewenangnya.',
+    aspect: 'Pengeluaran saat tim & chat bertambah',
+    manual: 'Harus beli HP tambahan untuk tiap admin baru',
+    other: 'Biaya berlipat mengikuti jumlah admin dan jumlah pesan',
+    reneo: 'Paket jelas & terjangkau tanpa biaya tambahan per pesan dari panel',
   },
 ];
 
 const FAQS = [
   {
-    q: 'Apa itu Reneo CRM dan untuk siapa aplikasi ini dibuat?',
-    a: 'Reneo CRM adalah aplikasi inbox pelanggan self-hosted untuk toko online, tim Customer Service multi-admin, dan usaha multi-cabang. Seluruh data kontak dan riwayat chat disimpan langsung di database PostgreSQL server Anda sendiri.',
+    q: 'Apakah saya harus mengerti hal teknis untuk mulai memakai Reneo CRM?',
+    a: 'Tidak perlu. Anda bisa memilih paket siap pakai yang langsung aktif dan siap digunakan oleh tim CS Anda, dengan masa coba gratis 7 hari terlebih dahulu.',
   },
   {
-    q: 'Apakah bisa memakai banyak nomor WhatsApp QR dan WhatsApp Bisnis Resmi bersamaan?',
-    a: 'Bisa. Satu pelanggan yang mengirim pesan ke Nomor A dan Nomor B dipisahkan jendela percakapannya sesuai sesi dan push name masing-masing, tetapi tetap terhubung ke satu profil kontak CRM.',
+    q: 'Apakah Reneo CRM hanya untuk WhatsApp saja?',
+    a: 'Tidak. Reneo CRM dirancang untuk menyatukan seluruh percakapan pelanggan Anda — mulai dari Instagram DM & komentar, Facebook Messenger, Threads, Telegram, hingga banyak nomor WhatsApp dalam satu ruang kerja.',
   },
   {
-    q: 'Bagaimana agar chat tim internal, kurir, atau grup WhatsApp tidak mengacaukan laporan SLA & CSAT?',
-    a: 'Obrolan grup WhatsApp otomatis ditandai Non-Penilaian (dan partisipannya tetap terlihat di panel chat). Untuk kontak pribadi internal/vendor, cukup tandai Non-Penilaian sekali — sistem akan menerapkannya ke kontak tersebut serta seluruh percakapan berikutnya secara otomatis.',
+    q: 'Apakah riwayat chat pelanggan aman jika ada admin yang berganti shift atau resign?',
+    a: 'Ya. Seluruh riwayat percakapan, catatan internal, dan profil pelanggan tersimpan terpusat. Anda cukup mengganti akses staf tanpa pernah kehilangan riwayat obrolan lama.',
   },
   {
-    q: 'Apakah saya bisa membatasi staf CS agar hanya melihat chat miliknya dan tidak bisa menghapus/mengekspor data?',
-    a: 'Bisa. Melalui menu Role & Batasan Akses, Anda dapat membuat role baru (seperti CS Shift, Supervisor, atau Konten) dan mencentang izin per menu hingga level tombol (balas chat, kirim CSAT, tambah/hapus kontak, ekspor CSV, atau pengaturan WAHA).',
+    q: 'Bagaimana jika nomor CS juga sering dipakai untuk chat kurir atau grup kantor?',
+    a: 'Anda dapat menandai kontak tertentu maupun grup kantor sebagai Non-Penilaian. Obrolan tetap bisa dibalas seperti biasa, tetapi tidak akan mengganggu laporan kecepatan respon dan tidak dikirimi survei kepuasan.',
   },
   {
-    q: 'Apakah ada biaya tambahan per pesan saat mengirim broadcast, Story WA, atau membalas chat?',
-    a: 'Tidak ada biaya tambahan per pesan dari panel Reneo. Nomor WhatsApp yang terhubung via scan QR (WAHA) tidak dikenakan biaya per percakapan Meta. Jika Anda memakai WhatsApp Cloud API resmi Meta, biaya mengikuti tarif langsung dari Meta Business.',
-  },
-  {
-    q: 'Bagaimana mekanisme Batas Mulai Sesi, Batas Selesai Sesi, dan CSAT multi-sesi bekerja?',
-    a: 'Riwayat chat tidak pernah direset agar audit mudah ditelusuri. Setiap siklus penanganan dimulai dengan penanda Batas Mulai Sesi hingga Batas Selesai Sesi dan membuat tiket survei CSAT tersendiri, lengkap dengan highlight segmen chat terkait.',
-  },
-  {
-    q: 'Apakah data kontak dan riwayat chat tetap aman jika ada staf CS keluar?',
-    a: 'Aman. Semua data kontak, identitas lintas kanal, dan riwayat percakapan tersimpan utuh di PostgreSQL pada server milik Anda sendiri. Anda cukup menonaktifkan atau mengganti role akun CS tersebut di Pengaturan.',
+    q: 'Apakah bisa dicoba dulu sebelum berlangganan?',
+    a: 'Tentu. Anda dapat memulai masa uji coba gratis selama 7 hari untuk merasakan langsung alur kerja tim Anda di Reneo CRM sebelum memutuskan berlangganan.',
   },
 ];
+
+function RevealSection({
+  children,
+  className = '',
+  id,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  id?: string;
+}) {
+  const ref = useRef<HTMLElement | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.08, rootMargin: '0px 0px -32px 0px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <section
+      id={id}
+      ref={ref}
+      className={`transition-all duration-700 ease-out ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'
+      } ${className}`}
+    >
+      {children}
+    </section>
+  );
+}
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   initialized,
   authenticated = false,
   onEnterLogin,
 }) => {
-  const [activeModuleId, setActiveModuleId] = useState<string>(MODULE_TABS[0].id);
+  const [activeModuleId, setActiveModuleId] = useState(MODULE_TABS[0].id);
+  const [activeHeroChannelId, setActiveHeroChannelId] = useState(HERO_CHANNEL_PREVIEWS[0].id);
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const currentHost =
-    typeof window !== 'undefined' && window.location.host
-      ? window.location.host
-      : 'panel.reneo.my.id';
+
   const activeModule = MODULE_TABS.find((m) => m.id === activeModuleId) || MODULE_TABS[0];
-  const ActiveIcon = activeModule.icon;
+  const activeHeroChannel =
+    HERO_CHANNEL_PREVIEWS.find((c) => c.id === activeHeroChannelId) || HERO_CHANNEL_PREVIEWS[0];
+  const ActiveModuleIcon = activeModule.icon;
 
   return (
-    <div className="min-h-screen supports-[height:100dvh]:min-h-dvh bg-[#f8fafc] text-slate-900 font-sans overflow-y-auto">
-      {/* Sticky Compro Header */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
+    <div className="min-h-screen bg-[#f8fafc] text-[#0f172a] antialiased overflow-x-clip">
+      {/* Top Navbar */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+          <a href="#" className="flex items-center gap-2.5 min-w-0">
             <ReneoCrmLogo className="w-8 h-8 shrink-0" />
-            <div className="min-w-0">
-              <div className="text-sm font-bold text-slate-900 leading-tight truncate">
+            <div className="leading-tight min-w-0">
+              <div className="text-sm font-bold text-slate-900 tracking-tight truncate">
                 Reneo CRM
               </div>
-              <div className="text-[11px] font-mono text-slate-500 leading-tight truncate">
-                {currentHost}
+              <div className="text-[11px] text-slate-500 hidden sm:block">
+                Satu Ruang Kerja Layanan Pelanggan
               </div>
             </div>
-          </div>
+          </a>
 
-          <nav aria-label="Navigasi Halaman" className="hidden md:flex items-center gap-5 text-xs font-medium text-slate-600">
+          <nav className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-600">
             {NAV_LINKS.map((link) => (
               <a
                 key={link.href}
                 href={link.href}
-                className="hover:text-slate-900 transition-colors whitespace-nowrap"
+                className="hover:text-slate-900 transition-colors"
               >
                 {link.label}
               </a>
             ))}
           </nav>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={onEnterLogin}
-              className={`h-8 px-2.5 sm:px-3 rounded-lg text-xs font-medium inline-flex items-center transition-colors whitespace-nowrap cursor-pointer ${
-                authenticated
-                  ? 'bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-semibold'
-                  : 'border border-slate-200 hover:bg-slate-50 text-slate-700'
-              }`}
+              className="hidden sm:inline-flex h-10 px-4 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium items-center transition-colors"
             >
-              {authenticated ? (
-                <>
-                  <span className="sm:hidden">Workspace</span>
-                  <span className="hidden sm:inline">Buka Workspace CRM</span>
-                </>
-              ) : (
-                <>
-                  <span>{initialized ? 'Masuk' : 'Setup'}</span>
-                  <span className="hidden sm:inline">&nbsp;CRM</span>
-                </>
-              )}
+              {authenticated ? 'Buka Workspace' : initialized ? 'Masuk' : 'Lanjutkan Setup'}
             </button>
             <a
               href={PANEL_ORDER_URL}
               target="_top"
-              className="h-8 px-2.5 sm:px-3.5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center transition-colors whitespace-nowrap"
+              className="h-10 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center gap-1.5 transition-colors shadow-xs"
             >
-              <span className="sm:hidden">Beli Paket</span>
-              <span className="hidden sm:inline">Beli Hosting + CRM</span>
+              <span>Coba Gratis 7 Hari</span>
+              <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
             </a>
             <button
               type="button"
-              onClick={() => setMobileMenuOpen((prev) => !prev)}
-              aria-label="Menu navigasi"
-              aria-expanded={mobileMenuOpen}
-              className="md:hidden h-8 w-8 rounded-lg border border-slate-200 inline-flex items-center justify-center text-slate-600 hover:bg-slate-50"
+              onClick={() => setMobileMenuOpen((v) => !v)}
+              aria-label="Toggle navigasi"
+              className="lg:hidden h-10 w-10 rounded-lg border border-slate-200 bg-white text-slate-700 inline-flex items-center justify-center hover:bg-slate-50"
             >
-              {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
 
-        {/* Mobile Nav Drawer */}
         {mobileMenuOpen && (
-          <nav aria-label="Menu Mobile" className="md:hidden border-t border-slate-200 bg-white px-4 py-3 flex flex-col gap-1">
+          <nav className="lg:hidden border-t border-slate-200 bg-white px-4 py-3.5 flex flex-col gap-1.5 text-sm shadow-sm">
             {NAV_LINKS.map((link) => (
               <a
                 key={link.href}
                 href={link.href}
                 onClick={() => setMobileMenuOpen(false)}
-                className="py-2 text-xs font-medium text-slate-700 hover:text-slate-900"
+                className="px-3 py-2.5 rounded-lg text-slate-700 hover:bg-slate-100 font-medium"
               >
                 {link.label}
               </a>
             ))}
-            <div className="pt-2 mt-1 border-t border-slate-100 flex flex-col gap-2">
+            <div className="pt-2.5 mt-1 border-t border-slate-100 flex flex-col gap-2">
               <a
                 href={PANEL_ORDER_URL}
                 target="_top"
-                className="h-9 px-3 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-xs font-semibold inline-flex items-center justify-center"
+                className="h-11 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5"
               >
-                Beli Hosting + CRM &amp; Lisensi
+                <span>Coba Gratis 7 Hari</span>
+                <ArrowUpRight className="w-4 h-4" />
               </a>
               <button
                 type="button"
@@ -432,12 +438,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   setMobileMenuOpen(false);
                   onEnterLogin();
                 }}
-                className="h-9 px-3 rounded-lg border border-slate-200 text-slate-700 text-xs font-medium inline-flex items-center justify-center"
+                className="h-11 px-4 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium inline-flex items-center justify-center"
               >
                 {authenticated
                   ? 'Buka Workspace CRM'
                   : initialized
-                  ? 'Masuk ke Ruang Kerja CRM'
+                  ? 'Masuk ke Ruang Kerja'
                   : 'Lanjutkan Setup CRM'}
               </button>
             </div>
@@ -446,550 +452,433 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       </header>
 
       <main>
-        {/* Executive Compro Hero */}
+        {/* Hero Section */}
         <section className="bg-white border-b border-slate-200">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14 space-y-10">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-16 space-y-10">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
               <div className="lg:col-span-6 space-y-5">
-                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200 text-[11px] font-mono font-medium text-slate-700">
-                  <Server className="w-3.5 h-3.5 text-[#2563eb]" strokeWidth={1.75} />
-                  <span>Self-Hosted CRM · PostgreSQL &amp; Redis</span>
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-xs font-semibold text-[#1d4ed8]">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
+                  <span>Instagram · WhatsApp · Facebook · Threads · Telegram</span>
                 </div>
 
-                <h1 className="text-2xl sm:text-4xl font-bold text-slate-900 tracking-tight leading-[1.18]">
-                  Satu Kotak Masuk untuk Chat Pelanggan &amp; Pengaturan Tim CS
+                <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-bold text-slate-900 tracking-tight leading-[1.18]">
+                  Jangan Biarkan Pembeli Kabur Cuma Karena Chat Tercecer di Banyak HP
                 </h1>
 
-                <p className="text-sm sm:text-[15px] text-slate-600 leading-relaxed">
-                  Kelola WhatsApp (Multi-Nomor QR, Grup WA, Story &amp; Bisnis Resmi),
-                  komentar dan DM Instagram, Facebook, Threads, serta Telegram dari satu halaman.
-                  Dilengkapi builder Role Multi-CS granular, filter Non-Penilaian, Batas Mulai &amp;
-                  Selesai Sesi SLA/CSAT, siaran terjadwal, dan Agent AI (MCP).
+                <p className="text-base sm:text-[17px] text-slate-600 leading-relaxed">
+                  Satukan pesan dari <strong className="font-semibold text-slate-800">Instagram, WhatsApp, Facebook, Threads, dan Telegram</strong> dalam satu kotak masuk bersama tim Anda. Balas lebih cepat, bagi tugas lebih rapi, dan pantau kepuasan pelanggan tanpa ribet.
                 </p>
 
-                <div className="space-y-2.5">
-                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2.5">
+                <div className="space-y-3 pt-1">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                     <a
                       href={PANEL_ORDER_URL}
                       target="_top"
-                      className="min-h-[40px] py-2 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5 text-center transition-colors"
+                      className="min-h-[46px] py-2.5 px-6 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-all shadow-sm"
                     >
-                      <span>Beli Hosting + CRM &amp; Lisensi</span>
-                      <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
+                      <span>Mulai Coba Gratis 7 Hari</span>
+                      <ArrowRight className="w-4 h-4" strokeWidth={2} />
                     </a>
                     <a
-                      href={PANEL_INSTALL_URL}
-                      target="_top"
-                      className="min-h-[40px] py-2 px-4 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm font-semibold inline-flex items-center justify-center gap-2 text-center transition-colors"
+                      href="#modul"
+                      className="min-h-[46px] py-2.5 px-5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors"
                     >
-                      Pasang di Server Sendiri
+                      Lihat Cara Kerjanya
                     </a>
                   </div>
-                  <div className="text-xs text-slate-500 leading-relaxed">
-                    {authenticated ? (
-                      <>
-                        Sesi akun CRM Anda masih aktif.{' '}
-                        <button
-                          type="button"
-                          onClick={onEnterLogin}
-                          className="font-semibold text-[#2563eb] hover:underline cursor-pointer"
-                        >
-                          Kembali ke Workspace CRM
-                        </button>
-                        .
-                      </>
-                    ) : (
-                      <>
-                        Pilih paket <strong className="font-semibold text-slate-700">Hosting + Reneo CRM siap pakai</strong> (trial 7 hari) atau pasang di VPS Linux Anda. Sudah punya akun?{' '}
-                        <button
-                          type="button"
-                          onClick={onEnterLogin}
-                          className="font-semibold text-[#2563eb] hover:underline cursor-pointer"
-                        >
-                          {initialized ? 'Masuk ke CRM' : 'Lanjutkan Setup CRM'}
-                        </button>
-                        .
-                      </>
-                    )}
+
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs sm:text-sm text-slate-500">
+                    <span className="inline-flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Aktif dalam hitungan menit</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Data 100% milik bisnis Anda</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onEnterLogin}
+                      className="text-[#2563eb] hover:text-[#1d4ed8] font-semibold underline underline-offset-2"
+                    >
+                      {authenticated ? 'Buka Workspace →' : 'Sudah punya akun? Masuk'}
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* Authentic Workstation Preview */}
+              {/* Interactive Omnichannel Inbox Preview */}
               <div className="lg:col-span-6">
-                <div className="border border-slate-300 rounded-xl bg-white overflow-hidden shadow-sm">
-                  <div className="h-10 px-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <ReneoCrmLogo className="w-4 h-4 shrink-0" />
-                      <span className="text-xs font-semibold text-slate-800 truncate">
-                        Reneo CRM · Kotak Masuk
+                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  {/* Channel Switcher Bar */}
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-700">
+                        Simulasi Kotak Masuk Semua Kanal
                       </span>
+                      <span className="text-xs text-slate-500">Klik kanal untuk melihat</span>
                     </div>
-                    <div className="flex items-center gap-1 text-slate-500 shrink-0">
-                      <span className="w-6 h-6 inline-flex items-center justify-center rounded">
-                        <Minus className="w-3.5 h-3.5" strokeWidth={1.75} />
-                      </span>
-                      <span className="w-6 h-6 inline-flex items-center justify-center rounded">
-                        <Maximize2 className="w-3 h-3" strokeWidth={1.75} />
-                      </span>
-                      <span className="w-6 h-6 inline-flex items-center justify-center rounded">
-                        <X className="w-3.5 h-3.5" strokeWidth={1.75} />
-                      </span>
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                      {HERO_CHANNEL_PREVIEWS.map((ch) => {
+                        const active = ch.id === activeHeroChannel.id;
+                        return (
+                          <button
+                            key={ch.id}
+                            type="button"
+                            onClick={() => setActiveHeroChannelId(ch.id)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all inline-flex items-center gap-1.5 shrink-0 ${
+                              active
+                                ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                active ? 'bg-white' : ch.dotClass
+                              }`}
+                            />
+                            <span>{ch.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-12 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 text-xs">
-                    <div className="sm:col-span-5 divide-y divide-slate-100 bg-slate-50/50">
-                      <div className="px-3 py-2.5 bg-white">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <span className="font-semibold text-slate-900">Siti Aminah</span>
-                          <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded shrink-0">
-                            WA Bisnis
+                  {/* Active Chat Preview */}
+                  <div
+                    key={activeHeroChannel.id}
+                    className="p-4 sm:p-5 space-y-4 bg-white transition-opacity duration-300"
+                  >
+                    <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm sm:text-base font-bold text-slate-900 truncate">
+                            {activeHeroChannel.customerName}
+                          </span>
+                          <span
+                            className={`text-xs font-medium px-2 py-0.5 rounded-md border ${activeHeroChannel.badgeClass}`}
+                          >
+                            {activeHeroChannel.label}
                           </span>
                         </div>
-                        <div className="text-[11px] text-slate-600 truncate mt-1">
-                          Mau pesan paket bundling 3 pcs, totalnya berapa kak?
-                        </div>
-                        <div className="text-[10px] text-[#1d4ed8] font-medium mt-1">
-                          Ditangani: Rina (Sales)
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          {activeHeroChannel.customerSub}
                         </div>
                       </div>
+                      <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md shrink-0">
+                        {activeHeroChannel.statusLabel}
+                      </span>
+                    </div>
 
-                      <div className="px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <span className="font-semibold text-slate-800">@tokoresmi.id</span>
-                          <span className="text-[10px] font-mono text-slate-700 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
-                            Instagram
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate mt-1">
-                          DM otomatis terkirim dari komentar postingan.
-                        </div>
+                    <div className="space-y-3">
+                      <div className="bg-slate-100 text-slate-800 rounded-xl rounded-tl-xs px-3.5 py-2.5 text-sm leading-relaxed max-w-[92%]">
+                        {activeHeroChannel.incoming}
                       </div>
-
-                      <div className="px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <span className="font-semibold text-slate-800">Grup Operasional</span>
-                          <span className="text-[10px] font-mono text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded shrink-0">
-                            Non-Nilai
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate mt-1">
-                          Dikecualikan otomatis dari laporan SLA &amp; CSAT.
-                        </div>
+                      <div className="bg-[#2563eb] text-white rounded-xl rounded-tr-xs px-3.5 py-2.5 text-sm leading-relaxed ml-auto max-w-[92%]">
+                        {activeHeroChannel.outgoing}
                       </div>
                     </div>
 
-                    <div className="sm:col-span-7 p-3.5 space-y-2.5 bg-white flex flex-col justify-between">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-100 pb-2">
-                          <div className="min-w-0">
-                            <div className="font-semibold text-slate-900">Siti Aminah</div>
-                            <div className="text-[11px] font-mono text-slate-500">+62 812-3456-7890</div>
-                          </div>
-                          <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded shrink-0">
-                            Selesai
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 py-0.5">
-                          <div className="flex-1 h-px bg-indigo-200" />
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-[9px] font-medium text-indigo-800">
-                            <Play className="w-2 h-2 fill-indigo-600 text-indigo-600" />
-                            <span>Batas Mulai Sesi #2 · 09.10</span>
-                          </span>
-                          <div className="flex-1 h-px bg-indigo-200" />
-                        </div>
-
-                        <div className="bg-slate-100 text-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] max-w-[92%]">
-                          Halo kak, mau pesan paket bundling 3 pcs. Total harganya berapa?
-                        </div>
-
-                        <div className="bg-[#2563eb] text-white rounded-lg px-2.5 py-1.5 text-[11px] ml-auto max-w-[92%]">
-                          Total 3 pcs Rp 245.000 ya kak. Berikut rincian penawarannya.
-                        </div>
-
-                        <div className="flex items-center gap-1.5 py-0.5">
-                          <div className="flex-1 h-px bg-emerald-200" />
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[9px] font-medium text-emerald-800">
-                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
-                            <span>Batas Selesai Sesi #2</span>
-                            <span className="inline-flex items-center gap-0.5 px-1 rounded bg-amber-100 text-amber-900 font-mono font-semibold">
-                              <Star className="w-2 h-2 fill-amber-400 text-amber-500" />
-                              5/5
-                            </span>
-                          </span>
-                          <div className="flex-1 h-px bg-emerald-200" />
-                        </div>
-                      </div>
-
-                      <div className="border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 flex items-center justify-between gap-2 flex-wrap">
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-semibold text-slate-800">
-                            Quick Quote · Katalog Produk
-                          </div>
-                          <div className="text-[10px] text-slate-500 truncate">Paket Bundling (3 pcs)</div>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-slate-900 shrink-0">Rp 245.000</span>
-                      </div>
+                    <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs sm:text-sm text-slate-600">
+                      <CheckCircle2 className="w-4 h-4 text-[#2563eb] shrink-0" />
+                      <span>{activeHeroChannel.footerNote}</span>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
-
-            {/* Architecture & Spec Metrics Strip */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-slate-200 rounded-xl bg-slate-50/70 divide-y sm:divide-y-0 sm:divide-x divide-slate-200 overflow-hidden">
-              {ARCHITECTURE_SPECS.map((spec) => (
-                <div key={spec.label} className="p-4 space-y-1">
-                  <div className="text-xs font-bold text-slate-900">{spec.label}</div>
-                  <p className="text-[11.5px] text-slate-600 leading-relaxed">{spec.detail}</p>
-                </div>
-              ))}
             </div>
           </div>
         </section>
 
-        {/* Why We Built This — Lived Operator Story */}
-        <section id="kenapa-dibuat" className="bg-white border-b border-slate-200">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-6">
+        {/* Problem & Agitation Section (Tarik-Ulur Psikologi Pembeli) */}
+        <RevealSection id="masalah" className="bg-[#f8fafc] border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-8">
             <div className="max-w-3xl space-y-2.5">
-              <div className="font-mono text-[11px] font-semibold uppercase tracking-wide text-[#2563eb]">
-                Latar Belakang
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-rose-600">
+                <AlertCircle className="w-4 h-4" />
+                <span>Yang Sering Terjadi Tanpa Disadari</span>
               </div>
-              <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-                Kenapa Kami Membuat Reneo CRM
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+                Iklan Sudah Bagus, Produk Sudah Dicari — Tapi Penjualan Bocor di Tahap Balas Chat?
               </h2>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Reneo CRM tidak dibuat karena ingin membuat software baru, melainkan lahir dari pengalaman nyata tim kami sendiri saat mengelola chat pelanggan setiap hari.
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                Banyak pemilik usaha mengira masalahnya ada di iklan atau harga, padahal calon pembeli batal transaksi hanya karena pengalaman membalas pesan yang lambat dan tidak terkoordinasi.
               </p>
             </div>
 
-            <div className="border border-slate-200 rounded-xl bg-slate-50/70 divide-y divide-slate-200 overflow-hidden">
-              {[
-                {
-                  step: 'Kami pernah mengalami',
-                  text: 'Chat pelanggan tersebar di banyak HP admin dan akun media sosial; saat staf berganti shift atau perangkat bermasalah, riwayat obrolan terputus, sementara pesan kurir, supplier, dan grup internal bercampur dengan chat pembeli.',
-                },
-                {
-                  step: 'Kami menyadari',
-                  text: 'Masalah tersebut ternyata bukan sekadar persoalan kecil: ketika percakapan makin ramai, pelanggan menunggu terlalu lama, tim mengulang pertanyaan yang sama, dan laporan respon CS maupun kepuasan layanan menjadi tidak akurat.',
-                },
-                {
-                  step: 'Kami merasa',
-                  text: 'Solusi yang tersedia belum menjawab kebutuhan operasional kami — biayanya membengkak seiring jumlah admin dan pesan, data pelanggan bergantung pada server luar, dan chat non-pelanggan masih mengacaukan metrik SLA maupun CSAT.',
-                },
-                {
-                  step: 'Karena itu, kami membuat Reneo CRM',
-                  text: 'Satu kotak masuk self-hosted yang dibangun langsung dari alur kerja nyata tim CS kami sendiri di atas PostgreSQL dan Redis pada server sendiri.',
-                },
-                {
-                  step: 'Tujuan kami',
-                  text: 'Membuat pengelolaan percakapan pelanggan, pembagian tugas tim, batas sesi penanganan, dan evaluasi layanan yang sebelumnya menyulitkan menjadi lebih terstruktur, terukur, dan mudah dilakukan.',
-                },
-              ].map((story) => (
-                <div key={story.step} className="px-4 sm:px-5 py-3 bg-white flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
-                  <span className="text-xs font-semibold text-[#1d4ed8] sm:w-64 shrink-0">
-                    {story.step}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
+              {HIDDEN_COSTS.map((item) => (
+                <div
+                  key={item.title}
+                  className="p-5 sm:p-6 rounded-2xl bg-white border border-slate-200 space-y-3 hover:border-slate-300 transition-colors"
+                >
+                  <span className="inline-block px-2.5 py-1 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold">
+                    {item.stat}
                   </span>
-                  <p className="text-xs sm:text-[13px] text-slate-700 leading-relaxed">
+                  <h3 className="text-base font-bold text-slate-900 leading-snug">
+                    {item.title}
+                  </h3>
+                  <p className="text-sm text-slate-600 leading-relaxed">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </RevealSection>
+
+        {/* Authentic Origin Story Section */}
+        <RevealSection id="kenapa-dibuat" className="bg-white border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
+            <div className="max-w-3xl space-y-2.5">
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                <HeartHandshake className="w-4 h-4" />
+                <span>Cerita di Balik Reneo CRM</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+                Kenapa Kami Membuat Reneo CRM
+              </h2>
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                Reneo CRM tidak dibuat karena sekadar ingin meluncurkan software baru, melainkan lahir dari pengalaman nyata tim kami sendiri saat melayani pelanggan setiap hari.
+              </p>
+            </div>
+
+            <div className="border border-slate-200 rounded-2xl bg-slate-50/60 divide-y divide-slate-200 overflow-hidden">
+              {STORY_BEATS.map((story, idx) => (
+                <div
+                  key={story.step}
+                  className="p-4 sm:px-6 sm:py-5 bg-white flex flex-col md:flex-row md:items-baseline gap-2 md:gap-6"
+                >
+                  <div className="flex items-center gap-2.5 md:w-72 shrink-0">
+                    <span className="w-6 h-6 rounded-full bg-blue-50 text-[#1d4ed8] border border-blue-200 text-xs font-bold inline-flex items-center justify-center shrink-0">
+                      {idx + 1}
+                    </span>
+                    <span className="text-sm sm:text-base font-bold text-[#1d4ed8]">
+                      {story.step}
+                    </span>
+                  </div>
+                  <p className="text-sm sm:text-[15px] text-slate-700 leading-relaxed">
                     {story.text}
                   </p>
                 </div>
               ))}
             </div>
+          </div>
+        </RevealSection>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 border border-slate-200 rounded-xl bg-slate-50/50 divide-y md:divide-y-0 md:divide-x md:grid-flow-row overflow-hidden">
-              {WHY_WE_BUILT_IT.map((item, idx) => (
-                <div
-                  key={item.title}
-                  className={`p-5 space-y-1.5 bg-white ${
-                    idx >= 2 ? 'md:border-t md:border-slate-200' : ''
-                  }`}
-                >
-                  <div className="font-mono text-[11px] font-bold text-slate-400">
-                    0{idx + 1}
-                  </div>
-                  <h3 className="text-sm font-semibold text-slate-900 leading-snug">
-                    {item.title}
-                  </h3>
-                  <p className="text-xs text-slate-600 leading-relaxed">{item.detail}</p>
-                </div>
-              ))}
+        {/* Interactive Module Explorer — Mobile First & Readable */}
+        <RevealSection id="modul" className="bg-[#f8fafc] border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
+            <div className="max-w-2xl space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                Cara Kerja Reneo CRM
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+                Semua yang Dibutuhkan Tim Layanan Pelanggan, Tanpa Ribet
+              </h2>
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                Pilih salah satu bagian di bawah untuk melihat bagaimana Reneo CRM membantu pekerjaan tim Anda dari pagi sampai tutup toko.
+              </p>
             </div>
 
-            <div className="border-l-2 border-[#2563eb] pl-4 py-1 text-xs sm:text-[13px] text-slate-700 leading-relaxed max-w-3xl">
-              Karena kami merasakan sendiri repotnya memilah laporan manual dan risiko kehilangan data saat staf berganti, detail seperti status <strong className="font-semibold text-slate-900">Non-Penilaian</strong> untuk grup WA &amp; kontak internal, penanda <strong className="font-semibold text-slate-900">Batas Mulai &amp; Selesai Sesi</strong>, serta pembatasan izin hingga level tombol menjadi pondasi utama aplikasi ini.
-            </div>
-          </div>
-        </section>
-
-        {/* Interactive Module & Architecture Explorer */}
-        <section id="modul" className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
-          <div className="space-y-1 max-w-2xl">
-            <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-              Modul Kerja &amp; Arsitektur Sistem CRM
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600">
-              Lima bagian utama untuk pekerjaan harian admin CS dan tim promosi: balas chat, ukur SLA, batasi akses staf, siarkan promo, dan pasang AI.
-            </p>
-          </div>
-
-          <div className="border border-slate-200 rounded-xl bg-white overflow-hidden grid grid-cols-1 lg:grid-cols-12">
-            <div className="lg:col-span-5 divide-y divide-slate-200 border-b lg:border-b-0 lg:border-r border-slate-200">
-              {MODULE_TABS.map((mod) => {
-                const isActive = mod.id === activeModule.id;
+            {/* Mobile Horizontal Scrollable Pill Tabs */}
+            <div className="flex lg:hidden items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 snap-x">
+              {MODULE_TABS.map((tab) => {
+                const active = tab.id === activeModule.id;
+                const Icon = tab.icon;
                 return (
                   <button
-                    key={mod.id}
+                    key={tab.id}
                     type="button"
-                    onClick={() => setActiveModuleId(mod.id)}
-                    className={`w-full text-left px-4 py-3.5 flex items-start gap-3 transition-colors cursor-pointer ${
-                      isActive ? 'bg-blue-50/60' : 'hover:bg-slate-50'
+                    onClick={() => setActiveModuleId(tab.id)}
+                    className={`snap-start shrink-0 px-3.5 py-2.5 rounded-xl border text-sm font-semibold inline-flex items-center gap-2 transition-all ${
+                      active
+                        ? 'bg-[#2563eb] text-white border-[#2563eb] shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    <span
-                      className={`font-mono text-xs font-bold shrink-0 mt-0.5 ${
-                        isActive ? 'text-[#2563eb]' : 'text-slate-400'
-                      }`}
-                    >
-                      {mod.num}
-                    </span>
-                    <div className="min-w-0 space-y-0.5">
-                      <div
-                        className={`text-xs sm:text-sm font-semibold ${
-                          isActive ? 'text-[#1d4ed8]' : 'text-slate-900'
-                        }`}
-                      >
-                        {mod.title}
-                      </div>
-                      <div className="text-[11.5px] text-slate-500 line-clamp-2 leading-snug">
-                        {mod.summary}
-                      </div>
-                    </div>
+                    <Icon className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                    <span>{tab.shortLabel}</span>
                   </button>
                 );
               })}
             </div>
 
-            <div className="lg:col-span-7 p-5 sm:p-6 flex flex-col justify-between gap-5 bg-white">
-              <div className="space-y-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-[#2563eb] shrink-0">
-                    <ActiveIcon className="w-4 h-4" strokeWidth={1.75} />
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              {/* Desktop Vertical Tabs */}
+              <div className="hidden lg:flex lg:col-span-4 flex-col gap-2">
+                {MODULE_TABS.map((tab, idx) => {
+                  const active = tab.id === activeModule.id;
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setActiveModuleId(tab.id)}
+                      className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all flex items-center gap-3 ${
+                        active
+                          ? 'bg-white border-[#2563eb] ring-1 ring-[#2563eb]/20 shadow-xs'
+                          : 'bg-white/70 border-slate-200 hover:bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div
+                        className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                          active
+                            ? 'bg-[#2563eb] text-white'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" strokeWidth={1.75} />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold text-slate-400">
+                          0{idx + 1}
+                        </div>
+                        <div
+                          className={`text-sm font-semibold leading-snug ${
+                            active ? 'text-slate-900' : 'text-slate-700'
+                          }`}
+                        >
+                          {tab.shortLabel}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Active Module Detail Card */}
+              <div
+                key={activeModule.id}
+                className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-5 sm:p-7 space-y-5 shadow-xs transition-all duration-300"
+              >
+                <div className="flex items-start gap-3.5">
+                  <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 text-[#2563eb] flex items-center justify-center shrink-0">
+                    <ActiveModuleIcon className="w-5 h-5" strokeWidth={1.75} />
                   </div>
-                  <div className="space-y-1">
-                    <div className="font-mono text-[11px] font-semibold text-[#2563eb]">
-                      MODUL {activeModule.num}
-                    </div>
-                    <h3 className="text-base font-bold text-slate-900">{activeModule.title}</h3>
+                  <div className="space-y-1.5 min-w-0">
+                    <h3 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug">
+                      {activeModule.title}
+                    </h3>
+                    <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                      {activeModule.summary}
+                    </p>
                   </div>
                 </div>
 
-                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                  {activeModule.summary}
-                </p>
-
-                <ul className="space-y-2.5 border-t border-slate-100 pt-3">
+                <ul className="space-y-3 pt-1">
                   {activeModule.highlights.map((item) => (
-                    <li key={item} className="flex items-start gap-2.5 text-xs sm:text-[13px] text-slate-700 leading-relaxed">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
+                    <li
+                      key={item}
+                      className="flex items-start gap-3 text-sm sm:text-[15px] text-slate-700 leading-relaxed"
+                    >
+                      <Check className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
                       <span>{item}</span>
                     </li>
                   ))}
                 </ul>
-              </div>
 
-              <div className="px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 flex items-center gap-2.5 text-xs text-slate-600">
-                <Layers className="w-4 h-4 text-slate-500 shrink-0" strokeWidth={1.75} />
-                <span>{activeModule.techNote}</span>
+                <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-100 flex items-start gap-2.5 text-sm text-slate-700">
+                  <TrendingUp className="w-4 h-4 text-[#2563eb] shrink-0 mt-0.5" />
+                  <span>{activeModule.benefitNote}</span>
+                </div>
               </div>
             </div>
           </div>
-        </section>
+        </RevealSection>
 
-        {/* Studi Kasus */}
-        <section id="studi-kasus" className="bg-white border-y border-slate-200">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
-            <div className="space-y-1 max-w-2xl">
-              <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-                Masalah Harian Tim CS &amp; Cara Menanganinya
+        {/* All Channels Grid — Balanced Omnichannel */}
+        <RevealSection id="kanal" className="bg-white border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
+            <div className="max-w-2xl space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                Terhubung di Mana Pembeli Berada
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+                Bukan Cuma WhatsApp — Seluruh Kanal Sosial Media Masuk Satu Pintu
               </h2>
-              <p className="text-xs sm:text-sm text-slate-600">
-                Contoh kendala di toko online, tim shift CS, dan pengelola iklan media sosial beserta cara kerjanya di Reneo CRM.
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                Pelanggan bebas menghubungi lewat aplikasi favorit mereka, sementara tim Anda cukup membalas dari satu tempat yang rapi.
               </p>
             </div>
 
-            <div className="space-y-3 md:hidden">
-              {USE_CASE_ROWS.map((row) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+              {CHANNELS.map((ch) => (
                 <div
-                  key={row.segment}
-                  className="border border-slate-200 rounded-xl bg-white overflow-hidden divide-y divide-slate-200 text-xs"
+                  key={ch.name}
+                  className="p-5 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition-colors space-y-2.5"
                 >
-                  <div className="px-3.5 py-2.5 bg-slate-50 font-semibold text-slate-900">
-                    {row.segment}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-slate-900">{ch.name}</h3>
+                    <span
+                      className={`text-xs font-semibold px-2.5 py-0.5 rounded-md border ${ch.badge}`}
+                    >
+                      {ch.role}
+                    </span>
                   </div>
-                  <div className="px-3.5 py-2.5 space-y-1">
-                    <div className="text-[11px] font-semibold text-slate-500">Kendala</div>
-                    <p className="text-slate-600 leading-relaxed">{row.problem}</p>
-                  </div>
-                  <div className="px-3.5 py-2.5 space-y-1 bg-blue-50/35">
-                    <div className="text-[11px] font-semibold text-[#1d4ed8]">Penanganan di Reneo CRM</div>
-                    <p className="text-slate-800 leading-relaxed">{row.solution}</p>
-                  </div>
+                  <p className="text-sm text-slate-600 leading-relaxed">{ch.desc}</p>
                 </div>
               ))}
             </div>
-
-            <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-x-auto">
-              <table className="w-full min-w-[680px] text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700">
-                    <th className="py-2.5 px-4 w-[24%]">Jenis Usaha</th>
-                    <th className="py-2.5 px-4 w-[38%]">Kendala Sebelum Memakai CRM</th>
-                    <th className="py-2.5 px-4 w-[38%]">Penanganan di Reneo CRM</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 text-xs">
-                  {USE_CASE_ROWS.map((row) => (
-                    <tr key={row.segment} className="align-top">
-                      <td className="py-3 px-4 font-semibold text-slate-900">{row.segment}</td>
-                      <td className="py-3 px-4 text-slate-600 leading-relaxed">{row.problem}</td>
-                      <td className="py-3 px-4 text-slate-800 leading-relaxed">{row.solution}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
-        </section>
+        </RevealSection>
 
-        {/* 6 Kanal Terhubung */}
-        <section id="kanal" className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
-          <div className="space-y-1 max-w-2xl">
-            <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-              6 Kanal Komunikasi dalam Satu Kotak Masuk
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600">
-              Hubungkan seluruh nomor WhatsApp dan akun media sosial usaha Anda tanpa biaya tambahan per pesan dari panel.
-            </p>
-          </div>
-
-          <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-200 bg-white">
-            {CHANNEL_ROWS.map((ch) => (
-              <div
-                key={ch.name}
-                className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-4"
-              >
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  <span className="text-xs sm:text-sm font-semibold text-slate-900">{ch.name}</span>
-                  <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
-                    {ch.mode}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 sm:text-right">{ch.detail}</p>
+        {/* Honest Comparison */}
+        <RevealSection id="perbandingan" className="bg-[#f8fafc] border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
+            <div className="max-w-2xl space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                Bandingkan Sebelum Memilih
               </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Perbandingan */}
-        <section id="perbandingan" className="bg-white border-y border-slate-200">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
-            <div className="space-y-1 max-w-2xl">
-              <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-                Perbandingan: Cara Manual vs CRM Berlangganan vs Reneo CRM
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+                Cara Lama vs Aplikasi Chat Umum vs Reneo CRM
               </h2>
-              <p className="text-xs sm:text-sm text-slate-600">
-                Perbandingan langsung dari sisi biaya operasional, keamanan data pelanggan, dan kendali tim.
-              </p>
             </div>
 
-            <div className="space-y-3 md:hidden">
+            {/* Mobile Stacked Comparison Cards */}
+            <div className="space-y-3.5 md:hidden">
               {COMPARISON_ROWS.map((row) => (
                 <div
                   key={row.aspect}
-                  className="border border-slate-200 rounded-xl bg-white overflow-hidden"
+                  className="rounded-2xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-200 text-sm"
                 >
-                  <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-900">
+                  <div className="px-4 py-3 bg-slate-50 font-bold text-slate-900">
                     {row.aspect}
                   </div>
-                  <dl className="divide-y divide-slate-200 text-xs">
-                    <div className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-3">
-                      <dt className="text-slate-500 font-medium shrink-0">Manual (Banyak HP)</dt>
-                      <dd className="flex items-start gap-1.5 sm:text-right text-slate-600">
-                        {row.manual.ok ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                        ) : (
-                          <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
-                        )}
-                        <span>{row.manual.text}</span>
-                      </dd>
-                    </div>
-                    <div className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-3">
-                      <dt className="text-slate-500 font-medium shrink-0">CRM Cloud Lainnya</dt>
-                      <dd className="flex items-start gap-1.5 sm:text-right text-slate-600">
-                        {row.saas.ok ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                        ) : (
-                          <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
-                        )}
-                        <span>{row.saas.text}</span>
-                      </dd>
-                    </div>
-                    <div className="px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-3 bg-blue-50/40">
-                      <dt className="text-[#1d4ed8] font-semibold shrink-0">Reneo CRM</dt>
-                      <dd className="flex items-start gap-1.5 sm:text-right font-medium text-slate-900">
-                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                        <span>{row.reneo.text}</span>
-                      </dd>
-                    </div>
-                  </dl>
+                  <div className="px-4 py-3 space-y-1">
+                    <div className="text-xs font-semibold text-slate-500">Cara Lama (Banyak HP)</div>
+                    <p className="text-slate-600 leading-relaxed">{row.manual}</p>
+                  </div>
+                  <div className="px-4 py-3 space-y-1">
+                    <div className="text-xs font-semibold text-slate-500">Aplikasi Chat Umum</div>
+                    <p className="text-slate-600 leading-relaxed">{row.other}</p>
+                  </div>
+                  <div className="px-4 py-3 space-y-1 bg-blue-50/40">
+                    <div className="text-xs font-bold text-[#1d4ed8]">Reneo CRM</div>
+                    <p className="text-slate-900 font-medium leading-relaxed">{row.reneo}</p>
+                  </div>
                 </div>
               ))}
             </div>
 
-            <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-x-auto">
-              <table className="w-full min-w-[680px] text-left border-collapse">
+            {/* Desktop Comparison Table */}
+            <div className="hidden md:block border border-slate-200 rounded-2xl bg-white overflow-x-auto">
+              <table className="w-full min-w-[700px] text-left border-collapse">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-700">
-                    <th className="py-2.5 px-3.5 w-[31%]">Kebutuhan Usaha</th>
-                    <th className="py-2.5 px-3.5 w-[23%]">Kelola Manual (Banyak HP)</th>
-                    <th className="py-2.5 px-3.5 w-[23%]">CRM Cloud Lainnya</th>
-                    <th className="py-2.5 px-3.5 w-[23%] bg-blue-50/70 text-[#1d4ed8] border-l border-blue-100">
-                      Reneo CRM
-                    </th>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-sm font-bold text-slate-800">
+                    <th className="py-3.5 px-5 w-[24%]">Aspek Penting</th>
+                    <th className="py-3.5 px-5 w-[24%]">Cara Lama</th>
+                    <th className="py-3.5 px-5 w-[24%]">Aplikasi Chat Umum</th>
+                    <th className="py-3.5 px-5 w-[28%] text-[#1d4ed8] bg-blue-50/50">Reneo CRM</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 text-xs">
+                <tbody className="divide-y divide-slate-200 text-sm">
                   {COMPARISON_ROWS.map((row) => (
                     <tr key={row.aspect} className="align-top">
-                      <td className="py-2.5 px-3.5 font-medium text-slate-900">{row.aspect}</td>
-                      <td className="py-2.5 px-3.5 text-slate-600">
-                        <div className="flex items-start gap-2">
-                          {row.manual.ok ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                          ) : (
-                            <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
-                          )}
-                          <span>{row.manual.text}</span>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3.5 text-slate-600">
-                        <div className="flex items-start gap-2">
-                          {row.saas.ok ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                          ) : (
-                            <X className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" strokeWidth={2} />
-                          )}
-                          <span>{row.saas.text}</span>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3.5 bg-blue-50/35 border-l border-blue-100 text-slate-900 font-medium">
-                        <div className="flex items-start gap-2">
-                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" strokeWidth={2} />
-                          <span>{row.reneo.text}</span>
-                        </div>
+                      <td className="py-4 px-5 font-semibold text-slate-900">{row.aspect}</td>
+                      <td className="py-4 px-5 text-slate-600 leading-relaxed">{row.manual}</td>
+                      <td className="py-4 px-5 text-slate-600 leading-relaxed">{row.other}</td>
+                      <td className="py-4 px-5 font-medium text-slate-900 bg-blue-50/30 leading-relaxed">
+                        {row.reneo}
                       </td>
                     </tr>
                   ))}
@@ -997,138 +886,121 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </table>
             </div>
           </div>
-        </section>
+        </RevealSection>
 
-        {/* 3 Langkah Aktivasi */}
-        <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
-          <div className="space-y-1 max-w-2xl">
-            <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-              Mulai Beroperasi dalam 3 Langkah
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600">
-              Dua jalur aktivasi — langsung terima beres dengan hosting Reneo atau pasang di server Linux sendiri.
-            </p>
-          </div>
-
-          <ol className="grid grid-cols-1 md:grid-cols-3 border border-slate-200 rounded-xl bg-white divide-y md:divide-y-0 md:divide-x divide-slate-200 overflow-hidden">
-            {STEPS.map((step) => (
-              <li key={step.num} className="p-4 sm:p-5 space-y-1.5">
-                <div className="font-mono text-xs font-bold text-[#2563eb]">LANGKAH {step.num}</div>
-                <h3 className="text-sm font-semibold text-slate-900">{step.title}</h3>
-                <p className="text-xs text-slate-600 leading-relaxed">{step.desc}</p>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        {/* FAQ using native semantic details/summary so all answers remain crawlable in DOM */}
-        <section id="faq" className="bg-white border-y border-slate-200">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-5">
-            <div className="space-y-1 max-w-2xl">
-              <h2 className="text-lg sm:text-xl font-bold text-slate-900">Pertanyaan Umum</h2>
-              <p className="text-xs sm:text-sm text-slate-600">
-                Jawaban ringkas seputar fitur, lisensi, dan implementasi Reneo CRM.
-              </p>
-            </div>
-
-            <div className="max-w-3xl border border-slate-200 rounded-xl divide-y divide-slate-200 overflow-hidden bg-white">
-              {FAQS.map((item, idx) => (
-                <details key={item.q} open={idx === 0} className="group">
-                  <summary className="w-full px-4 py-3 text-left flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                    <span className="text-xs sm:text-sm font-semibold text-slate-900">{item.q}</span>
-                    <ChevronDown
-                      className="w-4 h-4 text-slate-500 shrink-0 transition-transform group-open:rotate-180"
-                      strokeWidth={1.75}
-                    />
-                  </summary>
-                  <div className="px-4 pb-3.5 text-xs text-slate-600 leading-relaxed">
-                    {item.a}
-                  </div>
-                </details>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Final Closing CTA */}
-        <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
-          <div className="bg-[#0B2A57] text-white rounded-xl p-6 sm:p-7 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-            <div className="flex items-start gap-3.5 max-w-2xl">
-              <ReneoCrmLogo className="w-10 h-10 shrink-0" />
-              <div className="space-y-2.5">
-                <h2 className="text-base sm:text-lg font-bold">
-                  Siap Memindahkan Chat Pelanggan ke Server Sendiri?
-                </h2>
-                <p className="text-xs sm:text-sm text-blue-100 leading-relaxed">
-                  Masuk ke ruang kerja CRM Anda atau kelola kontainer dan domain lewat{' '}
-                  <a
-                    href={PANEL_URL}
-                    target="_top"
-                    className="font-mono underline underline-offset-2 text-white hover:text-blue-200"
-                  >
-                    panel.reneo.my.id
-                  </a>
-                  .
-                </p>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-blue-100">
-                  <span>· Data tersimpan di server sendiri</span>
-                  <span>· Tanpa biaya per pesan dari panel</span>
-                </div>
+        {/* FAQ */}
+        <RevealSection id="faq" className="bg-white border-b border-slate-200">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                Pertanyaan Umum
               </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+                Masih Ragu? Ini Jawaban yang Paling Sering Ditanyakan
+              </h2>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 w-full lg:w-auto">
+            <div className="divide-y divide-slate-200 border border-slate-200 rounded-2xl bg-white overflow-hidden">
+              {FAQS.map((item, idx) => {
+                const isOpen = openFaq === idx;
+                return (
+                  <div key={item.q}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenFaq(isOpen ? null : idx)}
+                      className="w-full px-5 py-4 text-left flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors"
+                    >
+                      <span className="text-sm sm:text-base font-semibold text-slate-900">
+                        {item.q}
+                      </span>
+                      <ChevronDown
+                        className={`w-5 h-5 text-slate-500 shrink-0 transition-transform duration-200 ${
+                          isOpen ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+                    {isOpen && (
+                      <div className="px-5 pb-4 text-sm sm:text-[15px] text-slate-600 leading-relaxed">
+                        {item.a}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </RevealSection>
+
+        {/* Final CTA — Risk Reversal */}
+        <RevealSection className="bg-slate-900 text-white">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-18 text-center space-y-5">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-semibold text-blue-200">
+              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+              <span>Uji Coba Gratis 7 Hari · Tanpa Risiko</span>
+            </div>
+
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight leading-snug">
+              Rapikan Layanan Pelanggan Anda Hari Ini Sebelum Lebih Banyak Pembeli Terlewat
+            </h2>
+
+            <p className="text-sm sm:text-base text-slate-300 max-w-2xl mx-auto leading-relaxed">
+              Coba langsung bersama tim CS Anda selama 7 hari. Rasakan bedanya ketika pesan dari Instagram, WhatsApp, Facebook, Threads, dan Telegram tertangani dari satu layar yang tenang.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 pt-2">
               <a
                 href={PANEL_ORDER_URL}
                 target="_top"
-                className="min-h-[40px] py-2 px-4 sm:px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center text-center transition-colors"
+                className="min-h-[48px] py-3 px-6 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors"
               >
-                Beli Hosting + CRM &amp; Lisensi
+                <span>Mulai Coba Gratis 7 Hari</span>
+                <ArrowUpRight className="w-4 h-4" />
               </a>
-              <a
-                href={PANEL_INSTALL_URL}
-                target="_top"
-                className="min-h-[40px] py-2 px-4 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-semibold inline-flex items-center justify-center text-center transition-colors"
+              <button
+                type="button"
+                onClick={onEnterLogin}
+                className="min-h-[48px] py-3 px-6 rounded-xl bg-white/10 hover:bg-white/15 text-white border border-white/20 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors"
               >
-                Pasang di Server Sendiri
-              </a>
+                <span>
+                  {authenticated
+                    ? 'Buka Workspace CRM'
+                    : initialized
+                    ? 'Masuk ke Ruang Kerja'
+                    : 'Lanjutkan Setup'}
+                </span>
+              </button>
             </div>
           </div>
-        </section>
+        </RevealSection>
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
-          <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
-            <ReneoCrmLogo className="w-5 h-5 shrink-0" />
-            <span>Reneo CRM</span>
-            {currentHost !== 'panel.reneo.my.id' && (
-              <>
-                <span className="text-slate-300">·</span>
-                <span className="font-mono text-slate-700">{currentHost}</span>
-              </>
-            )}
-            <span className="text-slate-300">·</span>
-            <a href={PANEL_URL} target="_top" className="font-mono hover:text-slate-800 transition-colors">
-              panel.reneo.my.id
+      <footer className="bg-white border-t border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs sm:text-sm text-slate-500">
+          <div className="flex items-center gap-2">
+            <ReneoCrmLogo className="w-6 h-6 shrink-0" />
+            <span className="font-semibold text-slate-800">Reneo CRM</span>
+            <span>· Layanan Pelanggan Terpadu</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <a href={PANEL_URL} target="_top" className="hover:text-slate-800 transition-colors">
+              Reneo Panel
             </a>
-            <span className="text-slate-300">·</span>
-            <a href="./llms.txt" className="font-mono hover:text-slate-800 transition-colors">
-              llms.txt
+            <a
+              href={PANEL_INSTALL_URL}
+              target="_top"
+              className="hover:text-slate-800 transition-colors"
+            >
+              Panduan Pemasangan
+            </a>
+            <a
+              href={PANEL_ORDER_URL}
+              target="_top"
+              className="hover:text-slate-800 transition-colors"
+            >
+              Paket &amp; Harga
             </a>
           </div>
-          <button
-            type="button"
-            onClick={onEnterLogin}
-            className="text-[#2563eb] hover:text-[#1d4ed8] font-medium cursor-pointer"
-          >
-            {authenticated
-              ? 'Buka Workspace CRM'
-              : initialized
-              ? 'Masuk ke Ruang Kerja CRM'
-              : 'Setup Awal CRM'}
-          </button>
         </div>
       </footer>
     </div>
