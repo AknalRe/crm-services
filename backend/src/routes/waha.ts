@@ -2793,6 +2793,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               senderName: chatMessages.senderName,
               senderPhone: chatMessages.senderPhone,
               senderJid: chatMessages.senderJid,
+              mediaUrl: chatMessages.mediaUrl,
+              mediaType: chatMessages.mediaType,
+              body: chatMessages.body,
             })
             .from(chatMessages)
             .where(dedupConditions)
@@ -2803,6 +2806,74 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             if (!dupMsg[0].senderName && snap.senderName) enrichSet.senderName = snap.senderName;
             if (!dupMsg[0].senderPhone && snap.senderPhone) enrichSet.senderPhone = snap.senderPhone;
             if (!dupMsg[0].senderJid && snap.senderJid) enrichSet.senderJid = snap.senderJid;
+            if (!dupMsg[0].mediaUrl || !dupMsg[0].mediaType) {
+              const dupMediaMeta = extractInboundWahaMediaMeta(payload);
+              if (dupMediaMeta.hasMedia) {
+                if (!dupMsg[0].mediaType && dupMediaMeta.mediaType) {
+                  enrichSet.mediaType = dupMediaMeta.mediaType;
+                }
+                if (!dupMsg[0].mediaUrl) {
+                  let resolvedDupMediaUrl: string | null = dupMediaMeta.rawMediaUrl;
+                  const dupMediaMetadata = {
+                    source: isFromMe ? ('OUTBOUND' as const) : ('INBOUND' as const),
+                    companyId,
+                    conversationId: dupMsg[0].conversationId,
+                    senderName: snap.senderName || undefined,
+                    senderPhone: snap.senderPhone || undefined,
+                    channel: 'WHATSAPP',
+                    label: inboundSession ? `WA • ${inboundSession}` : 'WhatsApp',
+                  };
+                  if (dupMediaMeta.inlineBase64) {
+                    try {
+                      const saved = await saveBase64MediaFile({
+                        base64: dupMediaMeta.inlineBase64,
+                        mimeType: dupMediaMeta.mimetype || undefined,
+                        fileName: dupMediaMeta.mediaName || undefined,
+                        maxBytes: 25 * 1024 * 1024,
+                        metadata: dupMediaMetadata,
+                      });
+                      resolvedDupMediaUrl = saved.relativeUrl;
+                    } catch {
+                      // keep fallback
+                    }
+                  } else if (dupMediaMeta.rawMediaUrl) {
+                    try {
+                      const downloaded = await wahaService.downloadMedia(dupMediaMeta.rawMediaUrl);
+                      const saved = await saveMediaBufferFile({
+                        buffer: downloaded.buffer,
+                        mimeType: dupMediaMeta.mimetype || downloaded.contentType,
+                        fileName: dupMediaMeta.mediaName || downloaded.filename,
+                        maxBytes: 25 * 1024 * 1024,
+                        metadata: dupMediaMetadata,
+                      });
+                      resolvedDupMediaUrl = saved.relativeUrl;
+                    } catch {
+                      // keep rawMediaUrl fallback
+                    }
+                  }
+                  if (resolvedDupMediaUrl) {
+                    enrichSet.mediaUrl = resolvedDupMediaUrl;
+                  }
+                }
+                if (dupMsg[0].body === '[Media]') {
+                  const dupText = extractInboundWahaText(payload).trim();
+                  const fallbackLabel = dupMediaMeta.isSticker
+                    ? '[Stiker]'
+                    : dupMediaMeta.mediaType === 'image'
+                    ? '[Gambar]'
+                    : dupMediaMeta.mediaType === 'video'
+                    ? '[Video]'
+                    : dupMediaMeta.mediaType === 'audio'
+                    ? '[Audio]'
+                    : dupMediaMeta.mediaType === 'document'
+                    ? dupMediaMeta.mediaName
+                      ? `[Dokumen: ${dupMediaMeta.mediaName}]`
+                      : '[Dokumen]'
+                    : '[Lampiran Media]';
+                  enrichSet.body = dupText || fallbackLabel;
+                }
+              }
+            }
             if (Object.keys(enrichSet).length > 0) {
               await db
                 .update(chatMessages)

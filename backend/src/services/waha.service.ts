@@ -3410,14 +3410,25 @@ export class WahaService {
     if (!cleanJid) return [];
     try {
       const { client, targetSession } = await this.resolveReadableSession(sessionName);
-      const res = await client.get(
-        `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
-        {
-          params: { limit, offset, downloadMedia: false },
-          timeout: 8000,
-        }
-      );
-      return Array.isArray(res.data) ? res.data : [];
+      try {
+        const res = await client.get(
+          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
+          {
+            params: { limit, offset, downloadMedia: true },
+            timeout: 15000,
+          }
+        );
+        return Array.isArray(res.data) ? res.data : [];
+      } catch {
+        const res = await client.get(
+          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
+          {
+            params: { limit, offset, downloadMedia: false },
+            timeout: 8000,
+          }
+        );
+        return Array.isArray(res.data) ? res.data : [];
+      }
     } catch {
       return [];
     }
