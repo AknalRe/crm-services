@@ -1578,239 +1578,176 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          {/* Privacy, Auto-Read & Online Presence Card (General & Per-Session) */}
-          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5">
-            <div className="flex flex-wrap items-start justify-between gap-2">
+          {/* Log Aktivitas & Webhook WAHA */}
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-gray-200 bg-gray-50/70 space-y-2.5">
               <div>
-                <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
-                  <Eye className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>Privasi, Auto-Read &amp; Status Online WhatsApp</span>
-                </h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Atur otomatis baca saat buka chat, visibilitas status Online/mengetik, dan centang 2 biru secara general atau per sesi WhatsApp.
+                <h3 className="text-gray-900 font-semibold text-sm">Log Aktivitas &amp; Webhook WAHA</h3>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Memantau event webhook masuk (<code className="font-mono">message</code>, <code className="font-mono">message.any</code>, <code className="font-mono">message.ack</code>) serta hasil sinkronisasi otomatis WAHA.
                 </p>
               </div>
-              {Object.keys(privacyConfig.sessions || {}).length > 0 && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
-                  {Object.keys(privacyConfig.sessions).length} Sesi Kustom
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
-              <div className="flex items-center gap-2 flex-1 min-w-0">
-                <label className="text-xs font-medium text-gray-700 shrink-0">
-                  Target Pengaturan:
-                </label>
-                <select
-                  value={privacyScope}
-                  onChange={(e) => setPrivacyScope(e.target.value)}
-                  className="h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500 min-w-[200px]"
-                >
-                  <option value="__GENERAL__">General (Default Semua Sesi)</option>
-                  {Array.from(
-                    new Set([
-                      ...sessions.map((s) => s.name),
-                      ...Object.keys(privacyConfig.sessions || {}),
-                    ])
-                  )
-                    .filter(Boolean)
-                    .map((sName) => (
-                      <option key={sName} value={sName}>
-                        Sesi: {sName}
-                        {privacyConfig.sessions?.[sName] ? ' (Kustom)' : ' (Ikuti General)'}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              {isSessionPrivacyOverridden && (
-                <Button
+              <div className="flex flex-wrap items-center gap-1.5">
+                {([
+                  { id: 'ALL', label: 'Semua' },
+                  { id: 'MESSAGE', label: 'Pesan' },
+                  { id: 'SYNC', label: 'Sync' },
+                  { id: 'ISSUE', label: 'Error / Diabaikan' },
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setWahaLogFilter(tab.id)}
+                    className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+                      wahaLogFilter === tab.id
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={!canEditSettings}
-                  onClick={() => handleResetSessionPrivacyOverride(privacyScope)}
+                  onClick={() => void fetchWahaLogs()}
+                  disabled={wahaLogsLoading}
+                  className="ml-auto px-2.5 py-1 rounded text-[11px] font-medium border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                 >
-                  Ikuti Pengaturan General
-                </Button>
-              )}
+                  {wahaLogsLoading ? 'Memuat...' : 'Refresh'}
+                </button>
+                {canEditSettings && wahaLogs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearWahaLogs}
+                    className="px-2.5 py-1 rounded text-[11px] font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                  >
+                    Bersihkan
+                  </button>
+                )}
+              </div>
             </div>
-
-            <div className="divide-y divide-gray-100 border border-gray-200 rounded-md bg-gray-50/40">
-              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-gray-900">
-                    Otomatis Baca Chat WhatsApp Saat Buka Percakapan
+            <div className="max-h-[680px] overflow-y-auto divide-y divide-gray-100">
+              {(() => {
+                const visibleLogs = wahaLogs.filter((item) => {
+                  if (wahaLogFilter === 'MESSAGE') {
+                    return item.event === 'message' || item.event === 'message.any';
+                  }
+                  if (wahaLogFilter === 'SYNC') {
+                    return item.event === 'chat.sync';
+                  }
+                  if (wahaLogFilter === 'ISSUE') {
+                    return item.outcome === 'ERROR' || item.outcome === 'IGNORED';
+                  }
+                  return true;
+                });
+                if (visibleLogs.length === 0) {
+                  return (
+                    <div className="px-4 py-8 text-center text-xs text-gray-500">
+                      Belum ada log WAHA yang tercatat untuk filter ini.
+                    </div>
+                  );
+                }
+                return visibleLogs.map((log, idx) => {
+                  const rowKey = `${log.receivedAt}-${log.event}-${idx}`;
+                  const isExpanded = expandedWahaLogKey === rowKey;
+                  const hasJson = log.payload !== undefined;
+                  const formattedJson =
+                    typeof log.payload === 'string'
+                      ? log.payload
+                      : JSON.stringify(log.payload ?? {
+                          receivedAt: log.receivedAt,
+                          event: log.event,
+                          session: log.session ?? null,
+                          from: log.from ?? null,
+                          outcome: log.outcome,
+                          statusCode: log.statusCode ?? null,
+                          note: log.note ?? null,
+                        }, null, 2);
+                  return (
+                  <div key={rowKey} className="px-4 py-2.5 text-xs hover:bg-gray-50/60">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-mono text-[11px] text-gray-400 shrink-0">
+                        {new Date(log.receivedAt).toLocaleTimeString('id-ID')}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
+                          log.outcome === 'ERROR'
+                            ? 'bg-red-100 text-red-700'
+                            : log.outcome === 'IGNORED'
+                            ? 'bg-amber-100 text-amber-800'
+                            : log.outcome === 'DEDUP'
+                            ? 'bg-gray-100 text-gray-600'
+                            : 'bg-emerald-100 text-emerald-700'
+                        }`}
+                      >
+                        {log.outcome}
+                      </span>
+                      {log.statusCode != null && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
+                            log.statusCode >= 500
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : log.statusCode >= 400
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          HTTP {log.statusCode}
+                        </span>
+                      )}
+                      <span className="font-mono text-[11px] font-semibold text-gray-800 shrink-0">
+                        {log.event}
+                      </span>
+                      {log.session && (
+                        <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
+                          {log.session}
+                        </span>
+                      )}
+                      {log.from && (
+                        <span className="font-mono text-[11px] text-gray-600 truncate max-w-[180px]" title={log.from}>
+                          {log.from}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedWahaLogKey(isExpanded ? null : rowKey)}
+                        className="ml-auto px-2 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-mono text-gray-600 hover:bg-gray-100 shrink-0"
+                      >
+                        {isExpanded ? 'Tutup JSON' : hasJson ? 'Lihat JSON' : 'Detail'}
+                      </button>
+                    </div>
+                    {log.note && (
+                      <div className="text-gray-600 text-[11px] mt-1 break-words">
+                        {log.note}
+                      </div>
+                    )}
+                    {isExpanded && (
+                      <div className="mt-2 rounded border border-gray-200 bg-gray-900 text-gray-100 p-2.5 overflow-x-auto">
+                        <div className="flex items-center justify-between mb-1.5 text-[10px] text-gray-400 font-mono">
+                          <span>{hasJson ? 'Webhook Payload JSON' : 'Ringkasan Log'}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(formattedJson);
+                              toast.success('JSON disalin.');
+                            }}
+                            className="px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200"
+                          >
+                            Salin JSON
+                          </button>
+                        </div>
+                        <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all max-h-96 overflow-y-auto">
+                          {formattedJson}
+                        </pre>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                    Jika aktif, membuka percakapan di Live Chat CRM otomatis mengirim tanda dibaca (<code className="font-mono">sendSeen</code>) ke WhatsApp pelanggan. Nonaktifkan jika ingin membaca chat di CRM tanpa langsung memicu centang 2 biru.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={activePrivacyRule.autoReadOnOpen}
-                  disabled={!canEditSettings}
-                  onChange={(e) => handleTogglePrivacyField('autoReadOnOpen', e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
-                />
-              </label>
-
-              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-gray-900">
-                    Mode Online &amp; Status Sedang Mengetik
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                    Jika aktif, CRM menampilkan status <span className="font-medium">Online</span> dan indikator <span className="font-medium">Sedang mengetik...</span> ke WhatsApp lawan bicara. Nonaktifkan untuk menyembunyikan status online (mode privasi offline).
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={activePrivacyRule.sendOnlinePresence}
-                  disabled={!canEditSettings}
-                  onChange={(e) => handleTogglePrivacyField('sendOnlinePresence', e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
-                />
-              </label>
-
-              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-gray-900">
-                    Izinkan Centang 2 Biru (Read Receipts WhatsApp)
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
-                    Jika dinonaktifkan, CRM tidak akan pernah mengirim tanda baca centang 2 biru (<code className="font-mono">sendSeen</code>) ke WhatsApp baik secara otomatis maupun tombol manual, sekaligus menyinkronkan privasi tanda baca sesi WAHA.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={activePrivacyRule.readReceipts}
-                  disabled={!canEditSettings}
-                  onChange={(e) => handleTogglePrivacyField('readReceipts', e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
-                />
-              </label>
-            </div>
-
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-[11px] text-gray-500">
-                {privacyScope === '__GENERAL__'
-                  ? 'Berlaku sebagai default untuk seluruh sesi yang tidak memiliki aturan khusus.'
-                  : isSessionPrivacyOverridden
-                  ? `Menampilkan aturan khusus untuk sesi "${privacyScope}".`
-                  : `Sesi "${privacyScope}" saat ini mengikuti aturan General. Ubah opsi di atas lalu simpan untuk membuat aturan khusus.`}
-              </span>
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                isLoading={savingPrivacy}
-                disabled={!canEditSettings}
-                onClick={() => void handleSavePrivacyConfig()}
-                className="shrink-0"
-              >
-                Simpan Privasi WA
-              </Button>
+                  );
+                });
+              })()}
             </div>
           </div>
 
-          <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
-            <button
-              type="button"
-              onClick={() => setShowMobileWahaTest((v) => !v)}
-              className="lg:pointer-events-none w-full flex items-center justify-between gap-2 text-left"
-            >
-              <div>
-                <h3 className="font-semibold text-gray-900 text-sm">Kirim Pesan Uji Coba</h3>
-                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 hidden sm:block">
-                  Verifikasi pengiriman pesan langsung ke nomor WhatsApp tujuan.
-                </p>
-              </div>
-              <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
-                <span>{showMobileWahaTest ? 'Tutup' : 'Buka'}</span>
-                {showMobileWahaTest ? (
-                  <ChevronDown className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronRight className="w-3.5 h-3.5" />
-                )}
-              </span>
-            </button>
-
-            <div className={`${showMobileWahaTest ? 'space-y-3.5' : 'hidden lg:block lg:space-y-4'}`}>
-
-            {sessions.length > 0 && (
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Sesi WhatsApp Pengirim
-                </label>
-                <select
-                  value={testSession || inspectedSession}
-                  onChange={(e) => setTestSession(e.target.value)}
-                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
-                >
-                  {sessions.map((s) => (
-                    <option key={s.name} value={s.name}>
-                      {s.name} ({s.status})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-              <div className="sm:w-48 md:w-52 shrink-0">
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Nomor WhatsApp Tujuan
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="08123456789"
-                  value={testPhone}
-                  onChange={(e) => setTestPhone(e.target.value)}
-                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div className="w-full flex-none sm:flex-1 min-w-0">
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Isi Pesan Uji Coba
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={testMessage}
-                  onChange={(e) => setTestMessage(e.target.value)}
-                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <Button
-                type="submit"
-                variant="secondary"
-                size="md"
-                isLoading={testSending}
-                disabled={isPendingModeSwitch || isServerOffline}
-                className="w-full sm:w-auto shrink-0"
-              >
-                Kirim Pesan Tes
-              </Button>
-            </div>
-
-            {testResult && (
-              <div
-                className={`p-3 rounded-md text-xs font-medium border ${
-                  testResult.ok
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-red-50 text-red-800 border-red-200'
-                }`}
-              >
-                {testResult.text}
-              </div>
-            )}
-            </div>
-          </form>
         </div>
 
         <div className="space-y-5">
@@ -2069,175 +2006,239 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          {/* Log Aktivitas & Webhook WAHA */}
-          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
-            <div className="px-4 sm:px-5 py-3.5 border-b border-gray-200 bg-gray-50/70 space-y-2.5">
+          {/* Privacy, Auto-Read & Online Presence Card (General & Per-Session) */}
+          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5">
+            <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <h3 className="text-gray-900 font-semibold text-sm">Log Aktivitas &amp; Webhook WAHA</h3>
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  Memantau event webhook masuk (<code className="font-mono">message</code>, <code className="font-mono">message.any</code>, <code className="font-mono">message.ack</code>) serta hasil sinkronisasi otomatis WAHA.
+                <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>Privasi, Auto-Read &amp; Status Online WhatsApp</span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Atur otomatis baca saat buka chat, visibilitas status Online/mengetik, dan centang 2 biru secara general atau per sesi WhatsApp.
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {([
-                  { id: 'ALL', label: 'Semua' },
-                  { id: 'MESSAGE', label: 'Pesan' },
-                  { id: 'SYNC', label: 'Sync' },
-                  { id: 'ISSUE', label: 'Error / Diabaikan' },
-                ] as const).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setWahaLogFilter(tab.id)}
-                    className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
-                      wahaLogFilter === tab.id
-                        ? 'bg-indigo-600 text-white border-indigo-600'
-                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => void fetchWahaLogs()}
-                  disabled={wahaLogsLoading}
-                  className="ml-auto px-2.5 py-1 rounded text-[11px] font-medium border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  {wahaLogsLoading ? 'Memuat...' : 'Refresh'}
-                </button>
-                {canEditSettings && wahaLogs.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleClearWahaLogs}
-                    className="px-2.5 py-1 rounded text-[11px] font-medium border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
-                  >
-                    Bersihkan
-                  </button>
-                )}
-              </div>
+              {Object.keys(privacyConfig.sessions || {}).length > 0 && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  {Object.keys(privacyConfig.sessions).length} Sesi Kustom
+                </span>
+              )}
             </div>
-            <div className="max-h-[560px] overflow-y-auto divide-y divide-gray-100">
-              {(() => {
-                const visibleLogs = wahaLogs.filter((item) => {
-                  if (wahaLogFilter === 'MESSAGE') {
-                    return item.event === 'message' || item.event === 'message.any';
-                  }
-                  if (wahaLogFilter === 'SYNC') {
-                    return item.event === 'chat.sync';
-                  }
-                  if (wahaLogFilter === 'ISSUE') {
-                    return item.outcome === 'ERROR' || item.outcome === 'IGNORED';
-                  }
-                  return true;
-                });
-                if (visibleLogs.length === 0) {
-                  return (
-                    <div className="px-4 py-8 text-center text-xs text-gray-500">
-                      Belum ada log WAHA yang tercatat untuk filter ini.
-                    </div>
-                  );
-                }
-                return visibleLogs.map((log, idx) => {
-                  const rowKey = `${log.receivedAt}-${log.event}-${idx}`;
-                  const isExpanded = expandedWahaLogKey === rowKey;
-                  const hasJson = log.payload !== undefined;
-                  const formattedJson =
-                    typeof log.payload === 'string'
-                      ? log.payload
-                      : JSON.stringify(log.payload ?? {
-                          receivedAt: log.receivedAt,
-                          event: log.event,
-                          session: log.session ?? null,
-                          from: log.from ?? null,
-                          outcome: log.outcome,
-                          statusCode: log.statusCode ?? null,
-                          note: log.note ?? null,
-                        }, null, 2);
-                  return (
-                  <div key={rowKey} className="px-4 py-2.5 text-xs hover:bg-gray-50/60">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-mono text-[11px] text-gray-400 shrink-0">
-                        {new Date(log.receivedAt).toLocaleTimeString('id-ID')}
-                      </span>
-                      <span
-                        className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
-                          log.outcome === 'ERROR'
-                            ? 'bg-red-100 text-red-700'
-                            : log.outcome === 'IGNORED'
-                            ? 'bg-amber-100 text-amber-800'
-                            : log.outcome === 'DEDUP'
-                            ? 'bg-gray-100 text-gray-600'
-                            : 'bg-emerald-100 text-emerald-700'
-                        }`}
-                      >
-                        {log.outcome}
-                      </span>
-                      {log.statusCode != null && (
-                        <span
-                          className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
-                            log.statusCode >= 500
-                              ? 'bg-red-50 text-red-700 border border-red-200'
-                              : log.statusCode >= 400
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'bg-slate-100 text-slate-700'
-                          }`}
-                        >
-                          HTTP {log.statusCode}
-                        </span>
-                      )}
-                      <span className="font-mono text-[11px] font-semibold text-gray-800 shrink-0">
-                        {log.event}
-                      </span>
-                      {log.session && (
-                        <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono text-[10px] shrink-0">
-                          {log.session}
-                        </span>
-                      )}
-                      {log.from && (
-                        <span className="font-mono text-[11px] text-gray-600 truncate max-w-[180px]" title={log.from}>
-                          {log.from}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setExpandedWahaLogKey(isExpanded ? null : rowKey)}
-                        className="ml-auto px-2 py-0.5 rounded border border-gray-200 bg-white text-[10px] font-mono text-gray-600 hover:bg-gray-100 shrink-0"
-                      >
-                        {isExpanded ? 'Tutup JSON' : hasJson ? 'Lihat JSON' : 'Detail'}
-                      </button>
-                    </div>
-                    {log.note && (
-                      <div className="text-gray-600 text-[11px] mt-1 break-words">
-                        {log.note}
-                      </div>
-                    )}
-                    {isExpanded && (
-                      <div className="mt-2 rounded border border-gray-200 bg-gray-900 text-gray-100 p-2.5 overflow-x-auto">
-                        <div className="flex items-center justify-between mb-1.5 text-[10px] text-gray-400 font-mono">
-                          <span>{hasJson ? 'Webhook Payload JSON' : 'Ringkasan Log'}</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(formattedJson);
-                              toast.success('JSON disalin.');
-                            }}
-                            className="px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200"
-                          >
-                            Salin JSON
-                          </button>
-                        </div>
-                        <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all max-h-72 overflow-y-auto">
-                          {formattedJson}
-                        </pre>
-                      </div>
-                    )}
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <label className="text-xs font-medium text-gray-700 shrink-0">
+                  Target Pengaturan:
+                </label>
+                <select
+                  value={privacyScope}
+                  onChange={(e) => setPrivacyScope(e.target.value)}
+                  className="h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500 min-w-[200px]"
+                >
+                  <option value="__GENERAL__">General (Default Semua Sesi)</option>
+                  {Array.from(
+                    new Set([
+                      ...sessions.map((s) => s.name),
+                      ...Object.keys(privacyConfig.sessions || {}),
+                    ])
+                  )
+                    .filter(Boolean)
+                    .map((sName) => (
+                      <option key={sName} value={sName}>
+                        Sesi: {sName}
+                        {privacyConfig.sessions?.[sName] ? ' (Kustom)' : ' (Ikuti General)'}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {isSessionPrivacyOverridden && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!canEditSettings}
+                  onClick={() => handleResetSessionPrivacyOverride(privacyScope)}
+                >
+                  Ikuti Pengaturan General
+                </Button>
+              )}
+            </div>
+
+            <div className="divide-y divide-gray-100 border border-gray-200 rounded-md bg-gray-50/40">
+              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-gray-900">
+                    Otomatis Baca Chat WhatsApp Saat Buka Percakapan
                   </div>
-                  );
-                });
-              })()}
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                    Jika aktif, membuka percakapan di Live Chat CRM otomatis mengirim tanda dibaca (<code className="font-mono">sendSeen</code>) ke WhatsApp pelanggan. Nonaktifkan jika ingin membaca chat di CRM tanpa langsung memicu centang 2 biru.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={activePrivacyRule.autoReadOnOpen}
+                  disabled={!canEditSettings}
+                  onChange={(e) => handleTogglePrivacyField('autoReadOnOpen', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                />
+              </label>
+
+              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-gray-900">
+                    Mode Online &amp; Status Sedang Mengetik
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                    Jika aktif, CRM menampilkan status <span className="font-medium">Online</span> dan indikator <span className="font-medium">Sedang mengetik...</span> ke WhatsApp lawan bicara. Nonaktifkan untuk menyembunyikan status online (mode privasi offline).
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={activePrivacyRule.sendOnlinePresence}
+                  disabled={!canEditSettings}
+                  onChange={(e) => handleTogglePrivacyField('sendOnlinePresence', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                />
+              </label>
+
+              <label className="flex items-start justify-between gap-3 p-3 cursor-pointer">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-gray-900">
+                    Izinkan Centang 2 Biru (Read Receipts WhatsApp)
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                    Jika dinonaktifkan, CRM tidak akan pernah mengirim tanda baca centang 2 biru (<code className="font-mono">sendSeen</code>) ke WhatsApp baik secara otomatis maupun tombol manual, sekaligus menyinkronkan privasi tanda baca sesi WAHA.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={activePrivacyRule.readReceipts}
+                  disabled={!canEditSettings}
+                  onChange={(e) => handleTogglePrivacyField('readReceipts', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-[11px] text-gray-500">
+                {privacyScope === '__GENERAL__'
+                  ? 'Berlaku sebagai default untuk seluruh sesi yang tidak memiliki aturan khusus.'
+                  : isSessionPrivacyOverridden
+                  ? `Menampilkan aturan khusus untuk sesi "${privacyScope}".`
+                  : `Sesi "${privacyScope}" saat ini mengikuti aturan General. Ubah opsi di atas lalu simpan untuk membuat aturan khusus.`}
+              </span>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                isLoading={savingPrivacy}
+                disabled={!canEditSettings}
+                onClick={() => void handleSavePrivacyConfig()}
+                className="shrink-0"
+              >
+                Simpan Privasi WA
+              </Button>
             </div>
           </div>
+
+          <form onSubmit={handleSendTest} className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
+            <button
+              type="button"
+              onClick={() => setShowMobileWahaTest((v) => !v)}
+              className="lg:pointer-events-none w-full flex items-center justify-between gap-2 text-left"
+            >
+              <div>
+                <h3 className="font-semibold text-gray-900 text-sm">Kirim Pesan Uji Coba</h3>
+                <p className="text-[11px] sm:text-xs text-gray-500 mt-0.5 hidden sm:block">
+                  Verifikasi pengiriman pesan langsung ke nomor WhatsApp tujuan.
+                </p>
+              </div>
+              <span className="lg:hidden text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5 shrink-0">
+                <span>{showMobileWahaTest ? 'Tutup' : 'Buka'}</span>
+                {showMobileWahaTest ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </span>
+            </button>
+
+            <div className={`${showMobileWahaTest ? 'space-y-3.5' : 'hidden lg:block lg:space-y-4'}`}>
+
+            {sessions.length > 0 && (
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Sesi WhatsApp Pengirim
+                </label>
+                <select
+                  value={testSession || inspectedSession}
+                  onChange={(e) => setTestSession(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
+                >
+                  {sessions.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name} ({s.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Nomor WhatsApp Tujuan
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="08123456789"
+                  value={testPhone}
+                  onChange={(e) => setTestPhone(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="w-full flex-none sm:flex-1 min-w-0">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Isi Pesan Uji Coba
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={testMessage}
+                  onChange={(e) => setTestMessage(e.target.value)}
+                  className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-[13px] focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <Button
+                type="submit"
+                variant="secondary"
+                size="md"
+                isLoading={testSending}
+                disabled={isPendingModeSwitch || isServerOffline}
+                className="w-full"
+              >
+                Kirim Pesan Tes
+              </Button>
+            </div>
+
+            {testResult && (
+              <div
+                className={`p-3 rounded-md text-xs font-medium border ${
+                  testResult.ok
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : 'bg-red-50 text-red-800 border-red-200'
+                }`}
+              >
+                {testResult.text}
+              </div>
+            )}
+            </div>
+          </form>
         </div>
       </div>
       </div>
