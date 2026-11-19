@@ -6549,16 +6549,63 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               </div>
                             );
                           }
-                          if (meta?.kind === 'CONTACT' && Array.isArray(meta.sharedContacts) && meta.sharedContacts.length > 0) {
+                          const parsedVcardContacts =
+                            meta?.kind !== 'CONTACT' && /BEGIN:VCARD/i.test(msg.body || '')
+                              ? (msg.body || '')
+                                  .split(/END:VCARD/i)
+                                  .map((chunk) => chunk.trim())
+                                  .filter((chunk) => /BEGIN:VCARD/i.test(chunk))
+                                  .map((chunk) => {
+                                    const lines = chunk.split(/\r?\n/);
+                                    let fullName = '';
+                                    let organization = '';
+                                    let email = '';
+                                    let waId = '';
+                                    const phones: string[] = [];
+                                    for (const line of lines) {
+                                      const upper = line.toUpperCase();
+                                      if (upper.startsWith('FN:')) {
+                                        fullName = line.slice(3).trim();
+                                      } else if (upper.startsWith('ORG:')) {
+                                        organization = line.slice(4).replace(/;+$/, '').trim();
+                                      } else if (upper.startsWith('EMAIL')) {
+                                        const idx = line.indexOf(':');
+                                        if (idx >= 0) email = line.slice(idx + 1).trim();
+                                      } else if (upper.startsWith('TEL')) {
+                                        const idx = line.indexOf(':');
+                                        const rawTel = idx >= 0 ? line.slice(idx + 1).trim() : '';
+                                        const digits = rawTel.replace(/[^\d]/g, '');
+                                        if (digits) {
+                                          phones.push(digits);
+                                          if (!waId) waId = digits;
+                                        }
+                                        const waMatch = line.match(/waid=(\d+)/i);
+                                        if (waMatch?.[1]) waId = waMatch[1];
+                                      }
+                                    }
+                                    return {
+                                      fullName: fullName || (waId ? `+${waId}` : 'Kontak WhatsApp'),
+                                      organization: organization || undefined,
+                                      email: email || undefined,
+                                      waId: waId || undefined,
+                                      phones,
+                                    };
+                                  })
+                              : [];
+                          const effectiveSharedContacts =
+                            meta?.kind === 'CONTACT' && Array.isArray(meta.sharedContacts) && meta.sharedContacts.length > 0
+                              ? meta.sharedContacts
+                              : parsedVcardContacts;
+                          if (effectiveSharedContacts.length > 0) {
                             return (
                               <div className="space-y-1.5">
                                 <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-700">
                                   <Users className="w-3 h-3" />
                                   <span>
-                                    Kartu Kontak Dibagikan ({meta.sharedContacts.length})
+                                    Kartu Kontak Dibagikan ({effectiveSharedContacts.length})
                                   </span>
                                 </div>
-                                {meta.sharedContacts.map((sc, scIdx) => {
+                                {effectiveSharedContacts.map((sc, scIdx) => {
                                   const primaryPhone = sc.phones?.[0] || sc.waId || '';
                                   const isSavedLocal = Boolean(primaryPhone && savedSharedPhones[primaryPhone]);
                                   return (

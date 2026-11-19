@@ -7,6 +7,7 @@ import { wahaService } from './waha.service';
 import {
   extractGroupParticipant,
   extractInboundWahaMediaMeta,
+  extractInboundWahaRichData,
   extractInboundWahaText,
   extractWahaMessageIds,
   isWahaFromMe,
@@ -293,6 +294,8 @@ export async function syncRecentWhatsAppChatMessages(
     }
 
     const rawText = extractInboundWahaText(m).trim();
+    const mediaMeta = extractInboundWahaMediaMeta(m);
+    const richData = extractInboundWahaRichData(m, mediaMeta, rawText);
     const mediaDetails = await resolveSyncedMediaDetails(
       m,
       conv,
@@ -301,8 +304,14 @@ export async function syncRecentWhatsAppChatMessages(
       senderName,
       senderPhone
     );
-    const body = rawText || (mediaDetails.hasMedia ? mediaDetails.mediaFallbackLabel : '');
+    const body = richData.body || (mediaDetails.hasMedia ? mediaDetails.mediaFallbackLabel : '');
     if (!body) continue;
+
+    const mergedMeta: Record<string, any> = {
+      ...(richData.metadata || {}),
+      ...(fromMe ? { sentVia: 'WHATSAPP_DEVICE', sentViaLabel: 'Perangkat WA' } : {}),
+    };
+    const serializedMeta = Object.keys(mergedMeta).length > 0 ? JSON.stringify(mergedMeta) : null;
 
     const msgDate = parseWahaTimestamp(m.timestamp ?? m._data?.Info?.Timestamp);
     const effectiveAck = ackValue ?? (fromMe ? 1 : 2);
@@ -335,9 +344,7 @@ export async function syncRecentWhatsAppChatMessages(
         sentAt: fromMe ? msgDate : null,
         deliveredAt: effectiveAck >= 2 ? msgDate : null,
         readAt: effectiveAck >= 3 ? msgDate : null,
-        metadataJson: fromMe
-          ? JSON.stringify({ sentVia: 'WHATSAPP_DEVICE', sentViaLabel: 'Perangkat WA' })
-          : null,
+        metadataJson: serializedMeta,
         createdAt: msgDate,
       })
       .onConflictDoNothing()
