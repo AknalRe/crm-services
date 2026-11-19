@@ -504,7 +504,7 @@ export async function syncCompanyRecentWhatsAppChats(companyId: string): Promise
         } else {
           let phone = !lowerChatId.endsWith('@lid') ? fromWahaChatId(rawChatId) : '';
           if (!phone && lowerChatId.endsWith('@lid')) {
-            const resolved = await wahaService.resolveLidToPhone(rawChatId, sess.name);
+            const resolved = await wahaService.resolveLidToPhone(sess.name, rawChatId);
             if (resolved) phone = normalizePhoneNumber(resolved);
           }
           if (phone) {

@@ -774,6 +774,7 @@ export interface WahaSessionInfo {
 export class WahaService {
   private static instance: WahaService;
   private webhookSyncAt = new Map<string, number>();
+  private presenceSubscribeAt = new Map<string, number>();
   private lidPhoneCache = new Map<string, string>();
   private lidNameCache = new Map<string, string>();
   private externalEngineCache = new Map<
@@ -3489,6 +3490,39 @@ export class WahaService {
       return Array.isArray(res.data) ? res.data : [];
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * Subscribe to a contact/group's WhatsApp presence updates (typing/recording/online) via WAHA
+   */
+  public async subscribeChatPresence(jid: string, sessionName?: string): Promise<void> {
+    const cleanJid = String(jid || '').trim();
+    if (!cleanJid) return;
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const cacheKey = `${targetSession}:${cleanJid}`;
+      const now = Date.now();
+      const prev = this.presenceSubscribeAt.get(cacheKey) || 0;
+      if (now - prev < 60_000) return;
+      this.presenceSubscribeAt.set(cacheKey, now);
+
+      try {
+        await client.post(
+          `/api/${encodeURIComponent(targetSession)}/presence/${encodeURIComponent(cleanJid)}/subscribe`,
+          {},
+          { timeout: 5000 }
+        );
+      } catch {
+        await client
+          .get(
+            `/api/${encodeURIComponent(targetSession)}/presence/${encodeURIComponent(cleanJid)}`,
+            { timeout: 5000 }
+          )
+          .catch(() => {});
+      }
+    } catch {
+      // ignore non-fatal presence subscribe errors
     }
   }
 

@@ -20,7 +20,7 @@ import {
   formatInteractiveButtonsFallbackText,
   formatLinkPreviewFallbackText,
 } from '../services/waha.service';
-import { fromWahaChatId, normalizePhoneNumber } from '../services/phone.utils';
+import { fromWahaChatId, normalizePhoneNumber, toWahaChatId } from '../services/phone.utils';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
 import {
@@ -1604,6 +1604,14 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               req.query?.forceSeen === '1'
             ).catch(() => { });
             void syncRecentWhatsAppChatMessages(row.conv, row.contact).catch(() => {});
+            const presenceJid =
+              row.conv.externalThreadId?.trim() ||
+              (row.contact.nomorWhatsapp ? toWahaChatId(row.contact.nomorWhatsapp) : '');
+            if (presenceJid && (row.conv.channel || 'WHATSAPP').toUpperCase() === 'WHATSAPP') {
+              void wahaService
+                .subscribeChatPresence(presenceJid, row.conv.wahaSession || undefined)
+                .catch(() => {});
+            }
           }
         }
       }

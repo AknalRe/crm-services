@@ -2073,6 +2073,18 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               updatedAt: new Date().toISOString(),
             }, companyId);
           }
+          wahaService.recordWebhookEvent({
+            receivedAt: new Date().toISOString(),
+            event: 'presence.update',
+            session: webhookSession || null,
+            from: parsedPresence.chatId,
+            outcome: matchedConv ? 'PROCESSED' : 'IGNORED',
+            statusCode: 200,
+            payload: req.body,
+            note: matchedConv
+              ? `Presence: ${parsedPresence.status}`
+              : `Presence (${parsedPresence.status}) tidak cocok dengan percakapan`,
+          }, companyId);
         }
       }
 
