@@ -9,13 +9,9 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock,
-  HeartHandshake,
   Menu,
   MessageSquare,
-  ShieldCheck,
-  Sparkles,
-  Star,
-  TrendingUp,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import { ReneoCrmLogo } from '../components/ReneoCrmLogo';
@@ -157,7 +153,7 @@ const MODULE_TABS = [
     title: 'Bagi Tugas Tim CS Tanpa Khawatir Data Bocor',
     summary:
       'Atur siapa menangani obrolan mana dan batasi akses tiap staf sesuai perannya — sehingga data pelanggan tetap aman meski tim terus bertambah.',
-    icon: ShieldCheck,
+    icon: SlidersHorizontal,
     highlights: [
       'Pilih hak akses tiap staf secara fleksibel: staf baru cukup melihat obrolan miliknya tanpa bisa mengunduh daftar kontak.',
       'Tandai chat internal, kurir, supplier, atau grup kantor sebagai Non-Penilaian agar tidak mengacaukan laporan CS.',
@@ -203,7 +199,7 @@ const MODULE_TABS = [
     highlights: [
       'Cukup unggah daftar harga, FAQ, atau panduan produk Anda agar jawaban AI selalu akurat dan tidak mengarang.',
       'Atur gaya bahasa ramah sesuai karakter merek Anda — bisa membantu di jam malam atau saat CS sedang penuh.',
-      'Kapan saja pelanggan butuh bantuan manusia, admin bisa langsung mengambil alih percakapan dengan mulus.',
+      'Kapan saja pelanggan butuh bantuan manusia, admin bisa langsung mengambil alih percakapan.',
     ],
     benefitNote: 'Calon pembeli tetap mendapat sambutan cepat meski menghubungi di luar jam operasional.',
   },
@@ -505,9 +501,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-16 space-y-10">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
               <div className="lg:col-span-6 space-y-5">
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-xs font-semibold text-[#1d4ed8]">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0" strokeWidth={1.75} />
-                  <span>Instagram · WhatsApp · Facebook · Threads · Telegram</span>
+                <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                  Instagram · WhatsApp · Facebook · Threads · Telegram
                 </div>
 
                 <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-bold text-slate-900 tracking-tight leading-[1.18]">
@@ -523,10 +518,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <a
                       href={PANEL_ORDER_URL}
                       target="_top"
-                      className="min-h-[46px] py-2.5 px-6 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-all shadow-sm"
+                      className="min-h-[46px] py-2.5 px-6 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors"
                     >
                       <span>Mulai Coba Gratis 7 Hari</span>
-                      <ArrowRight className="w-4 h-4" strokeWidth={2} />
+                      <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                     </a>
                     <a
                       href="#modul"
@@ -536,21 +531,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     </a>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs sm:text-sm text-slate-500">
-                    <span className="inline-flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Aktif dalam hitungan menit</span>
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Data 100% milik bisnis Anda</span>
-                    </span>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-slate-500">
+                    <span>Aktif dalam hitungan menit</span>
+                    <span aria-hidden="true">·</span>
+                    <span>Data 100% milik bisnis Anda</span>
+                    <span aria-hidden="true">·</span>
                     <button
                       type="button"
                       onClick={onEnterLogin}
                       className="text-[#2563eb] hover:text-[#1d4ed8] font-semibold underline underline-offset-2"
                     >
-                      {authenticated ? 'Buka Workspace →' : 'Sudah punya akun? Masuk'}
+                      {authenticated ? 'Buka Workspace' : 'Sudah punya akun? Masuk'}
                     </button>
                   </div>
                 </div>
@@ -639,13 +630,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </section>
 
-        {/* Problem & Agitation Section (Tarik-Ulur Psikologi Pembeli) */}
+        {/* Problem & Agitation Section */}
         <RevealSection id="masalah" className="bg-[#f8fafc] border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-8">
             <div className="max-w-3xl space-y-2.5">
-              <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-rose-600">
-                <AlertCircle className="w-4 h-4" />
-                <span>Yang Sering Terjadi Tanpa Disadari</span>
+              <div className="text-xs font-semibold uppercase tracking-wide text-rose-600">
+                Yang Sering Terjadi Tanpa Disadari
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
                 Iklan Sudah Bagus, Produk Sudah Dicari — Tapi Penjualan Bocor di Tahap Balas Chat?
@@ -655,15 +645,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-3 rounded-2xl bg-white border border-slate-200 divide-y md:divide-y-0 md:divide-x divide-slate-200 overflow-hidden">
               {HIDDEN_COSTS.map((item) => (
                 <div
                   key={item.title}
-                  className="p-5 sm:p-6 rounded-2xl bg-white border border-slate-200 space-y-3 hover:border-slate-300 transition-colors"
+                  className="p-5 sm:p-6 space-y-2.5"
                 >
-                  <span className="inline-block px-2.5 py-1 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold">
+                  <div className="text-xs font-bold uppercase tracking-wide text-rose-700">
                     {item.stat}
-                  </span>
+                  </div>
                   <h3 className="text-base font-bold text-slate-900 leading-snug">
                     {item.title}
                   </h3>
@@ -678,9 +668,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <RevealSection id="kenapa-dibuat" className="bg-white border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
             <div className="max-w-3xl space-y-2.5">
-              <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
-                <HeartHandshake className="w-4 h-4" />
-                <span>Cerita di Balik Reneo CRM</span>
+              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                Cerita di Balik Reneo CRM
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
                 Kenapa Kami Membuat Reneo CRM
@@ -825,9 +814,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   ))}
                 </ul>
 
-                <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-100 flex items-start gap-2.5 text-sm text-slate-700">
-                  <TrendingUp className="w-4 h-4 text-[#2563eb] shrink-0 mt-0.5" />
-                  <span>{activeModule.benefitNote}</span>
+                <div className="border-l-2 border-[#2563eb] pl-3.5 py-1 text-sm text-slate-700">
+                  {activeModule.benefitNote}
                 </div>
               </div>
             </div>
@@ -1124,12 +1112,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </RevealSection>
 
-        {/* Final CTA — Risk Reversal */}
+        {/* Final CTA */}
         <RevealSection className="bg-slate-900 text-white">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-18 text-center space-y-5">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-semibold text-blue-200">
-              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-              <span>Uji Coba Gratis 7 Hari · Tanpa Risiko</span>
+            <div className="text-xs font-semibold uppercase tracking-wide text-blue-300">
+              Uji Coba Gratis 7 Hari · Tanpa Kartu Kredit
             </div>
 
             <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight leading-snug">
