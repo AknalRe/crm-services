@@ -1732,6 +1732,12 @@ export class WahaService {
           webhooks: nextWebhooks,
         },
       });
+      // WAHA GOWS only activates newly subscribed webhook events (message.any, presence.update, message.ack) after restart
+      if (typeof client.post === 'function' && String(sessionData?.status || '').toUpperCase() === 'WORKING') {
+        await Promise.resolve(
+          client.post(`/api/sessions/${encodeURIComponent(sessionName)}/restart`)
+        ).catch(() => {});
+      }
       console.log(`[WahaService] Synced webhook for session "${sessionName}" -> ${targetUrl}`);
       return true;
     } catch (err: any) {
@@ -3389,6 +3395,31 @@ export class WahaService {
       if (liveSession) targetSession = liveSession;
     }
     return { client, targetSession };
+  }
+
+  /**
+   * Fetch recent chat messages from WAHA to backfill any messages missed by webhooks (e.g. external device sends)
+   */
+  public async fetchChatMessages(
+    jid: string,
+    limit = 25,
+    sessionName?: string
+  ): Promise<any[]> {
+    const cleanJid = String(jid || '').trim();
+    if (!cleanJid) return [];
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const res = await client.get(
+        `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
+        {
+          params: { limit, downloadMedia: false },
+          timeout: 8000,
+        }
+      );
+      return Array.isArray(res.data) ? res.data : [];
+    } catch {
+      return [];
+    }
   }
 
   /**

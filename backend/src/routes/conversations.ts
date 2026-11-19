@@ -46,6 +46,7 @@ import {
 import { readUploadedMediaAsDataUri, saveBase64MediaFile } from './media';
 import { pickBestContactDisplayName, isGenericDisplayName } from './waha';
 import { syncWhatsAppProfile } from '../services/profile.service';
+import { syncRecentWhatsAppChatMessages } from '../services/chatSync.service';
 import crypto from 'crypto';
 
 const VALID_STATUSES = new Set(['OPEN', 'PENDING', 'RESOLVED']);
@@ -1572,6 +1573,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               messages,
               req.query?.forceSeen === '1'
             ).catch(() => { });
+            if (!row.conv.isGroup) {
+              void syncRecentWhatsAppChatMessages(row.conv, row.contact).catch(() => {});
+            }
           }
         }
       }
@@ -1956,6 +1960,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         isGroup,
         force: true,
       });
+      if (!isGroup) {
+        void syncRecentWhatsAppChatMessages(row.conv, row.contact, { force: true }).catch(() => {});
+      }
       return reply.send({
         success: true,
         data: {
