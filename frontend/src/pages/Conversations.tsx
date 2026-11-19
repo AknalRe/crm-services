@@ -1125,6 +1125,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   activeConvIdRef.current = selectedConversation?.id || '';
   const loadedMsgsConvIdRef = useRef<string>('');
   const isAtBottomRef = useRef<boolean>(true);
+  const [isAtChatBottom, setIsAtChatBottom] = useState<boolean>(true);
   const pendingInitialScrollRef = useRef<boolean>(false);
   const [pendingNewMsgCount, setPendingNewMsgCount] = useState<number>(0);
   const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
@@ -1151,6 +1152,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       messagesEndRef.current?.scrollIntoView({ behavior });
     }
     isAtBottomRef.current = true;
+    setIsAtChatBottom(true);
     setPendingNewMsgCount(0);
   }, []);
 
@@ -1695,6 +1697,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     const nearBottom = distanceFromBottom <= 100;
     isAtBottomRef.current = nearBottom;
+    setIsAtChatBottom(nearBottom);
     if (nearBottom) {
       setPendingNewMsgCount(0);
     }
@@ -7001,18 +7004,47 @@ export const Conversations: React.FC<ConversationsProps> = ({
             )}
             <div ref={messagesEndRef} />
             </div>
-            {pendingNewMsgCount > 0 && (
-              <button
-                type="button"
-                onClick={() => scrollToBottom('smooth')}
-                className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md border border-indigo-500 transition-all cursor-pointer"
-              >
-                <ChevronDown className="w-3.5 h-3.5 shrink-0" />
-                <span>
-                  {pendingNewMsgCount > 1 ? `${pendingNewMsgCount} pesan baru` : 'Pesan baru'}
-                </span>
-              </button>
-            )}
+            {(() => {
+              const activeChatPresence = presenceByConvId[selectedConversation.id]?.status;
+              const showFloatingPresence =
+                !isAtChatBottom &&
+                (activeChatPresence === 'typing' || activeChatPresence === 'recording');
+              if (!showFloatingPresence && pendingNewMsgCount <= 0) return null;
+              return (
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5 pointer-events-none">
+                  {showFloatingPresence && (
+                    <button
+                      type="button"
+                      onClick={() => scrollToBottom('smooth')}
+                      className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/95 hover:bg-white text-emerald-700 text-xs font-semibold shadow-md border border-emerald-200 backdrop-blur-xs transition-all cursor-pointer"
+                    >
+                      <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.2s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:-0.1s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-bounce" />
+                      </span>
+                      <span>
+                        {activeChatPresence === 'recording'
+                          ? 'Sedang merekam audio...'
+                          : 'Sedang mengetik...'}
+                      </span>
+                    </button>
+                  )}
+                  {pendingNewMsgCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => scrollToBottom('smooth')}
+                      className="pointer-events-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-md border border-indigo-500 transition-all cursor-pointer"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                      <span>
+                        {pendingNewMsgCount > 1 ? `${pendingNewMsgCount} pesan baru` : 'Pesan baru'}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Composer */}
