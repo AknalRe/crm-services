@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, ne, desc, asc, gt, inArray, ilike, isNotNull, or, sql } from 'drizzle-orm';
+import { and, eq, ne, desc, asc, gt, lt, inArray, ilike, isNotNull, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   conversations,
@@ -1523,21 +1523,48 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET messages for conversation
+  // GET messages for conversation (supports optional ?limit=80&before=<ISO> pagination)
   fastify.get('/:id/messages', async (
     req: FastifyRequest<{
       Params: { id: string };
-      Querystring: { markRead?: string; forceSeen?: string };
+      Querystring: { markRead?: string; forceSeen?: string; limit?: string; before?: string };
     }>,
     reply: FastifyReply
   ) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const messages = await db
-        .select()
-        .from(chatMessages)
-        .where(and(eq(chatMessages.conversationId, req.params.id), eq(chatMessages.companyId, companyId)))
-        .orderBy(asc(chatMessages.createdAt));
+      const parsedLimit = req.query?.limit ? Number(req.query.limit) : 0;
+      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(Math.floor(parsedLimit), 200) : 0;
+      const beforeRaw = req.query?.before ? String(req.query.before).trim() : '';
+      const beforeDate = beforeRaw ? new Date(beforeRaw) : null;
+      const hasValidBefore = Boolean(beforeDate && !Number.isNaN(beforeDate.getTime()));
+
+      let messages: (typeof chatMessages.$inferSelect)[];
+      let hasMore = false;
+      if (limit > 0) {
+        const rowsDesc = await db
+          .select()
+          .from(chatMessages)
+          .where(
+            hasValidBefore
+              ? and(
+                  eq(chatMessages.conversationId, req.params.id),
+                  eq(chatMessages.companyId, companyId),
+                  lt(chatMessages.createdAt, beforeDate!)
+                )
+              : and(eq(chatMessages.conversationId, req.params.id), eq(chatMessages.companyId, companyId))
+          )
+          .orderBy(desc(chatMessages.createdAt))
+          .limit(limit + 1);
+        hasMore = rowsDesc.length > limit;
+        messages = rowsDesc.slice(0, limit).reverse();
+      } else {
+        messages = await db
+          .select()
+          .from(chatMessages)
+          .where(and(eq(chatMessages.conversationId, req.params.id), eq(chatMessages.companyId, companyId)))
+          .orderBy(asc(chatMessages.createdAt));
+      }
 
       const shouldMarkRead =
         req.query?.markRead !== 'false' && req.query?.markRead !== '0';
@@ -1624,7 +1651,49 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         };
       });
 
-      return reply.send({ success: true, data: enriched });
+      return reply.send({ success: true, data: enriched, hasMore });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST sync older/historical messages from WAHA for a conversation
+  fastify.post('/:id/sync-history', async (
+    req: FastifyRequest<{ Params: { id: string }; Body: { offset?: number; limit?: number } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
+        .limit(1);
+      const row = convRows[0];
+      if (!row?.conv || !row.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+      if ((row.conv.channel || 'WHATSAPP').toUpperCase() !== 'WHATSAPP') {
+        return reply.send({
+          success: true,
+          data: { inserted: 0, acksUpdated: 0, fetchedCount: 0, hasMoreOnWaha: false },
+        });
+      }
+      const limit = Math.min(Math.max(Number(req.body?.limit || 50), 1), 100);
+      const offset = Math.max(Number(req.body?.offset || 0), 0);
+      const result = await syncRecentWhatsAppChatMessages(row.conv, row.contact, {
+        force: true,
+        limit,
+        offset,
+      });
+      return reply.send({
+        success: true,
+        data: {
+          ...result,
+          hasMoreOnWaha: result.fetchedCount >= limit,
+        },
+      });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }

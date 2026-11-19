@@ -3403,7 +3403,8 @@ export class WahaService {
   public async fetchChatMessages(
     jid: string,
     limit = 25,
-    sessionName?: string
+    sessionName?: string,
+    offset = 0
   ): Promise<any[]> {
     const cleanJid = String(jid || '').trim();
     if (!cleanJid) return [];
@@ -3412,7 +3413,7 @@ export class WahaService {
       const res = await client.get(
         `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
         {
-          params: { limit, downloadMedia: false },
+          params: { limit, offset, downloadMedia: false },
           timeout: 8000,
         }
       );

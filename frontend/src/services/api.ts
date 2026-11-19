@@ -221,6 +221,28 @@ export const api = {
     const res = await client.get(`/conversations/${id}/messages`, { params });
     return res.data.data;
   },
+  getConversationMessagesPage: async (
+    id: string,
+    opts?: { markRead?: boolean; forceSeen?: boolean; limit?: number; before?: string }
+  ): Promise<{ items: ChatMessage[]; hasMore: boolean }> => {
+    const params: Record<string, string> = {};
+    if (opts?.markRead === false) params.markRead = 'false';
+    if (opts?.forceSeen) params.forceSeen = '1';
+    if (opts?.limit) params.limit = String(opts.limit);
+    if (opts?.before) params.before = opts.before;
+    const res = await client.get(`/conversations/${id}/messages`, { params });
+    return {
+      items: res.data.data || [],
+      hasMore: Boolean(res.data.hasMore),
+    };
+  },
+  syncConversationHistory: async (
+    id: string,
+    opts?: { offset?: number; limit?: number }
+  ): Promise<{ inserted: number; acksUpdated: number; fetchedCount: number; hasMoreOnWaha: boolean }> => {
+    const res = await client.post(`/conversations/${id}/sync-history`, opts || {});
+    return res.data.data;
+  },
   markConversationRead: async (
     id: string
   ): Promise<{ seenSent: boolean; skippedByPrivacy?: boolean; error?: string }> => {

@@ -28,10 +28,10 @@ function parseWahaTimestamp(raw: unknown): Date {
 export async function syncRecentWhatsAppChatMessages(
   conv: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
-  opts?: { force?: boolean; limit?: number }
-): Promise<{ inserted: number; acksUpdated: number }> {
+  opts?: { force?: boolean; limit?: number; offset?: number }
+): Promise<{ inserted: number; acksUpdated: number; fetchedCount: number }> {
   if ((conv.channel || 'WHATSAPP').toUpperCase() !== 'WHATSAPP') {
-    return { inserted: 0, acksUpdated: 0 };
+    return { inserted: 0, acksUpdated: 0, fetchedCount: 0 };
   }
 
   const key = `${conv.companyId}:${conv.id}`;
@@ -39,7 +39,7 @@ export async function syncRecentWhatsAppChatMessages(
   if (!opts?.force) {
     const prev = lastChatSyncAt.get(key) || 0;
     if (nowMs - prev < CHAT_SYNC_COOLDOWN_MS) {
-      return { inserted: 0, acksUpdated: 0 };
+      return { inserted: 0, acksUpdated: 0, fetchedCount: 0 };
     }
   }
   lastChatSyncAt.set(key, nowMs);
@@ -47,14 +47,17 @@ export async function syncRecentWhatsAppChatMessages(
   const targetJid =
     conv.externalThreadId?.trim() ||
     (contact.nomorWhatsapp ? toWahaChatId(contact.nomorWhatsapp) : '');
-  if (!targetJid) return { inserted: 0, acksUpdated: 0 };
+  if (!targetJid) return { inserted: 0, acksUpdated: 0, fetchedCount: 0 };
 
+  const limit = Math.min(Math.max(Number(opts?.limit || 25), 1), 100);
+  const offset = Math.max(Number(opts?.offset || 0), 0);
   const rawMessages = await wahaService.fetchChatMessages(
     targetJid,
-    opts?.limit ?? 25,
-    conv.wahaSession || undefined
+    limit,
+    conv.wahaSession || undefined,
+    offset
   );
-  if (rawMessages.length === 0) return { inserted: 0, acksUpdated: 0 };
+  if (rawMessages.length === 0) return { inserted: 0, acksUpdated: 0, fetchedCount: 0 };
 
   const existingRows = await db
     .select({
@@ -66,7 +69,7 @@ export async function syncRecentWhatsAppChatMessages(
     .from(chatMessages)
     .where(and(eq(chatMessages.conversationId, conv.id), eq(chatMessages.companyId, conv.companyId)))
     .orderBy(desc(chatMessages.createdAt))
-    .limit(120);
+    .limit(500);
 
   const byMsgId = new Map<string, (typeof existingRows)[number]>();
   for (const row of existingRows) {
@@ -207,5 +210,5 @@ export async function syncRecentWhatsAppChatMessages(
     liveEvents.emit('conversations:update', { conversationId: conv.id }, conv.companyId);
   }
 
-  return { inserted, acksUpdated };
+  return { inserted, acksUpdated, fetchedCount: rawMessages.length };
 }

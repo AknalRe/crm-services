@@ -1127,6 +1127,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const isAtBottomRef = useRef<boolean>(true);
   const pendingInitialScrollRef = useRef<boolean>(false);
   const [pendingNewMsgCount, setPendingNewMsgCount] = useState<number>(0);
+  const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState<boolean>(false);
+  const [wahaHistoryExhausted, setWahaHistoryExhausted] = useState<boolean>(false);
+  const loadingOlderMessagesRef = useRef<boolean>(false);
+  const wahaHistoryOffsetRef = useRef<number>(0);
+  const wahaHistoryExhaustedRef = useRef<boolean>(false);
+  const prependScrollAnchorRef = useRef<{ top: number; height: number } | null>(null);
   const lastAutoScrollRef = useRef<{ convId: string; lastMsgId: string | null }>({
     convId: '',
     lastMsgId: null,
@@ -1263,13 +1270,27 @@ export const Conversations: React.FC<ConversationsProps> = ({
     if (!isLiveChatUnlocked) return;
     if (!silent) {
       setLoadingMessages(true);
+      wahaHistoryOffsetRef.current = 0;
+      wahaHistoryExhaustedRef.current = false;
+      setWahaHistoryExhausted(false);
     }
     try {
       const isVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
-      const data = await api.getConversationMessages(convId, { markRead: isVisible });
+      const page = await api.getConversationMessagesPage(convId, { markRead: isVisible, limit: 80 });
       if (activeConvIdRef.current !== convId) return;
       loadedMsgsConvIdRef.current = convId;
-      setMessages(data);
+      if (!silent) {
+        setMessages(page.items);
+        setHasMoreMessages(page.hasMore);
+      } else {
+        setMessages((prev) => {
+          const incomingIds = new Set(page.items.map((m) => m.id));
+          const olderPreserved = prev.filter((m) => !incomingIds.has(m.id));
+          const merged = [...olderPreserved, ...page.items];
+          merged.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          return merged;
+        });
+      }
     } catch (err) {
       console.error('Error fetching messages:', err);
     } finally {
@@ -1278,6 +1299,74 @@ export const Conversations: React.FC<ConversationsProps> = ({
       }
     }
   }, [isLiveChatUnlocked]);
+
+  const loadOlderMessages = useCallback(async () => {
+    const convId = activeConvIdRef.current;
+    if (!convId || loadingOlderMessagesRef.current) return;
+    const isWhatsApp = (selectedConversation?.channel || 'WHATSAPP') === 'WHATSAPP';
+    if (!hasMoreMessages && (!isWhatsApp || wahaHistoryExhaustedRef.current)) return;
+
+    loadingOlderMessagesRef.current = true;
+    setLoadingOlderMessages(true);
+    const container = messagesContainerRef.current;
+    if (container) {
+      prependScrollAnchorRef.current = { top: container.scrollTop, height: container.scrollHeight };
+    }
+
+    try {
+      const oldestCreatedAt = messages[0]?.createdAt;
+      if (hasMoreMessages && oldestCreatedAt) {
+        const page = await api.getConversationMessagesPage(convId, {
+          markRead: false,
+          limit: 50,
+          before: oldestCreatedAt,
+        });
+        if (activeConvIdRef.current !== convId) return;
+        setHasMoreMessages(page.hasMore);
+        if (page.items.length > 0) {
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            const uniqueOlder = page.items.filter((m) => !existingIds.has(m.id));
+            return uniqueOlder.length > 0 ? [...uniqueOlder, ...prev] : prev;
+          });
+        }
+      } else if (isWhatsApp && !wahaHistoryExhaustedRef.current) {
+        const offset = wahaHistoryOffsetRef.current;
+        const syncRes = await api.syncConversationHistory(convId, { offset, limit: 50 });
+        if (activeConvIdRef.current !== convId) return;
+        wahaHistoryOffsetRef.current = offset + 50;
+        if (!syncRes.hasMoreOnWaha) {
+          wahaHistoryExhaustedRef.current = true;
+          setWahaHistoryExhausted(true);
+        }
+        if (syncRes.inserted > 0) {
+          const page = oldestCreatedAt
+            ? await api.getConversationMessagesPage(convId, {
+                markRead: false,
+                limit: 50,
+                before: oldestCreatedAt,
+              })
+            : await api.getConversationMessagesPage(convId, { markRead: false, limit: 80 });
+          if (activeConvIdRef.current !== convId) return;
+          if (page.items.length > 0) {
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id));
+              const uniqueOlder = page.items.filter((m) => !existingIds.has(m.id));
+              const merged = [...uniqueOlder, ...prev];
+              merged.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+              return merged;
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error loading older messages:', err);
+      prependScrollAnchorRef.current = null;
+    } finally {
+      loadingOlderMessagesRef.current = false;
+      setLoadingOlderMessages(false);
+    }
+  }, [hasMoreMessages, messages, selectedConversation?.channel]);
 
   useEffect(() => {
     if (!isLiveChatUnlocked) return;
@@ -1590,6 +1679,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
     setFloatingDateLabel(detected);
   }, [messages]);
 
+  useLayoutEffect(() => {
+    const anchor = prependScrollAnchorRef.current;
+    const container = messagesContainerRef.current;
+    if (!anchor || !container) return;
+    prependScrollAnchorRef.current = null;
+    const delta = container.scrollHeight - anchor.height;
+    container.scrollTop = delta > 0 ? anchor.top + delta : anchor.top;
+  }, [messages]);
+
   const handleMessagesScroll = useCallback(() => {
     updateFloatingDateLabel();
     const container = messagesContainerRef.current;
@@ -1600,7 +1698,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
     if (nearBottom) {
       setPendingNewMsgCount(0);
     }
-  }, [updateFloatingDateLabel]);
+    if (container.scrollTop <= 60 && !loadingOlderMessagesRef.current) {
+      const isWhatsApp = (selectedConversation?.channel || 'WHATSAPP') === 'WHATSAPP';
+      if (hasMoreMessages || (isWhatsApp && !wahaHistoryExhaustedRef.current)) {
+        void loadOlderMessages();
+      }
+    }
+  }, [hasMoreMessages, loadOlderMessages, selectedConversation?.channel, updateFloatingDateLabel]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => updateFloatingDateLabel());
@@ -5376,6 +5480,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </span>
               </div>
             )}
+            {!loadingMessages &&
+              messages.length > 0 &&
+              (hasMoreMessages ||
+                ((selectedConversation?.channel || 'WHATSAPP') === 'WHATSAPP' && !wahaHistoryExhausted)) && (
+                <div className="flex justify-center py-1">
+                  <button
+                    type="button"
+                    disabled={loadingOlderMessages}
+                    onClick={() => void loadOlderMessages()}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/90 hover:bg-white border border-gray-200 text-[11px] font-medium text-gray-600 hover:text-indigo-700 shadow-2xs transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    {loadingOlderMessages ? (
+                      <>
+                        <RotateCcw className="w-3 h-3 animate-spin" />
+                        <span>Memuat histori pesan lama...</span>
+                      </>
+                    ) : (
+                      <span>Muat &amp; sinkronkan pesan lebih lama</span>
+                    )}
+                  </button>
+                </div>
+              )}
             {loadingMessages && messages.length === 0 ? (
               <LoadingState message="Memuat pesan..." />
             ) : messages.length === 0 ? (
