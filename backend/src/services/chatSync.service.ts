@@ -6,11 +6,13 @@ import { liveEvents } from './events.service';
 import { wahaService } from './waha.service';
 import {
   extractGroupParticipant,
+  extractInboundWahaMediaMeta,
   extractInboundWahaText,
   extractWahaMessageIds,
   isWahaFromMe,
   normalizeWahaAck,
 } from '../routes/waha';
+import { saveBase64MediaFile, saveMediaBufferFile } from '../routes/media';
 import { toWahaChatId } from './phone.utils';
 
 const CHAT_SYNC_COOLDOWN_MS = 15_000;
@@ -59,6 +61,87 @@ export function resolveConversationSyncBumpUpdate(params: {
   return null;
 }
 
+async function resolveSyncedMediaDetails(
+  m: any,
+  conv: typeof conversations.$inferSelect,
+  contact: typeof contacts.$inferSelect,
+  fromMe: boolean,
+  senderName: string | null,
+  senderPhone: string | null
+): Promise<{
+  hasMedia: boolean;
+  mediaType: 'image' | 'video' | 'audio' | 'document' | null;
+  mediaUrl: string | null;
+  mediaFallbackLabel: string;
+}> {
+  const mediaMeta = extractInboundWahaMediaMeta(m);
+  if (!mediaMeta.hasMedia) {
+    return { hasMedia: false, mediaType: null, mediaUrl: null, mediaFallbackLabel: '' };
+  }
+  const mediaFallbackLabel = mediaMeta.isSticker
+    ? '[Stiker]'
+    : mediaMeta.mediaType === 'image'
+    ? '[Gambar]'
+    : mediaMeta.mediaType === 'video'
+    ? '[Video]'
+    : mediaMeta.mediaType === 'audio'
+    ? '[Audio]'
+    : mediaMeta.mediaType === 'document'
+    ? mediaMeta.mediaName
+      ? `[Dokumen: ${mediaMeta.mediaName}]`
+      : '[Dokumen]'
+    : '[Lampiran Media]';
+
+  let mediaUrl: string | null = mediaMeta.rawMediaUrl;
+  const mediaMetadata = {
+    source: fromMe ? ('OUTBOUND' as const) : ('INBOUND' as const),
+    companyId: conv.companyId,
+    conversationId: conv.id,
+    contactId: contact.id,
+    contactName: contact.namaLengkap || undefined,
+    senderName: senderName || contact.namaLengkap || undefined,
+    senderPhone: senderPhone || contact.nomorWhatsapp || undefined,
+    channel: 'WHATSAPP',
+    label: conv.wahaSession ? `WA • ${conv.wahaSession}` : 'WhatsApp',
+  };
+
+  if (mediaMeta.inlineBase64) {
+    try {
+      const saved = await saveBase64MediaFile({
+        base64: mediaMeta.inlineBase64,
+        mimeType: mediaMeta.mimetype || undefined,
+        fileName: mediaMeta.mediaName || undefined,
+        maxBytes: 25 * 1024 * 1024,
+        metadata: mediaMetadata,
+      });
+      mediaUrl = saved.relativeUrl;
+    } catch {
+      // keep fallback
+    }
+  } else if (mediaMeta.rawMediaUrl) {
+    try {
+      const downloaded = await wahaService.downloadMedia(mediaMeta.rawMediaUrl);
+      const saved = await saveMediaBufferFile({
+        buffer: downloaded.buffer,
+        mimeType: mediaMeta.mimetype || downloaded.contentType,
+        fileName: mediaMeta.mediaName || downloaded.filename,
+        maxBytes: 25 * 1024 * 1024,
+        metadata: mediaMetadata,
+      });
+      mediaUrl = saved.relativeUrl;
+    } catch {
+      // keep rawMediaUrl fallback
+    }
+  }
+
+  return {
+    hasMedia: true,
+    mediaType: mediaMeta.mediaType,
+    mediaUrl,
+    mediaFallbackLabel,
+  };
+}
+
 export async function syncRecentWhatsAppChatMessages(
   conv: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
@@ -99,6 +182,9 @@ export async function syncRecentWhatsAppChatMessages(
       wahaMessageId: chatMessages.wahaMessageId,
       ackStatus: chatMessages.ackStatus,
       direction: chatMessages.direction,
+      mediaUrl: chatMessages.mediaUrl,
+      mediaType: chatMessages.mediaType,
+      body: chatMessages.body,
     })
     .from(chatMessages)
     .where(and(eq(chatMessages.conversationId, conv.id), eq(chatMessages.companyId, conv.companyId)))
@@ -134,46 +220,7 @@ export async function syncRecentWhatsAppChatMessages(
       if (matchedExisting) break;
     }
 
-    const ackValue = normalizeWahaAck(m);
-    if (matchedExisting) {
-      if (
-        matchedExisting.direction === 'OUTBOUND' &&
-        ackValue !== null &&
-        ackValue > (matchedExisting.ackStatus ?? 0)
-      ) {
-        const now = new Date();
-        await db
-          .update(chatMessages)
-          .set({
-            ackStatus: ackValue,
-            status: ackValue >= 3 ? 'READ' : ackValue === 2 ? 'DELIVERED' : 'SENT',
-            deliveredAt: ackValue >= 2 ? now : undefined,
-            readAt: ackValue >= 3 ? now : undefined,
-          })
-          .where(eq(chatMessages.id, matchedExisting.id))
-          .catch(() => {});
-        matchedExisting.ackStatus = ackValue;
-        acksUpdated++;
-      }
-      continue;
-    }
-
-    const rawText = extractInboundWahaText(m).trim();
-    const hasMedia = Boolean(m.hasMedia);
-    const body = rawText || (hasMedia ? '[Media]' : '');
-    if (!body) continue;
-
     const fromMe = isWahaFromMe(m);
-    const msgDate = parseWahaTimestamp(m.timestamp ?? m._data?.Info?.Timestamp);
-    const effectiveAck = ackValue ?? (fromMe ? 1 : 2);
-    const msgStatus = fromMe
-      ? effectiveAck >= 3
-        ? 'READ'
-        : effectiveAck === 2
-        ? 'DELIVERED'
-        : 'SENT'
-      : 'DELIVERED';
-
     let senderName = fromMe ? 'Perangkat WA' : contact.namaLengkap;
     let senderPhone: string | null = fromMe ? null : contact.nomorWhatsapp || null;
     let senderJid: string | null = null;
@@ -186,6 +233,80 @@ export async function syncRecentWhatsAppChatMessages(
       ).trim();
       senderName = rawPush || (senderPhone ? `+${senderPhone}` : 'Anggota Grup');
     }
+
+    const ackValue = normalizeWahaAck(m);
+    if (matchedExisting) {
+      const updateFields: Record<string, any> = {};
+      if (
+        matchedExisting.direction === 'OUTBOUND' &&
+        ackValue !== null &&
+        ackValue > (matchedExisting.ackStatus ?? 0)
+      ) {
+        const now = new Date();
+        updateFields.ackStatus = ackValue;
+        updateFields.status = ackValue >= 3 ? 'READ' : ackValue === 2 ? 'DELIVERED' : 'SENT';
+        if (ackValue >= 2) updateFields.deliveredAt = now;
+        if (ackValue >= 3) updateFields.readAt = now;
+        matchedExisting.ackStatus = ackValue;
+      }
+      if (!matchedExisting.mediaUrl || !matchedExisting.mediaType) {
+        const mediaCheck = extractInboundWahaMediaMeta(m);
+        if (mediaCheck.hasMedia) {
+          const mediaDetails = await resolveSyncedMediaDetails(
+            m,
+            conv,
+            contact,
+            fromMe,
+            senderName,
+            senderPhone
+          );
+          if (!matchedExisting.mediaUrl && mediaDetails.mediaUrl) {
+            updateFields.mediaUrl = mediaDetails.mediaUrl;
+            matchedExisting.mediaUrl = mediaDetails.mediaUrl;
+          }
+          if (!matchedExisting.mediaType && mediaDetails.mediaType) {
+            updateFields.mediaType = mediaDetails.mediaType;
+            matchedExisting.mediaType = mediaDetails.mediaType;
+          }
+          if (matchedExisting.body === '[Media]' && mediaDetails.mediaFallbackLabel) {
+            const rawText = extractInboundWahaText(m).trim();
+            updateFields.body = rawText || mediaDetails.mediaFallbackLabel;
+            matchedExisting.body = updateFields.body;
+          }
+        }
+      }
+      if (Object.keys(updateFields).length > 0) {
+        await db
+          .update(chatMessages)
+          .set(updateFields)
+          .where(eq(chatMessages.id, matchedExisting.id))
+          .catch(() => {});
+        acksUpdated++;
+      }
+      continue;
+    }
+
+    const rawText = extractInboundWahaText(m).trim();
+    const mediaDetails = await resolveSyncedMediaDetails(
+      m,
+      conv,
+      contact,
+      fromMe,
+      senderName,
+      senderPhone
+    );
+    const body = rawText || (mediaDetails.hasMedia ? mediaDetails.mediaFallbackLabel : '');
+    if (!body) continue;
+
+    const msgDate = parseWahaTimestamp(m.timestamp ?? m._data?.Info?.Timestamp);
+    const effectiveAck = ackValue ?? (fromMe ? 1 : 2);
+    const msgStatus = fromMe
+      ? effectiveAck >= 3
+        ? 'READ'
+        : effectiveAck === 2
+        ? 'DELIVERED'
+        : 'SENT'
+      : 'DELIVERED';
 
     await db
       .insert(chatMessages)
@@ -200,6 +321,8 @@ export async function syncRecentWhatsAppChatMessages(
         senderPhone,
         senderJid,
         body,
+        mediaUrl: mediaDetails.mediaUrl,
+        mediaType: mediaDetails.mediaType,
         wahaMessageId: primaryId,
         status: msgStatus,
         ackStatus: effectiveAck,
@@ -220,6 +343,9 @@ export async function syncRecentWhatsAppChatMessages(
         wahaMessageId: primaryId,
         ackStatus: effectiveAck,
         direction: fromMe ? 'OUTBOUND' : 'INBOUND',
+        mediaUrl: mediaDetails.mediaUrl,
+        mediaType: mediaDetails.mediaType,
+        body,
       });
     }
     inserted++;
