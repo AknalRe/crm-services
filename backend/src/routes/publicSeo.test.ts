@@ -59,11 +59,13 @@ test('publicSeoRouter serves robots.txt, sitemap.xml, llms.txt, llms-full.txt an
   });
   assert.equal(landingHtmlRes.statusCode, 200);
   assert.equal(landingHtmlRes.headers['x-robots-tag'], 'index, follow');
-  assert.match(landingHtmlRes.body, /<link rel="canonical" href="https:\/\/panel\.reneo\.my\.id\/app\/reneo-crm\/" \/>/);
+  assert.match(landingHtmlRes.body, /<link rel="canonical" href="https:\/\/panel\.reneo\.my\.id\/app\/reneo-crm\/landing" \/>/);
   assert.match(landingHtmlRes.body, /application\/ld\+json/);
   assert.match(landingHtmlRes.body, /SoftwareApplication/);
   assert.match(landingHtmlRes.body, /FAQPage/);
   assert.match(landingHtmlRes.body, /<h1>Satu Kotak Masuk WhatsApp/);
+  assert.match(landingHtmlRes.body, /Kenapa Kami Membuat Reneo CRM/);
+  assert.equal((landingHtmlRes.body.match(/application\/ld\+json/g) || []).length, 1);
 
   const landingMdRes = await app.inject({
     method: 'GET',

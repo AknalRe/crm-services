@@ -16,6 +16,47 @@ export const CRM_SEO_META = {
     'Reneo CRM, CRM omnichannel, WhatsApp CRM self-hosted, inbox multi admin WhatsApp, WhatsApp Cloud API, WAHA CRM, CSAT multi sesi, SLA customer service, Agent AI MCP, WhatsApp Story terjadwal, CRM toko online Indonesia',
 };
 
+const CRM_WHY_WE_BUILT_IT = [
+  {
+    title: 'Chat tersebar di banyak HP admin, lalu hilang saat staf berganti',
+    detail:
+      'Tiap admin memegang perangkat sendiri untuk melayani banyak nomor WhatsApp dan akun media sosial. Begitu admin shift berganti atau staf keluar, riwayat chat lama terputus dan pembeli harus mengulang penjelasan dari awal.',
+  },
+  {
+    title: 'Chat internal, kurir, dan grup WA mengacaukan laporan SLA',
+    detail:
+      'Nomor CS harian juga menerima pesan dari kurir, supplier, staf internal, dan grup operasional. Di alat lain, semua ikut masuk hitungan keterlambatan SLA dan malah menerima survei rating CSAT.',
+  },
+  {
+    title: 'Sulit memisahkan batas sesi tanpa memutus riwayat pelanggan',
+    detail:
+      'Pelanggan lama sering kembali memesan atau bertanya di minggu berikutnya. Riwayat percakapan tetap harus utuh dalam satu utas, tetapi setiap siklus penanganan perlu penanda Batas Mulai Sesi dan Batas Selesai Sesi serta CSAT tersendiri.',
+  },
+  {
+    title: 'Biaya per pesan membengkak dan database berada di server luar',
+    detail:
+      'Saat tim CS bertambah, biaya kursi dan biaya per pesan naik, sementara data pelanggan bergantung pada server vendor pihak ketiga. Reneo CRM dibangun untuk berjalan penuh di PostgreSQL dan Redis pada server Anda sendiri.',
+  },
+];
+
+const CRM_USE_CASES = [
+  {
+    segment: 'Toko Online & Multi-Nomor WhatsApp',
+    problem: 'Chat dari Nomor Admin A dan Cabang B tercampur atau nama kontak berubah mengikuti push name terbaru.',
+    solution: 'Percakapan dipisah per nomor WA & push name, namun tetap tertaut ke 1 profil kontak CRM tunggal.',
+  },
+  {
+    segment: 'Tim Multi-CS dengan Kebutuhan Role Ketat',
+    problem: 'Staf baru berisiko menghapus kontak, mengunduh CSV database, membuka chat agen lain, atau mengubah WAHA.',
+    solution: 'Builder Role custom menyediakan pembatasan izin granular per menu hingga level tombol dan endpoint API.',
+  },
+  {
+    segment: 'Grup WhatsApp & Chat Internal Mengacaukan Laporan',
+    problem: 'Pesan grup operasional, kurir, atau vendor merusak metrik SLA dan memicu survei CSAT otomatis.',
+    solution: 'Grup WA (@g.us) & kontak Non-Penilaian otomatis dikecualikan dari SLA, Status, Penugasan, dan CSAT.',
+  },
+];
+
 const CRM_CHANNELS = [
   { name: 'WhatsApp (Multi-Nomor QR / WAHA)', mode: 'Chat, Grup & Story WA', detail: 'Hubungkan banyak nomor WA sekaligus, tampilkan daftar partisipan grup @g.us, dan jadwalkan WhatsApp Story ke kontak terpilih.' },
   { name: 'WhatsApp Business Cloud API (Meta)', mode: 'API Resmi', detail: 'Kirim pesan interaktif, template resmi, dan kelola percakapan bisnis skala tim tanpa batasan sesi lokal.' },
@@ -232,11 +273,17 @@ function buildJsonLd(baseUrl: string): Record<string, unknown> {
 function buildSemanticHtmlBody(baseUrl: string): string {
   const rootUrl = `${baseUrl}/`;
   const landingUrl = `${baseUrl}/landing`;
+  const whyHtml = CRM_WHY_WE_BUILT_IT.map(
+    (w, i) => `<li><h3>0${i + 1}. ${escapeHtml(w.title)}</h3><p>${escapeHtml(w.detail)}</p></li>`
+  ).join('\n');
   const channelsHtml = CRM_CHANNELS.map(
     (ch) => `<li><strong>${escapeHtml(ch.name)}</strong> (${escapeHtml(ch.mode)}): ${escapeHtml(ch.detail)}</li>`
   ).join('\n');
   const capsHtml = CRM_CAPABILITIES.map(
     (cap) => `<li><h3>${escapeHtml(cap.title)}</h3><p>${escapeHtml(cap.detail)}</p></li>`
+  ).join('\n');
+  const useCasesHtml = CRM_USE_CASES.map(
+    (u) => `<tr><td>${escapeHtml(u.segment)}</td><td>${escapeHtml(u.problem)}</td><td>${escapeHtml(u.solution)}</td></tr>`
   ).join('\n');
   const compHtml = CRM_COMPARISON.map(
     (row) =>
@@ -248,7 +295,7 @@ function buildSemanticHtmlBody(baseUrl: string): string {
 
   return `<main style="max-width:960px;margin:0 auto;padding:32px 20px;font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6;color:#0f172a">
   <header>
-    <p><strong>${escapeHtml(CRM_SEO_META.name)}</strong> · Aplikasi CRM Self-Hosted</p>
+    <p><strong>${escapeHtml(CRM_SEO_META.name)}</strong> · Self-Hosted CRM · PostgreSQL &amp; Redis</p>
     <h1>Satu Kotak Masuk WhatsApp &amp; Media Sosial untuk Tim Customer Service</h1>
     <p>${escapeHtml(CRM_SEO_META.description)}</p>
     <nav aria-label="Tautan Penting">
@@ -256,17 +303,30 @@ function buildSemanticHtmlBody(baseUrl: string): string {
       <a href="${escapeHtml(landingUrl)}">Profil Produk</a> ·
       <a href="${escapeHtml(baseUrl)}/login">Masuk CRM</a> ·
       <a href="${escapeHtml(baseUrl)}/llms.txt">Ringkasan AI (llms.txt)</a> ·
-      <a href="${escapeHtml(PANEL_ORDER_URL)}">Beli Hosting + CRM</a> ·
+      <a href="${escapeHtml(PANEL_ORDER_URL)}">Beli Hosting + CRM &amp; Lisensi</a> ·
       <a href="${escapeHtml(PANEL_INSTALL_URL)}">Pasang di Server Sendiri</a>
     </nav>
   </header>
+  <section id="kenapa-dibuat">
+    <h2>Kenapa Kami Membuat Reneo CRM</h2>
+    <p>Reneo CRM tidak dibuat dari teori buku teks, melainkan dari kerepotan yang kami alami sendiri saat mengelola chat pelanggan di banyak nomor WhatsApp dan akun media sosial dengan tim CS bergantian shift.</p>
+    <ul>${whyHtml}</ul>
+    <p>Dari pengalaman itulah detail seperti status Non-Penilaian untuk grup WA dan kontak internal, penanda Batas Mulai &amp; Selesai Sesi, serta pembatasan izin hingga level tombol menjadi pondasi utama aplikasi ini.</p>
+  </section>
+  <section id="modul">
+    <h2>Modul Kerja &amp; Arsitektur Sistem CRM</h2>
+    <ul>${capsHtml}</ul>
+  </section>
+  <section id="studi-kasus">
+    <h2>Masalah Harian Tim CS &amp; Cara Menanganinya</h2>
+    <table>
+      <thead><tr><th>Jenis Usaha</th><th>Kendala Sebelum Memakai CRM</th><th>Penanganan di Reneo CRM</th></tr></thead>
+      <tbody>${useCasesHtml}</tbody>
+    </table>
+  </section>
   <section id="kanal">
     <h2>6 Kanal Komunikasi Terhubung</h2>
     <ul>${channelsHtml}</ul>
-  </section>
-  <section id="fitur">
-    <h2>Arsitektur &amp; Kapabilitas Utama</h2>
-    <ul>${capsHtml}</ul>
   </section>
   <section id="perbandingan">
     <h2>Perbandingan Cara Manual vs CRM Cloud Lain vs Reneo CRM</h2>
@@ -274,6 +334,14 @@ function buildSemanticHtmlBody(baseUrl: string): string {
       <thead><tr><th>Aspek</th><th>Manual</th><th>CRM Cloud Lain</th><th>Reneo CRM</th></tr></thead>
       <tbody>${compHtml}</tbody>
     </table>
+  </section>
+  <section id="aktivasi">
+    <h2>Mulai Beroperasi dalam 3 Langkah</h2>
+    <ol>
+      <li><strong>Pilih Hosting Siap Pakai atau Server Sendiri</strong>: Pesan paket Hosting + Reneo CRM atau pasang image Docker di server Linux pribadi.</li>
+      <li><strong>Setup Akun &amp; Aktifkan Lisensi (Trial 7 Hari)</strong>: Buat akun admin utama dan aktifkan masa uji coba 7 hari atau paket lisensi.</li>
+      <li><strong>Sambungkan Kanal, Sinkron Kontak &amp; Atur Role CS</strong>: Scan QR multi-nomor WA, sambungkan akun medsos, dan atur hak akses staf.</li>
+    </ol>
   </section>
   <section id="faq">
     <h2>Pertanyaan Umum (FAQ)</h2>
@@ -287,7 +355,9 @@ function buildSemanticHtmlBody(baseUrl: string): string {
 
 function renderLandingHtmlDocument(req: FastifyRequest): string {
   const { baseUrl } = resolvePublicOriginAndBase(req);
-  const canonicalUrl = `${baseUrl}/`;
+  const reqPath = req.url.split('?')[0].toLowerCase();
+  const isLanding = reqPath.endsWith('/landing') || reqPath.endsWith('/landing/');
+  const canonicalUrl = isLanding ? `${baseUrl}/landing` : `${baseUrl}/`;
   const llmsUrl = `${baseUrl}/llms.txt`;
   const logoUrl = `${baseUrl}/logo.svg`;
   const jsonLd = JSON.stringify(buildJsonLd(baseUrl)).replace(/<\//g, '<\\/');
@@ -312,17 +382,24 @@ function renderLandingHtmlDocument(req: FastifyRequest): string {
     let html = builtHtml;
     html = html.replace(/<title>[^<]*<\/title>/i, `<title>${escapeHtml(CRM_SEO_META.fullTitle)}</title>`);
     html = html.replace(
-      /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/i,
+      /<meta\s+name="description"\s+content="[\s\S]*?"\s*\/?>/i,
       `<meta name="description" content="${escapeHtml(CRM_SEO_META.description)}" />`
     );
     html = html.replace(
-      /<meta\s+property="og:title"\s+content="[^"]*"\s*\/?>/i,
+      /<meta\s+property="og:title"\s+content="[\s\S]*?"\s*\/?>/i,
       `<meta property="og:title" content="${escapeHtml(CRM_SEO_META.fullTitle)}" />`
     );
     html = html.replace(
-      /<meta\s+property="og:description"\s+content="[^"]*"\s*\/?>/i,
+      /<meta\s+property="og:description"\s+content="[\s\S]*?"\s*\/?>/i,
       `<meta property="og:description" content="${escapeHtml(CRM_SEO_META.description)}" />`
     );
+    // Strip static tags from index.html that are already emitted cleanly in extraHead
+    html = html
+      .replace(/<meta\s+name="(?:keywords|robots|googlebot)"[^>]*>\s*/gi, '')
+      .replace(/<link\s+rel="(?:canonical|alternate)"[^>]*>\s*/gi, '')
+      .replace(/<meta\s+property="og:(?:site_name|url|image)"[^>]*>\s*/gi, '')
+      .replace(/<meta\s+name="twitter:[^"]*"[^>]*>\s*/gi, '')
+      .replace(/<script\s+type="application\/ld\+json">[\s\S]*?<\/script>\s*/gi, '');
     html = html.replace('</head>', `${extraHead}\n  </head>`);
     if (/<div id="root"><\/div>/i.test(html)) {
       html = html.replace(/<div id="root"><\/div>/i, `<div id="root">${semanticBody}</div>`);
@@ -363,6 +440,19 @@ function buildLlmsTxt(baseUrl: string, full: boolean): string {
     `- Pemesanan Hosting + CRM (Trial 7 Hari): ${PANEL_ORDER_URL}`,
     `- Instalasi Self-Hosted di Server Linux: ${PANEL_INSTALL_URL}`,
     `- Registry Container Resmi: ${DOCKER_IMAGE}`,
+    '',
+    '## Susunan Section Halaman Landing (/landing)',
+    '1. Hero & Pratinjau Kotak Masuk (judul, 2 CTA order/self-hosted, mockup antrean chat & Batas Mulai/Selesai Sesi, 4 kartu ringkasan teknis)',
+    '2. Kenapa Kami Membuat Reneo CRM (latar belakang masalah nyata tim CS & toko online)',
+    '3. Modul Kerja & Arsitektur Sistem CRM (5 tab interaktif: Inbox 6 Kanal, Role Multi-CS, SLA & CSAT Multi-Sesi, Siaran & WA Story, Agent AI & MCP)',
+    '4. Masalah Harian Tim CS & Cara Menanganinya (studi kasus lapangan)',
+    '5. 6 Kanal Komunikasi Terhubung',
+    '6. Perbandingan: Cara Manual vs CRM Cloud Lain vs Reneo CRM',
+    '7. Mulai Beroperasi dalam 3 Langkah',
+    '8. Pertanyaan Umum (FAQ) & CTA Penutup',
+    '',
+    '## Kenapa Kami Membuat Reneo CRM',
+    ...CRM_WHY_WE_BUILT_IT.map((w) => `- **${w.title}**: ${w.detail}`),
     '',
     '## Kanal Komunikasi yang Didukung',
     ...CRM_CHANNELS.map((c) => `- **${c.name}** (${c.mode}): ${c.detail}`),

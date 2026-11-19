@@ -31,11 +31,35 @@ const PANEL_INSTALL_URL = 'https://panel.reneo.my.id/install';
 const PANEL_ORDER_URL = 'https://panel.reneo.my.id/order?addon=reneo-crm';
 
 const NAV_LINKS = [
+  { href: '#kenapa-dibuat', label: 'Kenapa Kami Buat' },
   { href: '#modul', label: 'Modul' },
   { href: '#studi-kasus', label: 'Studi Kasus' },
   { href: '#kanal', label: 'Kanal' },
   { href: '#perbandingan', label: 'Perbandingan' },
   { href: '#faq', label: 'FAQ' },
+];
+
+const WHY_WE_BUILT_IT = [
+  {
+    title: 'Chat tersebar di banyak HP admin, lalu hilang saat staf berganti',
+    detail:
+      'Saat mengurus penjualan di banyak nomor WhatsApp dan akun sosial media, tiap admin memegang perangkat sendiri. Begitu admin shift berganti atau ada staf keluar, riwayat chat lama terputus dan pelanggan harus menjelaskan kendalanya dari awal.',
+  },
+  {
+    title: 'Chat internal, kurir, dan grup WA mengacaukan laporan SLA',
+    detail:
+      'Dalam praktik harian, nomor CS tidak hanya menerima pesan pembeli, tetapi juga pesan kurir, supplier, tim internal, dan grup operasional. Di alat CRM biasa, semua ikut dihitung sebagai antrean SLA dan malah mendapat survei rating CSAT.',
+  },
+  {
+    title: 'Sulit memisahkan batas sesi tanpa memutus riwayat pelanggan',
+    detail:
+      'Pembeli lama sering kembali bertanya minggu berikutnya. Kami ingin riwayat percakapan tetap utuh dalam satu benang, tetapi setiap siklus penanganan tetap punya penanda Batas Mulai Sesi dan Batas Selesai Sesi beserta penilaian CSAT masing-masing.',
+  },
+  {
+    title: 'Biaya per pesan membengkak dan database tersandera di server luar',
+    detail:
+      'Ketika tim CS bertumbuh, biaya per kursi dan biaya per pesan terus naik, sementara data kontak serta histori pelanggan tidak berada di server sendiri. Kami ingin perangkat yang berjalan penuh di PostgreSQL & Redis milik sendiri.',
+  },
 ];
 
 const ARCHITECTURE_SPECS = [
@@ -622,6 +646,46 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <p className="text-[11.5px] text-slate-600 leading-relaxed">{spec.detail}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Why We Built This — Lived Operator Story */}
+        <section id="kenapa-dibuat" className="bg-white border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-14 space-y-6">
+            <div className="max-w-3xl space-y-2.5">
+              <div className="font-mono text-[11px] font-semibold uppercase tracking-wide text-[#2563eb]">
+                Latar Belakang
+              </div>
+              <h2 className="text-lg sm:text-xl font-bold text-slate-900">
+                Kenapa Kami Membuat Reneo CRM
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                Reneo CRM tidak dibuat dari teori buku teks, melainkan dari kerepotan yang kami alami sendiri saat mengelola operasional chat pelanggan di banyak nomor WhatsApp dan akun media sosial dengan tim CS bergantian shift.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 border border-slate-200 rounded-xl bg-slate-50/50 divide-y md:divide-y-0 md:divide-x md:grid-flow-row overflow-hidden">
+              {WHY_WE_BUILT_IT.map((item, idx) => (
+                <div
+                  key={item.title}
+                  className={`p-5 space-y-1.5 bg-white ${
+                    idx >= 2 ? 'md:border-t md:border-slate-200' : ''
+                  }`}
+                >
+                  <div className="font-mono text-[11px] font-bold text-slate-400">
+                    0{idx + 1}
+                  </div>
+                  <h3 className="text-sm font-semibold text-slate-900 leading-snug">
+                    {item.title}
+                  </h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-l-2 border-[#2563eb] pl-4 py-1 text-xs sm:text-[13px] text-slate-700 leading-relaxed max-w-3xl">
+              Karena kami merasakan sendiri repotnya memilah laporan manual dan risiko kehilangan data saat staf berganti, detail seperti status <strong className="font-semibold text-slate-900">Non-Penilaian</strong> untuk grup WA &amp; kontak internal, penanda <strong className="font-semibold text-slate-900">Batas Mulai &amp; Selesai Sesi</strong>, serta pembatasan izin hingga level tombol menjadi pondasi utama aplikasi ini.
             </div>
           </div>
         </section>
