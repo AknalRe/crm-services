@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { and, eq, ne, desc, asc, gt, lt, inArray, ilike, isNotNull, or, sql } from 'drizzle-orm';
+import { and, eq, ne, desc, asc, gt, gte, lt, inArray, ilike, like, isNotNull, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   conversations,
@@ -3635,40 +3635,127 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         persistedBody || (mediaName ? `[Lampiran: ${mediaName}]` : '[Lampiran Media]');
       const effectiveSession = sendResult.sessionUsed || targetSession || null;
       const sendErrorMsg = sendResult.success ? null : (sendResult.error || 'Gagal mengirim pesan WhatsApp');
+      const crmMetadataJson = JSON.stringify({
+        ...(metadataRecord || {}),
+        sentVia: 'CRM',
+        actorName: currentAgentName,
+      });
 
-      const inserted = await db
-        .insert(chatMessages)
-        .values({
-          id: messageId,
-          companyId,
-          conversationId: conversation.conv.id,
-          contactId: conversation.conv.contactId,
-          direction: 'OUTBOUND',
-          senderName: currentAgentName,
-          messageType: persistedMessageType,
-          channel: convChannel,
-          externalMessageId: convChannel === 'WHATSAPP' ? null : (sendResult.messageId || null),
-          wahaSession: convChannel === 'WHATSAPP' ? effectiveSession : null,
-          body: displayBody,
-          mediaUrl: storedMediaUrl,
-          mediaType,
-          mediaName: mediaName || null,
-          replyToMessageId: quotedLocalId,
-          replyToBody: quotedBodyText,
-          replyToSender: quotedSenderLabel,
-          metadataJson: JSON.stringify({
-            ...(metadataRecord || {}),
-            sentVia: 'CRM',
-            actorName: currentAgentName,
-          }),
-          wahaMessageId: convChannel === 'WHATSAPP' && sendResult.success ? (sendResult.messageId || null) : null,
-          status: sendResult.success ? 'SENT' : 'FAILED',
-          ackStatus: sendResult.success ? 1 : -1,
-          errorMessage: sendErrorMsg,
-          sentAt: sendResult.success ? now : null,
-          createdAt: now,
-        })
-        .returning();
+      // Reconcile race condition: WAHA `message.any` (fromMe) webhook can arrive and insert
+      // the outbound row BEFORE `sendTextMessage` / `sendMediaMessage` HTTP response returns.
+      let inserted: (typeof chatMessages.$inferSelect)[] = [];
+      if (convChannel === 'WHATSAPP' && sendResult.success) {
+        const sentWahaId = sendResult.messageId ? String(sendResult.messageId).trim() : null;
+        const jidStanzaMatch = sentWahaId?.match(/@(?:g\.us|c\.us|s\.whatsapp\.net|lid|broadcast)_([^_@]+)(?:_|$)/i);
+        const fallbackStanza =
+          jidStanzaMatch?.[1] ||
+          (sentWahaId && sentWahaId.includes('_') ? sentWahaId.split('_').pop() : sentWahaId) ||
+          null;
+        const cleanStanza =
+          fallbackStanza && fallbackStanza.length >= 6 && !fallbackStanza.includes('@')
+            ? fallbackStanza
+            : null;
+        const raceCutoff = new Date(now.getTime() - 15_000);
+        const raceConditions: any[] = [];
+        if (sentWahaId) {
+          raceConditions.push(eq(chatMessages.wahaMessageId, sentWahaId));
+        }
+        if (cleanStanza) {
+          const esc = cleanStanza.replace(/[\\%_]/g, '\\$&');
+          raceConditions.push(
+            eq(chatMessages.wahaMessageId, cleanStanza),
+            like(chatMessages.wahaMessageId, `%_${esc}`),
+            like(chatMessages.wahaMessageId, `%_${esc}_%`)
+          );
+        }
+        if (displayBody.trim().length > 0) {
+          raceConditions.push(
+            and(
+              eq(chatMessages.direction, 'OUTBOUND'),
+              eq(chatMessages.body, displayBody),
+              gte(chatMessages.createdAt, raceCutoff)
+            )
+          );
+        }
+        if (raceConditions.length > 0) {
+          const existingWebhookRow = await db
+            .select()
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                eq(chatMessages.conversationId, conversation.conv.id),
+                eq(chatMessages.direction, 'OUTBOUND'),
+                gte(chatMessages.createdAt, raceCutoff),
+                or(...raceConditions)
+              )
+            )
+            .orderBy(desc(chatMessages.createdAt))
+            .limit(1);
+          if (existingWebhookRow[0]) {
+            let existingMeta: Record<string, any> = {};
+            try {
+              existingMeta = existingWebhookRow[0].metadataJson
+                ? JSON.parse(existingWebhookRow[0].metadataJson)
+                : {};
+            } catch {
+              existingMeta = {};
+            }
+            // Only reconcile if the existing row was created by the WAHA webhook (not a separate CRM send)
+            if (existingMeta.sentVia !== 'CRM') {
+              inserted = await db
+                .update(chatMessages)
+                .set({
+                  senderName: currentAgentName,
+                  wahaSession: effectiveSession || existingWebhookRow[0].wahaSession,
+                  wahaMessageId: sentWahaId || existingWebhookRow[0].wahaMessageId,
+                  mediaUrl: storedMediaUrl || existingWebhookRow[0].mediaUrl,
+                  mediaType: mediaType || existingWebhookRow[0].mediaType,
+                  mediaName: mediaName || existingWebhookRow[0].mediaName,
+                  replyToMessageId: quotedLocalId || existingWebhookRow[0].replyToMessageId,
+                  replyToBody: quotedBodyText || existingWebhookRow[0].replyToBody,
+                  replyToSender: quotedSenderLabel || existingWebhookRow[0].replyToSender,
+                  metadataJson: crmMetadataJson,
+                  status: 'SENT',
+                })
+                .where(eq(chatMessages.id, existingWebhookRow[0].id))
+                .returning();
+            }
+          }
+        }
+      }
+
+      if (inserted.length === 0) {
+        inserted = await db
+          .insert(chatMessages)
+          .values({
+            id: messageId,
+            companyId,
+            conversationId: conversation.conv.id,
+            contactId: conversation.conv.contactId,
+            direction: 'OUTBOUND',
+            senderName: currentAgentName,
+            messageType: persistedMessageType,
+            channel: convChannel,
+            externalMessageId: convChannel === 'WHATSAPP' ? null : (sendResult.messageId || null),
+            wahaSession: convChannel === 'WHATSAPP' ? effectiveSession : null,
+            body: displayBody,
+            mediaUrl: storedMediaUrl,
+            mediaType,
+            mediaName: mediaName || null,
+            replyToMessageId: quotedLocalId,
+            replyToBody: quotedBodyText,
+            replyToSender: quotedSenderLabel,
+            metadataJson: crmMetadataJson,
+            wahaMessageId: convChannel === 'WHATSAPP' && sendResult.success ? (sendResult.messageId || null) : null,
+            status: sendResult.success ? 'SENT' : 'FAILED',
+            ackStatus: sendResult.success ? 1 : -1,
+            errorMessage: sendErrorMsg,
+            sentAt: sendResult.success ? now : null,
+            createdAt: now,
+          })
+          .returning();
+      }
 
       if (sendResult.success) {
         await db

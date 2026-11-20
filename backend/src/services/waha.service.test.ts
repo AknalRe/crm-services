@@ -1098,6 +1098,18 @@ test('WhatsApp Status sending, deletion, viewer parsing, and ACK ID extraction w
   assert.ok(stanzaIds.includes('3EB0ABCDEF12'));
   assert.equal(extractStatusAckParticipant(ackPayload, exactIds), '628123456789@c.us');
 
+  // 1b. Test 4-segment group message ID (`<fromMe>_<group>@g.us_<STANZA>_<participantJid>`) stanza extraction
+  const groupOutIds = extractWahaMessageIds({
+    id: 'true_120363123456789012@g.us_3EB0GRP987654_628123456789@c.us',
+    fromMe: true,
+  });
+  assert.ok(groupOutIds.stanzaIds.includes('3EB0GRP987654'));
+  const groupLidIds = extractWahaMessageIds({
+    id: 'true_120363123456789012@g.us_3EB0GRP987654_99887766554433@lid',
+    fromMe: true,
+  });
+  assert.ok(groupLidIds.stanzaIds.includes('3EB0GRP987654'));
+
   const nestedParticipant = extractStatusAckParticipant(
     { participant: '628987654321@lid', id: 'false_status@broadcast_3EB0999' },
     ['false_status@broadcast_3EB0999']

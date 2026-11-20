@@ -1268,10 +1268,11 @@ export function extractWahaMessageIds(payload: any): { exactIds: string[]; stanz
     const trimmed = val.trim();
     if (!trimmed) continue;
     exactSet.add(trimmed);
-    // WAHA status ACK ids follow `<fromMe>_status@broadcast_<STANZA>_<VIEWER_JID>`
-    const statusMatch = trimmed.match(/status@broadcast_([^_]+)(?:_|$)/i);
-    if (statusMatch?.[1] && statusMatch[1].length >= 6) {
-      stanzaSet.add(statusMatch[1].trim());
+    // WAHA serialized IDs follow `<fromMe>_<chatJid>_<STANZA>[_<participantJid>]`
+    // (e.g. `true_120363...@g.us_3EB0ABC..._628123...@c.us` or `true_status@broadcast_<STANZA>_<VIEWER_JID>`)
+    const jidScopedMatch = trimmed.match(/@(?:g\.us|c\.us|s\.whatsapp\.net|lid|broadcast)_([^_@]+)(?:_|$)/i);
+    if (jidScopedMatch?.[1] && jidScopedMatch[1].length >= 6) {
+      stanzaSet.add(jidScopedMatch[1].trim());
     }
     const lastUnderscore = trimmed.lastIndexOf('_');
     if (lastUnderscore !== -1 && lastUnderscore < trimmed.length - 1) {
@@ -2917,9 +2918,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         if (dedupIds.length > 0) {
           const idMatchConditions = [
             inArray(chatMessages.wahaMessageId, dedupIds),
-            ...stanzaIds.map((stanza) => {
+            ...stanzaIds.flatMap((stanza) => {
               const escaped = stanza.replace(/[\\%_]/g, '\\$&');
-              return like(chatMessages.wahaMessageId, `%_${escaped}`);
+              return [
+                like(chatMessages.wahaMessageId, `%_${escaped}`),
+                like(chatMessages.wahaMessageId, `%_${escaped}_%`),
+              ];
             }),
           ];
           const dedupConditions = inboundSession
@@ -3748,6 +3752,37 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             return 'DEDUP_MEDIA' as const;
           }
         }
+        // Dedup recent outbound text messages (e.g. CRM sendTextMessage vs WAHA message.any fromMe race or group ID suffix mismatch)
+        if (!createdConversation && existingConv && isFromMe && !hasMedia && body.trim().length > 0 && !isRevokedShellPayload) {
+          const recentOutboundCutoff = new Date(now.getTime() - 15_000);
+          const recentOutboundDups = await db
+            .select({
+              id: chatMessages.id,
+              wahaMessageId: chatMessages.wahaMessageId,
+            })
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                eq(chatMessages.conversationId, convId),
+                eq(chatMessages.direction, 'OUTBOUND'),
+                eq(chatMessages.body, body),
+                gte(chatMessages.createdAt, recentOutboundCutoff)
+              )
+            )
+            .orderBy(desc(chatMessages.createdAt))
+            .limit(1);
+          if (recentOutboundDups[0]) {
+            if (!recentOutboundDups[0].wahaMessageId && msgId) {
+              await db
+                .update(chatMessages)
+                .set({ wahaMessageId: msgId })
+                .where(eq(chatMessages.id, recentOutboundDups[0].id))
+                .catch(() => {});
+            }
+            return 'DEDUP_OUTBOUND' as const;
+          }
+        }
         if (!createdConversation && existingConv) {
           const isReopeningFromResolved = existingConv.status === 'RESOLVED';
           await db
@@ -3967,16 +4002,19 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         return 'INSERTED' as const;
         });
 
-        if (persistOutcome === 'DEDUP_MEDIA') {
+        if (persistOutcome === 'DEDUP_MEDIA' || persistOutcome === 'DEDUP_OUTBOUND') {
           wahaService.recordWebhookEvent({
             receivedAt: now.toISOString(),
             event,
             session: inboundSession,
             from: rawFrom,
             outcome: 'DEDUP',
-            note: 'Duplikat pesan media & caption yang sama diabaikan',
+            note:
+              persistOutcome === 'DEDUP_OUTBOUND'
+                ? 'Duplikat pesan keluar WA (fromMe) yang sudah dicatat CRM diabaikan'
+                : 'Duplikat pesan media & caption yang sama diabaikan',
           }, companyId);
-          return reply.send({ success: true, deduplicated: true, message: 'Duplicate media webhook ignored' });
+          return reply.send({ success: true, deduplicated: true, message: 'Duplicate webhook ignored' });
         }
 
         // Capture WhatsApp profile (name & photo) of the contact or group without delaying the webhook response
