@@ -43,8 +43,8 @@ import {
   hasUserPermission,
   requirePermission,
 } from './auth';
-import { readUploadedMediaAsDataUri, saveBase64MediaFile } from './media';
-import { pickBestContactDisplayName, isGenericDisplayName } from './waha';
+import { readUploadedMediaAsDataUri, saveBase64MediaFile, saveMediaBufferFile } from './media';
+import { extractInboundWahaMediaMeta, pickBestContactDisplayName, isGenericDisplayName } from './waha';
 import { syncWhatsAppProfile } from '../services/profile.service';
 import { syncRecentWhatsAppChatMessages } from '../services/chatSync.service';
 import crypto from 'crypto';
@@ -1332,6 +1332,186 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     } catch (error: any) {
       const status = error?.statusCode || error?.response?.status || 502;
       return reply.status(status).send({ success: false, error: error.message || 'Gagal memuat media' });
+    }
+  });
+
+  // POST on-demand resolve & download media for a message whose mediaUrl was not yet downloaded
+  fastify.post('/:id/messages/:messageId/resolve-media', async (req: FastifyRequest<{
+    Params: { id: string; messageId: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const { id, messageId } = req.params;
+
+      const [convRow] = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(and(eq(conversations.id, id), eq(conversations.companyId, companyId)))
+        .limit(1);
+      if (!convRow?.conv || !convRow?.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
+      const [msgRow] = await db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.id, messageId),
+            eq(chatMessages.conversationId, id),
+            eq(chatMessages.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!msgRow) {
+        return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
+      }
+
+      if (msgRow.mediaUrl && msgRow.mediaUrl.startsWith('/api/media/')) {
+        return reply.send({
+          success: true,
+          data: {
+            mediaUrl: msgRow.mediaUrl,
+            mediaType: msgRow.mediaType,
+            mediaName: msgRow.mediaName,
+          },
+        });
+      }
+
+      const conv = convRow.conv;
+      const contact = convRow.contact;
+      const mediaMetadata = {
+        source: msgRow.direction === 'OUTBOUND' ? ('OUTBOUND' as const) : ('INBOUND' as const),
+        companyId: conv.companyId,
+        conversationId: conv.id,
+        contactId: contact.id,
+        contactName: contact.namaLengkap || undefined,
+        senderName: msgRow.senderName || contact.namaLengkap || undefined,
+        senderPhone: msgRow.senderPhone || contact.nomorWhatsapp || undefined,
+        channel: conv.channel || 'WHATSAPP',
+        label: conv.wahaSession ? `WA • ${conv.wahaSession}` : 'WhatsApp',
+      };
+
+      // Case 1: msgRow already holds a raw http(s) WAHA media URL
+      if (msgRow.mediaUrl && /^https?:\/\//i.test(msgRow.mediaUrl)) {
+        try {
+          const downloaded = await wahaService.downloadMedia(msgRow.mediaUrl);
+          const saved = await saveMediaBufferFile({
+            buffer: downloaded.buffer,
+            mimeType: downloaded.contentType,
+            fileName: msgRow.mediaName || downloaded.filename,
+            maxBytes: 25 * 1024 * 1024,
+            metadata: mediaMetadata,
+          });
+          const resolvedName = msgRow.mediaName || downloaded.filename || saved.filename || null;
+          await db
+            .update(chatMessages)
+            .set({ mediaUrl: saved.relativeUrl, mediaName: resolvedName })
+            .where(eq(chatMessages.id, msgRow.id));
+          return reply.send({
+            success: true,
+            data: {
+              mediaUrl: saved.relativeUrl,
+              mediaType: msgRow.mediaType,
+              mediaName: resolvedName,
+            },
+          });
+        } catch {
+          // Fall through to fetch from WAHA message endpoint
+        }
+      }
+
+      // Case 2: Fetch message with downloadMedia=true from WAHA
+      if (!msgRow.wahaMessageId) {
+        return reply.status(404).send({
+          success: false,
+          error: 'Berkas dokumen tidak memiliki ID pesan WAHA untuk diunduh ulang.',
+        });
+      }
+      const targetJid =
+        conv.externalThreadId?.trim() ||
+        (contact.nomorWhatsapp ? toWahaChatId(contact.nomorWhatsapp) : '');
+      if (!targetJid) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Nomor tujuan percakapan tidak valid untuk mengunduh berkas.',
+        });
+      }
+
+      const rawMsg = await wahaService.fetchChatMessageWithMedia(
+        targetJid,
+        msgRow.wahaMessageId,
+        msgRow.wahaSession || conv.wahaSession || undefined
+      );
+      if (!rawMsg) {
+        return reply.status(404).send({
+          success: false,
+          error: 'Berkas sudah tidak tersedia di riwayat sesi WhatsApp.',
+        });
+      }
+
+      const mediaMeta = extractInboundWahaMediaMeta(rawMsg);
+      let resolvedUrl: string | null = null;
+      let resolvedName: string | null = msgRow.mediaName || mediaMeta.mediaName || null;
+      const resolvedType = msgRow.mediaType || mediaMeta.mediaType || 'document';
+
+      if (mediaMeta.inlineBase64) {
+        const saved = await saveBase64MediaFile({
+          base64: mediaMeta.inlineBase64,
+          mimeType: mediaMeta.mimetype || undefined,
+          fileName: resolvedName || undefined,
+          maxBytes: 25 * 1024 * 1024,
+          metadata: mediaMetadata,
+        });
+        resolvedUrl = saved.relativeUrl;
+        if (!resolvedName && saved.filename) resolvedName = saved.filename;
+      } else if (mediaMeta.rawMediaUrl) {
+        try {
+          const downloaded = await wahaService.downloadMedia(mediaMeta.rawMediaUrl);
+          const saved = await saveMediaBufferFile({
+            buffer: downloaded.buffer,
+            mimeType: mediaMeta.mimetype || downloaded.contentType,
+            fileName: resolvedName || downloaded.filename,
+            maxBytes: 25 * 1024 * 1024,
+            metadata: mediaMetadata,
+          });
+          resolvedUrl = saved.relativeUrl;
+          if (!resolvedName) resolvedName = downloaded.filename || saved.filename || null;
+        } catch {
+          resolvedUrl = mediaMeta.rawMediaUrl;
+        }
+      }
+
+      if (!resolvedUrl) {
+        return reply.status(404).send({
+          success: false,
+          error: 'Berkas media tidak ditemukan atau sudah kedaluwarsa di WhatsApp.',
+        });
+      }
+
+      await db
+        .update(chatMessages)
+        .set({
+          mediaUrl: resolvedUrl,
+          mediaType: resolvedType,
+          mediaName: resolvedName,
+        })
+        .where(eq(chatMessages.id, msgRow.id));
+
+      return reply.send({
+        success: true,
+        data: {
+          mediaUrl: resolvedUrl,
+          mediaType: resolvedType,
+          mediaName: resolvedName,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({
+        success: false,
+        error: error.message || 'Gagal memuat berkas dari WhatsApp',
+      });
     }
   });
 

@@ -10,6 +10,7 @@ import {
   Lock,
   PanelRightClose,
   PanelRightOpen,
+  Maximize2,
   X,
   Smile,
   Paperclip,
@@ -1052,7 +1053,12 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState<string[]>(['Pilihan 1', 'Pilihan 2']);
   const [pollMultiple, setPollMultiple] = useState(false);
-  const [lightboxMedia, setLightboxMedia] = useState<{ url: string; name?: string | null } | null>(null);
+  const [lightboxMedia, setLightboxMedia] = useState<{
+    url: string;
+    name?: string | null;
+    type?: 'image' | 'video';
+  } | null>(null);
+  const [resolvingMediaMsgId, setResolvingMediaMsgId] = useState<string | null>(null);
   const [presenceByConvId, setPresenceByConvId] = useState<
     Record<string, { status: 'typing' | 'recording' | 'online' | 'paused'; expiresAt: number }>
   >({});
@@ -2282,6 +2288,98 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setSyncingModalContact(false);
     }
   };
+
+  const triggerMediaAction = (
+    rawUrl: string,
+    fileName: string | null | undefined,
+    action: 'open' | 'download' | 'reload'
+  ) => {
+    if (action === 'reload') return;
+    const targetUrl = resolveMediaUrl(rawUrl);
+    if (!targetUrl) return;
+    if (action === 'open') {
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = targetUrl;
+    link.download = fileName || 'dokumen';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleResolveAndActMedia = async (
+    msg: ChatMessage,
+    action: 'open' | 'download' | 'reload'
+  ) => {
+    if (msg.mediaUrl && msg.mediaUrl.startsWith('/api/media/')) {
+      triggerMediaAction(msg.mediaUrl, msg.mediaName, action);
+      return;
+    }
+    if (!selectedConversation?.id) {
+      if (msg.mediaUrl) {
+        triggerMediaAction(msg.mediaUrl, msg.mediaName, action);
+      }
+      return;
+    }
+    if (resolvingMediaMsgId === msg.id) return;
+    setResolvingMediaMsgId(msg.id);
+    try {
+      const resolved = await api.resolveMessageMedia(selectedConversation.id, msg.id);
+      if (resolved?.mediaUrl) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msg.id
+              ? {
+                  ...m,
+                  mediaUrl: resolved.mediaUrl,
+                  mediaType: (resolved.mediaType as any) || m.mediaType,
+                  mediaName: resolved.mediaName || m.mediaName,
+                }
+              : m
+          )
+        );
+        triggerMediaAction(resolved.mediaUrl, resolved.mediaName || msg.mediaName, action);
+      } else if (msg.mediaUrl) {
+        triggerMediaAction(msg.mediaUrl, msg.mediaName, action);
+      } else {
+        toast.error('Berkas tidak dapat dimuat dari sesi WhatsApp.');
+      }
+    } catch (err: any) {
+      if (msg.mediaUrl) {
+        triggerMediaAction(msg.mediaUrl, msg.mediaName, action);
+      } else {
+        toast.error(
+          err?.response?.data?.error || 'Gagal mengunduh berkas dokumen dari sesi WhatsApp.'
+        );
+      }
+    } finally {
+      setResolvingMediaMsgId(null);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (lightboxMedia) {
+        setLightboxMedia(null);
+        return;
+      }
+      const activeTag = (document.activeElement?.tagName || '').toUpperCase();
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
+        return;
+      }
+      if (selectedConversation) {
+        setSelectedConversation(null);
+        setShowMobileChatActions(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxMedia, selectedConversation]);
 
   const handleCopyContactPhone = (num?: string | null) => {
     if (!num) return;
@@ -5184,6 +5282,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <PanelRightOpen className="w-3.5 h-3.5" />
                     )}
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedConversation(null);
+                      setShowMobileChatActions(false);
+                    }}
+                    title="Tutup Obrolan (Esc)"
+                    aria-label="Tutup Obrolan"
+                    className="h-7 w-7 rounded-md border border-gray-200 bg-white hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-gray-600 inline-flex items-center justify-center shrink-0 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
 
                 {/* Minimal Mobile & Tablet Header Controls (<lg) */}
@@ -5362,6 +5473,19 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     }`}
                   >
                     <Info className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedConversation(null);
+                      setShowMobileChatActions(false);
+                    }}
+                    title="Tutup Obrolan"
+                    aria-label="Tutup Obrolan"
+                    className="hidden md:inline-flex h-8 w-8 rounded-md border border-gray-200 bg-white hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-gray-600 items-center justify-center shrink-0 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -6328,23 +6452,56 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                         {msg.mediaUrl && msg.mediaType === 'video' && (
                           <div className="space-y-1">
-                            <video
-                              src={resolveMediaUrl(msg.mediaUrl)}
-                              controls
-                              playsInline
-                              preload="metadata"
-                              className="max-w-full max-h-60 rounded border border-gray-200 bg-black"
-                            />
+                            <div className="relative group/video inline-block max-w-full">
+                              <video
+                                src={resolveMediaUrl(msg.mediaUrl)}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className="max-w-full max-h-60 rounded border border-gray-200 bg-black"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setLightboxMedia({
+                                    url: resolveMediaUrl(msg.mediaUrl),
+                                    name: msg.mediaName || 'Video',
+                                    type: 'video',
+                                  })
+                                }
+                                title="Perbesar Video"
+                                className="absolute top-2 right-2 px-2 py-1 rounded-md bg-black/70 hover:bg-black/85 text-white text-[10px] font-semibold inline-flex items-center gap-1 shadow-sm backdrop-blur-xs transition-colors"
+                              >
+                                <Maximize2 className="w-3 h-3" />
+                                <span>Perbesar</span>
+                              </button>
+                            </div>
                             <div className="flex items-center justify-between gap-2 text-[10px] text-gray-500">
                               <span className="font-mono truncate">{msg.mediaName || 'Video'}</span>
-                              <a
-                                href={resolveMediaUrl(msg.mediaUrl)}
-                                download={msg.mediaName || 'video.mp4'}
-                                className="inline-flex items-center gap-0.5 hover:text-indigo-700 shrink-0"
-                              >
-                                <Download className="w-2.5 h-2.5" />
-                                <span>Unduh</span>
-                              </a>
+                              <div className="flex items-center gap-2.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setLightboxMedia({
+                                      url: resolveMediaUrl(msg.mediaUrl),
+                                      name: msg.mediaName || 'Video',
+                                      type: 'video',
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-0.5 text-indigo-600 hover:text-indigo-800 font-semibold"
+                                >
+                                  <Maximize2 className="w-2.5 h-2.5" />
+                                  <span>Perbesar</span>
+                                </button>
+                                <a
+                                  href={resolveMediaUrl(msg.mediaUrl)}
+                                  download={msg.mediaName || 'video.mp4'}
+                                  className="inline-flex items-center gap-0.5 hover:text-indigo-700"
+                                >
+                                  <Download className="w-2.5 h-2.5" />
+                                  <span>Unduh</span>
+                                </a>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -6371,36 +6528,72 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           </div>
                         )}
 
-                        {!msg.mediaUrl && msg.messageType === 'MEDIA' && (
-                          <div className="px-2.5 py-1.5 rounded bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
-                            File media ({msg.mediaType || 'lampiran'}) tidak tersedia di server WAHA.
-                          </div>
-                        )}
+                        {!msg.mediaUrl &&
+                          (msg.messageType === 'MEDIA' ||
+                            (msg.mediaType && ['image', 'video', 'audio'].includes(msg.mediaType))) && (
+                            <div className="px-2.5 py-1.5 rounded bg-amber-50 border border-amber-200 text-[11px] text-amber-800 flex items-center justify-between gap-2">
+                              <span>
+                                File media ({msg.mediaType || 'lampiran'}) belum terunduh.
+                              </span>
+                              <button
+                                type="button"
+                                disabled={resolvingMediaMsgId === msg.id}
+                                onClick={() => void handleResolveAndActMedia(msg, 'reload')}
+                                className="px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-[10px] font-semibold inline-flex items-center gap-1 shrink-0"
+                              >
+                                <RefreshCw
+                                  className={`w-2.5 h-2.5 ${resolvingMediaMsgId === msg.id ? 'animate-spin' : ''}`}
+                                />
+                                <span>{resolvingMediaMsgId === msg.id ? 'Memuat...' : 'Muat Media'}</span>
+                              </button>
+                            </div>
+                          )}
 
                         {msg.mediaType && !['image', 'video', 'audio'].includes(msg.mediaType) && (
-                          <div className="flex items-center gap-2 p-2 rounded bg-white/80 border border-gray-200 text-[11px]">
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => void handleResolveAndActMedia(msg, 'open')}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                void handleResolveAndActMedia(msg, 'open');
+                              }
+                            }}
+                            title="Klik untuk membuka dokumen"
+                            className="flex items-center gap-2 p-2.5 rounded-md bg-white/90 hover:bg-white border border-gray-200 hover:border-indigo-300 text-[11px] cursor-pointer transition-colors"
+                          >
                             <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
-                            <span className="font-mono truncate flex-1">{msg.mediaName || 'Dokumen'}</span>
-                            {msg.mediaUrl && (
-                              <div className="flex items-center gap-2 shrink-0">
-                                <a
-                                  href={resolveMediaUrl(msg.mediaUrl)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-indigo-600 hover:underline font-medium"
-                                >
-                                  Buka
-                                </a>
-                                <a
-                                  href={resolveMediaUrl(msg.mediaUrl)}
-                                  download={msg.mediaName || true}
-                                  title="Unduh Dokumen"
-                                  className="text-gray-600 hover:text-gray-900 inline-flex items-center gap-0.5"
-                                >
-                                  <Download className="w-3 h-3" />
-                                </a>
-                              </div>
-                            )}
+                            <span className="font-mono truncate flex-1 text-gray-800">
+                              {msg.mediaName || 'Dokumen'}
+                            </span>
+                            <div
+                              className="flex items-center gap-2 shrink-0"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                disabled={resolvingMediaMsgId === msg.id}
+                                onClick={() => void handleResolveAndActMedia(msg, 'open')}
+                                className="px-2 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold inline-flex items-center gap-1 disabled:opacity-60"
+                              >
+                                {resolvingMediaMsgId === msg.id ? (
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <ExternalLink className="w-3 h-3" />
+                                )}
+                                <span>{resolvingMediaMsgId === msg.id ? 'Memuat...' : 'Buka'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={resolvingMediaMsgId === msg.id}
+                                onClick={() => void handleResolveAndActMedia(msg, 'download')}
+                                title="Unduh Dokumen"
+                                className="p-1 rounded hover:bg-gray-100 text-gray-600 hover:text-gray-900 inline-flex items-center gap-0.5 disabled:opacity-60"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         )}
 
@@ -11574,12 +11767,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
           >
             <div className="w-full flex items-center justify-between text-white text-xs">
               <span className="font-mono truncate max-w-[70%]">
-                {lightboxMedia.name || 'Pratinjau Gambar'}
+                {lightboxMedia.name ||
+                  (lightboxMedia.type === 'video' ? 'Pratinjau Video' : 'Pratinjau Gambar')}
               </span>
               <div className="flex items-center gap-2 shrink-0">
                 <a
                   href={lightboxMedia.url}
-                  download={lightboxMedia.name || 'gambar'}
+                  download={
+                    lightboxMedia.name || (lightboxMedia.type === 'video' ? 'video.mp4' : 'gambar')
+                  }
                   className="px-2.5 py-1 rounded bg-white/15 hover:bg-white/25 text-white inline-flex items-center gap-1"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -11595,11 +11791,21 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </button>
               </div>
             </div>
-            <img
-              src={lightboxMedia.url}
-              alt={lightboxMedia.name || 'Pratinjau Gambar'}
-              className="max-w-full max-h-[80vh] object-contain rounded shadow-2xl bg-black/40"
-            />
+            {lightboxMedia.type === 'video' ? (
+              <video
+                src={lightboxMedia.url}
+                controls
+                autoPlay
+                playsInline
+                className="max-w-full max-h-[80vh] rounded shadow-2xl bg-black"
+              />
+            ) : (
+              <img
+                src={lightboxMedia.url}
+                alt={lightboxMedia.name || 'Pratinjau Gambar'}
+                className="max-w-full max-h-[80vh] object-contain rounded shadow-2xl bg-black/40"
+              />
+            )}
           </div>
         </div>
       )}

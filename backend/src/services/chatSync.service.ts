@@ -79,11 +79,12 @@ async function resolveSyncedMediaDetails(
   hasMedia: boolean;
   mediaType: 'image' | 'video' | 'audio' | 'document' | null;
   mediaUrl: string | null;
+  mediaName: string | null;
   mediaFallbackLabel: string;
 }> {
   const mediaMeta = extractInboundWahaMediaMeta(m);
   if (!mediaMeta.hasMedia) {
-    return { hasMedia: false, mediaType: null, mediaUrl: null, mediaFallbackLabel: '' };
+    return { hasMedia: false, mediaType: null, mediaUrl: null, mediaName: null, mediaFallbackLabel: '' };
   }
   const mediaFallbackLabel = mediaMeta.isSticker
     ? '[Stiker]'
@@ -100,6 +101,7 @@ async function resolveSyncedMediaDetails(
     : '[Lampiran Media]';
 
   let mediaUrl: string | null = mediaMeta.rawMediaUrl;
+  let mediaName: string | null = mediaMeta.mediaName;
   const mediaMetadata = {
     source: fromMe ? ('OUTBOUND' as const) : ('INBOUND' as const),
     companyId: conv.companyId,
@@ -122,6 +124,7 @@ async function resolveSyncedMediaDetails(
         metadata: mediaMetadata,
       });
       mediaUrl = saved.relativeUrl;
+      if (!mediaName && saved.filename) mediaName = saved.filename;
     } catch {
       // keep fallback
     }
@@ -136,6 +139,7 @@ async function resolveSyncedMediaDetails(
         metadata: mediaMetadata,
       });
       mediaUrl = saved.relativeUrl;
+      if (!mediaName) mediaName = downloaded.filename || saved.filename || null;
     } catch {
       // keep rawMediaUrl fallback
     }
@@ -145,6 +149,7 @@ async function resolveSyncedMediaDetails(
     hasMedia: true,
     mediaType: mediaMeta.mediaType,
     mediaUrl,
+    mediaName,
     mediaFallbackLabel,
   };
 }
@@ -191,6 +196,7 @@ export async function syncRecentWhatsAppChatMessages(
       direction: chatMessages.direction,
       mediaUrl: chatMessages.mediaUrl,
       mediaType: chatMessages.mediaType,
+      mediaName: chatMessages.mediaName,
       body: chatMessages.body,
     })
     .from(chatMessages)
@@ -256,7 +262,7 @@ export async function syncRecentWhatsAppChatMessages(
         if (ackValue >= 3) updateFields.readAt = now;
         matchedExisting.ackStatus = ackValue;
       }
-      if (!matchedExisting.mediaUrl || !matchedExisting.mediaType) {
+      if (!matchedExisting.mediaUrl || !matchedExisting.mediaType || !matchedExisting.mediaName) {
         const mediaCheck = extractInboundWahaMediaMeta(m);
         if (mediaCheck.hasMedia) {
           const mediaDetails = await resolveSyncedMediaDetails(
@@ -274,6 +280,10 @@ export async function syncRecentWhatsAppChatMessages(
           if (!matchedExisting.mediaType && mediaDetails.mediaType) {
             updateFields.mediaType = mediaDetails.mediaType;
             matchedExisting.mediaType = mediaDetails.mediaType;
+          }
+          if (!matchedExisting.mediaName && mediaDetails.mediaName) {
+            updateFields.mediaName = mediaDetails.mediaName;
+            matchedExisting.mediaName = mediaDetails.mediaName;
           }
           if (matchedExisting.body === '[Media]' && mediaDetails.mediaFallbackLabel) {
             const rawText = extractInboundWahaText(m).trim();
@@ -338,6 +348,7 @@ export async function syncRecentWhatsAppChatMessages(
         body,
         mediaUrl: mediaDetails.mediaUrl,
         mediaType: mediaDetails.mediaType,
+        mediaName: mediaDetails.mediaName,
         wahaMessageId: primaryId,
         status: msgStatus,
         ackStatus: effectiveAck,
@@ -358,6 +369,7 @@ export async function syncRecentWhatsAppChatMessages(
         direction: fromMe ? 'OUTBOUND' : 'INBOUND',
         mediaUrl: mediaDetails.mediaUrl,
         mediaType: mediaDetails.mediaType,
+        mediaName: mediaDetails.mediaName,
         body,
       });
     }

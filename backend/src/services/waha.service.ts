@@ -3469,6 +3469,78 @@ export class WahaService {
   }
 
   /**
+   * Fetch a single message from WAHA with downloadMedia=true for on-demand attachment recovery
+   */
+  public async fetchChatMessageWithMedia(
+    jid: string,
+    messageId: string,
+    sessionName?: string
+  ): Promise<any | null> {
+    const cleanJid = String(jid || '').trim();
+    const cleanMsgId = String(messageId || '').trim();
+    if (!cleanJid || !cleanMsgId) return null;
+    try {
+      const { client, targetSession } = await this.resolveReadableSession(sessionName);
+      const underscoreIdx = cleanMsgId.lastIndexOf('_');
+      const shortStanzaId =
+        underscoreIdx !== -1 && underscoreIdx < cleanMsgId.length - 1
+          ? cleanMsgId.slice(underscoreIdx + 1)
+          : cleanMsgId;
+
+      for (const candidateId of Array.from(new Set([cleanMsgId, shortStanzaId]))) {
+        try {
+          const res = await client.get(
+            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages/${encodeURIComponent(candidateId)}`,
+            {
+              params: { downloadMedia: true },
+              timeout: 20000,
+            }
+          );
+          if (res.data && typeof res.data === 'object') {
+            return res.data;
+          }
+        } catch {
+          // Try next candidate or batch scan below
+        }
+      }
+
+      const listRes = await client.get(
+        `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
+        {
+          params: { limit: 60, downloadMedia: true },
+          timeout: 25000,
+        }
+      );
+      if (Array.isArray(listRes.data)) {
+        for (const item of listRes.data) {
+          const rawIds = [
+            item?.id?._serialized,
+            typeof item?.id === 'string' ? item.id : null,
+            item?._data?.id?._serialized,
+            typeof item?._data?.id === 'string' ? item._data.id : null,
+            item?._data?.key?.id,
+            item?._data?.Info?.ID,
+          ]
+            .map((v) => String(v || '').trim())
+            .filter(Boolean);
+          const matched = rawIds.some((rid) => {
+            if (rid === cleanMsgId || rid === shortStanzaId) return true;
+            const idx = rid.lastIndexOf('_');
+            const tail = idx !== -1 ? rid.slice(idx + 1) : rid;
+            return tail === cleanMsgId || tail === shortStanzaId;
+          });
+          if (matched) {
+            return item;
+          }
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Fetch recent chat summaries from WAHA for background inbox synchronization
    */
   public async fetchRecentChats(sessionName?: string, limit = 12): Promise<any[]> {

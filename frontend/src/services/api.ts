@@ -1696,6 +1696,16 @@ export const api = {
   deleteMessageTemplate: async (id: string): Promise<void> => {
     await client.delete(`/master/templates/${id}`);
   },
+
+  resolveMessageMedia: async (
+    conversationId: string,
+    messageId: string
+  ): Promise<{ mediaUrl: string; mediaType?: string | null; mediaName?: string | null }> => {
+    const res = await client.post(
+      `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/resolve-media`
+    );
+    return res.data.data;
+  },
 };
 
 export default api;

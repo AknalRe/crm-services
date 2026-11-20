@@ -972,11 +972,16 @@ export interface InboundWahaMediaMeta {
 
 export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta {
   const msg = extractWahaProtoMessage(payload);
-  const docMsg = msg?.documentWithCaptionMessage?.message?.documentMessage || msg?.documentMessage;
-  const imgMsg = msg?.imageMessage;
-  const vidMsg = msg?.videoMessage;
-  const audMsg = msg?.audioMessage;
-  const stickerMsg = msg?.stickerMessage;
+  const docMsg =
+    msg?.documentWithCaptionMessage?.message?.documentMessage ||
+    msg?.DocumentWithCaptionMessage?.Message?.DocumentMessage ||
+    msg?.DocumentWithCaptionMessage?.message?.documentMessage ||
+    msg?.documentMessage ||
+    msg?.DocumentMessage;
+  const imgMsg = msg?.imageMessage || msg?.ImageMessage;
+  const vidMsg = msg?.videoMessage || msg?.VideoMessage;
+  const audMsg = msg?.audioMessage || msg?.AudioMessage;
+  const stickerMsg = msg?.stickerMessage || msg?.StickerMessage;
 
   const rawMediaUrl =
     String(payload?.media?.url || payload?.mediaUrl || payload?._data?.mediaUrl || '').trim() ||
@@ -992,10 +997,15 @@ export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta 
     payload?.media?.mimetype ||
       payload?._data?.mimetype ||
       imgMsg?.mimetype ||
+      imgMsg?.Mimetype ||
       vidMsg?.mimetype ||
+      vidMsg?.Mimetype ||
       audMsg?.mimetype ||
+      audMsg?.Mimetype ||
       docMsg?.mimetype ||
+      docMsg?.Mimetype ||
       stickerMsg?.mimetype ||
+      stickerMsg?.Mimetype ||
       ''
   )
     .split(';')[0]
@@ -1032,6 +1042,9 @@ export function extractInboundWahaMediaMeta(payload: any): InboundWahaMediaMeta 
       payload?.media?.filename ||
         payload?._data?.filename ||
         docMsg?.fileName ||
+        docMsg?.FileName ||
+        docMsg?.title ||
+        docMsg?.Title ||
         payload?._data?.Info?.FileName ||
         ''
     ).trim() || null;
