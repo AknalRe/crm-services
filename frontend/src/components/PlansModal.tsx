@@ -766,8 +766,8 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   {
                     label: 'Penyimpanan Dokumen & Media',
                     value: `${(currentLicense.usage?.storageUsedMb ?? 0).toLocaleString('id-ID')} MB / ${formatStorageQuota(
-                      currentLicense.features?.maxStorageMb || 5120
-                    )} (Maks ${currentLicense.features?.maxAttachmentSizeMb || 25} MB/file)`,
+                      currentLicense.features?.maxStorageMb || 1024
+                    )} (Maks ${currentLicense.features?.maxAttachmentSizeMb || 10} MB/file)`,
                     unlocked: !currentLicense.isExpired,
                   },
                   {
@@ -1053,15 +1053,15 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const storageMb =
                               Number(p.features?.maxStorageMb) ||
                               (isEntPlan
-                                ? 102400
+                                ? 10240
                                 : isBusinessPlan
-                                ? 20480
+                                ? 3072
                                 : isStarterPlan
-                                ? 500
-                                : 5120);
+                                ? 250
+                                : 1024);
                             const fileLimitMb =
                               Number(p.features?.maxAttachmentSizeMb) ||
-                              (isEntPlan ? 100 : isBusinessPlan ? 50 : isStarterPlan ? 10 : 25);
+                              (isEntPlan ? 35 : isBusinessPlan ? 20 : isStarterPlan ? 5 : 10);
 
                             return (
                               <div className="border-t border-gray-200 pt-2.5 space-y-1.5 text-xs text-gray-700">

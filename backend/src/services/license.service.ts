@@ -190,8 +190,8 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: false,
         supportPriority: 'standard',
-        maxStorageMb: 500,
-        maxAttachmentSizeMb: 10,
+        maxStorageMb: 250,
+        maxAttachmentSizeMb: 5,
         allowedMenus: ['dashboard', 'contacts', 'broadcasts', 'birthday', 'media', 'automations', 'settings'],
       },
     },
@@ -230,8 +230,8 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: false,
         supportPriority: 'fast',
-        maxStorageMb: 5120,
-        maxAttachmentSizeMb: 25,
+        maxStorageMb: 1024,
+        maxAttachmentSizeMb: 10,
         allowedMenus: [
           'dashboard',
           'conversations',
@@ -254,7 +254,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'business-monthly',
       name: 'Business AI Bulanan',
-      tagline: 'Skala bisnis penuh: Semua menu terbuka termasuk Agent AI & Knowledge Book, MCP Tools, 20 GB dokumen & API.',
+      tagline: 'Skala bisnis penuh: Semua menu terbuka termasuk Agent AI & Knowledge Book, MCP Tools, 3 GB dokumen & API.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
@@ -284,8 +284,8 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'priority',
-        maxStorageMb: 20480,
-        maxAttachmentSizeMb: 50,
+        maxStorageMb: 3072,
+        maxAttachmentSizeMb: 20,
         allowedMenus: [
           'dashboard',
           'conversations',
@@ -309,7 +309,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'enterprise-annual',
       name: 'Enterprise Tahunan',
-      tagline: 'Paket tahunan hemat 17% (gratis 2 bln): Semua menu + AI, kontak & kanal tanpa batas, 100 GB dokumen & VIP.',
+      tagline: 'Paket tahunan hemat 17% (gratis 2 bln): Semua menu + AI, kontak & kanal tanpa batas, 10 GB dokumen & VIP.',
       period: 'annual',
       months: 12,
       trialDays: 7,
@@ -339,8 +339,8 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'vip',
-        maxStorageMb: 102400,
-        maxAttachmentSizeMb: 100,
+        maxStorageMb: 10240,
+        maxAttachmentSizeMb: 35,
         allowedMenus: [
           'dashboard',
           'conversations',
@@ -510,23 +510,23 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     typeof src.maxStorageMb === 'number' && src.maxStorageMb > 0
       ? src.maxStorageMb
       : isEnterprise
-      ? 102400
+      ? 10240
       : isBusiness
-      ? 20480
+      ? 3072
       : isStarter
-      ? 500
-      : 5120;
+      ? 250
+      : 1024;
 
   const maxAttachmentSizeMb =
     typeof src.maxAttachmentSizeMb === 'number' && src.maxAttachmentSizeMb > 0
       ? src.maxAttachmentSizeMb
       : isEnterprise
-      ? 100
+      ? 35
       : isBusiness
-      ? 50
+      ? 20
       : isStarter
-      ? 10
-      : 25;
+      ? 5
+      : 10;
 
   const allowedMenus: string[] = ['dashboard', 'contacts', 'broadcasts', 'media', 'settings'];
   if (liveChatCrm) allowedMenus.push('conversations');
