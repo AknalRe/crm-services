@@ -112,97 +112,118 @@ const HIDDEN_COSTS = [
 
 const STORY_BEATS = [
   {
-    step: 'Kami pernah mengalami',
-    text: 'Pesan pelanggan tersebar di beberapa HP admin dan akun media sosial yang berbeda. Saat staf berganti shift atau perangkat bermasalah, riwayat obrolan terputus, sementara pesan kurir, supplier, dan grup internal bercampur dengan chat pembeli.',
+    number: '01',
+    step: 'Kami pernah mengalaminya sendiri.',
+    paragraphs: [
+      'Dalam operasional sehari-hari, komunikasi dengan pelanggan datang dari berbagai kanal dan ditangani oleh beberapa admin. Percakapan tersebar di banyak perangkat dan akun, sehingga informasi pelanggan tidak selalu berada di satu tempat.',
+      'Ketika aktivitas semakin ramai, kami mulai merasakan betapa sulitnya memastikan setiap percakapan ditangani dengan baik.',
+    ],
   },
   {
-    step: 'Kami menyadari',
-    text: 'Masalah tersebut ternyata bukan sekadar persoalan kecil. Ketika jumlah pesan meningkat, pembeli menunggu terlalu lama, admin mengulang pertanyaan yang sama, dan kualitas pelayanan tim menjadi sulit diukur.',
+    number: '02',
+    step: 'Kami menyadari masalahnya lebih besar dari sekadar chat.',
+    paragraphs: [
+      'Pergantian shift bisa membuat riwayat komunikasi terputus. Follow-up pelanggan berisiko terlewat. Admin lain tidak selalu mengetahui apa yang sudah dibicarakan sebelumnya, sementara pemilik bisnis kesulitan memantau pekerjaan dan pelayanan tim.',
+      'Pada akhirnya, masalahnya bukan hanya tentang membalas pesan, tetapi bagaimana memastikan setiap pelanggan mendapatkan penanganan yang berkelanjutan.',
+    ],
   },
   {
-    step: 'Kami merasa',
-    text: 'Solusi yang tersedia saat ini belum benar-benar menjawab kebutuhan operasional harian kami — banyak yang biayanya terus membengkak tiap tambah admin atau pesan, menyimpan data pelanggan di tempat lain, dan belum rapi memisahkan chat non-pelanggan.',
+    number: '03',
+    step: 'Kami merasa membutuhkan sesuatu yang lebih menyeluruh.',
+    paragraphs: [
+      'Kami membutuhkan sistem yang bukan hanya mengumpulkan pesan dari berbagai kanal, tetapi juga membantu mengelola data pelanggan, membagi tanggung jawab, memantau aktivitas admin, dan memastikan setiap tindak lanjut berjalan.',
+      'Kami ingin seluruh proses tersebut saling terhubung, bukan berjalan sendiri-sendiri.',
+    ],
   },
   {
-    step: 'Karena itu, kami membuat Reneo CRM',
-    text: 'Bukan karena sekadar ingin membuat aplikasi baru, melainkan membangun ruang kerja yang lahir langsung dari kebutuhan nyata tim kami sendiri agar semua pesan pelanggan di berbagai kanal bisa ditangani dengan tenang.',
+    number: '04',
+    step: 'Karena itu, kami membuat Reneo CRM.',
+    paragraphs: [
+      'Kami membangun Reneo CRM berdasarkan kebutuhan yang kami alami sendiri. Sebuah sistem CRM yang membantu tim mengelola pelanggan, menyatukan komunikasi, menjaga kesinambungan pekerjaan, dan memberikan gambaran yang lebih jelas tentang aktivitas operasional.',
+      'Bukan sekadar tempat untuk menerima pesan, tetapi ruang kerja untuk mengelola hubungan dengan pelanggan.',
+    ],
   },
   {
-    step: 'Tujuan kami',
-    text: 'Membuat pengelolaan percakapan pelanggan, pembagian kerja tim, batas sesi layanan, dan evaluasi kepuasan yang sebelumnya melelahkan menjadi jauh lebih terstruktur, terukur, dan mudah dilakukan setiap hari.',
+    number: '05',
+    step: 'Tujuan kami.',
+    paragraphs: [
+      'Kami ingin pengelolaan pelanggan tidak lagi bergantung pada ingatan masing-masing admin, percakapan yang tersebar, atau informasi yang harus dicari ulang.',
+      'Setiap pelanggan memiliki riwayat, setiap pekerjaan memiliki tindak lanjut, dan setiap anggota tim memiliki gambaran yang jelas tentang apa yang perlu dikerjakan.',
+      'Karena bagi kami, pelayanan pelanggan yang baik tidak berhenti pada membalas pesan. Pelayanan yang baik adalah memastikan setiap pelanggan ditangani dengan baik, dari awal percakapan hingga proses selanjutnya.',
+    ],
   },
 ];
 
 const MODULE_TABS = [
   {
     id: 'inbox',
-    shortLabel: 'Kotak Masuk',
-    title: 'Satu Kotak Masuk untuk Semua Kanal Pelanggan',
+    shortLabel: 'Komunikasi Terpusat',
+    title: 'Menjaga Komunikasi Semua Kanal Tetap Terpusat di Satu Alur CRM',
     summary:
-      'Balas pesan dari Instagram, Facebook, Threads, Telegram, hingga banyak nomor WhatsApp dari satu tempat yang sama — tanpa lagi oper-operan HP di kantor.',
+      'Agar percakapan tidak lagi tercecer di banyak HP dan akun, seluruh pesan dari Instagram, WhatsApp, Facebook, Threads, dan Telegram masuk ke satu ruang kerja yang langsung terhubung ke profil pelanggan.',
     icon: MessageSquare,
     highlights: [
-      'Semua pesan masuk dari media sosial dan WhatsApp langsung rapi dalam satu antrean yang mudah dicari.',
+      'Semua pesan masuk dari media sosial dan banyak nomor WhatsApp tersimpan rapi dalam satu antrean yang langsung mencatat riwayat pelanggan.',
       'Kirim foto, video, dokumen, katalog harga produk, hingga balasan cepat pakai template dalam satu klik.',
-      'Pesan dari komentar iklan atau postingan Instagram & Facebook bisa otomatis dibalas dan dilanjutkan ke DM.',
+      'Komentar iklan atau postingan Instagram & Facebook bisa otomatis dibalas dan diteruskan ke obrolan pribadi agar peluang tidak tenggelam.',
     ],
-    benefitNote: 'Tim lebih fokus melayani pembeli, bukan sibuk membuka banyak aplikasi dan layar berbeda.',
+    benefitNote: 'Komunikasi terpusat membuat tim langsung melihat konteks pelanggan tanpa berpindah perangkat atau menebak riwayat sebelumnya.',
   },
   {
     id: 'team',
-    shortLabel: 'Tim & Akses',
-    title: 'Bagi Tugas Tim CS Tanpa Khawatir Data Bocor',
+    shortLabel: 'Tim, Shift & Akses',
+    title: 'Memastikan Tanggung Jawab Tim Tidak Terputus Saat Pergantian Shift',
     summary:
-      'Atur siapa menangani obrolan mana dan batasi akses tiap staf sesuai perannya — sehingga data pelanggan tetap aman meski tim terus bertambah.',
+      'Setiap percakapan memiliki penanggung jawab yang jelas, catatan internal, dan batasan akses sesuai peran staf — sehingga pekerjaan tetap berlanjut mulus saat shift berganti dan data pelanggan tetap aman.',
     icon: SlidersHorizontal,
     highlights: [
-      'Pilih hak akses tiap staf secara fleksibel: staf baru cukup melihat obrolan miliknya tanpa bisa mengunduh daftar kontak.',
-      'Tandai chat internal, kurir, supplier, atau grup kantor sebagai Non-Penilaian agar tidak mengacaukan laporan CS.',
-      'Supervisor tetap bisa memantau seluruh antrean percakapan dan membantu kapan saja dibutuhkan.',
+      'Atur pembagian tugas antar admin dan tentukan hak akses tiap staf: staf baru cukup melihat obrolan miliknya tanpa bisa mengunduh daftar kontak.',
+      'Saat shift berganti, admin berikutnya langsung membaca riwayat lengkap dan catatan internal tanpa meminta pelanggan mengulang cerita.',
+      'Tandai chat internal, kurir, supplier, atau grup kantor sebagai Non-Penilaian agar tidak mengacaukan antrean dan laporan CS.',
     ],
-    benefitNote: 'Database pelanggan tetap utuh dan aman di ruang milik usaha Anda sendiri.',
+    benefitNote: 'Pengelolaan pelanggan tidak lagi bergantung pada ingatan satu admin atau perangkat pribadi.',
   },
   {
     id: 'sla',
-    shortLabel: 'Kecepatan & Rating',
-    title: 'Ukur Kecepatan Balas & Kepuasan Pelanggan Secara Nyata',
+    shortLabel: 'Monitoring & Rating',
+    title: 'Memantau Aktivitas Tim, Kecepatan Respon & Kepuasan Secara Nyata',
     summary:
-      'Pantau berapa menit rata-rata tim membalas dan kumpulkan penilaian langsung dari pelanggan setiap kali satu sesi layanan selesai.',
+      'Pemilik bisnis dan supervisor bisa melihat gambaran jelas tentang pekerjaan tim, kecepatan balas rata-rata, hingga penilaian kepuasan pelanggan per sesi layanan.',
     icon: Clock,
     highlights: [
-      'Setiap kali pelanggan kembali menghubungi di hari lain, sistem menandai batas mulai dan selesai sesi baru tanpa menghapus chat lama.',
-      'Kirim tautan penilaian bintang & masukan pelanggan otomatis setelah obrolan ditandai selesai.',
-      'Lihat jam paling sibuk dan performa tiap admin langsung dari dashboard agar jadwal shift lebih tepat.',
+      'Setiap pelanggan yang kembali menghubungi di hari lain mendapat batas sesi penanganan baru tanpa menghapus riwayat obrolan sebelumnya.',
+      'Kirim tautan penilaian bintang & masukan pelanggan otomatis setelah satu sesi layanan selesai.',
+      'Pantau jam paling sibuk, beban kerja, dan performa tiap admin langsung dari dashboard untuk evaluasi operasional yang objektif.',
     ],
-    benefitNote: 'Keputusan bisnis berbasis data nyata, bukan lagi sekadar kira-kira.',
+    benefitNote: 'Pemilik bisnis melihat kondisi pelayanan yang sebenarnya, bukan lagi sekadar laporan lisan.',
   },
   {
     id: 'campaign',
-    shortLabel: 'Konten & Promosi',
-    title: 'Jadwalkan Konten Sosial & Pesan Promosi Lebih Teratur',
+    shortLabel: 'Follow-Up & Promosi',
+    title: 'Memastikan Tindak Lanjut Pelanggan & Promosi Tidak Pernah Terlupakan',
     summary:
-      'Selain membalas chat, tim Anda juga bisa menjadwalkan postingan media sosial, pengingat ulang tahun pelanggan, dan siaran promo secara terarah.',
+      'Hubungan dengan pelanggan tidak berhenti setelah pesan dibalas. Kelola daftar kontak, jadwalkan tindak lanjut, ucapan ulang tahun, hingga konten sosial dari satu alur kerja yang sama.',
     icon: CalendarClock,
     highlights: [
-      'Jadwalkan unggahan Instagram, Facebook, Threads, hingga pembaruan status WhatsApp dari satu kalender kerja.',
-      'Kirim pengingat promo atau info produk baru ke segmen pelanggan terpilih dengan jeda pengiriman yang aman.',
-      'Kirim ucapan ulang tahun otomatis agar pelanggan lama merasa diperhatikan dan kembali berbelanja.',
+      'Simpan profil, label, dan riwayat interaksi pelanggan agar tim tahu siapa yang perlu di-follow-up kembali.',
+      'Kirim pengingat promo, info produk baru, atau ucapan ulang tahun otomatis ke segmen pelanggan terpilih dengan jeda pengiriman yang aman.',
+      'Jadwalkan unggahan Instagram, Facebook, Threads, hingga pembaruan status WhatsApp dalam satu kalender kerja tim.',
     ],
-    benefitNote: 'Promosi rutin berjalan konsisten tanpa perlu dilakukan manual satu per satu.',
+    benefitNote: 'Setiap peluang dan pelanggan lama tetap terawat tanpa harus diingat satu per satu secara manual.',
   },
   {
     id: 'ai',
     shortLabel: 'Asisten AI',
-    title: 'Asisten AI yang Menjawab Cepat Sesuai Gaya Bahasa Toko Anda',
+    title: 'Asisten AI yang Menjaga Respon Awal & Meneruskan ke Admin Saat Dibutuhkan',
     summary:
-      'Saat antrean sedang ramai atau di luar jam kerja, Asisten AI membantu menjawab pertanyaan dasar berdasarkan panduan produk dan kebijakan bisnis Anda sendiri.',
+      'Saat antrean sedang padat atau di luar jam kerja, Asisten AI membantu menjawab pertanyaan awal berdasarkan panduan bisnis Anda, lalu meneruskan percakapan ke admin yang siap bekerja.',
     icon: Bot,
     highlights: [
-      'Cukup unggah daftar harga, FAQ, atau panduan produk Anda agar jawaban AI selalu akurat dan tidak mengarang.',
-      'Atur gaya bahasa ramah sesuai karakter merek Anda — bisa membantu di jam malam atau saat CS sedang penuh.',
-      'Kapan saja pelanggan butuh bantuan manusia, admin bisa langsung mengambil alih percakapan.',
+      'Cukup unggah daftar harga, FAQ, atau panduan produk Anda agar jawaban AI tetap akurat sesuai kebijakan bisnis.',
+      'Atur gaya bahasa ramah sesuai karakter usaha Anda agar pelanggan langsung disambut meski menghubungi di luar jam operasional.',
+      'Begitu pelanggan butuh penanganan lebih lanjut, percakapan langsung diteruskan ke admin yang aktif bertugas beserta ringkasan konteksnya.',
     ],
-    benefitNote: 'Calon pembeli tetap mendapat sambutan cepat meski menghubungi di luar jam operasional.',
+    benefitNote: 'Pelanggan tetap tertangani sejak menit pertama, dan admin bisa fokus pada tindak lanjut yang bernilai tinggi.',
   },
 ];
 
@@ -247,43 +268,43 @@ const CHANNELS = [
 
 const COMPARISON_ROWS = [
   {
-    aspect: 'Mengelola banyak kanal sekaligus',
-    manual: 'Buka HP dan aplikasi satu per satu, chat mudah terlewat',
-    other: 'Tersedia, tetapi sering dibatasi kuota kanal & biaya tambah admin tinggi',
-    reneo: 'Instagram, WhatsApp, Facebook, Threads & Telegram menyatu di satu layar',
+    aspect: 'Kesinambungan saat pergantian shift & tim bertambah',
+    manual: 'Riwayat obrolan tertahan di HP masing-masing admin; saat shift berganti konteks pelanggan langsung putus',
+    other: 'Pesan terkumpul, tetapi pembagian tugas & catatan kerja antar admin sering terbatas di paket mahal',
+    reneo: 'Riwayat pelanggan, catatan internal, dan status tugas tersambung utuh lintas shift di satu ruang kerja CRM',
   },
   {
-    aspect: 'Keamanan & kepemilikan data pelanggan',
-    manual: 'Rawan hilang saat HP rusak atau staf keluar',
-    other: 'Data tersimpan di tempat penyedia luar',
-    reneo: 'Data pelanggan tersimpan aman di ruang milik usaha Anda sendiri',
+    aspect: 'Tindak lanjut pelanggan & keterpusatan data',
+    manual: 'Bergantung pada ingatan admin; data pelanggan rawan hilang saat perangkat rusak atau staf keluar',
+    other: 'Fokus hanya pada balas chat, sementara data pelanggan tersimpan di pihak luar',
+    reneo: 'Data pelanggan, riwayat komunikasi semua kanal, dan jadwal tindak lanjut terpusat di ruang milik usaha Anda sendiri',
   },
   {
-    aspect: 'Kebersihan laporan kecepatan & kepuasan CS',
-    manual: 'Harus rekap manual dan sulit objektif',
-    other: 'Chat kurir, vendor, atau grup kantor ikut mengacaukan angka laporan',
-    reneo: 'Bisa menandai chat non-pelanggan agar laporan SLA & kepuasan tetap akurat',
+    aspect: 'Pengawasan pekerjaan admin & keakuratan laporan',
+    manual: 'Pemilik bisnis harus cek satu per satu dan rekap manual',
+    other: 'Chat kurir, vendor, atau grup kantor ikut masuk hitungan sehingga angka laporan bias',
+    reneo: 'Aktivitas admin, kecepatan balas, dan kepuasan pelanggan terpantau objektif dengan filter chat non-pelanggan',
   },
   {
-    aspect: 'Pengeluaran saat tim & chat bertambah',
-    manual: 'Harus beli HP tambahan untuk tiap admin baru',
-    other: 'Biaya berlipat mengikuti jumlah admin dan jumlah pesan',
-    reneo: 'Paket jelas & terjangkau tanpa biaya tambahan per pesan dari panel',
+    aspect: 'Biaya operasional saat percakapan makin ramai',
+    manual: 'Harus terus membeli HP tambahan setiap kali menambah admin baru',
+    other: 'Biaya berlipat mengikuti jumlah kursi admin dan volume pesan',
+    reneo: 'Struktur paket jelas untuk pengelolaan pelanggan jangka panjang tanpa biaya tambahan per pesan dari panel',
   },
 ];
 
 const FAQS = [
   {
+    q: 'Apakah Reneo CRM hanya aplikasi untuk menggabungkan chat saja?',
+    a: 'Tidak. Menyatukan pesan dari Instagram, WhatsApp, Facebook, Threads, dan Telegram hanyalah salah satu kemampuan di dalamnya. Reneo CRM dirancang sebagai sistem pengelolaan pelanggan dan operasional tim — mencakup riwayat pelanggan terpusat, pembagian tanggung jawab lintas shift, tindak lanjut (follow-up), hingga pemantauan kinerja admin.',
+  },
+  {
     q: 'Apakah saya harus mengerti hal teknis untuk mulai memakai Reneo CRM?',
-    a: 'Tidak perlu. Anda bisa memilih paket siap pakai yang langsung aktif dan siap digunakan oleh tim CS Anda, dengan masa coba gratis 7 hari terlebih dahulu.',
+    a: 'Tidak perlu. Anda bisa langsung mendaftar akun baru untuk mencoba ruang kerja Reneo CRM secara gratis selama 7 hari, atau memesan paket siap pakai bersama tim Anda.',
   },
   {
-    q: 'Apakah Reneo CRM hanya untuk WhatsApp saja?',
-    a: 'Tidak. Reneo CRM dirancang untuk menyatukan seluruh percakapan pelanggan Anda — mulai dari Instagram DM & komentar, Facebook Messenger, Threads, Telegram, hingga banyak nomor WhatsApp dalam satu ruang kerja.',
-  },
-  {
-    q: 'Apakah riwayat chat pelanggan aman jika ada admin yang berganti shift atau resign?',
-    a: 'Ya. Seluruh riwayat percakapan, catatan internal, dan profil pelanggan tersimpan terpusat. Anda cukup mengganti akses staf tanpa pernah kehilangan riwayat obrolan lama.',
+    q: 'Apakah riwayat pelanggan aman jika ada admin yang berganti shift atau resign?',
+    a: 'Ya. Seluruh riwayat percakapan, profil kontak, catatan internal, dan status tindak lanjut tersimpan terpusat di ruang kerja usaha Anda. Anda cukup mengatur ulang akses staf tanpa pernah kehilangan riwayat pelanggan lama.',
   },
   {
     q: 'Bagaimana jika nomor CS juga sering dipakai untuk chat kurir atau grup kantor?',
@@ -291,7 +312,7 @@ const FAQS = [
   },
   {
     q: 'Apakah bisa dicoba dulu sebelum berlangganan?',
-    a: 'Tentu. Anda dapat memulai masa uji coba gratis selama 7 hari untuk merasakan langsung alur kerja tim Anda di Reneo CRM sebelum memutuskan berlangganan.',
+    a: 'Tentu. Anda dapat memulai masa uji coba gratis selama 7 hari untuk merasakan langsung bagaimana Reneo CRM membantu mengelola pelanggan dan pekerjaan tim Anda sehari-hari.',
   },
 ];
 
@@ -422,7 +443,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 Reneo CRM
               </div>
               <div className="text-xs text-slate-500 hidden sm:block">
-                Satu Ruang Kerja Layanan Pelanggan
+                Kelola Pelanggan &amp; Operasional Tim
               </div>
             </div>
           </a>
@@ -528,8 +549,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-16 space-y-10">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
               <div className="lg:col-span-6 space-y-5">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Instagram · WhatsApp · Facebook · Threads · Telegram
+                <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                  Sistem CRM · Kelola Pelanggan, Bukan Hanya Percakapannya
                 </div>
 
                 <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight leading-tight">
@@ -537,7 +558,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </h1>
 
                 <p className="text-base text-slate-600 leading-relaxed max-w-prose">
-                  Satukan pesan dari <strong className="font-semibold text-slate-800">Instagram, WhatsApp, Facebook, Threads, dan Telegram</strong> dalam satu kotak masuk bersama tim Anda. Balas lebih cepat, bagi tugas lebih rapi, dan pantau kepuasan pelanggan tanpa ribet.
+                  Satu sistem untuk mengelola komunikasi dari{' '}
+                  <strong className="font-semibold text-slate-800">
+                    Instagram, WhatsApp, Facebook, Threads, dan Telegram
+                  </strong>{' '}
+                  sekaligus data pelanggan, aktivitas tim, dan tindak lanjut dalam satu alur kerja.
                 </p>
 
                 <div className="space-y-3 pt-1">
@@ -699,51 +724,79 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </RevealSection>
 
-        {/* Authentic Origin Story Section */}
+        {/* Authentic Origin Story Section — Vertical Storytelling */}
         <RevealSection id="kenapa-dibuat" className="bg-white border-b border-slate-200">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
-            <div className="max-w-3xl space-y-2.5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-20 space-y-10">
+            <div className="space-y-3">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
                 Cerita di Balik Reneo CRM
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-900 tracking-tight leading-tight">
                 Kenapa Kami Membuat Reneo CRM
               </h2>
-              <p className="text-sm sm:text-base text-slate-600 leading-relaxed max-w-prose">
-                Reneo CRM tidak dibuat karena sekadar ingin meluncurkan software baru, melainkan lahir dari pengalaman nyata tim kami sendiri saat melayani pelanggan setiap hari.
+              <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
+                Reneo CRM tidak lahir hanya dari keinginan membuat aplikasi CRM baru. Produk ini berawal dari pengalaman kami sendiri dalam menjalankan operasional dan mengelola pelanggan setiap hari.
               </p>
             </div>
 
-            <div className="border border-slate-200 rounded-xl bg-slate-50/60 divide-y divide-slate-200 overflow-hidden">
-              {STORY_BEATS.map((story) => (
-                <div
-                  key={story.step}
-                  className="p-4 sm:px-6 sm:py-5 bg-white flex flex-col md:flex-row md:items-baseline gap-1.5 md:gap-6"
-                >
-                  <span className="text-sm sm:text-base font-bold text-slate-900 md:w-72 shrink-0">
-                    {story.step}
-                  </span>
-                  <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-                    {story.text}
-                  </p>
-                </div>
-              ))}
+            <ol className="relative space-y-8 sm:space-y-10 before:content-[''] before:absolute before:left-[15px] sm:before:left-[19px] before:top-3 before:bottom-3 before:w-px before:bg-slate-200">
+              {STORY_BEATS.map((story, idx) => {
+                const isHighlightStep = idx === 3 || idx === 4;
+                return (
+                  <li key={story.number} className="relative pl-11 sm:pl-14">
+                    <div
+                      aria-hidden="true"
+                      className={`absolute left-0 top-0.5 w-8 h-8 sm:w-10 sm:h-10 rounded-full border text-xs sm:text-sm font-bold font-mono flex items-center justify-center ${
+                        isHighlightStep
+                          ? 'bg-[#2563eb] border-[#2563eb] text-white'
+                          : 'bg-white border-slate-300 text-slate-700'
+                      }`}
+                    >
+                      {story.number}
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <h3 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug">
+                        {story.step}
+                      </h3>
+                      <div className="space-y-3 text-sm sm:text-base text-slate-600 leading-relaxed">
+                        {story.paragraphs.map((paragraph) => (
+                          <p key={paragraph}>{paragraph}</p>
+                        ))}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+
+            {/* Penekanan Utama */}
+            <div className="rounded-xl border border-slate-200 border-l-4 border-l-[#2563eb] bg-slate-50 px-5 py-5 sm:px-7 sm:py-6 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
+                Penekanan Utama
+              </div>
+              <p className="text-lg sm:text-xl font-bold text-slate-900 leading-snug">
+                Bukan sekadar membalas pesan. Tetapi memastikan setiap pelanggan ditangani dengan baik.
+              </p>
+              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                Kelola pelanggan, bukan hanya percakapannya — satu sistem untuk komunikasi, data pelanggan, aktivitas tim, dan tindak lanjut dalam satu alur kerja.
+              </p>
             </div>
           </div>
         </RevealSection>
 
-        {/* Interactive Module Explorer — Mobile First & Readable */}
+        {/* Interactive Module Explorer — Connected to Operational Problems */}
         <RevealSection id="modul" className="bg-[#f8fafc] border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
-            <div className="max-w-2xl space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <div className="max-w-3xl space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
                 Cara Kerja Reneo CRM
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
-                Semua yang Dibutuhkan Tim Layanan Pelanggan, Tanpa Ribet
+                Dirancang untuk Menjawab Masalah Operasional Sehari-hari
               </h2>
               <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-                Pilih salah satu bagian di bawah untuk melihat bagaimana Reneo CRM membantu pekerjaan tim Anda dari pagi sampai tutup toko.
+                Setiap fitur di Reneo CRM terhubung langsung dalam satu alur kerja: dari komunikasi terpusat, riwayat pelanggan, pembagian tugas lintas shift, tindak lanjut, hingga pemantauan aktivitas tim.
               </p>
             </div>
 
@@ -860,18 +913,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </RevealSection>
 
-        {/* All Channels Grid — Balanced Omnichannel */}
+        {/* All Channels Grid — Omnichannel as a CRM Capability */}
         <RevealSection id="kanal" className="bg-white border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
-            <div className="max-w-2xl space-y-2">
+            <div className="max-w-3xl space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
-                Terhubung di Mana Pembeli Berada
+                Kemampuan Omnichannel dalam Reneo CRM
               </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
-                Bukan Cuma WhatsApp — Seluruh Kanal Sosial Media Masuk Satu Pintu
+                Semua Kanal Komunikasi Terhubung Langsung ke Alur Pengelolaan Pelanggan
               </h2>
               <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-                Pelanggan bebas menghubungi lewat aplikasi favorit mereka, sementara tim Anda cukup membalas dari satu tempat yang rapi.
+                Menyatukan pesan hanyalah awal. Setiap percakapan dari kanal yang pelanggan pilih langsung masuk ke riwayat kontak, pembagian tugas tim, dan tindak lanjut di Reneo CRM.
               </p>
             </div>
 
@@ -1161,11 +1214,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
 
               <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight leading-snug">
-                Rapikan Layanan Pelanggan Anda Hari Ini Sebelum Lebih Banyak Pembeli Terlewat
+                Mulai Kelola Pelanggan dan Pekerjaan Tim Secara Lebih Terstruktur Hari Ini
               </h2>
 
               <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
-                Anda bisa langsung mendaftar akun CRM baru untuk segera mulai bekerja bersama tim CS, atau memesan paket Hosting + CRM sekaligus di Reneo Panel.
+                Rasakan langsung bagaimana satu ruang kerja Reneo CRM menjaga komunikasi, riwayat pelanggan, pembagian shift, dan tindak lanjut tetap terhubung.
               </p>
             </div>
 
@@ -1238,7 +1291,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="flex items-center gap-2">
             <ReneoCrmLogo className="w-6 h-6 shrink-0" />
             <span className="font-semibold text-slate-800">Reneo CRM</span>
-            <span>· Layanan Pelanggan Terpadu</span>
+            <span>· Kelola Pelanggan &amp; Operasional Tim</span>
           </div>
           <div className="flex flex-wrap items-center gap-4">
             <a href={PANEL_URL} target="_top" className="hover:text-slate-800 transition-colors">

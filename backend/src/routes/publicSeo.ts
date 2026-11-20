@@ -10,33 +10,33 @@ const DOCKER_IMAGE = 'ghcr.io/aknalre/crm-services';
 
 export const CRM_SEO_META = {
   name: 'Reneo CRM',
-  fullTitle: 'Reneo CRM — Layanan Pelanggan Terpadu untuk Instagram, WhatsApp & Media Sosial',
+  fullTitle: 'Reneo CRM — Kelola Pelanggan, Tim & Komunikasi dalam Satu Alur Kerja',
   description:
-    'Reneo CRM menyatukan pesan pelanggan dari Instagram, WhatsApp, Facebook, Threads, dan Telegram dalam satu kotak masuk bersama tim CS. Dilengkapi pembagian peran staf, filter chat non-pelanggan agar laporan SLA & kepuasan tetap akurat, promo terjadwal, dan asisten balasan otomatis.',
+    'Reneo CRM adalah sistem pengelolaan pelanggan dan operasional tim yang menyatukan komunikasi Instagram, WhatsApp, Facebook, Threads, dan Telegram sekaligus data pelanggan, pergantian shift, tindak lanjut, dan pemantauan aktivitas admin dalam satu alur kerja.',
   keywords:
-    'Reneo CRM, CRM omnichannel Indonesia, layanan pelanggan terpadu, kotak masuk Instagram WhatsApp Facebook Threads Telegram, aplikasi CS toko online, laporan SLA dan kepuasan pelanggan',
+    'Reneo CRM, sistem CRM Indonesia, pengelolaan pelanggan dan tim, CRM omnichannel, riwayat pelanggan terpusat, tindak lanjut pelanggan, laporan SLA dan kepuasan pelanggan',
 };
 
 const CRM_STORY_BEATS = [
   {
-    step: 'Kami pernah mengalami',
-    text: 'Pesan pembeli tersebar di banyak HP admin dan akun media sosial; saat staf berganti shift atau HP bermasalah, riwayat obrolan terputus, sementara chat kurir, supplier, dan grup kantor bercampur dengan chat pembeli.',
+    step: 'Kami pernah mengalaminya sendiri.',
+    text: 'Dalam operasional sehari-hari, komunikasi dengan pelanggan datang dari berbagai kanal dan ditangani oleh beberapa admin. Percakapan tersebar di banyak perangkat dan akun, sehingga informasi pelanggan tidak selalu berada di satu tempat. Ketika aktivitas semakin ramai, kami mulai merasakan betapa sulitnya memastikan setiap percakapan ditangani dengan baik.',
   },
   {
-    step: 'Kami menyadari',
-    text: 'Masalah itu bukan hal sepele: begitu pesan makin ramai, pembeli menunggu terlalu lama lalu pindah ke toko lain, tim menanyakan hal yang sama berulang kali, dan pemilik usaha tidak bisa melihat laporan kecepatan respon yang jujur.',
+    step: 'Kami menyadari masalahnya lebih besar dari sekadar chat.',
+    text: 'Pergantian shift bisa membuat riwayat komunikasi terputus. Follow-up pelanggan berisiko terlewat. Admin lain tidak selalu mengetahui apa yang sudah dibicarakan sebelumnya, sementara pemilik bisnis kesulitan memantau pekerjaan dan pelayanan tim. Pada akhirnya, masalahnya bukan hanya tentang membalas pesan, tetapi bagaimana memastikan setiap pelanggan mendapatkan penanganan yang berkelanjutan.',
   },
   {
-    step: 'Kami merasa',
-    text: 'Aplikasi lain yang kami coba terasa belum pas untuk operasional harian — biayanya cepat membengkak setiap kali tambah admin atau chat makin ramai, data pelanggan tidak sepenuhnya kami pegang, dan chat non-pelanggan masih mengacaukan laporan tim.',
+    step: 'Kami merasa membutuhkan sesuatu yang lebih menyeluruh.',
+    text: 'Kami membutuhkan sistem yang bukan hanya mengumpulkan pesan dari berbagai kanal, tetapi juga membantu mengelola data pelanggan, membagi tanggung jawab, memantau aktivitas admin, dan memastikan setiap tindak lanjut berjalan. Kami ingin seluruh proses tersebut saling terhubung, bukan berjalan sendiri-sendiri.',
   },
   {
-    step: 'Karena itu, kami membuat Reneo CRM',
-    text: 'Satu ruang kerja layanan pelanggan yang lahir langsung dari alur kerja nyata tim kami sendiri setiap hari — untuk menyatukan Instagram, WhatsApp, Facebook, Threads, dan Telegram dalam satu layar yang rapi.',
+    step: 'Karena itu, kami membuat Reneo CRM.',
+    text: 'Kami membangun Reneo CRM berdasarkan kebutuhan yang kami alami sendiri. Sebuah sistem CRM yang membantu tim mengelola pelanggan, menyatukan komunikasi, menjaga kesinambungan pekerjaan, dan memberikan gambaran yang lebih jelas tentang aktivitas operasional. Bukan sekadar tempat untuk menerima pesan, tetapi ruang kerja untuk mengelola hubungan dengan pelanggan.',
   },
   {
-    step: 'Tujuan kami',
-    text: 'Membuat pengelolaan chat pelanggan, pembagian tugas tim, riwayat percakapan, dan penilaian kualitas layanan yang dulunya melelahkan menjadi jauh lebih tenang, terukur, dan mudah dijalankan setiap hari.',
+    step: 'Tujuan kami.',
+    text: 'Kami ingin pengelolaan pelanggan tidak lagi bergantung pada ingatan masing-masing admin, percakapan yang tersebar, atau informasi yang harus dicari ulang. Setiap pelanggan memiliki riwayat, setiap pekerjaan memiliki tindak lanjut, dan setiap anggota tim memiliki gambaran yang jelas tentang apa yang perlu dikerjakan. Karena bagi kami, pelayanan pelanggan yang baik tidak berhenti pada membalas pesan — melainkan memastikan setiap pelanggan ditangani dengan baik, dari awal percakapan hingga proses selanjutnya.',
   },
 ];
 
