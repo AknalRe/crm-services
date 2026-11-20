@@ -1706,6 +1706,47 @@ export const api = {
     );
     return res.data.data;
   },
+
+  updateMyAvailability: async (
+    availabilityStatus: import('../types').AgentAvailabilityStatus
+  ): Promise<{
+    availabilityStatus: import('../types').AgentAvailabilityStatus;
+    user: NonNullable<import('../types').AuthStatus['user']>;
+  }> => {
+    const res = await client.patch('/auth/availability', { availabilityStatus });
+    return res.data.data;
+  },
+
+  getMyWorkspaces: async (): Promise<{
+    currentCompanyId: string;
+    workspaces: import('../types').TenantWorkspaceItem[];
+  }> => {
+    const res = await client.get('/tenants/my-workspaces');
+    return res.data.data;
+  },
+
+  createMyWorkspace: async (data: {
+    name: string;
+    ownerPhone?: string;
+  }): Promise<{
+    user: NonNullable<import('../types').AuthStatus['user']>;
+    company: any;
+    license: import('../types').LicenseInfo;
+  }> => {
+    const res = await client.post('/tenants/my-workspaces', data);
+    return res.data.data;
+  },
+
+  switchWorkspace: async (
+    companyId: string
+  ): Promise<{
+    user: NonNullable<import('../types').AuthStatus['user']>;
+    company: any;
+    license?: import('../types').LicenseInfo;
+  }> => {
+    const res = await client.post('/tenants/switch', { companyId });
+    return res.data.data;
+  },
 };
 
 export default api;

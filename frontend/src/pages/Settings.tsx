@@ -2576,6 +2576,30 @@ export const Settings: React.FC<SettingsProps> = ({
                                 >
                                   {ag.roleName || (ag.role === 'ADMIN' ? 'Administrator' : 'Custom')}
                                 </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold inline-flex items-center gap-1 border ${
+                                    ag.availabilityStatus === 'AWAY'
+                                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                      : ag.availabilityStatus === 'OFFLINE'
+                                      ? 'bg-gray-100 text-gray-600 border-gray-200'
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      ag.availabilityStatus === 'AWAY'
+                                        ? 'bg-amber-500'
+                                        : ag.availabilityStatus === 'OFFLINE'
+                                        ? 'bg-gray-400'
+                                        : 'bg-emerald-500'
+                                    }`}
+                                  />
+                                  {ag.availabilityStatus === 'AWAY'
+                                    ? 'Istirahat'
+                                    : ag.availabilityStatus === 'OFFLINE'
+                                    ? 'Offline'
+                                    : 'Siap'}
+                                </span>
                                 <button
                                   type="button"
                                   disabled={isSelf || cannotTouchAdmin}
@@ -2694,18 +2718,44 @@ export const Settings: React.FC<SettingsProps> = ({
                                   )}
                                 </td>
                                 <td className="py-2.5 px-3">
-                                  <button
-                                    type="button"
-                                    disabled={isSelf || cannotTouchAdmin}
-                                    onClick={() => void handleToggleAgentActive(ag)}
-                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                      ag.isActive
-                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                        : 'bg-gray-100 text-gray-500 border border-gray-200'
-                                    } ${isSelf || cannotTouchAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
-                                  >
-                                    {ag.isActive ? 'Aktif' : 'Nonaktif'}
-                                  </button>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span
+                                      className={`px-2 py-0.5 rounded text-[10px] font-semibold inline-flex items-center gap-1 border ${
+                                        ag.availabilityStatus === 'AWAY'
+                                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                          : ag.availabilityStatus === 'OFFLINE'
+                                          ? 'bg-gray-100 text-gray-600 border-gray-200'
+                                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      }`}
+                                    >
+                                      <span
+                                        className={`w-1.5 h-1.5 rounded-full ${
+                                          ag.availabilityStatus === 'AWAY'
+                                            ? 'bg-amber-500'
+                                            : ag.availabilityStatus === 'OFFLINE'
+                                            ? 'bg-gray-400'
+                                            : 'bg-emerald-500'
+                                        }`}
+                                      />
+                                      {ag.availabilityStatus === 'AWAY'
+                                        ? 'Istirahat'
+                                        : ag.availabilityStatus === 'OFFLINE'
+                                        ? 'Offline'
+                                        : 'Siap'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      disabled={isSelf || cannotTouchAdmin}
+                                      onClick={() => void handleToggleAgentActive(ag)}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                        ag.isActive
+                                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                          : 'bg-gray-100 text-gray-500 border border-gray-200'
+                                      } ${isSelf || cannotTouchAdmin ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                                    >
+                                      {ag.isActive ? 'Aktif' : 'Nonaktif'}
+                                    </button>
+                                  </div>
                                 </td>
                                 <td className="py-2.5 pl-3 text-right">
                                   <div className="inline-flex items-center rounded-md border border-gray-200 bg-white divide-x divide-gray-200 overflow-hidden shadow-xs">

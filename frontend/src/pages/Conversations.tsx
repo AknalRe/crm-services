@@ -5236,11 +5236,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       className="h-7 px-2 bg-white border border-gray-200 rounded-md text-[11px] text-gray-700 focus:outline-none focus:border-indigo-500 max-w-[140px] disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       <option value="">Belum Ditugaskan</option>
-                      {assignableAgents.map((ag) => (
-                        <option key={ag.id} value={ag.id}>
-                          {ag.name}
-                        </option>
-                      ))}
+                      {assignableAgents.map((ag) => {
+                        const av = (ag as any).availabilityStatus || 'ONLINE';
+                        const avLabel = av === 'AWAY' ? ' · Istirahat' : av === 'OFFLINE' ? ' · Offline' : ' · Siap';
+                        return (
+                          <option key={ag.id} value={ag.id}>
+                            {ag.name}{avLabel}
+                          </option>
+                        );
+                      })}
                     </select>
                   )}
 

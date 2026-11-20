@@ -13,6 +13,7 @@ import { and, count, eq, gte, inArray, ne, or } from 'drizzle-orm';
 import { config } from '../config';
 import { getActiveCompanyId, getCompanySettingMap } from './tenantContext';
 import { syncReneoEnvironmentHosts } from './domainGuard';
+import { computeCompanyStorageUsageBytes } from '../routes/media';
 
 export type LicenseFeatureKey =
   | 'unlimitedBroadcast'
@@ -37,6 +38,8 @@ export interface LicenseUsage {
   templates: number;
   channels: number;
   broadcastsThisMonth: number;
+  storageUsedBytes: number;
+  storageUsedMb: number;
 }
 
 export interface LicenseInfo {
@@ -81,6 +84,9 @@ export interface LicenseInfo {
     wahaSync: boolean;
     apiAccess: boolean;
     supportPriority: string;
+    maxStorageMb: number;
+    maxAttachmentSizeMb: number;
+    allowedMenus: string[];
   };
 }
 
@@ -95,7 +101,7 @@ export interface LicensePlanDefinition {
   trialDays: number;
   priceAmount: number;
   highlighted: boolean;
-  features: Record<string, boolean | number | string>;
+  features: Record<string, boolean | number | string | string[]>;
 }
 
 const FEATURE_LABELS: Record<LicenseFeatureKey, string> = {
@@ -141,6 +147,9 @@ export function buildLockedFeatures(): LicenseInfo['features'] {
     wahaSync: false,
     apiAccess: false,
     supportPriority: 'standard',
+    maxStorageMb: 0,
+    maxAttachmentSizeMb: 0,
+    allowedMenus: ['dashboard'],
   };
 }
 
@@ -151,7 +160,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'starter-monthly',
       name: 'Starter Bulanan',
-      tagline: 'Untuk UMKM pemula: broadcast terjadwal, kontak terpusat, & auto-reply dasar.',
+      tagline: 'Untuk usaha rintisan: kontak terpusat, siaran promo terjadwal, auto-reply, & bot ulang tahun.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
@@ -181,6 +190,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: false,
         supportPriority: 'standard',
+        maxStorageMb: 500,
+        maxAttachmentSizeMb: 10,
+        allowedMenus: ['dashboard', 'contacts', 'broadcasts', 'birthday', 'media', 'automations', 'settings'],
       },
     },
     {
@@ -188,7 +200,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'pro-monthly',
       name: 'Growth Pro Bulanan',
-      tagline: 'Terlaris untuk tim CS: Live Chat CRM, Multi-Sesi WA, Omnichannel, Story WA & CSAT.',
+      tagline: 'Terlaris untuk tim CS: Inbox Live Chat CRM, Multi-Nomor WA, Omnichannel Sosial, Jadwal Post/Story & CSAT.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
@@ -218,6 +230,23 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: false,
         supportPriority: 'fast',
+        maxStorageMb: 5120,
+        maxAttachmentSizeMb: 25,
+        allowedMenus: [
+          'dashboard',
+          'conversations',
+          'comments',
+          'feed',
+          'contacts',
+          'broadcasts',
+          'birthday',
+          'tracking',
+          'posts',
+          'ideas',
+          'media',
+          'automations',
+          'settings',
+        ],
       },
     },
     {
@@ -225,7 +254,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'business-monthly',
       name: 'Business AI Bulanan',
-      tagline: 'Skala bisnis penuh: Agent AI Multi-Model, Knowledge Book, MCP Tools & akses API.',
+      tagline: 'Skala bisnis penuh: Semua menu terbuka termasuk Agent AI & Knowledge Book, MCP Tools, 20 GB dokumen & API.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
@@ -255,6 +284,24 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'priority',
+        maxStorageMb: 20480,
+        maxAttachmentSizeMb: 50,
+        allowedMenus: [
+          'dashboard',
+          'conversations',
+          'comments',
+          'feed',
+          'contacts',
+          'broadcasts',
+          'birthday',
+          'tracking',
+          'posts',
+          'ideas',
+          'media',
+          'automations',
+          'ai-agent',
+          'settings',
+        ],
       },
     },
     {
@@ -262,7 +309,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'enterprise-annual',
       name: 'Enterprise Tahunan',
-      tagline: 'Paket tahunan hemat 17% (gratis 2 bln): kontak & kanal tanpa batas, 25 sesi WA & support VIP.',
+      tagline: 'Paket tahunan hemat 17% (gratis 2 bln): Semua menu + AI, kontak & kanal tanpa batas, 100 GB dokumen & VIP.',
       period: 'annual',
       months: 12,
       trialDays: 7,
@@ -292,6 +339,24 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'vip',
+        maxStorageMb: 102400,
+        maxAttachmentSizeMb: 100,
+        allowedMenus: [
+          'dashboard',
+          'conversations',
+          'comments',
+          'feed',
+          'contacts',
+          'broadcasts',
+          'birthday',
+          'tracking',
+          'posts',
+          'ideas',
+          'media',
+          'automations',
+          'ai-agent',
+          'settings',
+        ],
       },
     },
   ];
@@ -441,6 +506,36 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       ? 'standard'
       : 'fast';
 
+  const maxStorageMb =
+    typeof src.maxStorageMb === 'number' && src.maxStorageMb > 0
+      ? src.maxStorageMb
+      : isEnterprise
+      ? 102400
+      : isBusiness
+      ? 20480
+      : isStarter
+      ? 500
+      : 5120;
+
+  const maxAttachmentSizeMb =
+    typeof src.maxAttachmentSizeMb === 'number' && src.maxAttachmentSizeMb > 0
+      ? src.maxAttachmentSizeMb
+      : isEnterprise
+      ? 100
+      : isBusiness
+      ? 50
+      : isStarter
+      ? 10
+      : 25;
+
+  const allowedMenus: string[] = ['dashboard', 'contacts', 'broadcasts', 'media', 'settings'];
+  if (liveChatCrm) allowedMenus.push('conversations');
+  if (omnichannel) allowedMenus.push('comments', 'feed');
+  if (birthdayAutomation) allowedMenus.push('birthday');
+  if (scheduledPosts) allowedMenus.push('posts', 'ideas', 'tracking');
+  if (autoReply) allowedMenus.push('automations');
+  if (aiAgent) allowedMenus.push('ai-agent');
+
   return {
     unlimitedBroadcast,
     maxBroadcastPerMonth,
@@ -465,6 +560,9 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     wahaSync,
     apiAccess,
     supportPriority,
+    maxStorageMb,
+    maxAttachmentSizeMb,
+    allowedMenus,
   };
 }
 
@@ -535,6 +633,7 @@ export class LicenseService {
       [templateRes],
       [channelRes],
       [broadcastRes],
+      storageUsedBytes,
     ] = await Promise.all([
       db.select({ val: count() }).from(contacts).where(eq(contacts.companyId, cid)),
       db.select({ val: count() }).from(crmAgents).where(eq(crmAgents.companyId, cid)),
@@ -553,6 +652,7 @@ export class LicenseService {
             or(gte(campaignRecipients.sentAt, monthStart), gte(campaignRecipients.createdAt, monthStart))
           )
         ),
+      computeCompanyStorageUsageBytes(cid),
     ]);
 
     return {
@@ -561,6 +661,8 @@ export class LicenseService {
       templates: Number(templateRes?.val ?? 0),
       channels: Number(channelRes?.val ?? 0),
       broadcastsThisMonth: Number(broadcastRes?.val ?? 0),
+      storageUsedBytes,
+      storageUsedMb: Math.round((storageUsedBytes / (1024 * 1024)) * 10) / 10,
     };
   }
 
@@ -969,7 +1071,7 @@ export class LicenseService {
   }
 
   public async assertQuota(
-    metric: 'contacts' | 'agents' | 'templates' | 'channels' | 'broadcasts' | 'sessions',
+    metric: 'contacts' | 'agents' | 'templates' | 'channels' | 'broadcasts' | 'sessions' | 'storage',
     targetCountOrDelta = 1,
     companyId?: string
   ): Promise<LicenseInfo> {
@@ -1063,6 +1165,31 @@ export class LicenseService {
       if (max > 0 && usage.broadcastsThisMonth + targetCountOrDelta > max) {
         const err: any = new Error(
           `Kuota siaran bulan ini pada paket "${lic.plan}" maksimal ${max.toLocaleString('id-ID')} pesan (terpakai ${usage.broadcastsThisMonth.toLocaleString('id-ID')}). Upgrade untuk siaran tanpa batas.`
+        );
+        err.statusCode = 403;
+        err.code = 'QUOTA_EXCEEDED';
+        throw err;
+      }
+      return lic;
+    }
+
+    if (metric === 'storage') {
+      const maxStorageMb = lic.features.maxStorageMb || 500;
+      const maxAttachmentSizeMb = lic.features.maxAttachmentSizeMb || 10;
+      const fileSizeMb = targetCountOrDelta / (1024 * 1024);
+      if (maxAttachmentSizeMb > 0 && fileSizeMb > maxAttachmentSizeMb) {
+        const err: any = new Error(
+          `Ukuran berkas (${fileSizeMb.toFixed(1)} MB) melebihi batas maksimal ${maxAttachmentSizeMb} MB per berkas pada paket "${lic.plan}".`
+        );
+        err.statusCode = 403;
+        err.code = 'QUOTA_EXCEEDED';
+        throw err;
+      }
+      const nextBytes = usage.storageUsedBytes + Math.max(0, targetCountOrDelta);
+      const maxBytes = maxStorageMb * 1024 * 1024;
+      if (maxStorageMb > 0 && nextBytes > maxBytes) {
+        const err: any = new Error(
+          `Kapasitas penyimpanan dokumen & media paket "${lic.plan}" penuh (${usage.storageUsedMb.toLocaleString('id-ID')} MB / ${maxStorageMb.toLocaleString('id-ID')} MB). Hapus berkas lama di Galeri atau upgrade paket lisensi.`
         );
         err.statusCode = 403;
         err.code = 'QUOTA_EXCEEDED';
@@ -1447,12 +1574,16 @@ export class LicenseService {
     return res.data;
   }
 
-  public async getOrder(publicId: string) {
+  public async getOrder(publicId: string, companyId?: string) {
+    const cid = getActiveCompanyId(companyId);
     const reneoUrl = this.getReneoUrl();
     const res = await axios.get(`${reneoUrl}/api/v1/app-catalog/orders/${publicId}`, {
       headers: this.getReneoHeaders(),
       timeout: 5000,
     });
+    if (res.data?.order?.status === 'paid') {
+      await this.applyPaidOrderToCompany(cid, res.data.order).catch(() => {});
+    }
     return res.data;
   }
 
@@ -1467,11 +1598,38 @@ export class LicenseService {
     const issuedKey = res.data?.licenseKey || res.data?.order?.licenseKey;
     if (issuedKey && cid !== DEFAULT_COMPANY_ID) {
       await this.activateLicenseKey(String(issuedKey), cid).catch(() => {});
+    } else if (res.data?.order) {
+      await this.applyPaidOrderToCompany(cid, res.data.order).catch(() => {});
     } else {
       this.invalidateCache(cid);
       await this.syncWithReneo(cid);
     }
     return res.data;
+  }
+
+  private async applyPaidOrderToCompany(companyId: string, order: any): Promise<void> {
+    const cid = getActiveCompanyId(companyId);
+    if (cid === DEFAULT_COMPANY_ID) {
+      this.invalidateCache(cid);
+      await this.syncWithReneo(cid);
+      return;
+    }
+    const company = await this.getCompanyRow(cid);
+    if (!company) return;
+
+    const orderKeyTag = `RN-SAAS-${String(order.invoiceNumber || order.publicId || order.id).toUpperCase()}`;
+    if (company.licenseKey === orderKeyTag && company.licenseStatus === 'ACTIVE') {
+      return;
+    }
+    const months = Math.max(1, Number(order.months || 1));
+    await this.assignCompanyPlan(cid, {
+      planSlug: order.planSlug || company.licensePlanSlug || 'pro-monthly',
+      planName: order.planName || undefined,
+      months,
+      status: 'ACTIVE',
+      licenseKey: orderKeyTag,
+      priceAmount: typeof order.amountList === 'number' ? order.amountList : undefined,
+    });
   }
 }
 

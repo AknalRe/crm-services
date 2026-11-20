@@ -15,8 +15,10 @@ import {
   AuthUserSession,
   getAuthSigningSecret,
   getCurrentAuthUser,
+  getRequestCompanyId,
   requirePermission,
 } from './auth';
+import { licenseService } from '../services/license.service';
 
 export interface MediaRouterOptions {
   resolveAuthUser?: (req: FastifyRequest) => Promise<AuthUserSession | null>;
@@ -100,6 +102,11 @@ const UPLOADS_DIR = resolveUploadsDir();
 const META_DIR = path.join(UPLOADS_DIR, '.meta');
 
 export interface MediaMetadata {
+  companyId?: string;
+  conversationId?: string;
+  contactId?: string;
+  contactName?: string;
+  sizeBytes?: number;
   channel?: string; // e.g. 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM' | 'DIRECT'
   sessionName?: string; // e.g. 'WA_TEST', 'HRIS_HR', 'sales'
   senderName?: string;
@@ -107,6 +114,37 @@ export interface MediaMetadata {
   source?: 'INBOUND' | 'OUTBOUND' | 'UPLOAD' | 'BROADCAST';
   originalFileName?: string;
   label?: string; // e.g. 'WA • WA_TEST'
+}
+
+export async function computeCompanyStorageUsageBytes(companyId: string): Promise<number> {
+  try {
+    if (!fs.existsSync(UPLOADS_DIR)) return 0;
+    const entries = await fs.promises.readdir(UPLOADS_DIR, { withFileTypes: true });
+    let totalBytes = 0;
+    const isDefault = !companyId || companyId === 'company_default';
+
+    for (const ent of entries) {
+      if (!ent.isFile() || ent.name.startsWith('.')) continue;
+      const meta = await readMediaMetadata(ent.name);
+      const fileCompanyId = meta?.companyId || 'company_default';
+      if (fileCompanyId !== companyId && !(isDefault && !meta?.companyId)) {
+        continue;
+      }
+      if (typeof meta?.sizeBytes === 'number' && meta.sizeBytes > 0) {
+        totalBytes += meta.sizeBytes;
+      } else {
+        try {
+          const st = await fs.promises.stat(path.join(UPLOADS_DIR, ent.name));
+          totalBytes += st.size;
+        } catch {
+          // ignore missing file
+        }
+      }
+    }
+    return totalBytes;
+  } catch {
+    return 0;
+  }
 }
 
 export async function saveMediaMetadata(filename: string, meta: MediaMetadata): Promise<void> {
@@ -434,12 +472,12 @@ export async function saveMediaBufferFile(params: {
   ensureUploadsDir();
   await fs.promises.writeFile(path.join(UPLOADS_DIR, safeName), params.buffer);
 
-  if (params.metadata) {
-    await saveMediaMetadata(safeName, {
-      ...params.metadata,
-      originalFileName: params.metadata.originalFileName || params.fileName,
-    });
-  }
+  await saveMediaMetadata(safeName, {
+    ...(params.metadata || {}),
+    companyId: params.metadata?.companyId || 'company_default',
+    sizeBytes: params.buffer.length,
+    originalFileName: params.metadata?.originalFileName || params.fileName,
+  });
 
   return {
     filename: safeName,
@@ -820,13 +858,22 @@ export default async function mediaRouter(
             ? rawUploadMime
             : EXT_MIME[extFromFileName] || rawUploadMime || undefined;
 
+        const companyId = getRequestCompanyId(req);
+        const rawBase64 = String(req.body?.base64 || '').trim();
+        const commaIdx = rawBase64.indexOf(',');
+        const b64Body = commaIdx >= 0 ? rawBase64.slice(commaIdx + 1) : rawBase64;
+        const estimatedBytes = Math.floor((b64Body.length * 3) / 4);
+        const lic = await licenseService.assertQuota('storage', estimatedBytes, companyId);
+        const maxBytes = (lic.features.maxAttachmentSizeMb || 25) * 1024 * 1024;
+
         const saved = await saveBase64MediaFile({
-          base64: req.body?.base64 || '',
+          base64: rawBase64,
           mimeType: effectiveMime,
           fileName: req.body?.fileName,
-          maxBytes: 25 * 1024 * 1024,
+          maxBytes,
           fallbackExt: '.bin',
           metadata: {
+            companyId,
             channel: customChannel,
             sessionName: customSession,
             label: customLabel,

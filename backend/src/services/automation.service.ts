@@ -239,14 +239,18 @@ export async function handleInboundAutomation(params: {
   try {
     const settings = await getSettingMap(resolvedCompanyId);
 
-    // 1. Auto-Assign Agent if unassigned
+    // 1. Auto-Assign Agent if unassigned (only assign to ONLINE / ready agents, skip AWAY/OFFLINE)
     const assignMode = settings.auto_assign_mode || 'NONE';
     if (!assignedAgentId && (assignMode === 'ROUND_ROBIN' || assignMode === 'LEAST_BUSY')) {
-      const activeAgents = await db
+      const allActiveAgents = await db
         .select()
         .from(crmAgents)
         .where(and(eq(crmAgents.companyId, getActiveCompanyId()), eq(crmAgents.isActive, true)))
         .orderBy(asc(crmAgents.createdAt));
+
+      const activeAgents = allActiveAgents.filter(
+        (a) => (a.availabilityStatus || 'ONLINE').toUpperCase() === 'ONLINE'
+      );
 
       if (activeAgents.length > 0) {
         let chosen = activeAgents[0];

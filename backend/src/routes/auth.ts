@@ -490,6 +490,7 @@ export interface AuthUserSession {
   roleId?: string | null;
   roleName?: string | null;
   permissions: PermissionKey[];
+  availabilityStatus?: 'ONLINE' | 'AWAY' | 'OFFLINE';
   companyId?: string;
   homeCompanyId?: string;
   companyName?: string;
@@ -524,13 +525,18 @@ export async function resolveAgentRoleSession(
   const isPlatformAdmin = Boolean(agent.isPlatformAdmin);
   let effectiveCompanyId = homeCompanyId;
 
-  if (isPlatformAdmin && overrideCompanyId && overrideCompanyId.trim()) {
+  if (overrideCompanyId && overrideCompanyId.trim()) {
     const cand = await db
       .select()
       .from(companies)
       .where(eq(companies.id, overrideCompanyId.trim()))
       .limit(1);
-    if (cand[0]) {
+    if (
+      cand[0] &&
+      (isPlatformAdmin ||
+        cand[0].id === homeCompanyId ||
+        (cand[0].ownerEmail || '').toLowerCase() === agent.email.toLowerCase())
+    ) {
       effectiveCompanyId = cand[0].id;
     }
   }
@@ -553,8 +559,16 @@ export async function resolveAgentRoleSession(
     .limit(1);
   const companyRow = companyRows[0];
 
-  // When a Platform Superadmin switches into a tenant workspace, grant full ADMIN capabilities in that workspace
-  const isSwitchedTenant = isPlatformAdmin && effectiveCompanyId !== homeCompanyId;
+  // When a Platform Superadmin or multi-tenant Company Owner switches into another owned tenant workspace, grant full ADMIN capabilities in that workspace
+  const isOwnerOfEffective =
+    Boolean(companyRow?.ownerEmail) &&
+    companyRow!.ownerEmail!.toLowerCase() === agent.email.toLowerCase();
+  const isSwitchedTenant =
+    (isPlatformAdmin || isOwnerOfEffective) && effectiveCompanyId !== homeCompanyId;
+
+  const rawAvail = String(agent.availabilityStatus || 'ONLINE').toUpperCase();
+  const availabilityStatus: 'ONLINE' | 'AWAY' | 'OFFLINE' =
+    rawAvail === 'AWAY' || rawAvail === 'OFFLINE' ? rawAvail : 'ONLINE';
 
   return {
     id: agent.id,
@@ -565,11 +579,14 @@ export async function resolveAgentRoleSession(
       ? getCompanyAdminRoleId(effectiveCompanyId)
       : matchedRole?.id || agent.roleId || (role === 'ADMIN' ? getCompanyAdminRoleId(homeCompanyId) : null),
     roleName: isSwitchedTenant
-      ? 'Platform Superadmin (Mode Tenant)'
+      ? isPlatformAdmin && !isOwnerOfEffective
+        ? 'Platform Superadmin (Mode Tenant)'
+        : 'Administrator'
       : matchedRole?.name || (role === 'ADMIN' ? 'Administrator' : 'Agent Kustom'),
     permissions: isSwitchedTenant
       ? [...ALL_PERMISSIONS]
       : parseAgentPermissions(rawPermSource, role, strictGranular),
+    availabilityStatus,
     companyId: effectiveCompanyId,
     homeCompanyId,
     companyName: companyRow?.name || 'Perusahaan Utama',
@@ -940,5 +957,48 @@ export default async function authRouter(fastify: FastifyInstance) {
   fastify.post('/logout', async (_req: FastifyRequest, reply: FastifyReply) => {
     reply.header('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
     return reply.send({ success: true });
+  });
+
+  // Self-service agent availability status toggle (ONLINE = Siap Aktivitas, AWAY = Istirahat, OFFLINE = Tidak Aktif)
+  fastify.patch<{
+    Body: { availabilityStatus?: 'ONLINE' | 'AWAY' | 'OFFLINE' };
+  }>('/availability', async (req, reply) => {
+    try {
+      const user = await getCurrentAuthUser(req);
+      if (!user) {
+        return reply.status(401).send({ success: false, error: 'Sesi login diperlukan' });
+      }
+      const rawStatus = String(req.body?.availabilityStatus || '').trim().toUpperCase();
+      if (rawStatus !== 'ONLINE' && rawStatus !== 'AWAY' && rawStatus !== 'OFFLINE') {
+        return reply.status(400).send({
+          success: false,
+          error: 'Status kehadiran tidak valid (pilih ONLINE, AWAY, atau OFFLINE).',
+        });
+      }
+
+      const [updated] = await db
+        .update(crmAgents)
+        .set({
+          availabilityStatus: rawStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(crmAgents.id, user.id))
+        .returning();
+
+      if (!updated) {
+        return reply.status(404).send({ success: false, error: 'Akun agen tidak ditemukan.' });
+      }
+
+      const nextSession = await resolveAgentRoleSession(updated, user.companyId);
+      return reply.send({
+        success: true,
+        data: {
+          availabilityStatus: rawStatus,
+          user: nextSession,
+        },
+      });
+    } catch (err: any) {
+      return reply.status(500).send({ success: false, error: err.message });
+    }
   });
 }

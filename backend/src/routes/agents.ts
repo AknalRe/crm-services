@@ -85,6 +85,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
             Boolean(matchedRole)
           ),
           isActive: a.isActive,
+          availabilityStatus: ((a.availabilityStatus || 'ONLINE').toUpperCase() as 'ONLINE' | 'AWAY' | 'OFFLINE'),
           createdAt: a.createdAt,
           updatedAt: a.updatedAt,
         };
@@ -609,6 +610,12 @@ export default async function agentsRouter(fastify: FastifyInstance) {
         }
       }
       if (req.body?.isActive !== undefined) updateData.isActive = Boolean(req.body.isActive);
+      if ((req.body as any)?.availabilityStatus !== undefined) {
+        const rawAvail = String((req.body as any).availabilityStatus || '').toUpperCase();
+        if (rawAvail === 'ONLINE' || rawAvail === 'AWAY' || rawAvail === 'OFFLINE') {
+          updateData.availabilityStatus = rawAvail;
+        }
+      }
       if (req.body?.password && req.body.password.length >= 6) {
         updateData.passwordHash = hashPassword(req.body.password);
       }
@@ -631,6 +638,7 @@ export default async function agentsRouter(fastify: FastifyInstance) {
           roleName: matchedRole?.name || (nextRole === 'ADMIN' ? 'Administrator' : 'Kustom Per Akun'),
           permissions: parseAgentPermissions(u.permissions, nextRole, true),
           isActive: u.isActive,
+          availabilityStatus: ((u.availabilityStatus || 'ONLINE').toUpperCase() as 'ONLINE' | 'AWAY' | 'OFFLINE'),
         },
       });
     } catch (error: any) {

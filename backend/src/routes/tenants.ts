@@ -158,10 +158,136 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
     }
   });
 
-  // POST switch active workspace for Platform Superadmin
+  // GET workspaces owned/accessible by current logged-in user (Multi-Tenant per account, each with its own license)
+  fastify.get('/my-workspaces', { preHandler: requireAuthenticated }, async (req, reply) => {
+    try {
+      const user = await getCurrentAuthUser(req);
+      if (!user) {
+        return reply.status(401).send({ success: false, error: 'Sesi tidak valid' });
+      }
+      const rows = await db
+        .select()
+        .from(companies)
+        .orderBy(desc(companies.isDefault), asc(companies.createdAt));
+
+      const accessible = rows.filter(
+        (c) =>
+          user.isPlatformAdmin ||
+          c.id === user.homeCompanyId ||
+          c.id === user.companyId ||
+          (c.ownerEmail || '').toLowerCase() === user.email.toLowerCase()
+      );
+
+      const enriched = await Promise.all(
+        accessible.map(async (c) => {
+          const lic = await licenseService.getLicense(c.id, false);
+          return {
+            id: c.id,
+            name: c.name,
+            slug: c.slug,
+            status: c.status,
+            isDefault: c.isDefault,
+            isCurrent: c.id === user.companyId,
+            license: {
+              status: lic.status,
+              plan: lic.plan,
+              daysLeft: lic.daysLeft,
+              isExpired: lic.isExpired,
+            },
+          };
+        })
+      );
+
+      return reply.send({
+        success: true,
+        data: {
+          currentCompanyId: user.companyId,
+          workspaces: enriched,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST create a new tenant workspace under the current Admin account (requires its own license subscription)
+  fastify.post<{
+    Body: { name?: string; ownerPhone?: string };
+  }>('/my-workspaces', { preHandler: requireCompanyAdmin }, async (req, reply) => {
+    try {
+      const user = await getCurrentAuthUser(req);
+      if (!user) {
+        return reply.status(401).send({ success: false, error: 'Sesi tidak valid' });
+      }
+      const name = String(req.body?.name || '').trim();
+      const ownerPhone = req.body?.ownerPhone ? String(req.body.ownerPhone).trim() : null;
+      if (!name || name.length < 2) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Nama bisnis / perusahaan baru wajib diisi (minimal 2 karakter).',
+        });
+      }
+
+      const [agentRow] = await db
+        .select()
+        .from(crmAgents)
+        .where(eq(crmAgents.id, user.id))
+        .limit(1);
+      if (!agentRow) {
+        return reply.status(404).send({ success: false, error: 'Akun admin tidak ditemukan.' });
+      }
+
+      const now = new Date();
+      const companyId = `cmp_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+      const slug = await generateUniqueCompanySlug(name);
+
+      await db.insert(companies).values({
+        id: companyId,
+        name,
+        slug,
+        ownerName: user.name,
+        ownerEmail: user.email.toLowerCase(),
+        ownerPhone,
+        status: 'ACTIVE',
+        isDefault: false,
+        licenseStatus: 'UNLICENSED',
+        licensePlan: 'Belum Diaktivasi',
+        licensePeriod: 'monthly',
+        licensePriceAmount: 0,
+        trialUsed: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await ensureDefaultRolesSeeded(companyId);
+      await seedCompanyDefaults(companyId);
+
+      const secret = await getAuthSigningSecret();
+      const token = signSessionToken(agentRow.email, secret, companyId);
+      reply.header(
+        'Set-Cookie',
+        `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`
+      );
+
+      const [created] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+      const session = await resolveAgentRoleSession(agentRow, companyId);
+      const license = await licenseService.getLicense(companyId, true);
+      liveEvents.emit('tenants:update', { action: 'create', id: companyId });
+
+      return reply.status(201).send({
+        success: true,
+        message: `Workspace "${name}" berhasil dibuat. Silakan aktifkan paket lisensi untuk workspace ini.`,
+        data: { user: session, company: created, license },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST switch active workspace for Platform Superadmin or Multi-Tenant Account Owner
   fastify.post<{
     Body: { companyId?: string };
-  }>('/switch', { preHandler: requirePlatformAdmin }, async (req, reply) => {
+  }>('/switch', { preHandler: requireAuthenticated }, async (req, reply) => {
     try {
       const user = await getCurrentAuthUser(req);
       if (!user) {
@@ -176,6 +302,17 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
         .limit(1);
       if (!targetCompany) {
         return reply.status(404).send({ success: false, error: 'Perusahaan tujuan tidak ditemukan' });
+      }
+
+      const isAllowed =
+        user.isPlatformAdmin ||
+        targetCompany.id === user.homeCompanyId ||
+        (targetCompany.ownerEmail || '').toLowerCase() === user.email.toLowerCase();
+      if (!isAllowed) {
+        return reply.status(403).send({
+          success: false,
+          error: 'Anda tidak memiliki akses untuk beralih ke workspace perusahaan tersebut.',
+        });
       }
 
       const [agentRow] = await db
@@ -194,10 +331,11 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
         `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`
       );
       const session = await resolveAgentRoleSession(agentRow, targetCompany.id);
+      const license = await licenseService.getLicense(targetCompany.id, true);
       return reply.send({
         success: true,
         message: `Berhasil beralih ke workspace "${targetCompany.name}"`,
-        data: { user: session, company: targetCompany },
+        data: { user: session, company: targetCompany, license },
       });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });

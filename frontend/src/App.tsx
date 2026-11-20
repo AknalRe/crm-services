@@ -574,6 +574,13 @@ function AppShell() {
           onLicenseUpdated={fetchLicenseStatus}
           onOpenPlans={() => openPlansModal(licenseInfo.status === 'UNLICENSED' ? 'plans' : 'overview')}
           onBackToLanding={openLandingPage}
+          onWorkspaceSwitched={(nextUser, nextLicense) => {
+            setAuthStatus((prev) => (prev ? { ...prev, user: nextUser } : prev));
+            if (nextLicense) {
+              setLicenseInfo(nextLicense);
+            }
+            void handleGlobalRefresh();
+          }}
           onLogout={async () => {
             try {
               await api.logoutAuth();
@@ -615,6 +622,17 @@ function AppShell() {
         licenseInfo={licenseInfo}
         user={authStatus?.user}
         onOpenLanding={openLandingPage}
+        onOpenPlans={() => openPlansModal('plans')}
+        onUserUpdated={(nextUser) => {
+          setAuthStatus((prev) => (prev ? { ...prev, user: nextUser } : prev));
+        }}
+        onWorkspaceSwitched={(nextUser, nextLicense) => {
+          setAuthStatus((prev) => (prev ? { ...prev, user: nextUser } : prev));
+          if (nextLicense) {
+            setLicenseInfo(nextLicense);
+          }
+          void handleGlobalRefresh();
+        }}
         onLogout={async () => {
           try {
             await api.logoutAuth();

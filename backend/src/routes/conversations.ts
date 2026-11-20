@@ -1150,6 +1150,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           email: crmAgents.email,
           role: crmAgents.role,
           isActive: crmAgents.isActive,
+          availabilityStatus: crmAgents.availabilityStatus,
         })
         .from(crmAgents)
         .where(and(eq(crmAgents.companyId, companyId), eq(crmAgents.isActive, true)))

@@ -188,7 +188,11 @@ export default async function licenseRouter(fastify: FastifyInstance) {
     Params: { publicId: string };
   }>('/order/:publicId', { preHandler: requireAdminUser }, async (req, reply) => {
     try {
-      const result = await licenseService.getOrder(req.params.publicId);
+      const companyId = getRequestCompanyId(req);
+      const result = await licenseService.getOrder(req.params.publicId, companyId);
+      if (result?.order?.status === 'paid') {
+        liveEvents.emit('license:update', { action: 'paid_poll', companyId });
+      }
       return reply.send(result);
     } catch (error: any) {
       return reply.status(error?.response?.status || 500).send({

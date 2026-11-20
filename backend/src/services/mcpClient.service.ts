@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import axios from 'axios';
-import { eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import {
   aiKnowledgeBooks,
@@ -9,9 +9,11 @@ import {
   chatMessages,
   contacts,
   conversations,
+  crmAgents,
   products,
 } from '../db/schema';
 import { liveEvents } from './events.service';
+import { getActiveCompanyId } from './tenantContext';
 
 export interface McpToolDescriptor {
   name: string;
@@ -678,29 +680,85 @@ async function executeBuiltinCrmTool(
       return { ok: false, output: 'Percakapan tidak ditemukan untuk eskalasi.' };
     }
 
+    const companyId = conv.companyId || getActiveCompanyId();
+    const activeAgents = await db
+      .select()
+      .from(crmAgents)
+      .where(and(eq(crmAgents.companyId, companyId), eq(crmAgents.isActive, true)))
+      .orderBy(asc(crmAgents.createdAt));
+
+    const onlineAgents = activeAgents.filter(
+      (a) => (a.availabilityStatus || 'ONLINE').toUpperCase() === 'ONLINE'
+    );
+
+    let chosenAgent =
+      conv.assignedAgentId
+        ? onlineAgents.find((a) => a.id === conv.assignedAgentId) || null
+        : null;
+
+    if (!chosenAgent && onlineAgents.length > 0) {
+      const openConvs = await db
+        .select({ assignedAgentId: conversations.assignedAgentId })
+        .from(conversations)
+        .where(and(eq(conversations.companyId, companyId), eq(conversations.status, 'OPEN')));
+      const counts = new Map<string, number>();
+      for (const c of openConvs) {
+        if (c.assignedAgentId) {
+          counts.set(c.assignedAgentId, (counts.get(c.assignedAgentId) || 0) + 1);
+        }
+      }
+      chosenAgent = onlineAgents.reduce((best, cur) => {
+        const bestCount = counts.get(best.id) || 0;
+        const curCount = counts.get(cur.id) || 0;
+        return curCount < bestCount ? cur : best;
+      }, onlineAgents[0]);
+    }
+
     const now = new Date();
+    const convUpdates: Record<string, any> = {
+      status: 'OPEN',
+      resolvedAt: null,
+      updatedAt: now,
+    };
+    if (chosenAgent) {
+      convUpdates.assignedAgentId = chosenAgent.id;
+      convUpdates.assignedAgentName = chosenAgent.name;
+    }
+
     await db
       .update(conversations)
-      .set({ status: 'OPEN', resolvedAt: null, updatedAt: now })
+      .set(convUpdates)
       .where(eq(conversations.id, conv.id));
+
+    const notePrefix = chosenAgent
+      ? `[Eskalasi Agent AI -> ${chosenAgent.name}]`
+      : '[Eskalasi Agent AI · Menunggu Agen Siap]';
 
     await db.insert(chatMessages).values({
       id: crypto.randomUUID(),
+      companyId,
       conversationId: conv.id,
       contactId: conv.contactId,
       direction: 'OUTBOUND',
       messageType: 'NOTE',
       wahaSession: conv.wahaSession,
-      body: `[Eskalasi Agent AI] ${reason}`,
+      body: `${notePrefix} ${reason}`,
       status: 'NOTE',
       ackStatus: 0,
       createdAt: now,
     });
 
-    liveEvents.emit('conversations:update', { conversationId: conv.id, escalated: true });
+    liveEvents.emit('conversations:update', {
+      conversationId: conv.id,
+      escalated: true,
+      assignedAgentId: chosenAgent?.id || conv.assignedAgentId || null,
+      assignedAgentName: chosenAgent?.name || conv.assignedAgentName || null,
+    });
     return {
       ok: true,
-      output: `Percakapan berhasil ditandai untuk agen manusia dengan catatan: "${reason}".`,
+      output: chosenAgent
+        ? `Percakapan berhasil dieskalasi dan ditugaskan ke agen aktif "${chosenAgent.name}" dengan catatan: "${reason}".`
+        : `Percakapan berhasil ditandai untuk agen manusia (saat ini semua agen sedang istirahat/offline) dengan catatan: "${reason}".`,
     };
   }
 

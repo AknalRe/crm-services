@@ -248,6 +248,7 @@ export const crmAgents = pgTable('crm_agents', {
   roleId: text('role_id'),
   permissions: text('permissions').default('["dashboard","conversations","contacts"]').notNull(), // JSON array of tab/action keys
   isActive: boolean('is_active').default(true).notNull(),
+  availabilityStatus: text('availability_status').default('ONLINE').notNull(), // ONLINE | AWAY | OFFLINE
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

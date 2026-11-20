@@ -8,11 +8,9 @@ import {
   Copy,
   RefreshCw,
   ArrowLeft,
-  ShieldCheck,
   AlertTriangle,
   Lock,
   Calendar,
-  Sparkles,
   Minus,
   Plus,
 } from 'lucide-react';
@@ -49,6 +47,14 @@ function addMonthsSafe(baseDate: Date, months: number): Date {
   const res = new Date(baseDate.getTime());
   res.setMonth(res.getMonth() + months);
   return res;
+}
+
+function formatStorageQuota(mb?: number): string {
+  const n = Number(mb || 0);
+  if (!Number.isFinite(n) || n <= 0) return '5 GB';
+  if (n >= 1024 && n % 1024 === 0) return `${n / 1024} GB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} GB`;
+  return `${n.toLocaleString('id-ID')} MB`;
 }
 
 function matchCurrentPlanSlug(lic: LicenseInfo | null, planList: LicensePlan[]): string {
@@ -594,7 +600,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                       {currentLicense.isExpired || currentLicense.status === 'SUSPENDED' ? (
                         <AlertTriangle className="w-3 h-3" />
                       ) : (
-                        <ShieldCheck className="w-3 h-3" />
+                        <CheckCircle2 className="w-3 h-3" />
                       )}
                       {licenseStatusMeta.label}
                     </span>
@@ -728,43 +734,84 @@ export const PlansModal: React.FC<PlansModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
                 {[
                   {
-                    label: 'Kapasitas Kontak',
-                    value:
-                      currentLicense.features?.maxContacts === 0
-                        ? 'Tak Terbatas'
-                        : `${(currentLicense.features?.maxContacts || 0).toLocaleString('id-ID')} Kontak`,
+                    label: 'Penyimpanan Dokumen & Media',
+                    value: `${(currentLicense.usage?.storageUsedMb ?? 0).toLocaleString('id-ID')} MB / ${formatStorageQuota(
+                      currentLicense.features?.maxStorageMb || 5120
+                    )} (Maks ${currentLicense.features?.maxAttachmentSizeMb || 25} MB/file)`,
                     unlocked: !currentLicense.isExpired,
                   },
                   {
-                    label: 'Live Chat CRM Inbox',
-                    value: currentLicense.features?.liveChatCrm ? 'Aktif' : 'Terkunci',
+                    label: 'Kapasitas Kontak',
+                    value:
+                      currentLicense.features?.maxContacts === 0
+                        ? `${(currentLicense.usage?.contacts ?? 0).toLocaleString('id-ID')} / Tanpa Batas`
+                        : `${(currentLicense.usage?.contacts ?? 0).toLocaleString('id-ID')} / ${(currentLicense.features?.maxContacts || 0).toLocaleString('id-ID')}`,
+                    unlocked: !currentLicense.isExpired,
+                  },
+                  {
+                    label: 'Siaran & Kampanye WA',
+                    value: currentLicense.features?.unlimitedBroadcast
+                      ? 'Tanpa Batas'
+                      : `${(currentLicense.usage?.broadcastsThisMonth ?? 0).toLocaleString('id-ID')} / ${(currentLicense.features?.maxBroadcastPerMonth || 1500).toLocaleString('id-ID')}/bln`,
+                    unlocked: !currentLicense.isExpired,
+                  },
+                  {
+                    label: 'Menu Inbox Live Chat CRM & CSAT',
+                    value: currentLicense.features?.liveChatCrm ? 'Terbuka' : 'Terkunci',
                     unlocked: Boolean(currentLicense.features?.liveChatCrm),
                   },
                   {
-                    label: 'Multi-Sesi WhatsApp',
+                    label: 'Multi-Sesi Nomor WhatsApp',
                     value: currentLicense.features?.multiSession
-                      ? `Hingga ${currentLicense.features?.maxSessions || 1} Sesi`
+                      ? `Hingga ${currentLicense.features?.maxSessions || 3} Sesi`
                       : `Maks ${currentLicense.features?.maxSessions || 1} Sesi`,
                     unlocked: Boolean(currentLicense.features?.multiSession),
                   },
                   {
-                    label: 'Tim & Multi-Agent',
+                    label: 'Tim & Agen CS (Role Granular)',
                     value: currentLicense.features?.multiAgent
-                      ? `Hingga ${currentLicense.features?.maxAgents || 1} Akun`
+                      ? `${currentLicense.usage?.agents ?? 1} / ${currentLicense.features?.maxAgents || 5} Akun`
                       : '1 Akun Admin',
                     unlocked: Boolean(currentLicense.features?.multiAgent),
                   },
                   {
-                    label: 'Siaran & Broadcast WA',
-                    value: currentLicense.features?.unlimitedBroadcast
-                      ? 'Tanpa Batas'
-                      : `${currentLicense.features?.maxBroadcastPerMonth || 500}/bulan`,
-                    unlocked: !currentLicense.isExpired,
+                    label: 'Menu Komentar, Feed & Omnichannel',
+                    value: currentLicense.features?.omnichannel
+                      ? currentLicense.features?.maxChannels === 0
+                        ? 'Terbuka (Tanpa Batas)'
+                        : `Terbuka (${currentLicense.features?.maxChannels || 4} Kanal)`
+                      : 'Terkunci',
+                    unlocked: Boolean(currentLicense.features?.omnichannel),
                   },
                   {
-                    label: 'Otomasi Ulang Tahun',
-                    value: currentLicense.features?.birthdayAutomation ? 'Aktif' : 'Terkunci',
+                    label: 'Menu Jadwal Post, Story & Ide Konten',
+                    value: currentLicense.features?.scheduledPosts ? 'Terbuka' : 'Terkunci',
+                    unlocked: Boolean(currentLicense.features?.scheduledPosts),
+                  },
+                  {
+                    label: 'Menu Otomasi Komentar & Auto-Reply',
+                    value:
+                      currentLicense.features?.autoReply !== false ? 'Terbuka' : 'Terkunci',
+                    unlocked: currentLicense.features?.autoReply !== false && !currentLicense.isExpired,
+                  },
+                  {
+                    label: 'Menu Ulang Tahun & Galeri Media',
+                    value: currentLicense.features?.birthdayAutomation ? 'Terbuka' : 'Terkunci',
                     unlocked: Boolean(currentLicense.features?.birthdayAutomation),
+                  },
+                  {
+                    label: 'Menu Agent AI, KB & Konektor MCP',
+                    value: currentLicense.features?.aiAgent ? 'Terbuka' : 'Terkunci',
+                    unlocked: Boolean(currentLicense.features?.aiAgent),
+                  },
+                  {
+                    label: 'Ekspor Laporan CSV & Akses API',
+                    value: currentLicense.features?.exportReports
+                      ? currentLicense.features?.apiAccess
+                        ? 'CSV + API Aktif'
+                        : 'Ekspor CSV Aktif'
+                      : 'Terkunci',
+                    unlocked: Boolean(currentLicense.features?.exportReports),
                   },
                 ].map((feat) => (
                   <div
@@ -876,7 +923,6 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             )}
                             {p.highlighted && !isCurrentTier && (
                               <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-0.5">
-                                <Sparkles className="w-2.5 h-2.5" />
                                 Populer
                               </span>
                             )}
@@ -904,52 +950,144 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                           </span>
                         </div>
 
-                        <div className="border-t border-gray-200 pt-3 space-y-1.5 text-xs text-gray-700">
-                          <div className="flex items-center gap-2">
-                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span>
-                              {p.features?.maxContacts === 0
-                                ? 'Kontak Tanpa Batas'
-                                : `${p.features?.maxContacts?.toLocaleString?.() || '10.000'} Kontak`}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span>
-                              {p.features?.unlimitedBroadcast
-                                ? 'Siaran WA Unlimited'
-                                : 'Siaran WA Terjadwal'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span>Otomasi Ucapan Ulang Tahun</span>
-                          </div>
-                          {p.features?.liveChat && (
-                            <div className="flex items-center gap-2">
-                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span>Live Chat CRM &amp; CSAT</span>
+                        {(() => {
+                          const slugLow = (p.slug || '').toLowerCase();
+                          const isStarterPlan = slugLow.includes('starter');
+                          const isBusinessPlan = slugLow.includes('business');
+                          const isEntPlan = slugLow.includes('enterprise');
+                          const hasLiveChat = Boolean(
+                            p.features?.liveChat ?? p.features?.liveChatCrm ?? !isStarterPlan
+                          );
+                          const hasMultiSess = Boolean(p.features?.multiSession ?? !isStarterPlan);
+                          const maxSess =
+                            p.features?.maxSessions || (isEntPlan ? 25 : isBusinessPlan ? 10 : hasMultiSess ? 3 : 1);
+                          const hasMultiAg = Boolean(p.features?.multiAgent ?? !isStarterPlan);
+                          const maxAg =
+                            p.features?.maxAgents ||
+                            p.features?.maxUsers ||
+                            (isEntPlan ? 30 : isBusinessPlan ? 12 : hasMultiAg ? 5 : 1);
+                          const hasOmni = Boolean(p.features?.omnichannel ?? !isStarterPlan);
+                          const maxChan =
+                            p.features?.maxChannels !== undefined
+                              ? Number(p.features.maxChannels)
+                              : isEntPlan
+                              ? 0
+                              : isBusinessPlan
+                              ? 12
+                              : hasOmni
+                              ? 4
+                              : 0;
+                          const hasSched = Boolean(p.features?.scheduledPosts ?? !isStarterPlan);
+                          const hasAi = Boolean(p.features?.aiAgent ?? (isBusinessPlan || isEntPlan));
+                          const hasMcp = Boolean(p.features?.mcpTools ?? (isBusinessPlan || isEntPlan));
+                          const hasExport = Boolean(p.features?.exportReports ?? !isStarterPlan);
+                          const storageMb =
+                            Number(p.features?.maxStorageMb) ||
+                            (isEntPlan ? 102400 : isBusinessPlan ? 20480 : isStarterPlan ? 500 : 5120);
+                          const fileLimitMb =
+                            Number(p.features?.maxAttachmentSizeMb) ||
+                            (isEntPlan ? 100 : isBusinessPlan ? 50 : isStarterPlan ? 10 : 25);
+
+                          return (
+                            <div className="border-t border-gray-200 pt-3 space-y-1.5 text-xs text-gray-700">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                                Kapasitas &amp; Kuota
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>
+                                  Penyimpanan Dokumen &amp; Media:{' '}
+                                  <strong>{formatStorageQuota(storageMb)}</strong> (maks {fileLimitMb} MB/file)
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>
+                                  {p.features?.maxContacts === 0 || p.features?.unlimitedContacts
+                                    ? 'Kontak Pelanggan Tanpa Batas'
+                                    : `Hingga ${(p.features?.maxContacts || 10000).toLocaleString('id-ID')} Kontak`}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>
+                                  {p.features?.unlimitedBroadcast
+                                    ? 'Siaran & Kampanye WA Tanpa Batas'
+                                    : `Siaran WA (${(p.features?.maxBroadcastPerMonth || 1500).toLocaleString('id-ID')} pesan/bln)`}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>
+                                  {hasMultiSess ? `Multi-Nomor WA (hingga ${maxSess} sesi)` : '1 Sesi Nomor WhatsApp'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>
+                                  {hasMultiAg
+                                    ? `Hingga ${maxAg} Akun Staf CS + Role Granular`
+                                    : '1 Akun Admin Tunggal'}
+                                </span>
+                              </div>
+
+                              <div className="pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                                Akses Menu Aplikasi
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Menu Dashboard, Kontak, Siaran, Galeri &amp; Ulang Tahun</span>
+                              </div>
+                              <div className={`flex items-center gap-2 ${hasLiveChat ? '' : 'text-gray-400'}`}>
+                                {hasLiveChat ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <Lock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                )}
+                                <span>Menu Inbox Live Chat CRM, SLA &amp; Survei CSAT</span>
+                              </div>
+                              <div className={`flex items-center gap-2 ${hasOmni ? '' : 'text-gray-400'}`}>
+                                {hasOmni ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <Lock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                )}
+                                <span>
+                                  Menu Komentar, Feed Sosial &amp; Omnichannel{' '}
+                                  {hasOmni ? `(${maxChan === 0 ? 'Tanpa Batas' : maxChan + ' kanal'})` : ''}
+                                </span>
+                              </div>
+                              <div className={`flex items-center gap-2 ${hasSched ? '' : 'text-gray-400'}`}>
+                                {hasSched ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <Lock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                )}
+                                <span>Menu Jadwal Post, Story WA, Pelacakan &amp; Ide Konten</span>
+                              </div>
+                              <div className={`flex items-center gap-2 ${hasAi ? '' : 'text-gray-400'}`}>
+                                {hasAi ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <Lock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                )}
+                                <span>
+                                  Menu Agent AI Multi-Model, Knowledge Book{hasMcp ? ' & MCP Tools' : ''}
+                                </span>
+                              </div>
+                              <div className={`flex items-center gap-2 ${hasExport ? '' : 'text-gray-400'}`}>
+                                {hasExport ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <Lock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                )}
+                                <span>
+                                  Ekspor Laporan CSV{p.features?.apiAccess ? ' & Akses API Eksternal' : ''}
+                                </span>
+                              </div>
                             </div>
-                          )}
-                          {(p.features?.multiSession ?? p.features?.liveChat) && (
-                            <div className="flex items-center gap-2">
-                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span>
-                                Multi-Sesi WA (hingga{' '}
-                                {p.features?.maxSessions || (p.slug?.includes('enterprise') ? 25 : 5)}{' '}
-                                sesi)
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2">
-                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span>
-                              {p.features?.multiAgent
-                                ? `Multi-Staf CS (hingga ${p.features?.maxAgents || (p.slug?.includes('enterprise') ? 25 : 5)} akun)`
-                                : '1 Akun Admin / CS'}
-                            </span>
-                          </div>
-                        </div>
+                          );
+                        })()}
                       </div>
 
                       {(!currentLicense ||

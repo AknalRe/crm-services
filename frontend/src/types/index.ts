@@ -696,6 +696,23 @@ export interface CrmRoleItem {
   updatedAt?: string;
 }
 
+export type AgentAvailabilityStatus = 'ONLINE' | 'AWAY' | 'OFFLINE';
+
+export interface TenantWorkspaceItem {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  isDefault: boolean;
+  isCurrent: boolean;
+  license: {
+    status: string;
+    plan: string;
+    daysLeft: number;
+    isExpired: boolean;
+  };
+}
+
 export interface AuthStatus {
   initialized: boolean;
   authenticated: boolean;
@@ -707,6 +724,12 @@ export interface AuthStatus {
     roleId?: string | null;
     roleName?: string | null;
     permissions?: string[];
+    availabilityStatus?: AgentAvailabilityStatus;
+    companyId?: string;
+    homeCompanyId?: string;
+    companyName?: string;
+    companySlug?: string;
+    isPlatformAdmin?: boolean;
   } | null;
 }
 
@@ -719,6 +742,7 @@ export interface AgentItem {
   roleName?: string | null;
   permissions: string[];
   isActive: boolean;
+  availabilityStatus?: AgentAvailabilityStatus;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -741,6 +765,7 @@ export interface CrmSlaCsatSettings {
 export interface LicenseInfo {
   status: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'SUSPENDED' | 'GRACE_PERIOD' | 'UNLICENSED';
   plan: string;
+  planSlug?: string | null;
   period: 'monthly' | 'quarterly' | 'annual' | 'trial';
   startedAt?: string;
   priceAmount?: number;
@@ -751,18 +776,45 @@ export interface LicenseInfo {
   reneoBillingUrl: string;
   licenseKey?: string;
   publicUrls?: string[];
+  companyId?: string;
+  companyName?: string;
+  trialUsed?: boolean;
+  usage?: {
+    contacts: number;
+    agents: number;
+    templates: number;
+    channels: number;
+    broadcastsThisMonth: number;
+    storageUsedBytes?: number;
+    storageUsedMb?: number;
+  };
   features: {
     unlimitedBroadcast: boolean;
     maxBroadcastPerMonth?: number;
+    unlimitedContacts?: boolean;
     birthdayAutomation: boolean;
     liveChatCrm: boolean;
     multiSession: boolean;
     maxSessions: number;
     maxContacts: number;
+    maxTemplates?: number;
+    maxUsers?: number;
     multiAgent?: boolean;
     maxAgents?: number;
+    customRoles?: boolean;
+    omnichannel?: boolean;
+    maxChannels?: number;
+    scheduledPosts?: boolean;
+    autoReply?: boolean;
+    aiAgent?: boolean;
+    mcpTools?: boolean;
+    exportReports?: boolean;
+    wahaSync?: boolean;
     apiAccess?: boolean;
     supportPriority?: string;
+    maxStorageMb?: number;
+    maxAttachmentSizeMb?: number;
+    allowedMenus?: string[];
   };
 }
 

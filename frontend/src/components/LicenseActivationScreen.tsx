@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Building2 } from 'lucide-react';
 import api from '../services/api';
-import { LicenseInfo } from '../types';
+import { AuthStatus, LicenseInfo, TenantWorkspaceItem } from '../types';
 import { Button } from './ui/Button';
 import { useToast } from './ui/ToastProvider';
 
 interface LicenseActivationScreenProps {
   licenseInfo: LicenseInfo;
-  user: { name: string; email: string } | null;
+  user: AuthStatus['user'] | null;
   onLicenseUpdated: () => void;
   onOpenPlans: () => void;
+  onWorkspaceSwitched?: (user: NonNullable<AuthStatus['user']>, license?: LicenseInfo) => void;
   onLogout?: () => void;
   onBackToLanding?: () => void;
 }
@@ -18,6 +20,7 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
   user,
   onLicenseUpdated,
   onOpenPlans,
+  onWorkspaceSwitched,
   onLogout,
   onBackToLanding,
 }) => {
@@ -25,6 +28,39 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
   const [licenseKey, setLicenseKey] = useState('');
   const [activating, setActivating] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [workspaces, setWorkspaces] = useState<TenantWorkspaceItem[]>([]);
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .getMyWorkspaces()
+      .then((res) => {
+        if (active) setWorkspaces(res.workspaces || []);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [licenseInfo.companyId]);
+
+  const handleSwitchWorkspace = async (companyId: string) => {
+    if (!companyId || switchingId || companyId === (user?.companyId || licenseInfo.companyId)) return;
+    setSwitchingId(companyId);
+    try {
+      const res = await api.switchWorkspace(companyId);
+      toast.success(`Beralih ke workspace "${res.company?.name || res.user.companyName}"`);
+      if (onWorkspaceSwitched) {
+        onWorkspaceSwitched(res.user, res.license);
+      } else {
+        onLicenseUpdated();
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal beralih workspace.');
+    } finally {
+      setSwitchingId(null);
+    }
+  };
 
   const handleActivate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,9 +129,34 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
                 : 'Akun CRM Anda sudah siap. Pilih paket lisensi (tersedia Trial 7 Hari atau langganan multi-bulan), atau masukkan kunci lisensi yang sudah Anda terima.'}
             </p>
             {user && (
-              <p className="text-[11px] text-gray-500 break-all">
-                Akun terdaftar: <span className="font-medium text-gray-800">{user.name}</span> ({user.email})
-              </p>
+              <div className="space-y-1.5 pt-0.5">
+                <p className="text-[11px] text-gray-500 break-all">
+                  Akun terdaftar: <span className="font-medium text-gray-800">{user.name}</span> ({user.email}) · Workspace:{' '}
+                  <strong className="text-gray-900">
+                    {user.companyName || licenseInfo.companyName || 'Workspace Utama'}
+                  </strong>
+                </p>
+                {workspaces.length > 1 && (
+                  <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                    <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
+                      <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                      Pindah Bisnis/Workspace:
+                    </span>
+                    <select
+                      value={user.companyId || licenseInfo.companyId || ''}
+                      disabled={Boolean(switchingId)}
+                      onChange={(e) => void handleSwitchWorkspace(e.target.value)}
+                      className="h-7 px-2 rounded border border-gray-300 bg-white text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500"
+                    >
+                      {workspaces.map((ws) => (
+                        <option key={ws.id} value={ws.id}>
+                          {ws.name} ({ws.license.status === 'UNLICENSED' ? 'Belum Aktif' : ws.license.plan})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
