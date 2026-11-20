@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
@@ -29,13 +29,11 @@ const PANEL_INSTALL_URL = 'https://panel.reneo.my.id/install';
 const PANEL_ORDER_URL = 'https://panel.reneo.my.id/order?addon=reneo-crm';
 
 const NAV_LINKS = [
-  { href: '#masalah', label: 'Kenapa Penting' },
   { href: '#kenapa-dibuat', label: 'Cerita Kami' },
   { href: '#modul', label: 'Fitur Utama' },
   { href: '#kanal', label: 'Semua Kanal' },
   { href: '#perbandingan', label: 'Perbandingan' },
   { href: '#faq', label: 'FAQ' },
-  { href: '#hubungi-kami', label: 'Hubungi Kami' },
 ];
 
 const HERO_CHANNEL_PREVIEWS = [
@@ -49,7 +47,9 @@ const HERO_CHANNEL_PREVIEWS = [
     statusLabel: 'Ditangani Rina',
     incoming: 'Kak, paket skincare yang di video tadi masih promo ongkir gratis hari ini?',
     outgoing: 'Masih berlaku sampai jam 21.00 ya Kak Nadia! Mau dibantu pilih varian yang cocok?',
-    footerNote: 'Komentar iklan otomatis dibalas & masuk ke kotak masuk CS.',
+    crmOwner: 'Rina · Shift Pagi',
+    crmFollowUp: 'Follow-up pilih varian',
+    crmHistory: 'Pelanggan baru · dari iklan Reels',
   },
   {
     id: 'whatsapp',
@@ -61,7 +61,9 @@ const HERO_CHANNEL_PREVIEWS = [
     statusLabel: 'Rating 5/5',
     incoming: 'Halo kak, mau repeat order paket bundling 3 pcs seperti bulan lalu ya.',
     outgoing: 'Siap Kak Siti! Data alamat & pesanan sebelumnya sudah tercatat. Total Rp 245.000 ya.',
-    footerNote: 'Riwayat order lama tetap utuh meski ditangani admin shift berbeda.',
+    crmOwner: 'Dimas · Shift Siang',
+    crmFollowUp: 'Kirim resi hari ini',
+    crmHistory: '3x transaksi · alamat tersimpan',
   },
   {
     id: 'facebook',
@@ -73,7 +75,9 @@ const HERO_CHANNEL_PREVIEWS = [
     statusLabel: 'Respon 1 mnt',
     incoming: 'Min, kalau kirim ke Surabaya hari ini estimasi sampai kapan ya?',
     outgoing: 'Kalau transfer sebelum jam 15.00 ikut pengiriman hari ini Pak Budi, estimasi 1–2 hari sampai.',
-    footerNote: 'Pesan Halaman Facebook & komentar postingan dibalas dari satu layar.',
+    crmOwner: 'Rina · Shift Pagi',
+    crmFollowUp: 'Cek konfirmasi transfer',
+    crmHistory: 'Tanya ongkir · prospek hangat',
   },
   {
     id: 'telegram',
@@ -85,7 +89,9 @@ const HERO_CHANNEL_PREVIEWS = [
     statusLabel: 'Prioritas',
     incoming: 'Kak, stok katalog grosir minggu ini sudah update belum?',
     outgoing: 'Sudah siap Kak! Ini daftar harga grosir terbaru langsung saya kirimkan ya.',
-    footerNote: 'Semua pesan pelanggan dari berbagai aplikasi terkumpul tanpa pindah tab.',
+    crmOwner: 'Ayu · Tim Grosir',
+    crmFollowUp: 'Jadwal restock Jumat',
+    crmHistory: 'Mitra aktif · 12 pesanan',
   },
 ];
 
@@ -174,7 +180,7 @@ const MODULE_TABS = [
     shortLabel: 'Tim, Shift & Akses',
     title: 'Memastikan Tanggung Jawab Tim Tidak Terputus Saat Pergantian Shift',
     summary:
-      'Setiap percakapan memiliki penanggung jawab yang jelas, catatan internal, dan batasan akses sesuai peran staf — sehingga pekerjaan tetap berlanjut mulus saat shift berganti dan data pelanggan tetap aman.',
+      'Setiap percakapan memiliki penanggung jawab yang jelas, catatan internal, dan batasan akses sesuai peran staf — sehingga pekerjaan tetap berlanjut tanpa terputus saat shift berganti dan data pelanggan tetap aman.',
     icon: SlidersHorizontal,
     highlights: [
       'Atur pembagian tugas antar admin dan tentukan hak akses tiap staf: staf baru cukup melihat obrolan miliknya tanpa bisa mengunduh daftar kontak.',
@@ -318,55 +324,6 @@ const FAQS = [
 
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb] focus-visible:ring-offset-2';
-
-function RevealSection({
-  children,
-  className = '',
-  id,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  id?: string;
-}) {
-  const ref = useRef<HTMLElement | null>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (
-      !el ||
-      typeof IntersectionObserver === 'undefined' ||
-      (typeof window !== 'undefined' &&
-        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
-    ) {
-      setVisible(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.08, rootMargin: '0px 0px -24px 0px' }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <section
-      id={id}
-      ref={ref}
-      className={`transition-all duration-300 ease-out motion-reduce:transition-none motion-reduce:transform-none ${
-        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
-      } ${className}`}
-    >
-      {children}
-    </section>
-  );
-}
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   initialized,
@@ -546,18 +503,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       <main>
         {/* Hero Section */}
         <section className="bg-white border-b border-slate-200">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-16 space-y-10">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-16 lg:py-20">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
               <div className="lg:col-span-6 space-y-5">
-                <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+                <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
                   Sistem CRM · Kelola Pelanggan, Bukan Hanya Percakapannya
                 </div>
 
-                <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight leading-tight">
+                <h1 className="text-[1.75rem] sm:text-4xl lg:text-[2.625rem] font-bold text-slate-900 tracking-tight leading-[1.15]">
                   Jangan Biarkan Pembeli Kabur Cuma Karena Chat Tercecer di Banyak HP
                 </h1>
 
-                <p className="text-base text-slate-600 leading-relaxed max-w-prose">
+                <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed max-w-[60ch]">
                   Satu sistem untuk mengelola komunikasi dari{' '}
                   <strong className="font-semibold text-slate-800">
                     Instagram, WhatsApp, Facebook, Threads, dan Telegram
@@ -566,11 +523,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </p>
 
                 <div className="space-y-3 pt-1">
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3">
                     <button
                       type="button"
                       onClick={authenticated ? onEnterLogin : handleRegister}
-                      className={`min-h-[44px] py-2.5 px-6 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                      className={`h-11 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
                     >
                       <span>{authenticated ? 'Buka Workspace CRM' : 'Daftar Akun CRM Baru'}</span>
                       <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
@@ -578,14 +535,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <a
                       href={PANEL_ORDER_URL}
                       target="_top"
-                      className={`min-h-[44px] py-2.5 px-5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                      className={`h-11 px-5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
                     >
                       <span>Order Hosting + CRM</span>
                       <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
                     </a>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-slate-500">
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:text-sm text-slate-500">
                     <span>Coba gratis 7 hari</span>
                     <span aria-hidden="true">·</span>
                     <span>Aktif dalam hitungan menit</span>
@@ -601,21 +558,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </div>
               </div>
 
-              {/* Interactive Omnichannel Inbox Preview */}
+              {/* Interactive CRM Workspace Preview */}
               <div className="lg:col-span-6">
                 <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                   {/* Channel Switcher Bar */}
                   <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-slate-700">
-                        Simulasi Kotak Masuk Semua Kanal
+                      <span className="text-xs font-semibold text-slate-800">
+                        Pratinjau Ruang Kerja Pelanggan
                       </span>
-                      <span className="text-xs text-slate-500">Klik kanal untuk melihat</span>
+                      <span className="text-xs text-slate-500">Pilih kanal</span>
                     </div>
                     <div
                       role="tablist"
-                      aria-label="Pilih kanal simulasi kotak masuk"
-                      className="flex items-center gap-1.5 overflow-x-auto pb-0.5"
+                      aria-label="Pilih kanal simulasi ruang kerja"
+                      className="grid grid-cols-4 gap-1.5 sm:flex sm:items-center sm:gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                     >
                       {HERO_CHANNEL_PREVIEWS.map((ch) => {
                         const active = ch.id === activeHeroChannel.id;
@@ -626,30 +583,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                             role="tab"
                             aria-selected={active}
                             onClick={() => setActiveHeroChannelId(ch.id)}
-                            className={`min-h-[40px] px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors inline-flex items-center gap-1.5 shrink-0 ${FOCUS_RING} ${
+                            className={`h-9 sm:h-10 px-2 sm:px-3 rounded-lg text-xs font-semibold border transition-colors inline-flex items-center justify-center gap-1.5 shrink-0 ${FOCUS_RING} ${
                               active
                                 ? 'bg-slate-900 text-white border-slate-900'
                                 : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
                             }`}
                           >
                             <span
-                              className={`w-2 h-2 rounded-full ${
+                              className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0 ${
                                 active ? 'bg-white' : ch.dotClass
                               }`}
                             />
-                            <span>{ch.label}</span>
+                            <span className="truncate">{ch.label}</span>
                           </button>
                         );
                       })}
                     </div>
                   </div>
 
-                  {/* Active Chat Preview */}
+                  {/* Active Chat & CRM Context */}
                   <div
                     key={activeHeroChannel.id}
-                    className="p-4 sm:p-5 space-y-4 bg-white transition-opacity duration-300"
+                    className="p-4 sm:p-5 space-y-4 bg-white"
                   >
-                    <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                    <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm sm:text-base font-bold text-slate-900 truncate">
@@ -670,18 +627,35 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       </span>
                     </div>
 
-                    <div className="space-y-3">
-                      <div className="bg-slate-100 text-slate-800 rounded-xl rounded-tl-xs px-3.5 py-2.5 text-sm leading-relaxed max-w-[92%]">
+                    <div className="space-y-2.5">
+                      <div className="bg-slate-100 text-slate-800 rounded-xl rounded-tl-sm px-3.5 py-2.5 text-sm leading-relaxed max-w-[92%]">
                         {activeHeroChannel.incoming}
                       </div>
-                      <div className="bg-[#2563eb] text-white rounded-xl rounded-tr-xs px-3.5 py-2.5 text-sm leading-relaxed ml-auto max-w-[92%]">
+                      <div className="bg-[#2563eb] text-white rounded-xl rounded-tr-sm px-3.5 py-2.5 text-sm leading-relaxed ml-auto max-w-[92%]">
                         {activeHeroChannel.outgoing}
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs sm:text-sm text-slate-600">
-                      <CheckCircle2 className="w-4 h-4 text-[#2563eb] shrink-0" />
-                      <span>{activeHeroChannel.footerNote}</span>
+                    {/* CRM Context Strip — Shows ownership, follow-up & history */}
+                    <div className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                      <div className="px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200/80">
+                        <div className="text-[11px] text-slate-500">Penanggung Jawab</div>
+                        <div className="font-semibold text-slate-800 mt-0.5 truncate">
+                          {activeHeroChannel.crmOwner}
+                        </div>
+                      </div>
+                      <div className="px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200/80">
+                        <div className="text-[11px] text-slate-500">Tindak Lanjut</div>
+                        <div className="font-semibold text-slate-800 mt-0.5 truncate">
+                          {activeHeroChannel.crmFollowUp}
+                        </div>
+                      </div>
+                      <div className="px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200/80">
+                        <div className="text-[11px] text-slate-500">Riwayat Pelanggan</div>
+                        <div className="font-semibold text-slate-800 mt-0.5 truncate">
+                          {activeHeroChannel.crmHistory}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -691,27 +665,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         </section>
 
         {/* Problem & Agitation Section */}
-        <RevealSection id="masalah" className="bg-[#f8fafc] border-b border-slate-200">
+        <section id="masalah" className="bg-[#f8fafc] border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-8">
             <div className="max-w-3xl space-y-2.5">
-              <div className="text-xs font-semibold uppercase tracking-wide text-rose-600">
+              <div className="text-xs font-semibold uppercase tracking-wider text-rose-600">
                 Yang Sering Terjadi Tanpa Disadari
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-snug">
                 Iklan Sudah Bagus, Produk Sudah Dicari — Tapi Penjualan Bocor di Tahap Balas Chat?
               </h2>
-              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+              <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed max-w-[65ch]">
                 Banyak pemilik usaha mengira masalahnya ada di iklan atau harga, padahal calon pembeli batal transaksi hanya karena pengalaman membalas pesan yang lambat dan tidak terkoordinasi.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 rounded-2xl bg-white border border-slate-200 divide-y md:divide-y-0 md:divide-x divide-slate-200 overflow-hidden">
+            <div className="grid grid-cols-1 md:grid-cols-3 rounded-xl bg-white border border-slate-200 divide-y md:divide-y-0 md:divide-x divide-slate-200 overflow-hidden">
               {HIDDEN_COSTS.map((item) => (
                 <div
                   key={item.title}
-                  className="p-5 sm:p-6 space-y-2.5"
+                  className="p-5 sm:p-6 space-y-2"
                 >
-                  <div className="text-xs font-bold uppercase tracking-wide text-rose-700">
+                  <div className="text-xs font-bold uppercase tracking-wider text-rose-700">
                     {item.stat}
                   </div>
                   <h3 className="text-base font-bold text-slate-900 leading-snug">
@@ -722,89 +696,110 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               ))}
             </div>
           </div>
-        </RevealSection>
+        </section>
 
-        {/* Authentic Origin Story Section — Vertical Storytelling */}
-        <RevealSection id="kenapa-dibuat" className="bg-white border-b border-slate-200">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-20 space-y-10">
-            <div className="space-y-3">
-              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
-                Cerita di Balik Reneo CRM
+        {/* Authentic Origin Story Section — Sticky Editorial on Desktop, Vertical on Mobile */}
+        <section id="kenapa-dibuat" className="bg-white border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+              {/* Left Sticky Intro & Core Highlight (Desktop) */}
+              <div className="lg:col-span-5 lg:sticky lg:top-24 space-y-6">
+                <div className="space-y-3">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
+                    Cerita di Balik Reneo CRM
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl lg:text-[2rem] font-bold text-slate-900 tracking-tight leading-tight">
+                    Kenapa Kami Membuat Reneo CRM
+                  </h2>
+                  <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed">
+                    Reneo CRM tidak lahir hanya dari keinginan membuat aplikasi CRM baru. Produk ini berawal dari pengalaman kami sendiri dalam menjalankan operasional dan mengelola pelanggan setiap hari.
+                  </p>
+                </div>
+
+                {/* Desktop Penekanan Utama (sticks alongside story chapters) */}
+                <div className="hidden lg:block rounded-xl border border-slate-200 border-l-4 border-l-[#2563eb] bg-slate-50 px-5 py-5 space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
+                    Penekanan Utama
+                  </div>
+                  <p className="text-base font-bold text-slate-900 leading-snug">
+                    Bukan sekadar membalas pesan. Tetapi memastikan setiap pelanggan ditangani dengan baik.
+                  </p>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    Kelola pelanggan, bukan hanya percakapannya — satu sistem untuk komunikasi, data pelanggan, aktivitas tim, dan tindak lanjut dalam satu alur kerja.
+                  </p>
+                </div>
               </div>
-              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-900 tracking-tight leading-tight">
-                Kenapa Kami Membuat Reneo CRM
-              </h2>
-              <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
-                Reneo CRM tidak lahir hanya dari keinginan membuat aplikasi CRM baru. Produk ini berawal dari pengalaman kami sendiri dalam menjalankan operasional dan mengelola pelanggan setiap hari.
-              </p>
-            </div>
 
-            <ol className="relative space-y-8 sm:space-y-10 before:content-[''] before:absolute before:left-[15px] sm:before:left-[19px] before:top-3 before:bottom-3 before:w-px before:bg-slate-200">
-              {STORY_BEATS.map((story, idx) => {
-                const isHighlightStep = idx === 3 || idx === 4;
-                return (
-                  <li key={story.number} className="relative pl-11 sm:pl-14">
-                    <div
-                      aria-hidden="true"
-                      className={`absolute left-0 top-0.5 w-8 h-8 sm:w-10 sm:h-10 rounded-full border text-xs sm:text-sm font-bold font-mono flex items-center justify-center ${
-                        isHighlightStep
-                          ? 'bg-[#2563eb] border-[#2563eb] text-white'
-                          : 'bg-white border-slate-300 text-slate-700'
-                      }`}
-                    >
-                      {story.number}
-                    </div>
+              {/* Right Vertical Storytelling Chapters */}
+              <div className="lg:col-span-7 space-y-8">
+                <ol className="relative space-y-7 sm:space-y-9 before:content-[''] before:absolute before:left-[15px] sm:before:left-[19px] before:top-3 before:bottom-3 before:w-px before:bg-slate-200">
+                  {STORY_BEATS.map((story, idx) => {
+                    const isHighlightStep = idx === 3 || idx === 4;
+                    return (
+                      <li key={story.number} className="relative pl-11 sm:pl-14">
+                        <div
+                          aria-hidden="true"
+                          className={`absolute left-0 top-0.5 w-8 h-8 sm:w-10 sm:h-10 rounded-full border text-xs sm:text-sm font-bold font-mono flex items-center justify-center ${
+                            isHighlightStep
+                              ? 'bg-[#2563eb] border-[#2563eb] text-white'
+                              : 'bg-white border-slate-300 text-slate-700'
+                          }`}
+                        >
+                          {story.number}
+                        </div>
 
-                    <div className="space-y-2.5">
-                      <h3 className="text-lg sm:text-xl font-bold text-slate-900 leading-snug">
-                        {story.step}
-                      </h3>
-                      <div className="space-y-3 text-sm sm:text-base text-slate-600 leading-relaxed">
-                        {story.paragraphs.map((paragraph) => (
-                          <p key={paragraph}>{paragraph}</p>
-                        ))}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
+                        <div className="space-y-2 max-w-[62ch]">
+                          <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
+                            {story.step}
+                          </h3>
+                          <div className="space-y-2.5 text-[15px] sm:text-base text-slate-600 leading-relaxed">
+                            {story.paragraphs.map((paragraph) => (
+                              <p key={paragraph}>{paragraph}</p>
+                            ))}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
 
-            {/* Penekanan Utama */}
-            <div className="rounded-xl border border-slate-200 border-l-4 border-l-[#2563eb] bg-slate-50 px-5 py-5 sm:px-7 sm:py-6 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
-                Penekanan Utama
+                {/* Mobile Penekanan Utama (appears after reading the 5 chapters) */}
+                <div className="lg:hidden rounded-xl border border-slate-200 border-l-4 border-l-[#2563eb] bg-slate-50 px-4 py-4 space-y-1.5">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
+                    Penekanan Utama
+                  </div>
+                  <p className="text-base font-bold text-slate-900 leading-snug">
+                    Bukan sekadar membalas pesan. Tetapi memastikan setiap pelanggan ditangani dengan baik.
+                  </p>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    Kelola pelanggan, bukan hanya percakapannya — satu sistem untuk komunikasi, data pelanggan, aktivitas tim, dan tindak lanjut dalam satu alur kerja.
+                  </p>
+                </div>
               </div>
-              <p className="text-lg sm:text-xl font-bold text-slate-900 leading-snug">
-                Bukan sekadar membalas pesan. Tetapi memastikan setiap pelanggan ditangani dengan baik.
-              </p>
-              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-                Kelola pelanggan, bukan hanya percakapannya — satu sistem untuk komunikasi, data pelanggan, aktivitas tim, dan tindak lanjut dalam satu alur kerja.
-              </p>
             </div>
           </div>
-        </RevealSection>
+        </section>
 
         {/* Interactive Module Explorer — Connected to Operational Problems */}
-        <RevealSection id="modul" className="bg-[#f8fafc] border-b border-slate-200">
+        <section id="modul" className="bg-[#f8fafc] border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
             <div className="max-w-3xl space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
                 Cara Kerja Reneo CRM
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-snug">
                 Dirancang untuk Menjawab Masalah Operasional Sehari-hari
               </h2>
-              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+              <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed max-w-[65ch]">
                 Setiap fitur di Reneo CRM terhubung langsung dalam satu alur kerja: dari komunikasi terpusat, riwayat pelanggan, pembagian tugas lintas shift, tindak lanjut, hingga pemantauan aktivitas tim.
               </p>
             </div>
 
-            {/* Mobile Horizontal Scrollable Pill Tabs */}
+            {/* Mobile Horizontal Scrollable Pill Tabs (no visible scrollbar) */}
             <div
               role="tablist"
               aria-label="Pilih modul kerja Reneo CRM"
-              className="flex lg:hidden items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 snap-x"
+              className="flex lg:hidden items-center gap-2 overflow-x-auto pb-1 -mx-4 px-4 snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {MODULE_TABS.map((tab) => {
                 const active = tab.id === activeModule.id;
@@ -911,33 +906,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
             </div>
           </div>
-        </RevealSection>
+        </section>
 
         {/* All Channels Grid — Omnichannel as a CRM Capability */}
-        <RevealSection id="kanal" className="bg-white border-b border-slate-200">
+        <section id="kanal" className="bg-white border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
             <div className="max-w-3xl space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
                 Kemampuan Omnichannel dalam Reneo CRM
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-snug">
                 Semua Kanal Komunikasi Terhubung Langsung ke Alur Pengelolaan Pelanggan
               </h2>
-              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+              <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed max-w-[65ch]">
                 Menyatukan pesan hanyalah awal. Setiap percakapan dari kanal yang pelanggan pilih langsung masuk ke riwayat kontak, pembagian tugas tim, dan tindak lanjut di Reneo CRM.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 rounded-xl border border-slate-200 bg-slate-200 gap-px overflow-hidden">
               {CHANNELS.map((ch) => (
                 <div
                   key={ch.name}
-                  className="p-5 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition-colors space-y-2.5"
+                  className="p-5 bg-white space-y-2.5"
                 >
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <h3 className="text-base font-bold text-slate-900">{ch.name}</h3>
                     <span
-                      className={`text-xs font-semibold px-2.5 py-0.5 rounded-md border ${ch.badge}`}
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${ch.badge}`}
                     >
                       {ch.role}
                     </span>
@@ -947,26 +942,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               ))}
             </div>
           </div>
-        </RevealSection>
+        </section>
 
         {/* Honest Comparison */}
-        <RevealSection id="perbandingan" className="bg-[#f8fafc] border-b border-slate-200">
+        <section id="perbandingan" className="bg-[#f8fafc] border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-7">
             <div className="max-w-2xl space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
                 Bandingkan Sebelum Memilih
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-snug">
                 Cara Lama vs Aplikasi Chat Umum vs Reneo CRM
               </h2>
             </div>
 
             {/* Mobile Stacked Comparison Cards */}
-            <div className="space-y-3.5 md:hidden">
+            <div className="space-y-3 md:hidden">
               {COMPARISON_ROWS.map((row) => (
                 <div
                   key={row.aspect}
-                  className="rounded-2xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-200 text-sm"
+                  className="rounded-xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-200 text-sm"
                 >
                   <div className="px-4 py-3 bg-slate-50 font-bold text-slate-900">
                     {row.aspect}
@@ -988,7 +983,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Desktop Comparison Table */}
-            <div className="hidden md:block border border-slate-200 rounded-2xl bg-white overflow-x-auto">
+            <div className="hidden md:block border border-slate-200 rounded-xl bg-white overflow-x-auto">
               <table className="w-full min-w-[700px] text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-sm font-bold text-slate-800">
@@ -1013,21 +1008,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </table>
             </div>
           </div>
-        </RevealSection>
+        </section>
 
         {/* FAQ */}
-        <RevealSection id="faq" className="bg-white border-b border-slate-200">
+        <section id="faq" className="bg-white border-b border-slate-200">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
             <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
                 Pertanyaan Umum
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-snug">
                 Masih Ragu? Ini Jawaban yang Paling Sering Ditanyakan
               </h2>
             </div>
 
-            <div className="divide-y divide-slate-200 border border-slate-200 rounded-2xl bg-white overflow-hidden">
+            <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl bg-white overflow-hidden">
               {FAQS.map((item, idx) => {
                 const isOpen = openFaq === idx;
                 return (
@@ -1036,9 +1031,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       type="button"
                       aria-expanded={isOpen}
                       onClick={() => setOpenFaq(isOpen ? null : idx)}
-                      className={`w-full min-h-[52px] px-5 py-4 text-left flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors ${FOCUS_RING}`}
+                      className={`w-full min-h-[52px] px-4 sm:px-5 py-4 text-left flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors ${FOCUS_RING}`}
                     >
-                      <span className="text-sm sm:text-base font-semibold text-slate-900">
+                      <span className="text-[15px] sm:text-base font-semibold text-slate-900">
                         {item.q}
                       </span>
                       <ChevronDown
@@ -1048,7 +1043,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       />
                     </button>
                     {isOpen && (
-                      <div className="px-5 pb-4 text-sm sm:text-base text-slate-600 leading-relaxed">
+                      <div className="px-4 sm:px-5 pb-4 text-[15px] sm:text-base text-slate-600 leading-relaxed">
                         {item.a}
                       </div>
                     )}
@@ -1057,26 +1052,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               })}
             </div>
           </div>
-        </RevealSection>
+        </section>
 
         {/* Custom Feature / Program Asset Inquiry Form */}
-        <RevealSection id="hubungi-kami" className="bg-[#f8fafc] border-b border-slate-200">
+        <section id="hubungi-kami" className="bg-[#f8fafc] border-b border-slate-200">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16 space-y-6">
             <div className="max-w-2xl space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-[#2563eb]">
+              <div className="text-xs font-semibold uppercase tracking-wider text-[#2563eb]">
                 Kebutuhan Khusus &amp; Aset Program
               </div>
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-snug">
                 Ingin Tambah Fitur Khusus atau Beli Aset Program? Hubungi Kami
               </h2>
-              <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+              <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed">
                 Butuh penyesuaian alur kerja khusus untuk perusahaan Anda, integrasi tambahan, atau ingin memiliki aset program secara penuh? Kirim detail kebutuhan Anda di bawah ini — tim kami akan langsung menghubungi Anda lewat WhatsApp.
               </p>
             </div>
 
             <form
               onSubmit={handleInquirySubmit}
-              className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-7 space-y-5 shadow-xs"
+              className="rounded-xl border border-slate-200 bg-white p-4 sm:p-7 space-y-5"
             >
               <div className="space-y-2">
                 <label className="block text-sm font-semibold text-slate-800">
@@ -1097,7 +1092,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                         type="button"
                         aria-pressed={selected}
                         onClick={() => setInquiryType(opt)}
-                        className={`min-h-[44px] px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold border transition-colors ${FOCUS_RING} ${
+                        className={`h-11 px-3.5 rounded-lg text-xs sm:text-sm font-semibold border transition-colors ${FOCUS_RING} ${
                           selected
                             ? 'bg-[#2563eb] text-white border-[#2563eb]'
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
@@ -1122,7 +1117,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     value={inquiryName}
                     onChange={(e) => setInquiryName(e.target.value)}
                     placeholder="Contoh: Budi Santoso"
-                    className="w-full h-11 px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
+                    className="w-full h-11 px-3.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
                   />
                 </div>
 
@@ -1137,7 +1132,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     value={inquiryPhone}
                     onChange={(e) => setInquiryPhone(e.target.value)}
                     placeholder="081234567890"
-                    className="w-full h-11 px-3.5 rounded-xl border border-slate-300 bg-white text-sm font-mono text-slate-900 focus:outline-none focus:border-[#2563eb]"
+                    className="w-full h-11 px-3.5 rounded-lg border border-slate-300 bg-white text-sm font-mono text-slate-900 focus:outline-none focus:border-[#2563eb]"
                   />
                 </div>
               </div>
@@ -1152,7 +1147,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   value={inquiryBusiness}
                   onChange={(e) => setInquiryBusiness(e.target.value)}
                   placeholder="Contoh: Toko Clarice Official / PT Maju Bersama"
-                  className="w-full h-11 px-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
+                  className="w-full h-11 px-3.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
                 />
               </div>
 
@@ -1167,13 +1162,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   value={inquiryMessage}
                   onChange={(e) => setInquiryMessage(e.target.value)}
                   placeholder="Contoh: Kami ingin menambah laporan khusus cabang atau ingin menanyakan pembelian aset program penuh..."
-                  className="w-full p-3.5 rounded-xl border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
+                  className="w-full p-3.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563eb]"
                 />
               </div>
 
               {inquiryStatus && (
                 <div
-                  className={`p-4 rounded-xl border text-sm font-medium flex items-start gap-2.5 ${
+                  className={`p-3.5 rounded-lg border text-sm font-medium flex items-start gap-2.5 ${
                     inquiryStatus.ok
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                       : 'bg-rose-50 border-rose-200 text-rose-800'
@@ -1195,21 +1190,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <button
                   type="submit"
                   disabled={inquirySubmitting}
-                  className="min-h-[46px] px-6 py-2.5 rounded-xl bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-60 text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors shrink-0"
+                  className={`h-11 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-60 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors shrink-0 ${FOCUS_RING}`}
                 >
                   <span>{inquirySubmitting ? 'Mengirim...' : 'Kirim Permintaan'}</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                 </button>
               </div>
             </form>
           </div>
-        </RevealSection>
+        </section>
 
         {/* Final CTA — 2 Jalur Order CRM */}
-        <RevealSection className="bg-slate-900 text-white">
+        <section className="bg-slate-900 text-white">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-14 sm:py-16 space-y-8">
             <div className="text-center space-y-3 max-w-3xl mx-auto">
-              <div className="text-xs font-semibold uppercase tracking-wide text-blue-300">
+              <div className="text-xs font-semibold uppercase tracking-wider text-blue-300">
                 Pilih Cara Mulai yang Sesuai Usaha Anda
               </div>
 
@@ -1217,7 +1212,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 Mulai Kelola Pelanggan dan Pekerjaan Tim Secara Lebih Terstruktur Hari Ini
               </h2>
 
-              <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
+              <p className="text-[15px] sm:text-base text-slate-300 leading-relaxed">
                 Rasakan langsung bagaimana satu ruang kerja Reneo CRM menjaga komunikasi, riwayat pelanggan, pembagian shift, dan tindak lanjut tetap terhubung.
               </p>
             </div>
@@ -1225,7 +1220,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
               <div className="rounded-xl border border-white/15 bg-white/5 p-5 sm:p-6 flex flex-col justify-between gap-5">
                 <div className="space-y-2">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-300">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-blue-300">
                     Opsi 1 · Langsung Pakai
                   </div>
                   <h3 className="text-lg sm:text-xl font-bold text-white">
@@ -1238,16 +1233,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <button
                   type="button"
                   onClick={authenticated ? onEnterLogin : handleRegister}
-                  className={`min-h-[44px] py-2.5 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                  className={`h-11 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
                 >
                   <span>{authenticated ? 'Buka Workspace CRM' : 'Daftar Akun CRM Baru'}</span>
-                  <ArrowRight className="w-4 h-4" />
+                  <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
                 </button>
               </div>
 
               <div className="rounded-xl border border-white/15 bg-white/5 p-5 sm:p-6 flex flex-col justify-between gap-5">
                 <div className="space-y-2">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                     Opsi 2 · Paket Lengkap
                   </div>
                   <h3 className="text-lg sm:text-xl font-bold text-white">
@@ -1260,10 +1255,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <a
                   href={PANEL_ORDER_URL}
                   target="_top"
-                  className={`min-h-[44px] py-2.5 px-5 rounded-lg bg-white/10 hover:bg-white/15 text-white border border-white/25 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                  className={`h-11 px-5 rounded-lg bg-white/10 hover:bg-white/15 text-white border border-white/25 text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
                 >
                   <span>Order Hosting + CRM</span>
-                  <ArrowUpRight className="w-4 h-4" />
+                  <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
                 </a>
               </div>
             </div>
@@ -1282,7 +1277,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </button>
             </div>
           </div>
-        </RevealSection>
+        </section>
       </main>
 
       {/* Footer */}
