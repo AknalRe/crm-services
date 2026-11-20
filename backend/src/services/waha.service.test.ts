@@ -1142,6 +1142,18 @@ test('WhatsApp Status sending, deletion, viewer parsing, and ACK ID extraction w
   assert.equal(parsedReceipts[0].deliveredAt, t1.toISOString());
   assert.equal(parsedReceipts[0].readAt, t2.toISOString());
 
+  // 1d. Test self-reaction dedup (CRM CS reaction + WAHA fromMe echo stays count=1)
+  const { upsertReactionInList } = require('../routes/waha') as typeof import('../routes/waha');
+  const afterCsReact = upsertReactionInList([], { emoji: '👍', actor: 'CS', isOutbound: true });
+  const afterWahaEcho = upsertReactionInList(afterCsReact, {
+    emoji: '👍',
+    actor: '6285155431301@c.us',
+    isOutbound: true,
+  });
+  assert.equal(afterWahaEcho.length, 1);
+  assert.equal(afterWahaEcho[0].actor, 'CS');
+  assert.equal(afterWahaEcho[0].isOutbound, true);
+
   const nestedParticipant = extractStatusAckParticipant(
     { participant: '628987654321@lid', id: 'false_status@broadcast_3EB0999' },
     ['false_status@broadcast_3EB0999']

@@ -767,9 +767,9 @@ export async function initDb() {
          AND a.conversation_id = b.conversation_id
          AND a.direction = 'OUTBOUND'
          AND b.direction = 'OUTBOUND'
-         AND a.body = b.body
+         AND TRIM(REPLACE(a.body, E'\\r\\n', E'\\n')) = TRIM(REPLACE(b.body, E'\\r\\n', E'\\n'))
          AND a.id <> b.id
-         AND ABS(EXTRACT(EPOCH FROM (b.created_at - a.created_at))) <= 30
+         AND ABS(EXTRACT(EPOCH FROM (b.created_at - a.created_at))) <= 120
         WHERE a.channel = 'WHATSAPP'
           AND b.channel = 'WHATSAPP'
           AND LENGTH(TRIM(a.body)) > 0

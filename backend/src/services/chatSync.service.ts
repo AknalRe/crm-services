@@ -198,6 +198,7 @@ export async function syncRecentWhatsAppChatMessages(
       mediaType: chatMessages.mediaType,
       mediaName: chatMessages.mediaName,
       body: chatMessages.body,
+      createdAt: chatMessages.createdAt,
     })
     .from(chatMessages)
     .where(and(eq(chatMessages.conversationId, conv.id), eq(chatMessages.companyId, conv.companyId)))
@@ -208,9 +209,16 @@ export async function syncRecentWhatsAppChatMessages(
   for (const row of existingRows) {
     if (!row.wahaMessageId) continue;
     byMsgId.set(row.wahaMessageId, row);
+    const jidStanza = row.wahaMessageId.match(/@(?:g\.us|c\.us|s\.whatsapp\.net|lid|broadcast)_([^_@]+)(?:_|$)/i);
+    if (jidStanza?.[1] && jidStanza[1].length >= 6) {
+      byMsgId.set(jidStanza[1], row);
+    }
     const underscoreIdx = row.wahaMessageId.lastIndexOf('_');
     if (underscoreIdx !== -1 && underscoreIdx < row.wahaMessageId.length - 1) {
-      byMsgId.set(row.wahaMessageId.slice(underscoreIdx + 1), row);
+      const tail = row.wahaMessageId.slice(underscoreIdx + 1);
+      if (tail.length >= 6 && !tail.includes('@')) {
+        byMsgId.set(tail, row);
+      }
     }
   }
 
@@ -317,6 +325,40 @@ export async function syncRecentWhatsAppChatMessages(
     const body = richData.body || (mediaDetails.hasMedia ? mediaDetails.mediaFallbackLabel : '');
     if (!body) continue;
 
+    // Fallback dedup for outbound messages sent via CRM whose wahaMessageId format differs or was null
+    if (fromMe) {
+      const normSyncBody = body.replace(/\r\n/g, '\n').trim();
+      const rawTs = Number(m?.timestamp || m?._data?.t || m?._data?.Info?.Timestamp || 0);
+      const syncMs = rawTs > 1_000_000_000_000 ? rawTs : rawTs > 1_000_000_000 ? rawTs * 1000 : Date.now();
+      const bodyMatch = existingRows.find(
+        (row) =>
+          row.direction === 'OUTBOUND' &&
+          (row.body || '').replace(/\r\n/g, '\n').trim() === normSyncBody &&
+          Math.abs(syncMs - new Date(row.createdAt).getTime()) <= 120_000
+      );
+      if (bodyMatch) {
+        const patch: Record<string, any> = {};
+        if (!bodyMatch.wahaMessageId && primaryId) {
+          patch.wahaMessageId = primaryId;
+          bodyMatch.wahaMessageId = primaryId;
+          byMsgId.set(primaryId, bodyMatch);
+        }
+        if (ackValue !== null && ackValue > (bodyMatch.ackStatus ?? 0)) {
+          const now = new Date();
+          patch.ackStatus = ackValue;
+          patch.status = ackValue >= 3 ? 'READ' : ackValue === 2 ? 'DELIVERED' : 'SENT';
+          if (ackValue >= 2) patch.deliveredAt = now;
+          if (ackValue >= 3) patch.readAt = now;
+          bodyMatch.ackStatus = ackValue;
+        }
+        if (Object.keys(patch).length > 0) {
+          await db.update(chatMessages).set(patch).where(eq(chatMessages.id, bodyMatch.id)).catch(() => {});
+          acksUpdated++;
+        }
+        continue;
+      }
+    }
+
     const mergedMeta: Record<string, any> = {
       ...(richData.metadata || {}),
       ...(fromMe ? { sentVia: 'WHATSAPP_DEVICE', sentViaLabel: 'Perangkat WA' } : {}),
@@ -371,6 +413,7 @@ export async function syncRecentWhatsAppChatMessages(
         mediaType: mediaDetails.mediaType,
         mediaName: mediaDetails.mediaName,
         body,
+        createdAt: msgDate,
       });
     }
     inserted++;
@@ -456,9 +499,12 @@ export async function syncCompanyRecentWhatsAppChats(companyId: string): Promise
         if (dedupIds.length > 0) {
           const idMatchConditions = [
             inArray(chatMessages.wahaMessageId, dedupIds),
-            ...stanzaIds.map((stanza) => {
+            ...stanzaIds.flatMap((stanza) => {
               const escaped = stanza.replace(/[\\%_]/g, '\\$&');
-              return like(chatMessages.wahaMessageId, `%_${escaped}`);
+              return [
+                like(chatMessages.wahaMessageId, `%_${escaped}`),
+                like(chatMessages.wahaMessageId, `%_${escaped}_%`),
+              ];
             }),
           ];
           const existingLast = await db

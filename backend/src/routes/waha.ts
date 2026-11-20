@@ -1471,6 +1471,42 @@ export function upsertGroupMessageReceiptInMetadata(
   return JSON.stringify({ ...meta, receipts: prevList });
 }
 
+export function upsertReactionInList(
+  prevList: Array<any>,
+  params: {
+    emoji: string;
+    actor: string;
+    actorName?: string;
+    isOutbound: boolean;
+  }
+): Array<any> {
+  const cleanEmoji = String(params.emoji || '').trim();
+  const cleanActor = params.isOutbound ? 'CS' : String(params.actor || 'contact').trim();
+  const normActorKey = cleanActor.toLowerCase().replace(/:\d+(?=@)/, '');
+  const filtered = (Array.isArray(prevList) ? prevList : []).filter((r) => {
+    if (!r || !r.emoji) return false;
+    if (params.isOutbound) {
+      if (r.isOutbound || r.actor === 'CS') return false;
+      const rActorNorm = String(r.actor || '').toLowerCase().replace(/:\d+(?=@)/, '');
+      const rawParamNorm = String(params.actor || '').toLowerCase().replace(/:\d+(?=@)/, '');
+      if (rawParamNorm && rActorNorm && rActorNorm === rawParamNorm) return false;
+      return true;
+    }
+    if (r.isOutbound) return true;
+    const rActorNorm = String(r.actor || '').toLowerCase().replace(/:\d+(?=@)/, '');
+    return rActorNorm !== normActorKey;
+  });
+  if (cleanEmoji) {
+    filtered.push({
+      emoji: cleanEmoji,
+      actor: cleanActor,
+      ...(params.actorName ? { actorName: params.actorName } : {}),
+      isOutbound: params.isOutbound,
+    });
+  }
+  return filtered;
+}
+
 export interface PollVoteMetadataEntry {
   voterId: string;
   voterName?: string | null;
@@ -2427,7 +2463,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                 or(
                   eq(chatMessages.wahaMessageId, cleanTarget),
                   eq(chatMessages.wahaMessageId, stanzaPart),
-                  like(chatMessages.wahaMessageId, `%_${stanzaPart}`)
+                  like(chatMessages.wahaMessageId, `%_${stanzaPart}`),
+                  like(chatMessages.wahaMessageId, `%_${stanzaPart}_%`)
                 )
               )
             )
@@ -2445,14 +2482,17 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             }
 
             if (event === 'message.reaction') {
-              const actor = String(payload?.from || payload?.participant || 'contact').trim();
+              const reactionFromMe = isWahaFromMe(payload);
+              const actor = String(payload?.participant || payload?.from || 'contact').trim();
               const actorName = String(payload?.pushName || payload?._data?.Info?.PushName || '').trim() || undefined;
               const emoji = String(richReaction.reaction?.emoji ?? payload?.reaction?.text ?? '').trim();
               const prevList: Array<any> = Array.isArray(prevMeta.reactions) ? prevMeta.reactions : [];
-              const filtered = prevList.filter((r) => !(r && r.actor === actor && !r.isOutbound));
-              if (emoji) {
-                filtered.push({ emoji, actor, ...(actorName ? { actorName } : {}), isOutbound: false });
-              }
+              const filtered = upsertReactionInList(prevList, {
+                emoji,
+                actor,
+                actorName: reactionFromMe ? undefined : actorName,
+                isOutbound: reactionFromMe,
+              });
               await db
                 .update(chatMessages)
                 .set({ metadataJson: JSON.stringify({ ...prevMeta, reactions: filtered }) })
@@ -3246,7 +3286,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             .where(
               and(
                 eq(chatMessages.companyId, companyId),
-                or(eq(chatMessages.wahaMessageId, cleanTarget), like(chatMessages.wahaMessageId, `%_${stanzaPart}`))
+                or(
+                  eq(chatMessages.wahaMessageId, cleanTarget),
+                  eq(chatMessages.wahaMessageId, stanzaPart),
+                  like(chatMessages.wahaMessageId, `%_${stanzaPart}`),
+                  like(chatMessages.wahaMessageId, `%_${stanzaPart}_%`)
+                )
               )
             )
             .limit(10);
@@ -3264,15 +3309,12 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             const actor = String(payload?.participant || payload?.from || 'contact').trim();
             const actorName = String(payload?._data?.notifyName || payload?._data?.Info?.PushName || '').trim() || undefined;
             const prevList: Array<any> = Array.isArray(prevMeta.reactions) ? prevMeta.reactions : [];
-            const filtered = prevList.filter((r) => !(r && r.actor === actor && !r.isOutbound));
-            if (richData.reaction.emoji) {
-              filtered.push({
-                emoji: richData.reaction.emoji,
-                actor,
-                ...(actorName ? { actorName } : {}),
-                isOutbound: false,
-              });
-            }
+            const filtered = upsertReactionInList(prevList, {
+              emoji: richData.reaction.emoji,
+              actor,
+              actorName: isFromMe ? undefined : actorName,
+              isOutbound: isFromMe,
+            });
             await db
               .update(chatMessages)
               .set({ metadataJson: JSON.stringify({ ...prevMeta, reactions: filtered }) })
