@@ -7075,40 +7075,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           );
                         })()}
 
-                        {Array.isArray(msgMeta?.reactions) && msgMeta.reactions.length > 0 && (() => {
-                          const grouped = new Map<string, { count: number; byMe: boolean }>();
-                          for (const r of msgMeta.reactions) {
-                            if (!r?.emoji) continue;
-                            const cur = grouped.get(r.emoji) || { count: 0, byMe: false };
-                            grouped.set(r.emoji, {
-                              count: cur.count + 1,
-                              byMe: cur.byMe || Boolean(r.isOutbound && r.actor === 'CS'),
-                            });
-                          }
-                          if (grouped.size === 0) return null;
-                          return (
-                            <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                              {Array.from(grouped.entries()).map(([em, info]) => (
-                                <button
-                                  key={em}
-                                  type="button"
-                                  disabled={!canReplyConversation || reactingMsgId === msg.id}
-                                  onClick={() => canReplyConversation && void handleReactMessage(msg.id, em)}
-                                  title={info.byMe ? 'Klik untuk menghapus reaksi Anda' : 'Klik untuk ikut bereaksi'}
-                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[11px] leading-none transition-colors ${
-                                    info.byMe
-                                      ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold'
-                                      : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                  }`}
-                                >
-                                  <span>{em}</span>
-                                  {info.count > 1 && <span className="text-[10px] font-mono">{info.count}</span>}
-                                </button>
-                              ))}
-                            </div>
-                          );
-                        })()}
-
                         {isFailed && (
                           <div className="pt-1 border-t border-red-200/70 flex flex-wrap items-center justify-between gap-2 text-[10px] text-red-700">
                             <span className="inline-flex items-center gap-1 font-medium">
@@ -7162,6 +7128,66 @@ export const Conversations: React.FC<ConversationsProps> = ({
                           )}
                         </div>
                         </div>
+
+                        {/* WhatsApp-style Reaction Pill docked on the bottom edge of the bubble */}
+                        {Array.isArray(msgMeta?.reactions) && msgMeta.reactions.length > 0 && (() => {
+                          const grouped = new Map<string, { count: number; byMe: boolean; actors: string[] }>();
+                          let totalCount = 0;
+                          for (const r of msgMeta.reactions) {
+                            if (!r?.emoji) continue;
+                            totalCount += 1;
+                            const cur = grouped.get(r.emoji) || { count: 0, byMe: false, actors: [] };
+                            const isMe = Boolean(r.isOutbound && r.actor === 'CS');
+                            const actorLabel = isMe
+                              ? 'Anda'
+                              : r.actorName || (r.isOutbound ? 'Tim CS' : 'Pelanggan');
+                            grouped.set(r.emoji, {
+                              count: cur.count + 1,
+                              byMe: cur.byMe || isMe,
+                              actors: cur.actors.includes(actorLabel) ? cur.actors : [...cur.actors, actorLabel],
+                            });
+                          }
+                          if (grouped.size === 0) return null;
+                          const entries = Array.from(grouped.entries());
+                          const hasMyReaction = entries.some(([, info]) => info.byMe);
+                          return (
+                            <div
+                              className={`relative z-10 -mt-2.5 mb-0.5 flex items-center ${
+                                isOutbound ? 'justify-end pr-2.5' : 'justify-start pl-2.5'
+                              }`}
+                            >
+                              <div
+                                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full border shadow-sm transition-colors ${
+                                  hasMyReaction
+                                    ? 'bg-white border-indigo-200 ring-1 ring-indigo-100'
+                                    : 'bg-white border-gray-200/90'
+                                }`}
+                              >
+                                {entries.map(([em, info]) => (
+                                  <button
+                                    key={em}
+                                    type="button"
+                                    disabled={!canReplyConversation || reactingMsgId === msg.id}
+                                    onClick={() => canReplyConversation && void handleReactMessage(msg.id, em)}
+                                    title={`${em} oleh ${info.actors.join(', ')} — ${
+                                      info.byMe ? 'Klik untuk hapus reaksi Anda' : 'Klik untuk ikut bereaksi'
+                                    }`}
+                                    className={`inline-flex items-center justify-center rounded-full px-0.5 text-[13px] leading-none hover:scale-110 transition-transform disabled:opacity-60 ${
+                                      info.byMe ? 'opacity-100' : 'opacity-95'
+                                    }`}
+                                  >
+                                    <span>{em}</span>
+                                  </button>
+                                ))}
+                                {totalCount > 1 && (
+                                  <span className="text-[11px] font-medium text-gray-600 tabular-nums pl-0.5 pr-0.5 leading-none">
+                                    {totalCount}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) — muncul di bawah bubble dengan membuka ruang tanpa menimpa pesan lain */}
                         {!isRevoked && (canReplyConversation || canManageConversation) && (
