@@ -22,6 +22,8 @@ Sebagai produk utama layanan bisnis di ekosistem Reneo, **Reneo CRM** menetapkan
 
 ## 2. Tahap Pembentukan Logo (4 Lapisan)
 
+![Tahap Pembentukan Logo Reneo CRM](./assets/crm-logo-evolution.svg)
+
 Logo **Reneo CRM** disusun dari 4 lapisan geometris yang saling melengkapi:
 
 ### Tahap 1 — Wadah Squircle Navy (`#0B2A57`)
