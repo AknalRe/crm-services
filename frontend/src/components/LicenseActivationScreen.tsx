@@ -125,8 +125,8 @@ export const LicenseActivationScreen: React.FC<LicenseActivationScreenProps> = (
             </h1>
             <p className="text-xs text-gray-500 leading-relaxed">
               {licenseInfo.status === 'EXPIRED'
-                ? 'Masa aktif lisensi CRM Anda telah berakhir. Lihat info lisensi untuk memperpanjang (tersedia multi-qty durasi) atau pasang kunci lisensi baru.'
-                : 'Akun CRM Anda sudah siap. Pilih paket lisensi (tersedia Trial 7 Hari atau langganan multi-bulan), atau masukkan kunci lisensi yang sudah Anda terima.'}
+                ? 'Masa aktif lisensi CRM Anda telah berakhir. Lihat info lisensi untuk memperpanjang atau pasang kunci lisensi baru.'
+                : 'Akun CRM Anda sudah siap. Pilih paket lisensi atau masukkan kunci lisensi yang sudah Anda terima.'}
             </p>
             {user && (
               <div className="space-y-1.5 pt-0.5">
