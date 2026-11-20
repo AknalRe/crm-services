@@ -6,17 +6,21 @@ import { ReneoCrmLogo } from './ReneoCrmLogo';
 
 interface SetupLoginGateProps {
   initialized: boolean;
+  initialMode?: 'login' | 'setup';
   onAuthenticated: (user: { name: string; email: string }) => void;
   onBackToLanding?: () => void;
 }
 
 export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
   initialized,
+  initialMode,
   onAuthenticated,
   onBackToLanding,
 }) => {
   const toast = useToast();
-  const [mode, setMode] = useState<'login' | 'setup'>(initialized ? 'login' : 'setup');
+  const [mode, setMode] = useState<'login' | 'setup'>(
+    initialMode ?? (initialized ? 'login' : 'setup')
+  );
   const [name, setName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [email, setEmail] = useState('');
@@ -24,10 +28,12 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (initialized) {
+    if (initialMode) {
+      setMode(initialMode);
+    } else if (initialized) {
       setMode('login');
     }
-  }, [initialized]);
+  }, [initialized, initialMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,7 +140,7 @@ export const SetupLoginGate: React.FC<SetupLoginGateProps> = ({
             {mode === 'login'
               ? 'Masukkan email dan kata sandi akun admin atau staf CRM Anda untuk membuka ruang kerja.'
               : initialized
-              ? 'Daftarkan nama perusahaan Anda untuk membuat workspace CRM multi-tenant mandiri.'
+              ? 'Daftarkan nama usaha Anda untuk membuat ruang kerja Reneo CRM baru yang terpisah dan aman.'
               : 'Buat akun pemilik/admin pertama untuk workspace CRM ini (terpisah dari akun login panel server).'}
           </p>
         </div>

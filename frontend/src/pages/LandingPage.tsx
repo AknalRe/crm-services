@@ -21,6 +21,7 @@ interface LandingPageProps {
   initialized: boolean;
   authenticated?: boolean;
   onEnterLogin: () => void;
+  onEnterRegister?: () => void;
 }
 
 const PANEL_URL = 'https://panel.reneo.my.id';
@@ -350,7 +351,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   initialized,
   authenticated = false,
   onEnterLogin,
+  onEnterRegister,
 }) => {
+  const handleRegister = onEnterRegister ?? onEnterLogin;
   const [activeModuleId, setActiveModuleId] = useState(MODULE_TABS[0].id);
   const [activeHeroChannelId, setActiveHeroChannelId] = useState(HERO_CHANNEL_PREVIEWS[0].id);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
@@ -444,14 +447,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             >
               {authenticated ? 'Buka Workspace' : initialized ? 'Masuk' : 'Lanjutkan Setup'}
             </button>
-            <a
-              href={PANEL_ORDER_URL}
-              target="_top"
+            <button
+              type="button"
+              onClick={authenticated ? onEnterLogin : handleRegister}
               className={`h-11 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center gap-1.5 transition-colors ${FOCUS_RING}`}
             >
-              <span>Coba Gratis 7 Hari</span>
-              <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
-            </a>
+              <span>{authenticated ? 'Buka CRM' : 'Daftar Baru'}</span>
+              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </button>
             <button
               type="button"
               onClick={() => setMobileMenuOpen((v) => !v)}
@@ -477,12 +480,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </a>
             ))}
             <div className="pt-2.5 mt-1 border-t border-slate-100 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  if (authenticated) {
+                    onEnterLogin();
+                  } else {
+                    handleRegister();
+                  }
+                }}
+                className="h-11 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5"
+              >
+                <span>{authenticated ? 'Buka Workspace CRM' : 'Daftar Akun CRM Baru'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
               <a
                 href={PANEL_ORDER_URL}
                 target="_top"
-                className="h-11 px-4 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5"
+                className="h-11 px-4 rounded-lg border border-slate-300 bg-white text-slate-800 text-sm font-semibold inline-flex items-center justify-center gap-1.5"
               >
-                <span>Coba Gratis 7 Hari</span>
+                <span>Order Hosting + CRM</span>
                 <ArrowUpRight className="w-4 h-4" />
               </a>
               <button
@@ -524,26 +542,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
                 <div className="space-y-3 pt-1">
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={authenticated ? onEnterLogin : handleRegister}
+                      className={`min-h-[44px] py-2.5 px-6 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                    >
+                      <span>{authenticated ? 'Buka Workspace CRM' : 'Daftar Akun CRM Baru'}</span>
+                      <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+                    </button>
                     <a
                       href={PANEL_ORDER_URL}
                       target="_top"
-                      className={`min-h-[44px] py-2.5 px-6 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
-                    >
-                      <span>Mulai Coba Gratis 7 Hari</span>
-                      <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
-                    </a>
-                    <a
-                      href="#modul"
                       className={`min-h-[44px] py-2.5 px-5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
                     >
-                      Lihat Cara Kerjanya
+                      <span>Order Hosting + CRM</span>
+                      <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
                     </a>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-slate-500">
-                    <span>Aktif dalam hitungan menit</span>
+                    <span>Coba gratis 7 hari</span>
                     <span aria-hidden="true">·</span>
-                    <span>Data 100% milik bisnis Anda</span>
+                    <span>Aktif dalam hitungan menit</span>
                     <span aria-hidden="true">·</span>
                     <button
                       type="button"
@@ -1132,42 +1152,80 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </RevealSection>
 
-        {/* Final CTA */}
+        {/* Final CTA — 2 Jalur Order CRM */}
         <RevealSection className="bg-slate-900 text-white">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-14 sm:py-16 text-center space-y-5">
-            <div className="text-xs font-semibold uppercase tracking-wide text-blue-300">
-              Uji Coba Gratis 7 Hari · Tanpa Kartu Kredit
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-14 sm:py-16 space-y-8">
+            <div className="text-center space-y-3 max-w-3xl mx-auto">
+              <div className="text-xs font-semibold uppercase tracking-wide text-blue-300">
+                Pilih Cara Mulai yang Sesuai Usaha Anda
+              </div>
+
+              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight leading-snug">
+                Rapikan Layanan Pelanggan Anda Hari Ini Sebelum Lebih Banyak Pembeli Terlewat
+              </h2>
+
+              <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
+                Anda bisa langsung mendaftar akun CRM baru untuk segera mulai bekerja bersama tim CS, atau memesan paket Hosting + CRM sekaligus di Reneo Panel.
+              </p>
             </div>
 
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight leading-snug">
-              Rapikan Layanan Pelanggan Anda Hari Ini Sebelum Lebih Banyak Pembeli Terlewat
-            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+              <div className="rounded-xl border border-white/15 bg-white/5 p-5 sm:p-6 flex flex-col justify-between gap-5">
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-300">
+                    Opsi 1 · Langsung Pakai
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-bold text-white">
+                    Daftar Akun CRM Baru
+                  </h3>
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    Buat ruang kerja usaha Anda sekarang juga dan mulai masa uji coba gratis 7 hari tanpa perlu menyiapkan hosting sendiri.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={authenticated ? onEnterLogin : handleRegister}
+                  className={`min-h-[44px] py-2.5 px-5 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                >
+                  <span>{authenticated ? 'Buka Workspace CRM' : 'Daftar Akun CRM Baru'}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
 
-            <p className="text-sm sm:text-base text-slate-300 max-w-2xl mx-auto leading-relaxed">
-              Coba langsung bersama tim CS Anda selama 7 hari. Rasakan bedanya ketika pesan dari Instagram, WhatsApp, Facebook, Threads, dan Telegram tertangani dari satu layar yang tenang.
-            </p>
+              <div className="rounded-xl border border-white/15 bg-white/5 p-5 sm:p-6 flex flex-col justify-between gap-5">
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    Opsi 2 · Paket Lengkap
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-bold text-white">
+                    Order Hosting + CRM
+                  </h3>
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    Pesan paket hosting Reneo sekaligus aktifkan lisensi Reneo CRM dalam satu pesanan yang terkelola dari panel utama.
+                  </p>
+                </div>
+                <a
+                  href={PANEL_ORDER_URL}
+                  target="_top"
+                  className={`min-h-[44px] py-2.5 px-5 rounded-lg bg-white/10 hover:bg-white/15 text-white border border-white/25 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                >
+                  <span>Order Hosting + CRM</span>
+                  <ArrowUpRight className="w-4 h-4" />
+                </a>
+              </div>
+            </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 pt-2">
-              <a
-                href={PANEL_ORDER_URL}
-                target="_top"
-                className={`min-h-[44px] py-2.5 px-6 rounded-lg bg-[#2563eb] hover:bg-[#1d4ed8] text-white text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
-              >
-                <span>Mulai Coba Gratis 7 Hari</span>
-                <ArrowUpRight className="w-4 h-4" />
-              </a>
+            <div className="text-center">
               <button
                 type="button"
                 onClick={onEnterLogin}
-                className={`min-h-[44px] py-2.5 px-6 rounded-lg bg-white/10 hover:bg-white/15 text-white border border-white/20 text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                className={`text-sm text-slate-300 hover:text-white underline underline-offset-4 rounded px-2 py-1 transition-colors ${FOCUS_RING}`}
               >
-                <span>
-                  {authenticated
-                    ? 'Buka Workspace CRM'
-                    : initialized
-                    ? 'Masuk ke Ruang Kerja'
-                    : 'Lanjutkan Setup'}
-                </span>
+                {authenticated
+                  ? 'Sudah masuk · Buka Workspace CRM'
+                  : initialized
+                  ? 'Sudah punya akun CRM? Masuk ke Ruang Kerja'
+                  : 'Lanjutkan Setup CRM'}
               </button>
             </div>
           </div>

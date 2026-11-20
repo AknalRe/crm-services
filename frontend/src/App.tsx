@@ -131,6 +131,7 @@ function AppShell() {
     if (typeof window === 'undefined') return false;
     return isLandingPathname(window.location.pathname) || window.location.hash === '#landing';
   });
+  const [authGateInitialMode, setAuthGateInitialMode] = useState<'login' | 'setup'>('login');
 
   const rootPath = getAppRootPath(currentPathname);
   const loginPath = getLoginPath(currentPathname);
@@ -489,6 +490,11 @@ function AppShell() {
           initialized={true}
           authenticated={false}
           onEnterLogin={() => {
+            setAuthGateInitialMode('login');
+            navigatePath(loginPath);
+          }}
+          onEnterRegister={() => {
+            setAuthGateInitialMode('setup');
             navigatePath(loginPath);
           }}
         />
@@ -508,6 +514,11 @@ function AppShell() {
           initialized={Boolean(authStatus?.initialized)}
           authenticated={false}
           onEnterLogin={() => {
+            setAuthGateInitialMode('login');
+            navigatePath(loginPath);
+          }}
+          onEnterRegister={() => {
+            setAuthGateInitialMode('setup');
             navigatePath(loginPath);
           }}
         />
@@ -517,6 +528,7 @@ function AppShell() {
     return (
       <SetupLoginGate
         initialized={Boolean(authStatus?.initialized)}
+        initialMode={authGateInitialMode}
         onAuthenticated={(user) => {
           try {
             localStorage.setItem('crm_auth_hint', '1');
