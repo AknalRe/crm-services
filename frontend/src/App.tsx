@@ -28,9 +28,11 @@ import api from './services/api';
 import { hasAnyPerm, hasPerm } from './lib/permissions';
 import { subscribeLiveEvent } from './services/liveEvents';
 import {
+  buildTabPath,
   getAppRootPath,
   getLandingPath,
   getLoginPath,
+  getRelativeSubpath,
   isConnectChannelPathname,
   isCsatPathname,
   isLandingPathname,
@@ -78,9 +80,27 @@ function normalizeSettingsSection(raw: string): SettingsSection {
   return VALID_SETTINGS_SECTIONS.has(raw as SettingsSection) ? (raw as SettingsSection) : 'whatsapp';
 }
 
-function getInitialLocation(): { tab: string; settingsSection: SettingsSection } {
-  if (typeof window === 'undefined') return { tab: 'dashboard', settingsSection: 'whatsapp' };
-  const rawHash = window.location.hash.replace(/^#/, '').trim();
+function parseLocationTab(pathname: string, hash: string): { tab: string; settingsSection: SettingsSection } | null {
+  const rel = getRelativeSubpath(pathname);
+  if (rel) {
+    const segs = rel.split('/').filter(Boolean);
+    if (segs[0] === 'settings') {
+      return {
+        tab: 'settings',
+        settingsSection: normalizeSettingsSection(segs[1] || 'whatsapp'),
+      };
+    }
+    if (VALID_TABS.has(segs[0])) {
+      let savedSub: SettingsSection = 'whatsapp';
+      try {
+        savedSub = normalizeSettingsSection(localStorage.getItem('crm_settings_section') || '');
+      } catch {
+        // ignore
+      }
+      return { tab: segs[0], settingsSection: savedSub };
+    }
+  }
+  const rawHash = (hash || '').replace(/^#\/?/, '').trim();
   if (rawHash.startsWith('settings/')) {
     return {
       tab: 'settings',
@@ -90,13 +110,19 @@ function getInitialLocation(): { tab: string; settingsSection: SettingsSection }
   if (VALID_TABS.has(rawHash)) {
     let savedSub: SettingsSection = 'whatsapp';
     try {
-      const s = localStorage.getItem('crm_settings_section') || '';
-      savedSub = normalizeSettingsSection(s);
+      savedSub = normalizeSettingsSection(localStorage.getItem('crm_settings_section') || '');
     } catch {
       // ignore
     }
     return { tab: rawHash, settingsSection: savedSub };
   }
+  return null;
+}
+
+function getInitialLocation(): { tab: string; settingsSection: SettingsSection } {
+  if (typeof window === 'undefined') return { tab: 'dashboard', settingsSection: 'whatsapp' };
+  const parsed = parseLocationTab(window.location.pathname, window.location.hash);
+  if (parsed) return parsed;
   try {
     const savedTab = localStorage.getItem('crm_current_tab') || '';
     const savedSub = localStorage.getItem('crm_settings_section') || '';
@@ -172,16 +198,34 @@ function AppShell() {
       const nextPath = window.location.pathname;
       setCurrentPathname(nextPath);
       setShowLandingPage(isLandingPathname(nextPath) || window.location.hash === '#landing');
+      const parsed = parseLocationTab(nextPath, window.location.hash);
+      if (parsed) {
+        setCurrentTabState(parsed.tab);
+        setSettingsSectionState(parsed.settingsSection);
+      }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const syncHash = (tab: string, section: SettingsSection) => {
+  const syncRoutePath = (tab: string, section: SettingsSection, replace = false) => {
     if (typeof window === 'undefined') return;
-    const targetHash = tab === 'settings' ? `#settings/${section}` : `#${tab}`;
-    if (window.location.hash !== targetHash) {
-      window.history.replaceState(null, '', `${window.location.pathname}${targetHash}`);
+    if (
+      isLoginPathname(window.location.pathname) ||
+      isLandingPathname(window.location.pathname) ||
+      isCsatPathname(window.location.pathname) ||
+      isConnectChannelPathname(window.location.pathname)
+    ) {
+      return;
+    }
+    const targetPath = buildTabPath(window.location.pathname, tab, section);
+    if (window.location.pathname !== targetPath || window.location.hash) {
+      if (replace) {
+        window.history.replaceState(null, '', targetPath);
+      } else {
+        window.history.pushState(null, '', targetPath);
+      }
+      setCurrentPathname(targetPath);
     }
   };
 
@@ -193,7 +237,7 @@ function AppShell() {
     } catch {
       // Ignore storage error
     }
-    syncHash(next, sectionOverride ?? settingsSection);
+    syncRoutePath(next, sectionOverride ?? settingsSection);
   };
 
   const setSettingsSection = (section: SettingsSection) => {
@@ -204,7 +248,7 @@ function AppShell() {
     } catch {
       // Ignore storage error
     }
-    syncHash('settings', next);
+    syncRoutePath('settings', next);
   };
 
   const [wahaStatus, setWahaStatus] = useState<WahaStatus | null>(null);
