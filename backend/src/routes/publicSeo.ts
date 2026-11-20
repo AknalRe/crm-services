@@ -10,33 +10,33 @@ const DOCKER_IMAGE = 'ghcr.io/aknalre/crm-services';
 
 export const CRM_SEO_META = {
   name: 'Reneo CRM',
-  fullTitle: 'Reneo CRM — Kotak Masuk WhatsApp & Media Sosial Self-Hosted',
+  fullTitle: 'Reneo CRM — Layanan Pelanggan Terpadu untuk Instagram, WhatsApp & Media Sosial',
   description:
-    'Reneo CRM adalah aplikasi layanan pelanggan self-hosted di server Linux untuk mengelola WhatsApp Multi-Nomor (WAHA QR & Cloud API), Instagram DM & Komentar, Facebook Messenger, Threads, dan Telegram dalam satu kotak masuk tim CS. Dilengkapi pengaturan Role granular, filter Non-Penilaian, Batas Mulai & Selesai Sesi SLA/CSAT, siaran terjadwal, dan Agent AI (OpenAI, Gemini, Anthropic, Ollama, MCP).',
+    'Reneo CRM menyatukan pesan pelanggan dari Instagram, WhatsApp, Facebook, Threads, dan Telegram dalam satu kotak masuk bersama tim CS. Dilengkapi pembagian peran staf, filter chat non-pelanggan agar laporan SLA & kepuasan tetap akurat, promo terjadwal, dan asisten balasan otomatis.',
   keywords:
-    'Reneo CRM, CRM omnichannel, WhatsApp CRM self-hosted, inbox multi admin WhatsApp, WhatsApp Cloud API, WAHA CRM, CSAT multi sesi, SLA customer service, Agent AI MCP, WhatsApp Story terjadwal, CRM toko online Indonesia',
+    'Reneo CRM, CRM omnichannel Indonesia, layanan pelanggan terpadu, kotak masuk Instagram WhatsApp Facebook Threads Telegram, aplikasi CS toko online, laporan SLA dan kepuasan pelanggan',
 };
 
 const CRM_STORY_BEATS = [
   {
     step: 'Kami pernah mengalami',
-    text: 'Chat pelanggan tersebar di banyak HP admin dan akun media sosial; saat staf berganti shift atau perangkat bermasalah, riwayat obrolan terputus, sementara pesan kurir, supplier, dan grup internal bercampur dengan chat pembeli.',
+    text: 'Pesan pembeli tersebar di banyak HP admin dan akun media sosial; saat staf berganti shift atau HP bermasalah, riwayat obrolan terputus, sementara chat kurir, supplier, dan grup kantor bercampur dengan chat pembeli.',
   },
   {
     step: 'Kami menyadari',
-    text: 'Masalah tersebut ternyata bukan sekadar persoalan kecil: ketika percakapan makin ramai, pelanggan menunggu terlalu lama, tim mengulang pertanyaan yang sama, dan laporan respon CS maupun kepuasan layanan menjadi tidak akurat.',
+    text: 'Masalah itu bukan hal sepele: begitu pesan makin ramai, pembeli menunggu terlalu lama lalu pindah ke toko lain, tim menanyakan hal yang sama berulang kali, dan pemilik usaha tidak bisa melihat laporan kecepatan respon yang jujur.',
   },
   {
     step: 'Kami merasa',
-    text: 'Solusi yang tersedia belum menjawab kebutuhan operasional kami — biayanya membengkak seiring jumlah admin dan pesan, data pelanggan bergantung pada server luar, dan chat non-pelanggan masih mengacaukan metrik SLA maupun CSAT.',
+    text: 'Aplikasi lain yang kami coba terasa belum pas untuk operasional harian — biayanya cepat membengkak setiap kali tambah admin atau chat makin ramai, data pelanggan tidak sepenuhnya kami pegang, dan chat non-pelanggan masih mengacaukan laporan tim.',
   },
   {
     step: 'Karena itu, kami membuat Reneo CRM',
-    text: 'Satu kotak masuk self-hosted yang dibangun langsung dari alur kerja nyata tim CS kami sendiri di atas PostgreSQL dan Redis pada server sendiri, bukan sekadar ingin membuat software baru.',
+    text: 'Satu ruang kerja layanan pelanggan yang lahir langsung dari alur kerja nyata tim kami sendiri setiap hari — untuk menyatukan Instagram, WhatsApp, Facebook, Threads, dan Telegram dalam satu layar yang rapi.',
   },
   {
     step: 'Tujuan kami',
-    text: 'Membuat pengelolaan percakapan pelanggan, pembagian tugas tim, batas sesi penanganan, dan evaluasi layanan yang sebelumnya menyulitkan menjadi lebih terstruktur, terukur, dan mudah dilakukan.',
+    text: 'Membuat pengelolaan chat pelanggan, pembagian tugas tim, riwayat percakapan, dan penilaian kualitas layanan yang dulunya melelahkan menjadi jauh lebih tenang, terukur, dan mudah dijalankan setiap hari.',
   },
 ];
 
@@ -47,133 +47,118 @@ const CRM_WHY_WE_BUILT_IT = [
       'Tiap admin memegang perangkat sendiri untuk melayani banyak nomor WhatsApp dan akun media sosial. Begitu admin shift berganti atau staf keluar, riwayat chat lama terputus dan pembeli harus mengulang penjelasan dari awal.',
   },
   {
-    title: 'Chat internal, kurir, dan grup WA mengacaukan laporan SLA',
+    title: 'Chat internal, kurir, dan grup kantor mengacaukan laporan kecepatan tim',
     detail:
-      'Nomor CS harian juga menerima pesan dari kurir, supplier, staf internal, dan grup operasional. Di alat lain, semua ikut masuk hitungan keterlambatan SLA dan malah menerima survei rating CSAT.',
+      'Nomor CS harian juga menerima pesan dari kurir, supplier, staf internal, dan grup operasional. Di alat lain, semua ikut masuk hitungan keterlambatan respon dan malah menerima survei kepuasan.',
   },
   {
     title: 'Sulit memisahkan batas sesi tanpa memutus riwayat pelanggan',
     detail:
-      'Pelanggan lama sering kembali memesan atau bertanya di minggu berikutnya. Riwayat percakapan tetap harus utuh dalam satu utas, tetapi setiap siklus penanganan perlu penanda Batas Mulai Sesi dan Batas Selesai Sesi serta CSAT tersendiri.',
+      'Pelanggan lama sering kembali memesan atau bertanya di minggu berikutnya. Riwayat percakapan tetap harus utuh dalam satu utas, tetapi setiap siklus penanganan perlu penanda batas mulai dan selesai sesi serta penilaian kepuasan tersendiri.',
   },
   {
-    title: 'Biaya per pesan membengkak dan database berada di server luar',
+    title: 'Biaya membengkak saat tim tumbuh dan data pelanggan tidak dipegang penuh',
     detail:
-      'Saat tim CS bertambah, biaya kursi dan biaya per pesan naik, sementara data pelanggan bergantung pada server vendor pihak ketiga. Reneo CRM dibangun untuk berjalan penuh di PostgreSQL dan Redis pada server Anda sendiri.',
+      'Saat tim CS bertambah, biaya kursi dan biaya per pesan ikut melonjak, sementara data pelanggan bergantung pada pihak luar. Reneo CRM dirancang dengan paket yang jelas dan kepemilikan data 100% di tangan usaha Anda.',
   },
 ];
 
 const CRM_USE_CASES = [
   {
-    segment: 'Toko Online & Multi-Nomor WhatsApp',
-    problem: 'Chat dari Nomor Admin A dan Cabang B tercampur atau nama kontak berubah mengikuti push name terbaru.',
-    solution: 'Percakapan dipisah per nomor WA & push name, namun tetap tertaut ke 1 profil kontak CRM tunggal.',
+    segment: 'Toko Online & Banyak Kanal Penjualan',
+    problem: 'Chat dari Instagram, WhatsApp cabang, dan Facebook tercampur sehingga pembeli sering terlewat atau dibalas dobel.',
+    solution: 'Semua kanal masuk ke satu kotak masuk rapi namun tetap terpisah jelas berdasarkan asal kanal & profil pelanggan.',
   },
   {
-    segment: 'Tim Multi-CS dengan Kebutuhan Role Ketat',
-    problem: 'Staf baru berisiko menghapus kontak, mengunduh CSV database, membuka chat agen lain, atau mengubah WAHA.',
-    solution: 'Builder Role custom menyediakan pembatasan izin granular per menu hingga level tombol dan endpoint API.',
+    segment: 'Tim Multi-CS dengan Kebutuhan Kontrol Ketat',
+    problem: 'Staf baru berisiko menghapus kontak, mengunduh daftar pelanggan, atau membuka obrolan agen lain.',
+    solution: 'Pembagian peran staf mengatur izin akses per menu dan aksi agar data pelanggan tetap aman.',
   },
   {
-    segment: 'Grup WhatsApp & Chat Internal Mengacaukan Laporan',
-    problem: 'Pesan grup operasional, kurir, atau vendor merusak metrik SLA dan memicu survei CSAT otomatis.',
-    solution: 'Grup WA (@g.us) & kontak Non-Penilaian otomatis dikecualikan dari SLA, Status, Penugasan, dan CSAT.',
+    segment: 'Grup Kantor & Chat Kurir Mengacaukan Laporan',
+    problem: 'Pesan grup operasional, kurir, atau vendor merusak laporan kecepatan respon dan memicu survei kepuasan.',
+    solution: 'Grup dan kontak non-pelanggan bisa ditandai Non-Penilaian sekali agar otomatis dikecualikan dari laporan SLA & survei.',
   },
 ];
 
 const CRM_CHANNELS = [
-  { name: 'WhatsApp (Multi-Nomor QR / WAHA)', mode: 'Chat, Grup & Story WA', detail: 'Hubungkan banyak nomor WA sekaligus, tampilkan daftar partisipan grup @g.us, dan jadwalkan WhatsApp Story ke kontak terpilih.' },
-  { name: 'WhatsApp Business Cloud API (Meta)', mode: 'API Resmi', detail: 'Kirim pesan interaktif, template resmi, dan kelola percakapan bisnis skala tim tanpa batasan sesi lokal.' },
-  { name: 'Instagram', mode: 'DM, Feed & Komentar', detail: 'Balas Direct Message, jadwalkan unggahan feed, dan otomasi balasan DM dari komentar iklan/postingan.' },
-  { name: 'Facebook Messenger & Page', mode: 'Messenger & Komentar', detail: 'Kelola pesan masuk halaman bisnis, jadwal post Page, serta interaksi komentar dalam satu inbox.' },
-  { name: 'Threads', mode: 'Post & Mentions', detail: 'Jadwalkan utas Threads dan pantau komentar akun usaha terpusat.' },
-  { name: 'Telegram', mode: 'Bot Bisnis & Channel', detail: 'Terima pertanyaan pelanggan melalui bot Telegram dan publikasikan pembaruan ke channel.' },
+  { name: 'Instagram', mode: 'DM, Feed & Komentar', detail: 'Balas Direct Message, jadwalkan unggahan, dan ubah komentar iklan atau postingan langsung jadi obrolan penjualan.' },
+  { name: 'WhatsApp', mode: 'Multi-Nomor, Bisnis & Story', detail: 'Satukan banyak nomor WhatsApp cabang dan tim CS dalam satu layar bersama, lengkap dengan jadwal promo dan Story.' },
+  { name: 'Facebook Messenger & Page', mode: 'Pesan Halaman & Komentar', detail: 'Kelola pesan masuk halaman bisnis, jadwal konten, serta interaksi komentar dalam satu kotak masuk.' },
+  { name: 'Threads', mode: 'Utas & Interaksi', detail: 'Jadwalkan utas rutin dan pantau interaksi audiens merek Anda bersama kanal komunikasi lainnya.' },
+  { name: 'Telegram', mode: 'Pesan Pelanggan & Channel', detail: 'Layani pertanyaan pembeli, mitra, atau reseller melalui Telegram langsung dari kotak masuk utama.' },
 ];
 
 const CRM_CAPABILITIES = [
   {
-    title: 'Multi-CS Role & Batasan Akses Granular',
-    detail: 'Atur hak akses per menu hingga tombol (lihat semua chat vs milik sendiri, balas/kelola tiket, ekspor CSV, edit kontak, siaran, hingga pengaturan WAHA).',
+    title: 'Satu Kotak Masuk untuk Semua Kanal',
+    detail: 'Satukan pesan dari Instagram, WhatsApp, Facebook, Threads, dan Telegram di satu layar tanpa perlu gonta-ganti HP atau aplikasi.',
   },
   {
-    title: 'Kontrol Penilaian SLA, CSAT Multi-Sesi & Filter Non-Penilaian',
-    detail: 'Catat batas mulai dan batas selesai setiap sesi tanpa mereset riwayat pesan, kirim survei CSAT per sesi selesai, dan kecualikan grup WA maupun kontak internal/vendor melalui status Non-Penilaian.',
+    title: 'Pembagian Tugas & Kontrol Akses Tim CS',
+    detail: 'Atur staf mana yang bisa melihat semua chat atau hanya miliknya, batasi ekspor data pelanggan, dan jaga riwayat tetap aman saat pergantian shift.',
   },
   {
-    title: 'Analitik Dashboard Klik-untuk-Detail (Drilldown)',
-    detail: 'Telusuri kartu KPI, tren harian, jam sibuk, funnel siaran, performa CS, dan skor CSAT langsung ke daftar obrolan serta segmen chat terkait.',
+    title: 'Laporan Kecepatan Respon & Survei Kepuasan yang Jujur',
+    detail: 'Pantau kecepatan balas tim dan rating pelanggan per sesi, sambil mengecualikan grup kantor, kurir, atau vendor agar angka laporan tetap akurat.',
   },
   {
-    title: 'Siaran Terjadwal Anti-Ban, Katalog Produk & WhatsApp Story',
-    detail: 'Kirim siaran terjadwal multi-sesi dengan jeda natural, bagikan Quick Quote produk langsung di chat, dan jadwalkan WhatsApp Story dengan pembacaan daftar penonton.',
+    title: 'Siaran Promo Terjadwal & Katalog Produk Siap Kirim',
+    detail: 'Kirim info promo ke pelanggan lama dengan jeda kirim yang aman, dan bagikan harga serta detail produk dalam sekali klik.',
   },
   {
-    title: 'Agent AI Multi-Model, Knowledge Book & MCP Tools',
-    detail: 'Hubungkan OpenAI, Gemini, Anthropic, atau Ollama lokal dengan buku panduan Markdown, skill, serta MCP server eksternal dan sistem failover otomatis.',
-  },
-  {
-    title: 'Self-Hosted 100% di Server Sendiri',
-    detail: 'Data pelanggan dan riwayat chat tersimpan utuh di PostgreSQL dan Redis pada server Anda sendiri (image Docker ghcr.io/aknalre/crm-services), tanpa biaya tambahan per pesan dari panel.',
+    title: 'Asisten Balasan Otomatis 24 Jam',
+    detail: 'Bantu menjawab pertanyaan umum pembeli di luar jam kerja berdasarkan panduan produk usaha Anda, lalu teruskan ke tim CS bila diperlukan.',
   },
 ];
 
 const CRM_COMPARISON = [
   {
-    aspect: 'Kotak masuk 6 kanal (WA QR, WA Cloud, IG, FB, Threads, Telegram)',
-    manual: 'Buka banyak HP dan aplikasi terpisah',
-    saas: 'Tersedia, umumnya dibatasi kuota kanal & kursi mahal',
-    reneo: '6 kanal + multi-nomor WA dalam satu layar tanpa biaya kursi per pesan panel',
+    aspect: 'Mengelola banyak kanal sekaligus',
+    manual: 'Buka HP dan aplikasi satu per satu, chat mudah terlewat',
+    saas: 'Tersedia, tetapi sering dibatasi kuota kanal & biaya tambah admin tinggi',
+    reneo: 'Instagram, WhatsApp, Facebook, Threads & Telegram menyatu di satu layar',
   },
   {
-    aspect: 'Role CS Custom (pembatasan menu, aksi & ekspor data)',
-    manual: 'Semua staf pegang akses penuh',
-    saas: 'Biasanya terkunci di paket Enterprise mahal',
-    reneo: 'Termasuk builder Role & izin granular bawaan',
+    aspect: 'Keamanan & kepemilikan data pelanggan',
+    manual: 'Rawan hilang saat HP rusak atau staf keluar',
+    saas: 'Data tersimpan di tempat penyedia luar',
+    reneo: 'Data pelanggan tersimpan aman di ruang milik usaha Anda sendiri',
   },
   {
-    aspect: 'Pengecualian grup WA & kontak Non-Penilaian pada laporan SLA/CSAT',
-    manual: 'Sulit dipilah manual di spreadsheet',
-    saas: 'Chat non-pelanggan sering ikut menghitung SLA',
-    reneo: 'Otomatis mengecualikan grup WA (@g.us) & kontak berstatus Non-Penilaian',
+    aspect: 'Kebersihan laporan kecepatan & kepuasan CS',
+    manual: 'Harus rekap manual dan sulit objektif',
+    saas: 'Chat kurir, vendor, atau grup kantor ikut mengacaukan angka laporan',
+    reneo: 'Bisa menandai chat non-pelanggan agar laporan SLA & kepuasan tetap akurat',
   },
   {
-    aspect: 'Kepemilikan data pelanggan & privasi',
-    manual: 'Risiko chat hilang bila HP rusak / staf keluar',
-    saas: 'Data bergantung server pihak ketiga',
-    reneo: '100% tersimpan di database PostgreSQL/Redis server Anda sendiri',
-  },
-  {
-    aspect: 'Analitik Drilldown + Agent AI Multi-Model & MCP',
-    manual: 'Tidak tersedia',
-    saas: 'Umumnya biaya add-on terpisah',
-    reneo: 'Bawaan langsung dan mendukung API key sendiri / Ollama lokal',
+    aspect: 'Pengeluaran saat tim & chat bertambah',
+    manual: 'Harus beli HP tambahan untuk tiap admin baru',
+    saas: 'Biaya berlipat mengikuti jumlah admin dan jumlah pesan',
+    reneo: 'Paket jelas & terjangkau tanpa biaya tambahan per pesan dari panel',
   },
 ];
 
 const CRM_FAQS = [
   {
-    q: 'Apa itu Reneo CRM?',
-    a: 'Reneo CRM adalah aplikasi layanan pelanggan (CRM) omnichannel self-hosted yang menyatukan WhatsApp Multi-Nomor (WAHA QR), WhatsApp Business Cloud API, Instagram, Facebook Messenger, Threads, dan Telegram ke satu ruang kerja tim CS.',
+    q: 'Apakah saya harus mengerti hal teknis untuk mulai memakai Reneo CRM?',
+    a: 'Tidak perlu. Anda bisa langsung mendaftar akun CRM baru untuk segera mencoba gratis 7 hari, atau memesan paket Hosting + CRM siap pakai.',
   },
   {
-    q: 'Apakah bisa memakai banyak nomor WhatsApp QR dan WhatsApp Cloud API sekaligus?',
-    a: 'Ya. Percakapan pelanggan dipisahkan berdasarkan sesi WA / kanal sumbernya dengan push name masing-masing, tetapi tetap terhubung ke satu profil kontak CRM terpadu.',
+    q: 'Apakah Reneo CRM hanya untuk WhatsApp saja?',
+    a: 'Tidak. Reneo CRM dirancang untuk menyatukan seluruh percakapan pelanggan Anda — mulai dari Instagram DM & komentar, Facebook Messenger, Threads, Telegram, hingga banyak nomor WhatsApp dalam satu ruang kerja.',
   },
   {
-    q: 'Bagaimana agar grup WhatsApp atau chat tim internal tidak merusak laporan SLA dan CSAT?',
-    a: 'Obrolan grup WhatsApp otomatis berstatus Non-Penilaian dengan daftar partisipan tetap terlihat. Kontak internal atau vendor dapat ditandai Non-Penilaian sekali agar percakapan berikutnya otomatis dikecualikan dari SLA, Status, Penugasan, dan CSAT.',
+    q: 'Apakah riwayat chat pelanggan aman jika ada admin yang berganti shift atau resign?',
+    a: 'Ya. Seluruh riwayat percakapan, catatan internal, dan profil pelanggan tersimpan terpusat. Anda cukup mengganti akses staf tanpa pernah kehilangan riwayat obrolan lama.',
   },
   {
-    q: 'Bagaimana sistem sesi dan survei CSAT bekerja tanpa menghapus riwayat chat?',
-    a: 'Riwayat chat dipertahankan utuh dalam satu utas dengan penanda Batas Mulai Sesi dan Batas Selesai Sesi per siklus tiket. Setiap sesi yang selesai dapat memicu survei CSAT multi-kriteria baru beserta penyorotan segmen pesan terkait.',
+    q: 'Bagaimana jika nomor CS juga sering dipakai untuk chat kurir atau grup kantor?',
+    a: 'Anda dapat menandai kontak tertentu maupun grup kantor sebagai Non-Penilaian. Obrolan tetap bisa dibalas seperti biasa, tetapi tidak akan mengganggu laporan kecepatan respon dan tidak dikirimi survei kepuasan.',
   },
   {
-    q: 'Apakah data dan biaya per pesan dikendalikan sendiri?',
-    a: 'Ya. Aplikasi dijalankan di server Linux sendiri atau paket Hosting Reneo memakai image Docker ghcr.io/aknalre/crm-services, PostgreSQL, dan Redis tanpa biaya tambahan per pesan dari panel Reneo.',
-  },
-  {
-    q: 'Bagaimana cara mendapatkan atau memasang Reneo CRM?',
-    a: `Anda dapat memesan paket Hosting + Reneo CRM siap pakai dengan trial 7 hari melalui ${PANEL_ORDER_URL}, atau memasang panel Reneo di server Linux pribadi lewat ${PANEL_INSTALL_URL}.`,
+    q: 'Bagaimana cara mulai berlangganan atau memesan Reneo CRM?',
+    a: `Ada 2 pilihan mudah: (1) Daftar Akun CRM Baru langsung di halaman masuk untuk mulai coba gratis 7 hari, atau (2) Order Hosting + CRM melalui ${PANEL_ORDER_URL}.`,
   },
 ];
 
@@ -322,27 +307,24 @@ function buildSemanticHtmlBody(baseUrl: string): string {
 
   return `<main style="max-width:960px;margin:0 auto;padding:32px 20px;font-family:Inter,system-ui,-apple-system,sans-serif;line-height:1.6;color:#0f172a">
   <header>
-    <p><strong>${escapeHtml(CRM_SEO_META.name)}</strong> · Self-Hosted CRM · PostgreSQL &amp; Redis</p>
-    <h1>Satu Kotak Masuk WhatsApp &amp; Media Sosial untuk Tim Customer Service</h1>
+    <p><strong>${escapeHtml(CRM_SEO_META.name)}</strong> · Instagram · WhatsApp · Facebook · Threads · Telegram</p>
+    <h1>Jangan Biarkan Pembeli Kabur Cuma Karena Chat Tercecer di Banyak HP</h1>
     <p>${escapeHtml(CRM_SEO_META.description)}</p>
     <nav aria-label="Tautan Penting">
       <a href="${escapeHtml(rootUrl)}">Beranda</a> ·
-      <a href="${escapeHtml(landingUrl)}">Profil Produk</a> ·
-      <a href="${escapeHtml(baseUrl)}/login">Masuk CRM</a> ·
-      <a href="${escapeHtml(baseUrl)}/llms.txt">Ringkasan AI (llms.txt)</a> ·
-      <a href="${escapeHtml(PANEL_ORDER_URL)}">Beli Hosting + CRM &amp; Lisensi</a> ·
-      <a href="${escapeHtml(PANEL_INSTALL_URL)}">Pasang di Server Sendiri</a>
+      <a href="${escapeHtml(baseUrl)}/login">Daftar Akun CRM Baru / Masuk</a> ·
+      <a href="${escapeHtml(PANEL_ORDER_URL)}">Order Hosting + CRM</a> ·
+      <a href="${escapeHtml(baseUrl)}/llms.txt">Ringkasan AI (llms.txt)</a>
     </nav>
   </header>
   <section id="kenapa-dibuat">
     <h2>Kenapa Kami Membuat Reneo CRM</h2>
-    <p>Reneo CRM tidak dibuat karena ingin membuat software baru, melainkan lahir dari pengalaman nyata tim kami sendiri saat mengelola chat pelanggan setiap hari.</p>
+    <p>Reneo CRM tidak dibuat karena sekadar ingin meluncurkan software baru, melainkan lahir dari pengalaman nyata tim kami sendiri saat melayani pelanggan setiap hari.</p>
     <ul>${storyHtml}</ul>
     <ul>${whyHtml}</ul>
-    <p>Dari pengalaman itulah detail seperti status Non-Penilaian untuk grup WA dan kontak internal, penanda Batas Mulai &amp; Selesai Sesi, serta pembatasan izin hingga level tombol menjadi pondasi utama aplikasi ini.</p>
   </section>
   <section id="modul">
-    <h2>Modul Kerja &amp; Arsitektur Sistem CRM</h2>
+    <h2>Cara Kerja Reneo CRM</h2>
     <ul>${capsHtml}</ul>
   </section>
   <section id="studi-kasus">
@@ -353,22 +335,21 @@ function buildSemanticHtmlBody(baseUrl: string): string {
     </table>
   </section>
   <section id="kanal">
-    <h2>6 Kanal Komunikasi Terhubung</h2>
+    <h2>Semua Kanal Komunikasi Terhubung</h2>
     <ul>${channelsHtml}</ul>
   </section>
   <section id="perbandingan">
-    <h2>Perbandingan Cara Manual vs CRM Cloud Lain vs Reneo CRM</h2>
+    <h2>Perbandingan Cara Manual vs Aplikasi Lain vs Reneo CRM</h2>
     <table>
-      <thead><tr><th>Aspek</th><th>Manual</th><th>CRM Cloud Lain</th><th>Reneo CRM</th></tr></thead>
+      <thead><tr><th>Aspek</th><th>Manual</th><th>Aplikasi Lain</th><th>Reneo CRM</th></tr></thead>
       <tbody>${compHtml}</tbody>
     </table>
   </section>
   <section id="aktivasi">
-    <h2>Mulai Beroperasi dalam 3 Langkah</h2>
+    <h2>2 Cara Mulai Memakai Reneo CRM</h2>
     <ol>
-      <li><strong>Pilih Hosting Siap Pakai atau Server Sendiri</strong>: Pesan paket Hosting + Reneo CRM atau pasang image Docker di server Linux pribadi.</li>
-      <li><strong>Setup Akun &amp; Aktifkan Lisensi (Trial 7 Hari)</strong>: Buat akun admin utama dan aktifkan masa uji coba 7 hari atau paket lisensi.</li>
-      <li><strong>Sambungkan Kanal, Sinkron Kontak &amp; Atur Role CS</strong>: Scan QR multi-nomor WA, sambungkan akun medsos, dan atur hak akses staf.</li>
+      <li><strong>Daftar Akun CRM Baru</strong>: Buat ruang kerja usaha Anda langsung di <a href="${escapeHtml(baseUrl)}/login">${escapeHtml(baseUrl)}/login</a> dan mulai uji coba gratis 7 hari.</li>
+      <li><strong>Order Hosting + CRM</strong>: Pesan paket Hosting + Reneo CRM sekaligus di <a href="${escapeHtml(PANEL_ORDER_URL)}">${escapeHtml(PANEL_ORDER_URL)}</a>.</li>
     </ol>
   </section>
   <section id="faq">
@@ -376,16 +357,14 @@ function buildSemanticHtmlBody(baseUrl: string): string {
     ${faqHtml}
   </section>
   <footer>
-    <p>Bagian dari <a href="${escapeHtml(PANEL_URL)}">Reneo Panel</a> · Image Docker: <code>${escapeHtml(DOCKER_IMAGE)}</code></p>
+    <p>Bagian dari <a href="${escapeHtml(PANEL_URL)}">Reneo Panel</a> · Layanan Pelanggan Terpadu</p>
   </footer>
 </main>`;
 }
 
 function renderLandingHtmlDocument(req: FastifyRequest): string {
   const { baseUrl } = resolvePublicOriginAndBase(req);
-  const reqPath = req.url.split('?')[0].toLowerCase();
-  const isLanding = reqPath.endsWith('/landing') || reqPath.endsWith('/landing/');
-  const canonicalUrl = isLanding ? `${baseUrl}/landing` : `${baseUrl}/`;
+  const canonicalUrl = `${baseUrl}/`;
   const llmsUrl = `${baseUrl}/llms.txt`;
   const logoUrl = `${baseUrl}/logo.svg`;
   const jsonLd = JSON.stringify(buildJsonLd(baseUrl)).replace(/<\//g, '<\\/');
