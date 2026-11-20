@@ -10,14 +10,16 @@ import {
 } from '../db/schema';
 import {
   AgentToolRegistry,
+  AiQueuedOutboundMedia,
   AiToolCallTrace,
+  BUILTIN_CRM_TOOLS,
   McpServerConfigRecord,
   buildAgentToolRegistry,
   loadActiveMcpServers,
   sanitizeSchemaForGemini,
 } from './mcpClient.service';
 
-export type { AiToolCallTrace } from './mcpClient.service';
+export type { AiQueuedOutboundMedia, AiToolCallTrace } from './mcpClient.service';
 
 export type AiProviderId =
   | 'OPENAI'
@@ -94,12 +96,20 @@ export interface AiAgentConfig {
   fallbackToLocalKb: boolean;
   temperature: number;
   maxTokens: number;
+  contextLength?: number;
+  maxHistoryMessages?: number;
   timeoutMs: number;
 }
 
 export interface AiConversationTurn {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
+  timestamp?: string;
+  imageUrl?: string | null;
+  mediaName?: string | null;
+  mediaType?: string | null;
+  replyToMessageId?: string | null;
 }
 
 export interface AiAttemptTrace {
@@ -124,6 +134,9 @@ export interface AiGenerationResult {
   matchedKb: boolean;
   attempts: AiAttemptTrace[];
   toolCalls: AiToolCallTrace[];
+  outboundMedia?: AiQueuedOutboundMedia[];
+  replyToMessageId?: string | null;
+  replyToPreview?: string | null;
 }
 
 export const AI_PROVIDER_CATALOG: AiProviderCatalogEntry[] = [
@@ -298,12 +311,7 @@ const VALID_TONES = new Set(['PROFESSIONAL', 'FRIENDLY', 'FORMAL', 'CASUAL', 'EM
 const VALID_LANGUAGES = new Set(['INDONESIAN', 'ENGLISH', 'BILINGUAL', 'MATCH_USER']);
 const VALID_LENGTHS = new Set(['CONCISE', 'BALANCED', 'DETAILED']);
 const VALID_EMOJI = new Set(['NONE', 'MINIMAL', 'MODERATE']);
-const VALID_BUILTIN_TOOL_NAMES = new Set([
-  'crm_search_products',
-  'crm_search_knowledge',
-  'crm_get_customer_info',
-  'crm_escalate_to_human',
-]);
+const VALID_BUILTIN_TOOL_NAMES = new Set(BUILTIN_CRM_TOOLS.map((t) => t.name));
 
 export const DEFAULT_AI_CONFIG: AiAgentConfig = {
   enabled: false,
@@ -314,7 +322,18 @@ export const DEFAULT_AI_CONFIG: AiAgentConfig = {
     'Utamakan menjawab inti pertanyaan pelanggan terlebih dahulu dengan bahasa yang jelas, sopan, dan terstruktur.\nArahkan pelanggan ke langkah berikutnya bila ingin melakukan pemesanan atau konsultasi lebih lanjut.',
   negativePrompt:
     'Jangan mengarang harga, promo, diskon, atau kebijakan yang tidak tertulis di Knowledge Book atau Katalog Produk.\nJangan meminta kata sandi, PIN, atau OTP pelanggan.\nJangan menjelekkan kompetitor atau memberikan janji garansi di luar kebijakan tertulis.',
-  enabledBuiltinTools: ['crm_search_products', 'crm_search_knowledge'],
+  enabledBuiltinTools: [
+    'crm_search_products',
+    'crm_search_knowledge',
+    'crm_get_customer_info',
+    'crm_get_chat_history',
+    'crm_inspect_customer_media',
+    'crm_list_gallery_media',
+    'crm_send_media',
+    'crm_reply_to_message',
+    'crm_update_customer_profile',
+    'crm_escalate_to_human',
+  ],
   autoReplyDm: false,
   autoReplyComment: false,
   provider: 'LOCAL_KB',
@@ -324,7 +343,9 @@ export const DEFAULT_AI_CONFIG: AiAgentConfig = {
   fallbacks: [],
   fallbackToLocalKb: true,
   temperature: 0.4,
-  maxTokens: 800,
+  maxTokens: 2048,
+  contextLength: 32768,
+  maxHistoryMessages: 20,
   timeoutMs: 15000,
 };
 
@@ -497,8 +518,19 @@ function sanitizeStoredConfig(raw: any): AiAgentConfig {
         ? Boolean(raw.fallbackToLocalKb)
         : DEFAULT_AI_CONFIG.fallbackToLocalKb,
     temperature: clampNumber(raw?.temperature, DEFAULT_AI_CONFIG.temperature, 0, 1.5),
-    maxTokens: Math.round(clampNumber(raw?.maxTokens, DEFAULT_AI_CONFIG.maxTokens, 64, 4096)),
-    timeoutMs: Math.round(clampNumber(raw?.timeoutMs, DEFAULT_AI_CONFIG.timeoutMs, 3000, 60000)),
+    maxTokens: Math.round(clampNumber(raw?.maxTokens, DEFAULT_AI_CONFIG.maxTokens, 64, 131072)),
+    contextLength: Math.round(
+      clampNumber(raw?.contextLength, DEFAULT_AI_CONFIG.contextLength || 32768, 2048, 2097152)
+    ),
+    maxHistoryMessages: Math.round(
+      clampNumber(
+        raw?.maxHistoryMessages,
+        DEFAULT_AI_CONFIG.maxHistoryMessages || 20,
+        1,
+        100
+      )
+    ),
+    timeoutMs: Math.round(clampNumber(raw?.timeoutMs, DEFAULT_AI_CONFIG.timeoutMs, 3000, 180000)),
   };
 }
 
@@ -617,7 +649,27 @@ export function mergeAiAgentConfig(prev: AiAgentConfig, incoming: Partial<AiAgen
         incoming?.maxTokens !== undefined ? incoming.maxTokens : prev.maxTokens,
         DEFAULT_AI_CONFIG.maxTokens,
         64,
-        4096
+        131072
+      )
+    ),
+    contextLength: Math.round(
+      clampNumber(
+        incoming?.contextLength !== undefined
+          ? incoming.contextLength
+          : prev.contextLength ?? DEFAULT_AI_CONFIG.contextLength ?? 32768,
+        DEFAULT_AI_CONFIG.contextLength || 32768,
+        2048,
+        2097152
+      )
+    ),
+    maxHistoryMessages: Math.round(
+      clampNumber(
+        incoming?.maxHistoryMessages !== undefined
+          ? incoming.maxHistoryMessages
+          : prev.maxHistoryMessages ?? DEFAULT_AI_CONFIG.maxHistoryMessages ?? 20,
+        DEFAULT_AI_CONFIG.maxHistoryMessages || 20,
+        1,
+        100
       )
     ),
     timeoutMs: Math.round(
@@ -625,7 +677,7 @@ export function mergeAiAgentConfig(prev: AiAgentConfig, incoming: Partial<AiAgen
         incoming?.timeoutMs !== undefined ? incoming.timeoutMs : prev.timeoutMs,
         DEFAULT_AI_CONFIG.timeoutMs,
         3000,
-        60000
+        180000
       )
     ),
   };
@@ -1071,20 +1123,54 @@ function isToolsUnsupportedError(err: any): boolean {
   );
 }
 
-const MAX_TOOL_ROUNDS = 4;
+function parseDataUriImage(raw?: string | null): { mimeType: string; base64: string } | null {
+  const trimmed = String(raw || '').trim();
+  const match = trimmed.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
+  if (!match) return null;
+  return { mimeType: match[1].toLowerCase(), base64: match[2].trim() };
+}
+
+function isVisionUnsupportedError(err: any): boolean {
+  const status = err?.response?.status;
+  if (status !== 400 && status !== 422) return false;
+  const msg = String(
+    err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || ''
+  ).toLowerCase();
+  return (
+    msg.includes('image_url') ||
+    msg.includes('image') ||
+    msg.includes('vision') ||
+    msg.includes('multimodal') ||
+    msg.includes('content must be a string')
+  );
+}
+
+const MAX_TOOL_ROUNDS = 5;
 
 async function invokeExternalModelTarget(params: {
   target: ExecutionTarget;
   systemPrompt: string;
   history: AiConversationTurn[];
   message: string;
+  imageUrl?: string | null;
   temperature: number;
   maxTokens: number;
+  contextLength?: number;
   timeoutMs: number;
   toolRegistry?: AgentToolRegistry;
 }): Promise<{ reply: string; toolCalls: AiToolCallTrace[] }> {
-  const { target, systemPrompt, history, message, temperature, maxTokens, timeoutMs, toolRegistry } =
-    params;
+  const {
+    target,
+    systemPrompt,
+    history,
+    message,
+    imageUrl,
+    temperature,
+    maxTokens,
+    contextLength,
+    timeoutMs,
+    toolRegistry,
+  } = params;
   const entry = getProviderEntry(target.provider);
 
   if (entry.requiresBaseUrl && !target.baseUrl) {
@@ -1101,14 +1187,28 @@ async function invokeExternalModelTarget(params: {
 
   if (entry.protocol === 'gemini') {
     const cleanModel = modelName.replace(/^models\//, '');
+    const buildGeminiParts = (text: string, img?: string | null) => {
+      const parts: any[] = [{ text: text || '(lampiran gambar)' }];
+      const parsedImg = parseDataUriImage(img);
+      if (parsedImg) {
+        parts.push({
+          inlineData: {
+            mimeType: parsedImg.mimeType,
+            data: parsedImg.base64,
+          },
+        });
+      }
+      return parts;
+    };
+
     const contents: any[] = [
       ...history
-        .filter((h) => h.content.trim())
+        .filter((h) => h.content.trim() || h.imageUrl)
         .map((h) => ({
           role: h.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: h.content }],
+          parts: buildGeminiParts(h.content, h.imageUrl),
         })),
-      { role: 'user', parts: [{ text: message }] },
+      { role: 'user', parts: buildGeminiParts(message, imageUrl) },
     ];
 
     const geminiTools =
@@ -1151,6 +1251,7 @@ async function invokeExternalModelTarget(params: {
       if (fnCalls.length > 0 && toolRegistry && round < MAX_TOOL_ROUNDS) {
         contents.push({ role: 'model', parts });
         const fnResponses: any[] = [];
+        const prevInspectedCount = toolRegistry.sideEffects.inspectedImages.length;
         for (const callPart of fnCalls) {
           const fnName = String(callPart.functionCall.name);
           const fnArgs = parseSafeJsonArgs(callPart.functionCall.args);
@@ -1162,6 +1263,18 @@ async function invokeExternalModelTarget(params: {
               response: { result: execRes.output },
             },
           });
+        }
+        const newImages = toolRegistry.sideEffects.inspectedImages.slice(prevInspectedCount);
+        for (const img of newImages) {
+          const parsed = parseDataUriImage(img.dataUri);
+          if (parsed) {
+            fnResponses.push({
+              inlineData: {
+                mimeType: parsed.mimeType,
+                data: parsed.base64,
+              },
+            });
+          }
         }
         contents.push({ role: 'user', parts: fnResponses });
         continue;
@@ -1179,6 +1292,24 @@ async function invokeExternalModelTarget(params: {
 
   if (entry.protocol === 'anthropic') {
     const messages: any[] = normalizeAnthropicMessages(history, message);
+    const parsedLatestImg = parseDataUriImage(imageUrl);
+    if (parsedLatestImg && messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg.role === 'user') {
+        lastMsg.content = [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: parsedLatestImg.mimeType,
+              data: parsedLatestImg.base64,
+            },
+          },
+          { type: 'text', text: typeof lastMsg.content === 'string' ? lastMsg.content : message },
+        ];
+      }
+    }
+
     const anthropicTools =
       toolDefs.length > 0
         ? toolDefs.map((t) => ({
@@ -1256,11 +1387,31 @@ async function invokeExternalModelTarget(params: {
     headers['X-Title'] = 'Reneo CRM';
   }
 
-  const messages: any[] = [
+  const buildOpenAiUserContent = (text: string, img?: string | null, useVision = true): any => {
+    if (!useVision || !img) return text;
+    return [
+      { type: 'text', text: text || 'Mohon periksa gambar lampiran ini.' },
+      { type: 'image_url', image_url: { url: img } },
+    ];
+  };
+
+  let allowVision = Boolean(imageUrl || history.some((h) => Boolean(h.imageUrl)));
+
+  const buildOpenAiInitialMessages = (useVision: boolean) => [
     { role: 'system', content: systemPrompt },
-    ...history.filter((h) => h.content.trim()),
-    { role: 'user', content: message },
+    ...history
+      .filter((h) => h.content.trim() || h.imageUrl)
+      .map((h) => ({
+        role: h.role,
+        content:
+          h.role === 'user'
+            ? buildOpenAiUserContent(h.content, h.imageUrl, useVision)
+            : h.content,
+      })),
+    { role: 'user', content: buildOpenAiUserContent(message, imageUrl, useVision) },
   ];
+
+  let messages: any[] = buildOpenAiInitialMessages(allowVision);
 
   const openaiTools =
     toolDefs.length > 0
@@ -1275,6 +1426,8 @@ async function invokeExternalModelTarget(params: {
       : undefined;
 
   let allowTools = Boolean(openaiTools);
+  const isOllamaEndpoint =
+    target.provider === 'CUSTOM_OPENAI' && /:11434(\/|$)/i.test(baseUrl);
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const payload: Record<string, unknown> = {
@@ -1289,6 +1442,10 @@ async function invokeExternalModelTarget(params: {
       payload.max_tokens = maxTokens;
     }
 
+    if (isOllamaEndpoint && contextLength && contextLength >= 2048) {
+      payload.options = { num_ctx: contextLength };
+    }
+
     if (allowTools && openaiTools && round < MAX_TOOL_ROUNDS) {
       payload.tools = openaiTools;
     }
@@ -1300,7 +1457,15 @@ async function invokeExternalModelTarget(params: {
         timeout: timeoutMs,
       });
     } catch (reqErr: any) {
-      if (allowTools && round === 0 && isToolsUnsupportedError(reqErr)) {
+      if (allowVision && round === 0 && isVisionUnsupportedError(reqErr)) {
+        allowVision = false;
+        messages = buildOpenAiInitialMessages(false);
+        payload.messages = messages;
+        res = await axios.post(`${baseUrl}/chat/completions`, payload, {
+          headers,
+          timeout: timeoutMs,
+        });
+      } else if (allowTools && round === 0 && isToolsUnsupportedError(reqErr)) {
         allowTools = false;
         delete payload.tools;
         res = await axios.post(`${baseUrl}/chat/completions`, payload, {
@@ -1321,6 +1486,7 @@ async function invokeExternalModelTarget(params: {
         content: msgObj?.content ?? null,
         tool_calls: rawToolCalls,
       });
+      const prevInspected = toolRegistry.sideEffects.inspectedImages.length;
       for (const tc of rawToolCalls) {
         const fnName = String(tc?.function?.name || '');
         const fnArgs = parseSafeJsonArgs(tc?.function?.arguments);
@@ -1330,6 +1496,22 @@ async function invokeExternalModelTarget(params: {
           role: 'tool',
           tool_call_id: tc.id || `call_${Date.now()}`,
           content: execRes.output,
+        });
+      }
+      const newlyInspected = toolRegistry.sideEffects.inspectedImages.slice(prevInspected);
+      if (allowVision && newlyInspected.length > 0) {
+        messages.push({
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Berikut lampiran gambar pelanggan (${newlyInspected.map((i) => i.label || 'foto').join(', ')}) untuk dianalisis:`,
+            },
+            ...newlyInspected.map((img) => ({
+              type: 'image_url',
+              image_url: { url: img.dataUri },
+            })),
+          ],
         });
       }
       continue;
@@ -1477,7 +1659,11 @@ export async function generateAiAgentReply(
   message: string,
   options?: {
     history?: AiConversationTurn[];
+    imageUrl?: string | null;
+    mediaName?: string | null;
+    replyToMessageId?: string | null;
     contactName?: string | null;
+    contactPhone?: string | null;
     channel?: string | null;
     conversationId?: string | null;
     isComment?: boolean;
@@ -1541,6 +1727,25 @@ export async function generateAiAgentReply(
       ? options.mcpServersOverride
       : await loadActiveMcpServers();
 
+  const effectiveContextLength = clampNumber(cfg.contextLength, 32768, 2048, 2097152);
+  const maxHistoryTurns = clampNumber(cfg.maxHistoryMessages, 20, 1, 100);
+  const rawHistory = (options?.history || []).slice(-maxHistoryTurns);
+
+  // Trim history characters so history + KB fit comfortably inside contextLength
+  const maxHistoryCharBudget = Math.max(4000, Math.floor(effectiveContextLength * 1.8));
+  let usedHistoryChars = 0;
+  const trimmedHistoryReversed: AiConversationTurn[] = [];
+  for (let i = rawHistory.length - 1; i >= 0; i--) {
+    const turn = rawHistory[i];
+    const len = (turn.content || '').length;
+    if (trimmedHistoryReversed.length > 0 && usedHistoryChars + len > maxHistoryCharBudget) {
+      break;
+    }
+    usedHistoryChars += len;
+    trimmedHistoryReversed.push(turn);
+  }
+  const effectiveHistory = trimmedHistoryReversed.reverse();
+
   const linkedToolsFromSkills = activeSkills.flatMap((s) => s.linkedTools || []);
   const toolRegistry = buildAgentToolRegistry({
     enabledBuiltinTools: cfg.enabledBuiltinTools || [],
@@ -1549,11 +1754,33 @@ export async function generateAiAgentReply(
     context: {
       conversationId: options?.conversationId,
       contactName: options?.contactName,
+      contactPhone: options?.contactPhone,
       isSimulator: options?.isSimulator,
+      simulatorHistory: [
+        ...effectiveHistory,
+        {
+          id: `sim_msg_${effectiveHistory.length + 1}`,
+          role: 'user',
+          content: message,
+          imageUrl: options?.imageUrl || null,
+          mediaName: options?.mediaName || null,
+          replyToMessageId: options?.replyToMessageId || null,
+        },
+      ],
+      latestCustomerImage: options?.imageUrl || null,
+      latestCustomerMediaName: options?.mediaName || null,
     },
     customExecutor: options?.customToolExecutor,
   });
 
+  if (options?.replyToMessageId && !toolRegistry.sideEffects.replyToMessageId) {
+    toolRegistry.sideEffects.replyToMessageId = options.replyToMessageId;
+  }
+
+  const maxKbCharBudget = Math.min(
+    160000,
+    Math.max(12000, Math.floor(effectiveContextLength * 1.5))
+  );
   const kbContext = kbItems
     .map((k) =>
       k.bookTitle
@@ -1561,7 +1788,7 @@ export async function generateAiAgentReply(
         : `[${k.category}] ${k.title}: ${k.content}`
     )
     .join('\n\n')
-    .slice(0, 18000);
+    .slice(0, maxKbCharBudget);
 
   const skillContext = activeSkills
     .map((s) =>
@@ -1577,14 +1804,17 @@ export async function generateAiAgentReply(
 
   const channelInfo = options?.channel ? `Kanal Percakapan: ${options.channel}` : '';
   const contactInfo = options?.contactName ? `Nama Pelanggan: ${options.contactName}` : '';
+  const mediaAttachedInfo = options?.imageUrl
+    ? `Lampiran Pelanggan Saat Ini: Gambar/Foto (${options.mediaName || 'foto-pelanggan.jpg'}) telah dilampirkan di pesan ini.`
+    : '';
   const commentRule = options?.isComment
     ? 'Konteks: Ini adalah balasan komentar publik media sosial; jawab singkat, sopan, dan ajak lanjut ke DM bila perlu.'
     : '';
 
   const systemSections = [
     `[IDENTITAS & PERSONALITY]\n${buildPersonalityInstructions(cfg, options?.contactName).join('\n')}`,
-    channelInfo || contactInfo || commentRule
-      ? `[KONTEKS INTERAKSI]\n${[channelInfo, contactInfo, commentRule].filter(Boolean).join('\n')}`
+    channelInfo || contactInfo || mediaAttachedInfo || commentRule
+      ? `[KONTEKS INTERAKSI]\n${[channelInfo, contactInfo, mediaAttachedInfo, commentRule].filter(Boolean).join('\n')}`
       : '',
     cfg.positivePrompt?.trim()
       ? `[ARAHAN POSITIF / POSITIVE PROMPT - UTAMAKAN]\n${cfg.positivePrompt.trim()}`
@@ -1594,7 +1824,7 @@ export async function generateAiAgentReply(
       : `[BATASAN & LARANGAN]\nJangan mengarang harga, promo, atau kebijakan yang tidak tercantum di Knowledge Book atau hasil tool.`,
     skillContext ? `[SKILL AKTIF YANG TERPASANG]\n${skillContext}` : '',
     toolRegistry.definitions.length > 0
-      ? `[TOOL MCP & CRM TERSEDIA]\nAnda memiliki akses tool fungsi (${toolRegistry.definitions.map((t) => t.llmName).join(', ')}). Gunakan tool bila perlu memeriksa data nyata sebelum menjawab.`
+      ? `[TOOL MCP & CRM TERSEDIA]\nAnda memiliki akses tool fungsi (${toolRegistry.definitions.map((t) => t.llmName).join(', ')}). Gunakan tool bila perlu memeriksa katalog produk, membaca riwayat WhatsApp, memeriksa foto pelanggan, mengutip/reply pesan spesifik, mengirim foto/brosur dari Galeri Media, menyimpan catatan/label pelanggan, atau eskalasi ke agen manusia.`
       : '',
     `[KNOWLEDGE BOOK AKTIF]\n${kbContext || 'Belum ada materi di Knowledge Book.'}`,
   ];
@@ -1630,6 +1860,9 @@ export async function generateAiAgentReply(
         matchedKb: localRes.matchedKb,
         attempts,
         toolCalls: [],
+        outboundMedia: toolRegistry.sideEffects.outboundMedia,
+        replyToMessageId: toolRegistry.sideEffects.replyToMessageId,
+        replyToPreview: toolRegistry.sideEffects.replyToPreview,
       };
     }
 
@@ -1637,10 +1870,12 @@ export async function generateAiAgentReply(
       const invocation = await invokeExternalModelTarget({
         target,
         systemPrompt,
-        history: options?.history || [],
+        history: effectiveHistory,
         message,
+        imageUrl: options?.imageUrl || null,
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens,
+        contextLength: effectiveContextLength,
         timeoutMs: cfg.timeoutMs,
         toolRegistry: toolRegistry.definitions.length > 0 ? toolRegistry : undefined,
       });
@@ -1664,6 +1899,9 @@ export async function generateAiAgentReply(
         matchedKb: true,
         attempts,
         toolCalls: invocation.toolCalls,
+        outboundMedia: toolRegistry.sideEffects.outboundMedia,
+        replyToMessageId: toolRegistry.sideEffects.replyToMessageId,
+        replyToPreview: toolRegistry.sideEffects.replyToPreview,
       };
     } catch (err: any) {
       const cleanError = sanitizeAiError(err, target.apiKey);

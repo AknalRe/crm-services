@@ -255,7 +255,7 @@ test('generateAiAgentReply fails over across primary model error, fallback timeo
   assert.equal(res.attempts[1].ok, true);
 
   // Check OpenAI reasoning model formatting (uses max_completion_tokens without temperature)
-  assert.equal(calledBodies[0].max_completion_tokens, 800);
+  assert.equal(calledBodies[0].max_completion_tokens, DEFAULT_AI_CONFIG.maxTokens);
   assert.equal(calledBodies[0].temperature, undefined);
 
   // Check Anthropic leading-assistant trimming and consecutive-user merge

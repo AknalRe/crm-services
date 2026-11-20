@@ -187,3 +187,65 @@ test('parseMarkdownToChapters and parseSkillMarkdown extract structured Knowledg
   assert.match(skill.triggerHint, /calon pelanggan baru/);
   assert.match(skill.instructions, /Sapa dengan sopan/);
 });
+
+test('built-in CRM tools execute chat history, customer media inspection, quote reply, outbound media, and profile update in simulator mode', async () => {
+  const registry = buildAgentToolRegistry({
+    enabledBuiltinTools: [
+      'crm_get_chat_history',
+      'crm_inspect_customer_media',
+      'crm_reply_to_message',
+      'crm_send_media',
+      'crm_update_customer_profile',
+    ],
+    linkedToolsFromSkills: [],
+    mcpServers: [],
+    context: {
+      isSimulator: true,
+      contactName: 'Riky',
+      contactPhone: '+6288996555448',
+      simulatorHistory: [
+        {
+          id: 'sim_msg_1',
+          role: 'user',
+          content: 'Halo min, ini bukti transfer saya ya',
+          imageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          mediaName: 'bukti-tf.png',
+        },
+      ],
+    },
+  });
+
+  const histRes = await registry.executeTool('crm_get_chat_history', { limit: 10 });
+  assert.equal(histRes.trace.ok, true);
+  assert.match(histRes.output, /sim_msg_1/);
+  assert.match(histRes.output, /bukti-tf\.png/);
+
+  const mediaRes = await registry.executeTool('crm_inspect_customer_media', {
+    messageId: 'sim_msg_1',
+  });
+  assert.equal(mediaRes.trace.ok, true);
+  assert.equal(registry.sideEffects.inspectedImages.length, 1);
+  assert.equal(registry.sideEffects.inspectedImages[0].label, 'bukti-tf.png');
+
+  const replyRes = await registry.executeTool('crm_reply_to_message', {
+    messageId: 'sim_msg_1',
+  });
+  assert.equal(replyRes.trace.ok, true);
+  assert.equal(registry.sideEffects.replyToMessageId, 'sim_msg_1');
+
+  const sendMediaRes = await registry.executeTool('crm_send_media', {
+    mediaUrlOrName: 'https://crm.reneo.my.id/api/media/files/katalog-pro.jpg',
+    caption: 'Berikut brosur Paket Pro',
+  });
+  assert.equal(sendMediaRes.trace.ok, true);
+  assert.equal(registry.sideEffects.outboundMedia.length, 1);
+  assert.equal(registry.sideEffects.outboundMedia[0].caption, 'Berikut brosur Paket Pro');
+
+  const profileRes = await registry.executeTool('crm_update_customer_profile', {
+    category: 'Pelanggan Aktif',
+    addLabel: 'Sudah Transfer',
+    notes: 'Transfer paket Pro terkonfirmasi',
+  });
+  assert.equal(profileRes.trace.ok, true);
+  assert.match(profileRes.output, /Pelanggan Aktif/);
+});

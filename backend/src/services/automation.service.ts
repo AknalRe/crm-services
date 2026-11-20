@@ -10,8 +10,10 @@ import {
   webhookDeliveries,
 } from '../db/schema';
 import { getSettingMap } from '../routes/auth';
+import { readUploadedMediaAsDataUri } from '../routes/media';
 import {
   AiConversationTurn,
+  AiQueuedOutboundMedia,
   generateAiAgentReply,
   getAiAgentConfig,
 } from './ai.service';
@@ -74,6 +76,8 @@ async function sendAutoReplyMessage(params: {
   phone?: string | null;
   sessionName?: string | null;
   text: string;
+  replyToMessageId?: string | null;
+  outboundMedia?: AiQueuedOutboundMedia[];
 }): Promise<void> {
   const {
     conversationId,
@@ -84,17 +88,46 @@ async function sendAutoReplyMessage(params: {
     phone,
     sessionName,
     text,
+    replyToMessageId,
+    outboundMedia,
   } = params;
   const now = new Date();
   let msgId: string | null = `auto_${crypto.randomUUID()}`;
   let sendSucceeded = true;
   let effectiveSession: string | null = channel === 'WHATSAPP' ? sessionName || null : null;
   let sendError: string | null = null;
+  let resolvedReplyToId: string | null = null;
+  let resolvedWahaReplyTo: string | undefined;
+
+  if (replyToMessageId) {
+    const [quotedRow] = await db
+      .select({
+        id: chatMessages.id,
+        wahaMessageId: chatMessages.wahaMessageId,
+      })
+      .from(chatMessages)
+      .where(
+        and(
+          eq(chatMessages.conversationId, conversationId),
+          eq(chatMessages.id, replyToMessageId)
+        )
+      )
+      .limit(1);
+    if (quotedRow) {
+      resolvedReplyToId = quotedRow.id;
+      resolvedWahaReplyTo = quotedRow.wahaMessageId || undefined;
+    }
+  }
 
   if (channel === 'WHATSAPP') {
     const targetWa = phone || externalThreadId;
     if (!targetWa) return;
-    const sendRes = await wahaService.sendTextMessage(targetWa, text, sessionName || undefined);
+    const sendRes = await wahaService.sendTextMessage(
+      targetWa,
+      text,
+      sessionName || undefined,
+      resolvedWahaReplyTo ? { replyTo: resolvedWahaReplyTo } : undefined
+    );
     sendSucceeded = sendRes.success;
     msgId = sendRes.success ? sendRes.messageId || msgId : null;
     effectiveSession = sendRes.sessionUsed || sessionName || null;
@@ -124,6 +157,7 @@ async function sendAutoReplyMessage(params: {
     wahaSession: channel === 'WHATSAPP' ? effectiveSession : null,
     senderName: 'Agent AI',
     body: text,
+    replyToMessageId: resolvedReplyToId,
     metadataJson: JSON.stringify({ sentVia: 'AI_BOT', sentViaLabel: 'Bot AI' }),
     wahaMessageId: channel === 'WHATSAPP' ? msgId : null,
     status: sendSucceeded ? 'SENT' : 'FAILED',
@@ -132,6 +166,62 @@ async function sendAutoReplyMessage(params: {
     sentAt: sendSucceeded ? now : null,
     createdAt: now,
   });
+
+  if (Array.isArray(outboundMedia) && outboundMedia.length > 0 && channel === 'WHATSAPP') {
+    const targetWa = phone || externalThreadId;
+    if (targetWa) {
+      for (const item of outboundMedia) {
+        try {
+          const loaded = await readUploadedMediaAsDataUri(item.mediaUrl, item.mimeType);
+          if (!loaded) continue;
+          const mediaSendRes = await wahaService.sendMediaMessage(
+            targetWa,
+            {
+              base64: loaded.dataUri,
+              mimetype: loaded.mimetype,
+              filename: item.fileName || 'media.jpg',
+              caption: item.caption || '',
+              asDocument: item.asDocument,
+            },
+            effectiveSession || sessionName || undefined
+          );
+          const msgType = item.asDocument
+            ? 'DOCUMENT'
+            : item.mediaType === 'image'
+              ? 'IMAGE'
+              : item.mediaType === 'video'
+                ? 'VIDEO'
+                : item.mediaType === 'audio'
+                  ? 'AUDIO'
+                  : 'DOCUMENT';
+          await db.insert(chatMessages).values({
+            id: crypto.randomUUID(),
+            companyId: getActiveCompanyId(),
+            conversationId,
+            contactId,
+            direction: 'OUTBOUND',
+            messageType: msgType,
+            channel,
+            wahaSession: mediaSendRes.sessionUsed || effectiveSession,
+            senderName: 'Agent AI',
+            body: item.caption || item.fileName,
+            mediaUrl: item.mediaUrl,
+            mediaType: loaded.mimetype,
+            mediaName: item.fileName,
+            metadataJson: JSON.stringify({ sentVia: 'AI_BOT', sentViaLabel: 'Bot AI' }),
+            wahaMessageId: mediaSendRes.success ? mediaSendRes.messageId || null : null,
+            status: mediaSendRes.success ? 'SENT' : 'FAILED',
+            ackStatus: mediaSendRes.success ? 1 : -1,
+            errorMessage: mediaSendRes.success ? null : mediaSendRes.error || null,
+            sentAt: mediaSendRes.success ? new Date() : null,
+            createdAt: new Date(),
+          });
+        } catch (mediaErr: any) {
+          console.warn('[AutomationService] Failed to send AI outbound media:', mediaErr?.message);
+        }
+      }
+    }
+  }
 
   if (sendSucceeded) {
     await db
@@ -343,10 +433,15 @@ export async function handleInboundAutomation(params: {
       try {
         const aiCfg = await getAiAgentConfig();
         if (aiCfg.enabled && aiCfg.autoReplyDm) {
+          const maxHist = Math.max(2, Math.min(100, aiCfg.maxHistoryMessages || 20));
           const recentRows = await db
             .select({
+              id: chatMessages.id,
               direction: chatMessages.direction,
+              messageType: chatMessages.messageType,
               body: chatMessages.body,
+              mediaUrl: chatMessages.mediaUrl,
+              mediaName: chatMessages.mediaName,
             })
             .from(chatMessages)
             .where(
@@ -357,35 +452,64 @@ export async function handleInboundAutomation(params: {
               )
             )
             .orderBy(desc(chatMessages.createdAt))
-            .limit(7);
+            .limit(maxHist + 1);
 
           const trimmedInbound = inboundBody.trim();
-          const priorTurnsRaw = recentRows.slice(
-            recentRows[0]?.direction === 'INBOUND' &&
-              String(recentRows[0]?.body || '').trim() === trimmedInbound
-              ? 1
-              : 0
-          );
+          const latestRow = recentRows[0];
+          const isLatestSameInbound =
+            latestRow?.direction === 'INBOUND' &&
+            String(latestRow?.body || '').trim() === trimmedInbound;
+          const priorTurnsRaw = recentRows.slice(isLatestSameInbound ? 1 : 0);
+
           const history: AiConversationTurn[] = priorTurnsRaw
-            .slice(0, 6)
+            .slice(0, maxHist)
             .reverse()
-            .filter((r) => Boolean(String(r.body || '').trim()))
-            .map((r) => ({
-              role: r.direction === 'OUTBOUND' ? 'assistant' : 'user',
-              content: String(r.body || '').trim(),
-            }));
+            .filter((r) => Boolean(String(r.body || '').trim() || r.mediaUrl))
+            .map((r) => {
+              const rawText = String(r.body || '').trim();
+              const mediaTag =
+                r.messageType !== 'TEXT' && (r.mediaName || r.mediaUrl)
+                  ? `[Lampiran ${r.messageType}: ${r.mediaName || r.mediaUrl} | ID: ${r.id}] `
+                  : '';
+              return {
+                id: r.id,
+                role: r.direction === 'OUTBOUND' ? 'assistant' : 'user',
+                content: `${mediaTag}${rawText}`.trim(),
+                mediaName: r.mediaName,
+                mediaType: r.messageType,
+              };
+            });
+
+          let latestImageDataUri: string | null = null;
+          let latestMediaName: string | null = null;
+          if (
+            isLatestSameInbound &&
+            latestRow?.messageType === 'IMAGE' &&
+            latestRow?.mediaUrl
+          ) {
+            const loaded = await readUploadedMediaAsDataUri(latestRow.mediaUrl).catch(() => null);
+            if (loaded && loaded.mimetype.startsWith('image/')) {
+              latestImageDataUri = loaded.dataUri;
+              latestMediaName = latestRow.mediaName || 'foto-pelanggan.jpg';
+            }
+          }
 
           const aiResult = await generateAiAgentReply(trimmedInbound, {
             configOverride: aiCfg,
             history,
+            imageUrl: latestImageDataUri,
+            mediaName: latestMediaName,
             conversationId,
             contactName: contact.namaPanggilan || contact.namaLengkap || null,
+            contactPhone: contact.nomorWhatsapp || null,
             channel,
           });
           if (aiResult.reply) {
             await sendAutoReplyMessage({
               ...replyBase,
               text: aiResult.reply,
+              replyToMessageId: aiResult.replyToMessageId || null,
+              outboundMedia: aiResult.outboundMedia,
             });
             return;
           }

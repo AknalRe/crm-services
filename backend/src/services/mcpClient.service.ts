@@ -1,6 +1,8 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import axios from 'axios';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import {
   aiKnowledgeBooks,
@@ -12,6 +14,11 @@ import {
   crmAgents,
   products,
 } from '../db/schema';
+import {
+  readMediaMetadata,
+  readUploadedMediaAsDataUri,
+  resolveUploadsDir,
+} from '../routes/media';
 import { liveEvents } from './events.service';
 import { getActiveCompanyId } from './tenantContext';
 
@@ -67,6 +74,33 @@ export interface BuiltinCrmToolMeta {
   parameters: Record<string, any>;
 }
 
+export interface AiQueuedOutboundMedia {
+  mediaUrl: string;
+  mediaType: 'image' | 'video' | 'audio' | 'document';
+  mimeType: string;
+  fileName: string;
+  caption?: string;
+  asDocument?: boolean;
+}
+
+export interface AiSimulatorHistoryTurn {
+  id?: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
+  imageUrl?: string | null;
+  mediaName?: string | null;
+  mediaType?: string | null;
+  replyToMessageId?: string | null;
+}
+
+export interface AiToolSideEffects {
+  outboundMedia: AiQueuedOutboundMedia[];
+  replyToMessageId?: string | null;
+  replyToPreview?: string | null;
+  inspectedImages: Array<{ dataUri: string; mimeType: string; label?: string }>;
+}
+
 export const BUILTIN_CRM_TOOLS: BuiltinCrmToolMeta[] = [
   {
     name: 'crm_search_products',
@@ -107,17 +141,139 @@ export const BUILTIN_CRM_TOOLS: BuiltinCrmToolMeta[] = [
     name: 'crm_get_customer_info',
     label: 'Lihat Profil Kontak Pelanggan',
     description:
-      'Mengambil profil kontak pelanggan dan status percakapan aktif (nama, kategori, tag, catatan) jika pesan berasal dari percakapan Live Chat.',
+      'Mengambil profil kontak pelanggan dan status percakapan aktif (nama, nomor WhatsApp, kategori, tag, label chat, catatan CS).',
     parameters: {
       type: 'object',
       properties: {},
     },
   },
   {
+    name: 'crm_get_chat_history',
+    label: 'Baca Riwayat Chat WhatsApp & Omnichannel',
+    description:
+      'Membaca riwayat pesan percakapan WhatsApp/omnichannel saat ini beserta ID pesan, waktu, lampiran foto/dokumen, dan kutipan. Gunakan untuk meninjau pesan sebelumnya atau mencari ID pesan untuk di-reply.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'integer',
+          description: 'Jumlah pesan terakhir yang ingin dibaca (1-40, default 15).',
+        },
+        query: {
+          type: 'string',
+          description: 'Kata kunci opsional untuk memfilter isi pesan tertentu di riwayat chat.',
+        },
+      },
+    },
+  },
+  {
+    name: 'crm_inspect_customer_media',
+    label: 'Baca & Analisis Foto / Dokumen Pelanggan',
+    description:
+      'Memeriksa foto, bukti transfer, screenshot, atau dokumen yang dikirimkan pelanggan di chat agar AI dapat melihat dan menganalisis isi gambar/file tersebut.',
+    parameters: {
+      type: 'object',
+      properties: {
+        messageId: {
+          type: 'string',
+          description:
+            'ID pesan yang melampirkan foto/dokumen (opsional; kosongkan untuk memeriksa foto/dokumen terakhir dari pelanggan).',
+        },
+      },
+    },
+  },
+  {
+    name: 'crm_list_gallery_media',
+    label: 'Cari Foto & Brosur di Galeri Media CRM',
+    description:
+      'Mencari daftar foto produk, gambar katalog, atau dokumen PDF yang tersimpan di Galeri Media CRM sebelum mengirimkannya ke pelanggan dengan crm_send_media.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Kata kunci nama file atau label media (opsional).',
+        },
+        mediaKind: {
+          type: 'string',
+          description: 'Filter jenis media: image, document, video, atau all (default: all).',
+        },
+        limit: {
+          type: 'integer',
+          description: 'Jumlah maksimal media yang ditampilkan (1-20, default 10).',
+        },
+      },
+    },
+  },
+  {
+    name: 'crm_send_media',
+    label: 'Kirim Foto, Gambar Produk, atau Dokumen',
+    description:
+      'Mengirimkan foto produk, gambar brosur, atau dokumen dari Galeri Media CRM (atau URL gambar) langsung ke chat pelanggan beserta caption.',
+    parameters: {
+      type: 'object',
+      properties: {
+        mediaUrlOrName: {
+          type: 'string',
+          description:
+            'URL media (/api/media/files/... atau https://...) atau nama file dari hasil crm_list_gallery_media.',
+        },
+        caption: {
+          type: 'string',
+          description: 'Keterangan/caption pengantar untuk foto atau dokumen yang dikirim.',
+        },
+        asDocument: {
+          type: 'boolean',
+          description: 'Kirim sebagai dokumen file asli (true untuk PDF/dokumen, false untuk foto/gambar).',
+        },
+      },
+      required: ['mediaUrlOrName'],
+    },
+  },
+  {
+    name: 'crm_reply_to_message',
+    label: 'Balas / Quote Pesan Spesifik Pelanggan',
+    description:
+      'Mengutip (quote/reply) pesan spesifik pelanggan berdasarkan messageId sehingga balasan AI di WhatsApp/Inbox terhubung langsung ke pesan yang dikutip.',
+    parameters: {
+      type: 'object',
+      properties: {
+        messageId: {
+          type: 'string',
+          description: 'ID pesan pelanggan yang ingin dikutip/di-reply (lihat dari crm_get_chat_history).',
+        },
+      },
+      required: ['messageId'],
+    },
+  },
+  {
+    name: 'crm_update_customer_profile',
+    label: 'Simpan Catatan, Kategori & Label Pelanggan',
+    description:
+      'Memperbarui catatan CS pada profil kontak, kategori pelanggan, atau menambahkan label percakapan (misalnya menyimpan ringkasan pesanan, alamat, atau menandai Hot Lead).',
+    parameters: {
+      type: 'object',
+      properties: {
+        notes: {
+          type: 'string',
+          description: 'Catatan penting pelanggan atau ringkasan kebutuhan untuk disimpan di profil kontak.',
+        },
+        category: {
+          type: 'string',
+          description: 'Kategori kontak (mis. Prospek, Pelanggan Aktif, VIP, Reseller).',
+        },
+        addLabel: {
+          type: 'string',
+          description: 'Label percakapan yang ingin ditambahkan (mis. Hot Lead, Menunggu Pembayaran, Follow Up).',
+        },
+      },
+    },
+  },
+  {
     name: 'crm_escalate_to_human',
     label: 'Eskalasi ke Agen Manusia',
     description:
-      'Menandai percakapan saat ini untuk ditindaklanjuti langsung oleh agen/CS manusia (misalnya komplain berat, permintaan refund, atau pertanyaan di luar kewenangan AI).',
+      'Menandai percakapan saat ini untuk ditindaklanjuti langsung oleh agen/CS manusia yang sedang aktif/ONLINE (misalnya komplain berat, permintaan refund, atau pertanyaan di luar kewenangan AI).',
     parameters: {
       type: 'object',
       properties: {
@@ -545,11 +701,126 @@ export async function loadActiveMcpServers(): Promise<McpServerConfigRecord[]> {
   }));
 }
 
+const EXT_TO_MIME: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.mp4': 'video/mp4',
+  '.mp3': 'audio/mpeg',
+};
+
+function inferMediaKindFromMime(mime: string): 'image' | 'video' | 'audio' | 'document' {
+  const lower = String(mime || '').toLowerCase();
+  if (lower.startsWith('image/')) return 'image';
+  if (lower.startsWith('video/')) return 'video';
+  if (lower.startsWith('audio/')) return 'audio';
+  return 'document';
+}
+
+export interface BuiltinToolExecutionContext {
+  conversationId?: string | null;
+  contactName?: string | null;
+  contactPhone?: string | null;
+  isSimulator?: boolean;
+  simulatorHistory?: AiSimulatorHistoryTurn[];
+  latestCustomerImage?: string | null;
+  latestCustomerMediaName?: string | null;
+  sideEffects?: AiToolSideEffects;
+}
+
+async function listTenantGalleryFiles(params: {
+  companyId: string;
+  query?: string;
+  mediaKind?: string;
+  limit?: number;
+}): Promise<
+  Array<{
+    filename: string;
+    originalFileName: string;
+    relativeUrl: string;
+    mimeType: string;
+    mediaKind: 'image' | 'video' | 'audio' | 'document';
+    label?: string;
+    sizeBytes: number;
+  }>
+> {
+  const uploadsDir = resolveUploadsDir();
+  if (!fs.existsSync(uploadsDir)) return [];
+  const entries = await fs.promises.readdir(uploadsDir, { withFileTypes: true }).catch(() => []);
+  const q = String(params.query || '').trim().toLowerCase();
+  const kindFilter = String(params.mediaKind || '').trim().toLowerCase();
+  const maxItems = Math.max(1, Math.min(30, params.limit || 10));
+  const isDefault = !params.companyId || params.companyId === 'company_default';
+
+  const items: Array<{
+    filename: string;
+    originalFileName: string;
+    relativeUrl: string;
+    mimeType: string;
+    mediaKind: 'image' | 'video' | 'audio' | 'document';
+    label?: string;
+    sizeBytes: number;
+    mtimeMs: number;
+  }> = [];
+
+  for (const ent of entries) {
+    if (!ent.isFile() || ent.name.startsWith('.') || !/^[a-zA-Z0-9._-]+$/.test(ent.name)) continue;
+    const meta = await readMediaMetadata(ent.name);
+    const fileCompanyId = meta?.companyId || 'company_default';
+    if (fileCompanyId !== params.companyId && !(isDefault && !meta?.companyId)) {
+      continue;
+    }
+    const ext = path.extname(ent.name).toLowerCase();
+    const mimeType = EXT_TO_MIME[ext] || 'application/octet-stream';
+    const mediaKind = inferMediaKindFromMime(mimeType);
+    if (kindFilter && kindFilter !== 'all' && mediaKind !== kindFilter) {
+      continue;
+    }
+    const originalFileName = meta?.originalFileName || ent.name;
+    const label = meta?.label || '';
+    if (q) {
+      const hay = `${ent.name} ${originalFileName} ${label} ${mediaKind}`.toLowerCase();
+      if (!hay.includes(q)) continue;
+    }
+    let mtimeMs = 0;
+    let sizeBytes = meta?.sizeBytes || 0;
+    try {
+      const st = await fs.promises.stat(path.join(uploadsDir, ent.name));
+      mtimeMs = st.mtimeMs;
+      if (!sizeBytes) sizeBytes = st.size;
+    } catch {
+      continue;
+    }
+    items.push({
+      filename: ent.name,
+      originalFileName,
+      relativeUrl: `/api/media/files/${ent.name}`,
+      mimeType,
+      mediaKind,
+      label: label || undefined,
+      sizeBytes,
+      mtimeMs,
+    });
+  }
+
+  items.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return items.slice(0, maxItems);
+}
+
 async function executeBuiltinCrmTool(
   toolName: string,
   args: Record<string, any>,
-  ctx?: { conversationId?: string | null; contactName?: string | null; isSimulator?: boolean }
+  ctx?: BuiltinToolExecutionContext
 ): Promise<{ ok: boolean; output: string }> {
+  const companyId = getActiveCompanyId();
+
   if (toolName === 'crm_search_products') {
     const q = String(args?.query || '').trim().toLowerCase();
     const rawLimit = Number(args?.limit);
@@ -557,7 +828,7 @@ async function executeBuiltinCrmTool(
     const rows = await db
       .select()
       .from(products)
-      .where(eq(products.isActive, true));
+      .where(and(eq(products.companyId, companyId), eq(products.isActive, true)));
 
     const matched = rows
       .filter((p) => {
@@ -587,12 +858,21 @@ async function executeBuiltinCrmTool(
     const q = String(args?.query || '').trim().toLowerCase();
     const tokens = q.split(/\s+/).filter((t) => t.length > 1);
     const [books, items] = await Promise.all([
-      db.select().from(aiKnowledgeBooks).where(eq(aiKnowledgeBooks.isActive, true)),
-      db.select().from(aiKnowledgeItems).where(eq(aiKnowledgeItems.isActive, true)),
+      db
+        .select()
+        .from(aiKnowledgeBooks)
+        .where(and(eq(aiKnowledgeBooks.companyId, companyId), eq(aiKnowledgeBooks.isActive, true))),
+      db
+        .select()
+        .from(aiKnowledgeItems)
+        .where(and(eq(aiKnowledgeItems.companyId, companyId), eq(aiKnowledgeItems.isActive, true))),
     ]);
 
     const activeBookMap = new Map(books.map((b) => [b.id, b.title]));
-    const allBookRows = await db.select({ id: aiKnowledgeBooks.id }).from(aiKnowledgeBooks);
+    const allBookRows = await db
+      .select({ id: aiKnowledgeBooks.id })
+      .from(aiKnowledgeBooks)
+      .where(eq(aiKnowledgeBooks.companyId, companyId));
     const allKnownBookIds = new Set(allBookRows.map((b) => b.id));
 
     const eligible = items.filter((item) => {
@@ -633,9 +913,15 @@ async function executeBuiltinCrmTool(
     if (!ctx?.conversationId) {
       return {
         ok: true,
-        output: ctx?.contactName
-          ? `Mode simulasi / non-percakapan. Nama pelanggan: ${ctx.contactName}.`
-          : 'Berjalan di mode simulasi (tidak terikat percakapan Live Chat).',
+        output: [
+          `Mode: Simulasi Chat Inbox`,
+          `Nama Pelanggan: ${ctx?.contactName || 'Budi Santoso'}`,
+          ctx?.contactPhone ? `Nomor WhatsApp: ${ctx.contactPhone}` : 'Nomor WhatsApp: +6281234567890',
+          `Kanal: WHATSAPP (Simulasi)`,
+          `Status Tiket: OPEN`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
       };
     }
     const rows = await db
@@ -653,13 +939,374 @@ async function executeBuiltinCrmTool(
       output: [
         `Nama Lengkap: ${c.namaLengkap}`,
         c.namaPanggilan ? `Nama Panggilan: ${c.namaPanggilan}` : '',
+        c.nomorWhatsapp ? `Nomor WhatsApp: ${c.nomorWhatsapp}` : '',
         c.kategori ? `Kategori: ${c.kategori}` : '',
-        c.tags ? `Tag: ${c.tags}` : '',
+        c.tags ? `Tag Kontak: ${c.tags}` : '',
+        row.conv.labels ? `Label Percakapan: ${row.conv.labels}` : '',
         c.notes ? `Catatan CS: ${c.notes}` : '',
-        `Status Tiket: ${row.conv.status} (Kanal: ${row.conv.channel})`,
+        `Status Tiket: ${row.conv.status} (Kanal: ${row.conv.channel}${row.conv.wahaSession ? ` • Sesi: ${row.conv.wahaSession}` : ''})`,
       ]
         .filter(Boolean)
         .join('\n'),
+    };
+  }
+
+  if (toolName === 'crm_get_chat_history') {
+    const rawLimit = Number(args?.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(40, Math.round(rawLimit))) : 15;
+    const query = String(args?.query || '').trim().toLowerCase();
+
+    if (!ctx?.conversationId) {
+      const simTurns = ctx?.simulatorHistory || [];
+      const filtered = simTurns
+        .filter((t) => !query || t.content.toLowerCase().includes(query) || (t.mediaName || '').toLowerCase().includes(query))
+        .slice(-limit);
+      if (filtered.length === 0) {
+        return {
+          ok: true,
+          output: 'Belum ada riwayat pesan sebelumnya pada sesi simulasi chat ini.',
+        };
+      }
+      const lines = filtered.map((t, idx) => {
+        const msgId = t.id || `sim_msg_${idx + 1}`;
+        const actor = t.role === 'assistant' ? 'AGEN AI' : `PELANGGAN (${ctx?.contactName || 'Pelanggan'})`;
+        const mediaBadge = t.imageUrl
+          ? ` [Lampiran Foto: ${t.mediaName || 'foto-pelanggan.jpg'}]`
+          : '';
+        return `[ID: ${msgId}] ${actor}:${mediaBadge} ${t.content}`;
+      });
+      return { ok: true, output: lines.join('\n') };
+    }
+
+    const msgRows = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.conversationId, ctx.conversationId))
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(Math.max(limit * 2, 30));
+
+    const chronological = msgRows
+      .filter((m) => m.messageType !== 'ACTIVITY')
+      .reverse()
+      .filter((m) => {
+        if (!query) return true;
+        const hay = `${m.body || ''} ${m.mediaName || ''} ${m.senderName || ''}`.toLowerCase();
+        return hay.includes(query);
+      })
+      .slice(-limit);
+
+    if (chronological.length === 0) {
+      return { ok: true, output: 'Tidak ada riwayat pesan yang cocok pada percakapan ini.' };
+    }
+
+    const lines = chronological.map((m) => {
+      const timeStr = m.createdAt
+        ? new Date(m.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+        : '';
+      const sender =
+        m.direction === 'OUTBOUND'
+          ? `AGEN (${m.senderName || 'CS'})`
+          : `PELANGGAN (${m.senderName || ctx?.contactName || 'Pelanggan'})`;
+      const mediaNote =
+        m.messageType !== 'TEXT' && m.messageType !== 'NOTE'
+          ? ` [Lampiran ${m.messageType}${m.mediaName ? `: ${m.mediaName}` : ''}${m.mediaUrl ? ` | URL: ${m.mediaUrl}` : ''}]`
+          : '';
+      return `[ID: ${m.id}] [${timeStr}] ${sender}:${mediaNote} ${m.body || '(tanpa teks)'}`;
+    });
+
+    return { ok: true, output: lines.join('\n') };
+  }
+
+  if (toolName === 'crm_inspect_customer_media') {
+    const requestedMsgId = String(args?.messageId || '').trim();
+
+    if (!ctx?.conversationId) {
+      const simTurns = [...(ctx?.simulatorHistory || [])].reverse();
+      const matchedTurn = requestedMsgId
+        ? simTurns.find((t) => t.id === requestedMsgId && t.imageUrl)
+        : simTurns.find((t) => t.role === 'user' && t.imageUrl);
+      const targetImage = matchedTurn?.imageUrl || ctx?.latestCustomerImage || null;
+      const targetName = matchedTurn?.mediaName || ctx?.latestCustomerMediaName || 'foto-pelanggan.jpg';
+
+      if (!targetImage) {
+        return {
+          ok: true,
+          output:
+            'Tidak ditemukan lampiran foto atau dokumen dari pelanggan pada percakapan ini. Minta pelanggan melampirkan foto bila diperlukan.',
+        };
+      }
+
+      if (targetImage.startsWith('data:image/') && ctx?.sideEffects) {
+        const mimeMatch = targetImage.match(/^data:([^;]+);base64,/);
+        ctx.sideEffects.inspectedImages.push({
+          dataUri: targetImage,
+          mimeType: mimeMatch?.[1] || 'image/jpeg',
+          label: targetName,
+        });
+      }
+
+      return {
+        ok: true,
+        output: `Lampiran foto pelanggan "${targetName}" berhasil dimuat ke konteks visual AI.${matchedTurn?.content ? ` Keterangan pelanggan: "${matchedTurn.content}".` : ''} Silakan analisis isi gambar tersebut.`,
+      };
+    }
+
+    const msgRows = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.conversationId, ctx.conversationId))
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(30);
+
+    const targetMsg = requestedMsgId
+      ? msgRows.find((m) => m.id === requestedMsgId || m.wahaMessageId === requestedMsgId)
+      : msgRows.find(
+          (m) =>
+            m.direction === 'INBOUND' &&
+            (Boolean(m.mediaUrl) || ['IMAGE', 'DOCUMENT', 'VIDEO', 'AUDIO'].includes(m.messageType))
+        );
+
+    if (!targetMsg) {
+      return {
+        ok: true,
+        output: 'Tidak ditemukan pesan berlampiran foto/dokumen dari pelanggan di percakapan ini.',
+      };
+    }
+
+    const details = [
+      `ID Pesan: ${targetMsg.id}`,
+      `Tipe Media: ${targetMsg.messageType}`,
+      targetMsg.mediaName ? `Nama File: ${targetMsg.mediaName}` : '',
+      targetMsg.mediaUrl ? `URL Media: ${targetMsg.mediaUrl}` : '',
+      targetMsg.body ? `Caption / Teks Pelanggan: ${targetMsg.body}` : '',
+    ].filter(Boolean);
+
+    if (targetMsg.mediaUrl && targetMsg.messageType === 'IMAGE') {
+      const loaded = await readUploadedMediaAsDataUri(targetMsg.mediaUrl);
+      if (loaded && loaded.mimetype.startsWith('image/') && ctx?.sideEffects) {
+        ctx.sideEffects.inspectedImages.push({
+          dataUri: loaded.dataUri,
+          mimeType: loaded.mimetype,
+          label: targetMsg.mediaName || targetMsg.id,
+        });
+        details.push(
+          'Status Visual: Gambar berhasil dimuat ke konteks multimodal AI untuk dianalisis langsung.'
+        );
+      }
+    }
+
+    return { ok: true, output: details.join('\n') };
+  }
+
+  if (toolName === 'crm_list_gallery_media') {
+    const query = String(args?.query || '').trim();
+    const mediaKind = String(args?.mediaKind || 'all').trim();
+    const rawLimit = Number(args?.limit);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(20, Math.round(rawLimit))) : 10;
+
+    const files = await listTenantGalleryFiles({
+      companyId,
+      query,
+      mediaKind,
+      limit,
+    });
+
+    if (files.length === 0) {
+      return {
+        ok: true,
+        output: query
+          ? `Tidak ditemukan file/foto di Galeri Media CRM dengan kata kunci "${query}".`
+          : 'Galeri Media CRM saat ini belum memiliki file atau foto yang diunggah.',
+      };
+    }
+
+    const lines = files.map((f) => {
+      const kb = Math.max(1, Math.round(f.sizeBytes / 1024));
+      return `- [${f.mediaKind.toUpperCase()}] ${f.originalFileName} (fileName: ${f.filename} | URL: ${f.relativeUrl} | ${kb} KB${f.label ? ` | Label: ${f.label}` : ''})`;
+    });
+    return {
+      ok: true,
+      output: `Daftar Media Tersedia (${files.length}):\n${lines.join('\n')}\nGunakan crm_send_media dengan mediaUrlOrName berisi URL atau fileName di atas untuk mengirimkannya ke pelanggan.`,
+    };
+  }
+
+  if (toolName === 'crm_send_media') {
+    const rawTarget = String(args?.mediaUrlOrName || '').trim();
+    const caption = String(args?.caption || '').trim();
+    const asDocument = Boolean(args?.asDocument);
+
+    if (!rawTarget) {
+      return { ok: false, output: 'Parameter mediaUrlOrName wajib diisi.' };
+    }
+
+    const allFiles = await listTenantGalleryFiles({ companyId, limit: 30 });
+    const targetLower = rawTarget.toLowerCase();
+    const matchedFile = allFiles.find(
+      (f) =>
+        f.filename.toLowerCase() === targetLower ||
+        f.relativeUrl.toLowerCase() === targetLower ||
+        f.originalFileName.toLowerCase() === targetLower ||
+        f.originalFileName.toLowerCase().includes(targetLower) ||
+        f.filename.toLowerCase().includes(targetLower)
+    );
+
+    if (matchedFile) {
+      if (ctx?.sideEffects) {
+        ctx.sideEffects.outboundMedia.push({
+          mediaUrl: matchedFile.relativeUrl,
+          mediaType: asDocument ? 'document' : matchedFile.mediaKind,
+          mimeType: matchedFile.mimeType,
+          fileName: matchedFile.originalFileName || matchedFile.filename,
+          caption: caption || undefined,
+          asDocument,
+        });
+      }
+      return {
+        ok: true,
+        output: `Media "${matchedFile.originalFileName}" (${matchedFile.relativeUrl}) berhasil dijadwalkan untuk dikirim ke pelanggan${caption ? ` dengan caption: "${caption}"` : ''}.`,
+      };
+    }
+
+    if (/^https?:\/\//i.test(rawTarget) || rawTarget.startsWith('/api/media/files/')) {
+      const ext = path.extname(rawTarget.split('?')[0]).toLowerCase();
+      const mimeType = EXT_TO_MIME[ext] || (asDocument ? 'application/pdf' : 'image/jpeg');
+      const mediaType = asDocument ? 'document' : inferMediaKindFromMime(mimeType);
+      const fileName = path.basename(rawTarget.split('?')[0]) || 'media-crm.jpg';
+      if (ctx?.sideEffects) {
+        ctx.sideEffects.outboundMedia.push({
+          mediaUrl: rawTarget,
+          mediaType,
+          mimeType,
+          fileName,
+          caption: caption || undefined,
+          asDocument,
+        });
+      }
+      return {
+        ok: true,
+        output: `Media "${fileName}" (${rawTarget}) berhasil dijadwalkan untuk dikirim ke pelanggan${caption ? ` dengan caption: "${caption}"` : ''}.`,
+      };
+    }
+
+    return {
+      ok: false,
+      output: `Media "${rawTarget}" tidak ditemukan di Galeri Media CRM. Panggil crm_list_gallery_media terlebih dahulu untuk melihat daftar file yang tersedia.`,
+    };
+  }
+
+  if (toolName === 'crm_reply_to_message') {
+    const messageId = String(args?.messageId || '').trim();
+    if (!messageId) {
+      return { ok: false, output: 'Parameter messageId wajib diisi.' };
+    }
+
+    if (!ctx?.conversationId) {
+      const simTurns = ctx?.simulatorHistory || [];
+      const found = simTurns.find((t, idx) => (t.id || `sim_msg_${idx + 1}`) === messageId);
+      if (ctx?.sideEffects) {
+        ctx.sideEffects.replyToMessageId = messageId;
+        ctx.sideEffects.replyToPreview = found?.content || `Pesan #${messageId}`;
+      }
+      return {
+        ok: true,
+        output: `Balasan AI akan mengutip (reply) pesan ID "${messageId}"${found ? ` ("${found.content.slice(0, 80)}")` : ''}.`,
+      };
+    }
+
+    const [msgRow] = await db
+      .select()
+      .from(chatMessages)
+      .where(
+        and(eq(chatMessages.conversationId, ctx.conversationId), eq(chatMessages.id, messageId))
+      )
+      .limit(1);
+
+    if (ctx?.sideEffects) {
+      ctx.sideEffects.replyToMessageId = msgRow?.id || messageId;
+      ctx.sideEffects.replyToPreview = msgRow?.body || `Pesan #${messageId}`;
+    }
+
+    return {
+      ok: true,
+      output: msgRow
+        ? `Balasan AI akan mengutip pesan "${(msgRow.body || msgRow.mediaName || messageId).slice(0, 80)}" (ID: ${msgRow.id}).`
+        : `Balasan AI diatur untuk mengutip pesan ID "${messageId}".`,
+    };
+  }
+
+  if (toolName === 'crm_update_customer_profile') {
+    const notes = String(args?.notes || '').trim();
+    const category = String(args?.category || '').trim();
+    const addLabel = String(args?.addLabel || '').trim();
+
+    if (!notes && !category && !addLabel) {
+      return {
+        ok: false,
+        output: 'Isi minimal satu dari parameter notes, category, atau addLabel.',
+      };
+    }
+
+    if (!ctx?.conversationId || ctx?.isSimulator) {
+      const summaryParts = [
+        category ? `Kategori -> "${category}"` : '',
+        addLabel ? `Label Chat + "${addLabel}"` : '',
+        notes ? `Catatan CS -> "${notes}"` : '',
+      ].filter(Boolean);
+      return {
+        ok: true,
+        output: `[Simulasi] Profil pelanggan diperbarui: ${summaryParts.join(', ')}.`,
+      };
+    }
+
+    const [conv] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, ctx.conversationId));
+    if (!conv) {
+      return { ok: false, output: 'Percakapan tidak ditemukan.' };
+    }
+
+    const [contact] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.id, conv.contactId));
+
+    const now = new Date();
+    const applied: string[] = [];
+
+    if (contact && (notes || category)) {
+      const contactUpdate: Record<string, any> = { updatedAt: now };
+      if (category) {
+        contactUpdate.kategori = category;
+        applied.push(`kategori="${category}"`);
+      }
+      if (notes) {
+        const prevNotes = String(contact.notes || '').trim();
+        contactUpdate.notes = prevNotes ? `${prevNotes}\n[AI] ${notes}` : `[AI] ${notes}`;
+        applied.push(`catatan ditambahkan`);
+      }
+      await db.update(contacts).set(contactUpdate).where(eq(contacts.id, contact.id));
+    }
+
+    if (addLabel) {
+      const currentLabels = String(conv.labels || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (!currentLabels.some((l) => l.toLowerCase() === addLabel.toLowerCase())) {
+        currentLabels.push(addLabel);
+      }
+      await db
+        .update(conversations)
+        .set({ labels: currentLabels.join(', '), updatedAt: now })
+        .where(eq(conversations.id, conv.id));
+      applied.push(`label="${addLabel}"`);
+    }
+
+    liveEvents.emit('conversations:update', { conversationId: conv.id });
+    return {
+      ok: true,
+      output: `Profil & label pelanggan berhasil diperbarui (${applied.join(', ')}).`,
     };
   }
 
@@ -680,11 +1327,11 @@ async function executeBuiltinCrmTool(
       return { ok: false, output: 'Percakapan tidak ditemukan untuk eskalasi.' };
     }
 
-    const companyId = conv.companyId || getActiveCompanyId();
+    const convCompanyId = conv.companyId || companyId;
     const activeAgents = await db
       .select()
       .from(crmAgents)
-      .where(and(eq(crmAgents.companyId, companyId), eq(crmAgents.isActive, true)))
+      .where(and(eq(crmAgents.companyId, convCompanyId), eq(crmAgents.isActive, true)))
       .orderBy(asc(crmAgents.createdAt));
 
     const onlineAgents = activeAgents.filter(
@@ -700,7 +1347,7 @@ async function executeBuiltinCrmTool(
       const openConvs = await db
         .select({ assignedAgentId: conversations.assignedAgentId })
         .from(conversations)
-        .where(and(eq(conversations.companyId, companyId), eq(conversations.status, 'OPEN')));
+        .where(and(eq(conversations.companyId, convCompanyId), eq(conversations.status, 'OPEN')));
       const counts = new Map<string, number>();
       for (const c of openConvs) {
         if (c.assignedAgentId) {
@@ -736,7 +1383,7 @@ async function executeBuiltinCrmTool(
 
     await db.insert(chatMessages).values({
       id: crypto.randomUUID(),
-      companyId,
+      companyId: convCompanyId,
       conversationId: conv.id,
       contactId: conv.contactId,
       direction: 'OUTBOUND',
@@ -767,6 +1414,7 @@ async function executeBuiltinCrmTool(
 
 export interface AgentToolRegistry {
   definitions: AiRuntimeToolDefinition[];
+  sideEffects: AiToolSideEffects;
   executeTool: (
     llmName: string,
     args: Record<string, any>
@@ -777,11 +1425,7 @@ export function buildAgentToolRegistry(params: {
   enabledBuiltinTools: string[];
   linkedToolsFromSkills: string[];
   mcpServers: McpServerConfigRecord[];
-  context?: {
-    conversationId?: string | null;
-    contactName?: string | null;
-    isSimulator?: boolean;
-  };
+  context?: Omit<BuiltinToolExecutionContext, 'sideEffects'>;
   customExecutor?: (
     def: AiRuntimeToolDefinition,
     args: Record<string, any>
@@ -789,6 +1433,12 @@ export function buildAgentToolRegistry(params: {
 }): AgentToolRegistry {
   const definitions: AiRuntimeToolDefinition[] = [];
   const usedNames = new Set<string>();
+  const sideEffects: AiToolSideEffects = {
+    outboundMedia: [],
+    replyToMessageId: null,
+    replyToPreview: null,
+    inspectedImages: [],
+  };
   const executorMap = new Map<
     string,
     { def: AiRuntimeToolDefinition; server?: McpServerConfigRecord }
@@ -869,7 +1519,10 @@ export function buildAgentToolRegistry(params: {
     } else if (target.def.source === 'MCP' && target.server) {
       res = await callMcpTool(target.server, target.def.originalName, args);
     } else {
-      res = await executeBuiltinCrmTool(target.def.originalName, args, params.context);
+      res = await executeBuiltinCrmTool(target.def.originalName, args, {
+        ...(params.context || {}),
+        sideEffects,
+      });
     }
 
     return {
@@ -886,5 +1539,5 @@ export function buildAgentToolRegistry(params: {
     };
   };
 
-  return { definitions, executeTool };
+  return { definitions, sideEffects, executeTool };
 }

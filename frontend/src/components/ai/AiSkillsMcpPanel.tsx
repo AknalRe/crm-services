@@ -630,11 +630,35 @@ export const AiSkillsMcpPanel: React.FC<AiSkillsMcpPanelProps> = ({
       {/* MCP Servers & Built-in CRM Tools Column */}
       <div className="lg:col-span-6 space-y-4">
         <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3">
-          <div className="pb-2 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-900">Tool Internal CRM (Function Calling)</h2>
-            <p className="text-[11px] text-gray-500 mt-0.5">
-              Izinkan model AI memanggil tool internal CRM secara langsung untuk data real-time produk, Knowledge Book, pelanggan, atau eskalasi.
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-gray-100">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                Tool Internal CRM ({config.enabledBuiltinTools?.length || 0}/{builtinTools.length})
+              </h2>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Izinkan model AI membaca riwayat WhatsApp, memeriksa foto pelanggan, mengutip/reply pesan, mengirim foto produk dari Galeri, mencatat profil, hingga eskalasi agen.
+              </p>
+            </div>
+            {builtinTools.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    void onSaveBuiltinTools(
+                      (config.enabledBuiltinTools?.length || 0) === builtinTools.length
+                        ? []
+                        : builtinTools.map((t) => t.name)
+                    )
+                  }
+                >
+                  {(config.enabledBuiltinTools?.length || 0) === builtinTools.length
+                    ? 'Nonaktifkan Semua'
+                    : 'Aktifkan Semua Tool'}
+                </Button>
+              </div>
+            )}
           </div>
           <div className="space-y-2">
             {builtinTools.map((tool) => {

@@ -13,6 +13,7 @@ import {
 import {
   AI_PROVIDER_CATALOG,
   AiAgentConfig,
+  AiConversationTurn,
   AiProviderId,
   DEFAULT_AI_CONFIG,
   generateAiAgentReply,
@@ -1253,44 +1254,83 @@ export default async function aiAgentRouter(fastify: FastifyInstance) {
 
   // ── Simulator Test ──────────────────────────────────────────────────────
 
-  fastify.post<{ Body: { message?: string; draftConfig?: Partial<AiAgentConfig> } }>(
-    '/test',
-    async (req, reply) => {
-      try {
-        const message = String(req.body?.message || '').trim();
-        if (!message) {
-          return reply.status(400).send({ success: false, error: 'Pesan uji wajib diisi' });
-        }
-
-        let configOverride: AiAgentConfig | undefined;
-        if (req.body?.draftConfig) {
-          const saved = await getAiAgentConfig();
-          configOverride = mergeAiAgentConfig(saved, req.body.draftConfig);
-        }
-
-        const result = await generateAiAgentReply(message, {
-          configOverride,
-          isSimulator: true,
-        });
-        return reply.send({
-          success: true,
-          data: {
-            reply: result.reply,
-            source: result.source,
-            providerLabel: result.providerLabel,
-            model: result.model,
-            fallbackUsed: result.fallbackUsed,
-            attempts: result.attempts,
-            toolCalls: result.toolCalls,
-          },
-        });
-      } catch (error: any) {
-        return reply.status(400).send({
-          success: false,
-          error: error?.message || 'Gagal menguji Agent AI',
-          data: error?.attempts ? { attempts: error.attempts, toolCalls: [] } : undefined,
-        });
+  fastify.post<{
+    Body: {
+      message?: string;
+      history?: AiConversationTurn[];
+      imageUrl?: string | null;
+      mediaName?: string | null;
+      replyToMessageId?: string | null;
+      contactName?: string | null;
+      contactPhone?: string | null;
+      channel?: string | null;
+      draftConfig?: Partial<AiAgentConfig>;
+    };
+  }>('/test', async (req, reply) => {
+    try {
+      const rawMessage = String(req.body?.message || '').trim();
+      const imageUrl = req.body?.imageUrl ? String(req.body.imageUrl).trim() : null;
+      const message = rawMessage || (imageUrl ? 'Mohon periksa gambar lampiran ini.' : '');
+      if (!message) {
+        return reply.status(400).send({ success: false, error: 'Pesan uji wajib diisi' });
       }
+
+      let configOverride: AiAgentConfig | undefined;
+      if (req.body?.draftConfig) {
+        const saved = await getAiAgentConfig();
+        configOverride = mergeAiAgentConfig(saved, req.body.draftConfig);
+      }
+
+      const rawHistory = Array.isArray(req.body?.history) ? req.body.history : [];
+      const history: AiConversationTurn[] = rawHistory
+        .filter((h) => h && (h.role === 'user' || h.role === 'assistant'))
+        .map((h, idx) => ({
+          id: h.id ? String(h.id) : `sim_msg_${idx + 1}`,
+          role: h.role,
+          content: String(h.content || ''),
+          timestamp: h.timestamp ? String(h.timestamp) : undefined,
+          imageUrl: h.imageUrl ? String(h.imageUrl) : null,
+          mediaName: h.mediaName ? String(h.mediaName) : null,
+          mediaType: h.mediaType ? String(h.mediaType) : null,
+          replyToMessageId: h.replyToMessageId ? String(h.replyToMessageId) : null,
+        }));
+
+      const result = await generateAiAgentReply(message, {
+        configOverride,
+        history,
+        imageUrl,
+        mediaName: req.body?.mediaName ? String(req.body.mediaName).trim() : null,
+        replyToMessageId: req.body?.replyToMessageId
+          ? String(req.body.replyToMessageId).trim()
+          : null,
+        contactName: req.body?.contactName ? String(req.body.contactName).trim() : 'Budi Santoso',
+        contactPhone: req.body?.contactPhone
+          ? String(req.body.contactPhone).trim()
+          : '+6281234567890',
+        channel: req.body?.channel ? String(req.body.channel).trim() : 'WHATSAPP',
+        isSimulator: true,
+      });
+      return reply.send({
+        success: true,
+        data: {
+          reply: result.reply,
+          source: result.source,
+          providerLabel: result.providerLabel,
+          model: result.model,
+          fallbackUsed: result.fallbackUsed,
+          attempts: result.attempts,
+          toolCalls: result.toolCalls,
+          outboundMedia: result.outboundMedia || [],
+          replyToMessageId: result.replyToMessageId || null,
+          replyToPreview: result.replyToPreview || null,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(400).send({
+        success: false,
+        error: error?.message || 'Gagal menguji Agent AI',
+        data: error?.attempts ? { attempts: error.attempts, toolCalls: [] } : undefined,
+      });
     }
-  );
+  });
 }

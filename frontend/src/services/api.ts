@@ -1559,9 +1559,30 @@ export const api = {
 
   testAiAgent: async (
     message: string,
-    draftConfig?: Partial<import('../types').AiAgentConfig>
+    draftConfig?: Partial<import('../types').AiAgentConfig>,
+    options?: {
+      history?: Array<{
+        id?: string;
+        role: 'user' | 'assistant';
+        content: string;
+        timestamp?: string;
+        imageUrl?: string | null;
+        mediaName?: string | null;
+        replyToMessageId?: string | null;
+      }>;
+      imageUrl?: string | null;
+      mediaName?: string | null;
+      replyToMessageId?: string | null;
+      contactName?: string | null;
+      contactPhone?: string | null;
+      channel?: string | null;
+    }
   ): Promise<import('../types').AiTestResult> => {
-    const res = await client.post('/ai-agent/test', { message, draftConfig });
+    const res = await client.post('/ai-agent/test', {
+      message,
+      draftConfig,
+      ...(options || {}),
+    });
     return res.data.data;
   },
 

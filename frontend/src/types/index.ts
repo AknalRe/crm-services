@@ -1151,7 +1151,39 @@ export interface AiAgentConfig {
   fallbackToLocalKb: boolean;
   temperature: number;
   maxTokens: number;
+  contextLength?: number;
+  maxHistoryMessages?: number;
   timeoutMs: number;
+}
+
+export interface AiQueuedOutboundMedia {
+  mediaUrl: string;
+  mediaType: 'image' | 'video' | 'audio' | 'document';
+  mimeType: string;
+  fileName: string;
+  caption?: string;
+  asDocument?: boolean;
+}
+
+export interface AiSimulatorChatTurn {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  imageUrl?: string | null;
+  mediaName?: string | null;
+  replyToMessageId?: string | null;
+  replyToPreview?: string | null;
+  resultMeta?: {
+    source: AiProviderId;
+    providerLabel: string;
+    model: string;
+    fallbackUsed: boolean;
+    attempts: AiAttemptTrace[];
+    toolCalls?: AiToolCallTrace[];
+    outboundMedia?: AiQueuedOutboundMedia[];
+    error?: string;
+  };
 }
 
 export interface AiAttemptTrace {
@@ -1184,6 +1216,9 @@ export interface AiTestResult {
   fallbackUsed: boolean;
   attempts: AiAttemptTrace[];
   toolCalls?: AiToolCallTrace[];
+  outboundMedia?: AiQueuedOutboundMedia[];
+  replyToMessageId?: string | null;
+  replyToPreview?: string | null;
 }
 
 export interface AiSlotVerifyResult {

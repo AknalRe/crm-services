@@ -111,12 +111,12 @@ export const SKILL_PRESETS: SkillPreset[] = [
     slug: 'catalog-advisor',
     name: 'Konsultan Produk & Harga',
     description:
-      'Mengambil data produk dan harga langsung dari Katalog Produk CRM untuk menjawab pertanyaan harga dan rekomendasi paket.',
+      'Mengambil data produk dan harga langsung dari Katalog Produk CRM serta mengirimkan foto/brosur dari Galeri Media saat diminta.',
     category: 'SALES',
-    triggerHint: 'Saat pelanggan menanyakan harga, daftar produk, paket layanan, SKU, atau rekomendasi.',
+    triggerHint: 'Saat pelanggan menanyakan harga, daftar produk, foto produk, paket layanan, SKU, atau rekomendasi.',
     instructions:
-      '1. Gunakan tool crm_search_products sebelum menyebutkan harga atau spesifikasi produk.\n2. Cantumkan nama produk, harga per satuan, dan ringkasan manfaat secara rapi.\n3. Jika ada beberapa pilihan, tawarkan opsi yang paling sesuai dengan kebutuhan pelanggan.',
-    linkedTools: ['crm_search_products'],
+      '1. Gunakan tool crm_search_products sebelum menyebutkan harga atau spesifikasi produk.\n2. Bila pelanggan meminta foto produk atau brosur katalog, gunakan crm_list_gallery_media lalu kirim dengan crm_send_media.\n3. Cantumkan nama produk, harga per satuan, dan ringkasan manfaat secara rapi.',
+    linkedTools: ['crm_search_products', 'crm_list_gallery_media', 'crm_send_media'],
   },
   {
     slug: 'knowledge-researcher',
@@ -130,26 +130,48 @@ export const SKILL_PRESETS: SkillPreset[] = [
     linkedTools: ['crm_search_knowledge'],
   },
   {
+    slug: 'whatsapp-media-assistant',
+    name: 'Asisten Visual, Foto & Riwayat WhatsApp',
+    description:
+      'Membaca riwayat chat WhatsApp, menganalisis foto/bukti transfer pelanggan, mengutip (reply) pesan spesifik, serta mengirim foto produk.',
+    category: 'CRM',
+    triggerHint: 'Saat pelanggan mengirim foto/bukti transfer, merujuk pesan lama, atau meminta balasan atas pesan tertentu.',
+    instructions:
+      '1. Gunakan crm_get_chat_history bila pelanggan merujuk percakapan sebelumnya.\n2. Gunakan crm_inspect_customer_media untuk melihat foto/dokumen yang dikirim pelanggan.\n3. Gunakan crm_reply_to_message bila perlu mengutip pesan spesifik pelanggan, dan crm_send_media untuk mengirim foto/dokumen dari Galeri Media.',
+    linkedTools: [
+      'crm_get_chat_history',
+      'crm_inspect_customer_media',
+      'crm_list_gallery_media',
+      'crm_send_media',
+      'crm_reply_to_message',
+    ],
+  },
+  {
     slug: 'lead-qualifier',
     name: 'Kualifikasi Prospek (Lead)',
     description:
-      'Menggali kebutuhan calon pelanggan baru secara ramah untuk mempermudah tindak lanjut tim sales.',
+      'Menggali kebutuhan calon pelanggan baru secara ramah dan otomatis menyimpan catatan serta label prospek.',
     category: 'SALES',
     triggerHint: 'Saat prospek baru bertanya umum seperti "info dong", "bisa bantu?", atau "mau konsultasi".',
     instructions:
-      '1. Jawab inti pertanyaan terlebih dahulu secara singkat.\n2. Ajukan maksimal 2 pertanyaan lanjutan yang relevan (kebutuhan utama dan perkiraan skala/timeline).\n3. Hindari gaya interogasi; tetap sopan dan membantu.',
-    linkedTools: ['crm_get_customer_info'],
+      '1. Jawab inti pertanyaan terlebih dahulu secara singkat.\n2. Ajukan maksimal 2 pertanyaan lanjutan yang relevan (kebutuhan utama dan perkiraan skala/timeline).\n3. Simpan ringkasan kebutuhan atau label prospek menggunakan crm_update_customer_profile.',
+    linkedTools: ['crm_get_customer_info', 'crm_update_customer_profile'],
   },
   {
     slug: 'complaint-handler',
     name: 'Penanganan Komplain & Eskalasi',
     description:
-      'Merespons keluhan pelanggan dengan empati dan langsung melakukan eskalasi tiket ke agen manusia bila butuh penanganan khusus.',
+      'Merespons keluhan pelanggan dengan empati dan langsung melakukan eskalasi tiket ke agen manusia yang sedang ONLINE.',
     category: 'SUPPORT',
     triggerHint: 'Saat pelanggan marah, komplain produk/pembayaran, meminta refund, atau meminta bicara dengan admin.',
     instructions:
-      '1. Awali dengan empati dan permohonan maaf yang tulus tanpa menyalahkan pelanggan.\n2. Minta detail pendukung singkat (nomor order/kendala) jika belum ada.\n3. Panggil tool crm_escalate_to_human dengan ringkasan jelas agar agen manusia segera mengambil alih.',
-    linkedTools: ['crm_escalate_to_human', 'crm_get_customer_info'],
+      '1. Awali dengan empati dan permohonan maaf yang tulus tanpa menyalahkan pelanggan.\n2. Periksa riwayat chat atau foto bukti kendala dengan crm_get_chat_history / crm_inspect_customer_media bila ada.\n3. Panggil tool crm_escalate_to_human dengan ringkasan jelas agar agen manusia segera mengambil alih.',
+    linkedTools: [
+      'crm_escalate_to_human',
+      'crm_get_customer_info',
+      'crm_get_chat_history',
+      'crm_inspect_customer_media',
+    ],
   },
   {
     slug: 'social-comment-moderator',
@@ -166,12 +188,17 @@ export const SKILL_PRESETS: SkillPreset[] = [
     slug: 'follow-up-assistant',
     name: 'Asisten Follow-Up & Pembayaran',
     description:
-      'Membantu pelanggan menuntaskan kendala pembayaran, konfirmasi order, atau status layanan secara tertib.',
+      'Membantu pelanggan menuntaskan kendala pembayaran, memeriksa bukti transfer, atau memperbarui catatan status pesanan.',
     category: 'OPERATIONS',
     triggerHint: 'Saat pelanggan menanyakan status pembayaran, konfirmasi transfer, atau kelanjutan proses order.',
     instructions:
-      '1. Periksa profil kontak dengan crm_get_customer_info bila tersedia.\n2. Arahkan langkah verifikasi pembayaran secara jelas tanpa meminta PIN/OTP/kata sandi.',
-    linkedTools: ['crm_get_customer_info', 'crm_search_knowledge'],
+      '1. Periksa profil kontak dengan crm_get_customer_info dan foto bukti pembayaran dengan crm_inspect_customer_media bila pelanggan mengirim gambar.\n2. Catat ringkasan konfirmasi pada kontak menggunakan crm_update_customer_profile.\n3. Arahkan langkah verifikasi pembayaran secara jelas tanpa meminta PIN/OTP/kata sandi.',
+    linkedTools: [
+      'crm_get_customer_info',
+      'crm_inspect_customer_media',
+      'crm_update_customer_profile',
+      'crm_search_knowledge',
+    ],
   },
 ];
 

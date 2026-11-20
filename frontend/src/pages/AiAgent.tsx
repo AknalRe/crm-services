@@ -10,6 +10,7 @@ import {
   AiModelOption,
   AiProviderCatalogEntry,
   AiProviderId,
+  AiSimulatorChatTurn,
   AiSkill,
   AiSkillPreset,
   AiSlotVerifyResult,
@@ -169,7 +170,18 @@ const DEFAULT_FORM_CONFIG: AiAgentConfig = {
   },
   positivePrompt: '',
   negativePrompt: '',
-  enabledBuiltinTools: ['crm_search_products', 'crm_search_knowledge'],
+  enabledBuiltinTools: [
+    'crm_search_products',
+    'crm_search_knowledge',
+    'crm_get_customer_info',
+    'crm_get_chat_history',
+    'crm_inspect_customer_media',
+    'crm_list_gallery_media',
+    'crm_send_media',
+    'crm_reply_to_message',
+    'crm_update_customer_profile',
+    'crm_escalate_to_human',
+  ],
   autoReplyDm: false,
   autoReplyComment: false,
   provider: 'LOCAL_KB',
@@ -179,7 +191,9 @@ const DEFAULT_FORM_CONFIG: AiAgentConfig = {
   fallbacks: [],
   fallbackToLocalKb: true,
   temperature: 0.4,
-  maxTokens: 800,
+  maxTokens: 2048,
+  contextLength: 32768,
+  maxHistoryMessages: 20,
   timeoutMs: 15000,
 };
 
@@ -230,6 +244,7 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
   const [testResult, setTestResult] = useState<AiTestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  const [chatTurns, setChatTurns] = useState<AiSimulatorChatTurn[]>([]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -467,34 +482,123 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
     }
   };
 
-  const handleTest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!testMessage.trim()) return;
+  const handleSendChatTurn = async (payload: {
+    text: string;
+    imageUrl?: string | null;
+    mediaName?: string | null;
+    replyToMessageId?: string | null;
+    replyToPreview?: string | null;
+    customerName: string;
+  }) => {
+    const cleanText = payload.text.trim();
+    if (!cleanText && !payload.imageUrl) return;
+
+    const nowTime = new Date().toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const userTurnId = `sim_msg_${chatTurns.length + 1}`;
+    const userTurn: AiSimulatorChatTurn = {
+      id: userTurnId,
+      role: 'user',
+      content: cleanText,
+      timestamp: nowTime,
+      imageUrl: payload.imageUrl || null,
+      mediaName: payload.mediaName || null,
+      replyToMessageId: payload.replyToMessageId || null,
+      replyToPreview: payload.replyToPreview || null,
+    };
+
+    const priorHistory = chatTurns.map((t) => ({
+      id: t.id,
+      role: t.role,
+      content: t.content,
+      timestamp: t.timestamp,
+      imageUrl: t.imageUrl || null,
+      mediaName: t.mediaName || null,
+      replyToMessageId: t.replyToMessageId || null,
+    }));
+
+    setChatTurns((prev) => [...prev, userTurn]);
     setTesting(true);
     setTestError(null);
+
     try {
-      const res = await api.testAiAgent(testMessage.trim(), config);
+      const res = await api.testAiAgent(cleanText, config, {
+        history: priorHistory,
+        imageUrl: payload.imageUrl || null,
+        mediaName: payload.mediaName || null,
+        replyToMessageId: payload.replyToMessageId || null,
+        contactName: payload.customerName,
+      });
       setTestResult(res);
+
+      const aiTurn: AiSimulatorChatTurn = {
+        id: `sim_msg_${chatTurns.length + 2}`,
+        role: 'assistant',
+        content: res.reply || '(Tidak ada teks balasan)',
+        timestamp: new Date().toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        replyToMessageId: res.replyToMessageId || payload.replyToMessageId || null,
+        replyToPreview: res.replyToPreview || payload.replyToPreview || null,
+        resultMeta: {
+          source: res.source,
+          providerLabel: res.providerLabel,
+          model: res.model,
+          fallbackUsed: res.fallbackUsed,
+          attempts: res.attempts || [],
+          toolCalls: res.toolCalls || [],
+          outboundMedia: res.outboundMedia || [],
+        },
+      };
+      setChatTurns((prev) => [...prev, aiTurn]);
     } catch (err: any) {
       const attempts = err.response?.data?.data?.attempts;
-      if (Array.isArray(attempts)) {
-        setTestResult({
-          reply: '',
+      const msg = err.response?.data?.error || 'Gagal menguji balasan AI';
+      setTestError(msg);
+      toast.error(msg);
+
+      const errTurn: AiSimulatorChatTurn = {
+        id: `sim_msg_${chatTurns.length + 2}`,
+        role: 'assistant',
+        content: `Gagal memproses balasan: ${msg}`,
+        timestamp: new Date().toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        resultMeta: {
           source: config.provider,
           providerLabel: config.provider,
           model: config.model,
           fallbackUsed: false,
-          attempts,
-        });
-      } else {
-        setTestResult(null);
-      }
-      const msg = err.response?.data?.error || 'Gagal menguji balasan AI';
-      setTestError(msg);
-      toast.error(msg);
+          attempts: Array.isArray(attempts) ? attempts : [],
+          toolCalls: [],
+          error: msg,
+        },
+      };
+      setChatTurns((prev) => [...prev, errTurn]);
     } finally {
       setTesting(false);
     }
+  };
+
+  const handleTest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testMessage.trim()) return;
+    const text = testMessage.trim();
+    setTestMessage('');
+    await handleSendChatTurn({
+      text,
+      customerName: 'Budi Santoso',
+    });
+  };
+
+  const handleClearChat = () => {
+    setChatTurns([]);
+    setTestResult(null);
+    setTestError(null);
   };
 
   if (loading) return <LoadingState message="Memuat Agent AI, Knowledge Book & Skill..." />;
@@ -503,6 +607,11 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
   const activeSkillsCount = skills.filter((s) => s.isActive).length;
   const activeMcpCount = mcpServers.filter((s) => s.isActive).length;
   const activeBooksCount = books.filter((b) => b.isActive).length;
+  const enabledToolsCount =
+    (config.enabledBuiltinTools?.length || 0) +
+    mcpServers
+      .filter((s) => s.isActive)
+      .reduce((acc, s) => acc + (s.cachedTools?.length || 0), 0);
 
   return (
     <div className="space-y-4">
@@ -548,7 +657,10 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
               id: 'skills-mcp',
               label: `Skill (${activeSkillsCount}) & MCP (${activeMcpCount})`,
             },
-            { id: 'simulator', label: 'Uji Balasan AI' },
+            {
+              id: 'simulator',
+              label: `Simulasi Chat AI${chatTurns.length > 0 ? ` (${chatTurns.length})` : ''}`,
+            },
           ] as Array<{ id: AiTabId; label: string }>
         ).map((tab) => (
           <button
@@ -576,7 +688,7 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
               onSave={handleSaveConfig}
             />
           </fieldset>
-          <div className="hidden lg:block lg:col-span-5">
+          <div className="lg:col-span-5">
             <AiTestSimulatorPanel
               testMessage={testMessage}
               onTestMessageChange={setTestMessage}
@@ -585,6 +697,12 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
               testError={testError}
               onSubmitTest={handleTest}
               providerLabelFallback={config.provider}
+              agentName={config.name}
+              agentModel={config.model}
+              enabledToolsCount={enabledToolsCount}
+              chatTurns={chatTurns}
+              onSendChatTurn={handleSendChatTurn}
+              onClearChat={handleClearChat}
             />
           </div>
         </div>
@@ -615,7 +733,7 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
               onSave={handleSaveConfig}
             />
           </fieldset>
-          <div className="hidden lg:block lg:col-span-5">
+          <div className="lg:col-span-5">
             <AiTestSimulatorPanel
               testMessage={testMessage}
               onTestMessageChange={setTestMessage}
@@ -624,6 +742,12 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
               testError={testError}
               onSubmitTest={handleTest}
               providerLabelFallback={config.provider}
+              agentName={config.name}
+              agentModel={config.model}
+              enabledToolsCount={enabledToolsCount}
+              chatTurns={chatTurns}
+              onSendChatTurn={handleSendChatTurn}
+              onClearChat={handleClearChat}
             />
           </div>
         </div>
@@ -655,7 +779,7 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
       )}
 
       {activeTab === 'simulator' && (
-        <div className="max-w-3xl">
+        <div className="max-w-4xl">
           <AiTestSimulatorPanel
             testMessage={testMessage}
             onTestMessageChange={setTestMessage}
@@ -664,6 +788,12 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
             testError={testError}
             onSubmitTest={handleTest}
             providerLabelFallback={config.provider}
+            agentName={config.name}
+            agentModel={config.model}
+            enabledToolsCount={enabledToolsCount}
+            chatTurns={chatTurns}
+            onSendChatTurn={handleSendChatTurn}
+            onClearChat={handleClearChat}
           />
         </div>
       )}

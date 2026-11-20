@@ -115,10 +115,26 @@ const AiSlotFields: React.FC<SlotEditorProps> = ({
   };
 
   return (
-    <div className="space-y-2.5">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+    <div className="space-y-3">
+      {/* 1. Provider AI & 2. Base URL Endpoint */}
+      <div
+        className={`grid grid-cols-1 ${
+          !isLocal && (meta?.requiresBaseUrl || showCustomUrl) ? 'sm:grid-cols-2' : ''
+        } gap-2.5`}
+      >
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Provider AI</label>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <label className="block text-xs font-medium text-gray-700">1. Provider AI</label>
+            {!isLocal && !meta?.requiresBaseUrl && (
+              <button
+                type="button"
+                onClick={() => setShowCustomUrl((v) => !v)}
+                className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
+              >
+                {showCustomUrl ? 'Gunakan Base URL Default' : 'Override Base URL'}
+              </button>
+            )}
+          </div>
           <select
             value={provider}
             onChange={(e) => handleProviderSelect(e.target.value as AiProviderId)}
@@ -132,186 +148,187 @@ const AiSlotFields: React.FC<SlotEditorProps> = ({
           </select>
         </div>
 
+        {!isLocal && (meta?.requiresBaseUrl || showCustomUrl) && (
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              2. Base URL Endpoint {meta?.requiresBaseUrl ? '(Wajib)' : '(Opsional)'}
+            </label>
+            <input
+              type="url"
+              placeholder={meta?.baseUrlPlaceholder || 'https://...'}
+              value={baseUrl}
+              onChange={(e) => onChange({ baseUrl: e.target.value })}
+              className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono"
+            />
+            {meta?.id === 'CUSTOM_OPENAI' && (
+              <p className="text-[11px] text-gray-500 mt-1">
+                Contoh Ollama / Gateway:{' '}
+                <code className="font-mono">http://host.docker.internal:11434/v1</code>
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 3. API Key */}
+      {!isLocal && (
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="block text-xs font-medium text-gray-700">Model</label>
-            {!isLocal && (
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+            <label className="text-xs font-medium text-gray-700">
+              {meta?.requiresBaseUrl || showCustomUrl ? '3. API Key' : '2. API Key'}{' '}
+              {hasApiKey && !clearApiKey && (
+                <span className="font-mono text-[11px] font-normal text-emerald-700">
+                  (Tersimpan: {apiKeyPreview || '••••'})
+                </span>
+              )}
+              {clearApiKey && (
+                <span className="text-[11px] font-normal text-amber-700">
+                  (Key akan dihapus saat disimpan)
+                </span>
+              )}
+              {!hasApiKey && !clearApiKey && canInheritPrimaryKey && (
+                <span className="text-[11px] font-normal text-gray-500">
+                  (Opsional: mewarisi key Utama)
+                </span>
+              )}
+            </label>
+
+            {hasApiKey && !clearApiKey && (
               <button
                 type="button"
-                onClick={() => onToggleManualModel(!showManualInput)}
-                className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
+                onClick={() =>
+                  onChange({
+                    apiKey: '',
+                    hasApiKey: false,
+                    apiKeyPreview: '',
+                    clearApiKey: true,
+                  })
+                }
+                className="text-[11px] text-rose-600 hover:text-rose-700 font-medium"
               >
-                {showManualInput ? 'Pilih daftar' : 'Input manual'}
+                Hapus key
               </button>
             )}
           </div>
 
-          {isLocal ? (
-            <div className="h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-600 font-mono flex items-center">
-              local-kb-matcher
-            </div>
-          ) : showManualInput ? (
-            <input
-              type="text"
-              value={model}
-              placeholder={meta?.defaultModel || 'nama-model'}
-              onChange={(e) => onChange({ model: e.target.value })}
-              className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
-            />
-          ) : (
-            <select
-              value={model}
-              onChange={(e) => {
-                if (e.target.value === '__MANUAL__') {
-                  onToggleManualModel(true);
-                } else {
-                  onChange({ model: e.target.value });
-                }
-              }}
-              className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
+          <input
+            type="password"
+            autoComplete="off"
+            placeholder={
+              hasApiKey && !clearApiKey
+                ? 'Biarkan kosong untuk tetap pakai API Key tersimpan'
+                : canInheritPrimaryKey
+                  ? 'Kosongkan untuk pakai key Utama, atau isi key cadangan'
+                  : meta?.apiKeyPlaceholder || 'API Key...'
+            }
+            value={apiKey}
+            onChange={(e) =>
+              onChange({
+                apiKey: e.target.value,
+                clearApiKey: false,
+              })
+            }
+            className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono"
+          />
+        </div>
+      )}
+
+      {/* 4. Model Selection + Muat Model API & Uji Koneksi */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-xs font-medium text-gray-700">
+            {isLocal
+              ? '2. Model'
+              : meta?.requiresBaseUrl || showCustomUrl
+                ? '4. Model AI'
+                : '3. Model AI'}
+          </label>
+          {!isLocal && (
+            <button
+              type="button"
+              onClick={() => onToggleManualModel(!showManualInput)}
+              className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
             >
-              {mergedModels.apiList.length > 0 && (
-                <optgroup label={`Model dari API (${mergedModels.apiList.length})`}>
-                  {mergedModels.apiList.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {mergedModels.recList.length > 0 && (
-                <optgroup label="Rekomendasi">
-                  {mergedModels.recList.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label} ({m.id})
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              <option value="__MANUAL__">+ Tulis ID model kustom...</option>
-            </select>
+              {showManualInput ? 'Pilih dari daftar' : 'Input ID manual'}
+            </button>
           )}
         </div>
-      </div>
 
-      {!isLocal && (
-        <>
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <label className="text-xs font-medium text-gray-700">
-                API Key{' '}
-                {hasApiKey && !clearApiKey && (
-                  <span className="font-mono text-[11px] font-normal text-emerald-700">
-                    (Tersimpan: {apiKeyPreview || '••••'})
-                  </span>
-                )}
-                {clearApiKey && (
-                  <span className="text-[11px] font-normal text-amber-700">
-                    (Key akan dihapus saat disimpan)
-                  </span>
-                )}
-                {!hasApiKey && !clearApiKey && canInheritPrimaryKey && (
-                  <span className="text-[11px] font-normal text-gray-500">
-                    (Opsional: mewarisi key Utama)
-                  </span>
-                )}
-              </label>
-
-              <div className="flex items-center gap-2.5">
-                {hasApiKey && !clearApiKey && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onChange({
-                        apiKey: '',
-                        hasApiKey: false,
-                        apiKeyPreview: '',
-                        clearApiKey: true,
-                      })
-                    }
-                    className="text-[11px] text-rose-600 hover:text-rose-700 font-medium"
-                  >
-                    Hapus key
-                  </button>
-                )}
-                {!meta?.requiresBaseUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomUrl((v) => !v)}
-                    className="text-[11px] text-gray-500 hover:text-gray-800"
-                  >
-                    {showCustomUrl ? 'Sembunyikan Base URL' : 'Override Base URL'}
-                  </button>
-                )}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <div className="flex-1 min-w-0">
+            {isLocal ? (
+              <div className="h-9 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-600 font-mono flex items-center">
+                local-kb-matcher
               </div>
-            </div>
-
-            <input
-              type="password"
-              autoComplete="off"
-              placeholder={
-                hasApiKey && !clearApiKey
-                  ? 'Biarkan kosong untuk tetap pakai API Key tersimpan'
-                  : canInheritPrimaryKey
-                    ? 'Kosongkan untuk pakai key Utama, atau isi key cadangan'
-                    : meta?.apiKeyPlaceholder || 'API Key...'
-              }
-              value={apiKey}
-              onChange={(e) =>
-                onChange({
-                  apiKey: e.target.value,
-                  clearApiKey: false,
-                })
-              }
-              className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono"
-            />
+            ) : showManualInput ? (
+              <input
+                type="text"
+                value={model}
+                placeholder={meta?.defaultModel || 'nama-model'}
+                onChange={(e) => onChange({ model: e.target.value })}
+                className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
+              />
+            ) : (
+              <select
+                value={model}
+                onChange={(e) => {
+                  if (e.target.value === '__MANUAL__') {
+                    onToggleManualModel(true);
+                  } else {
+                    onChange({ model: e.target.value });
+                  }
+                }}
+                className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
+              >
+                {mergedModels.apiList.length > 0 && (
+                  <optgroup label={`Model dari API (${mergedModels.apiList.length})`}>
+                    {mergedModels.apiList.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {mergedModels.recList.length > 0 && (
+                  <optgroup label="Rekomendasi">
+                    {mergedModels.recList.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label} ({m.id})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <option value="__MANUAL__">+ Tulis ID model kustom...</option>
+              </select>
+            )}
           </div>
 
-          {(meta?.requiresBaseUrl || showCustomUrl) && (
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                Base URL Endpoint {meta?.requiresBaseUrl ? '(Wajib)' : '(Opsional)'}
-              </label>
-              <input
-                type="url"
-                placeholder={meta?.baseUrlPlaceholder || 'https://...'}
-                value={baseUrl}
-                onChange={(e) => onChange({ baseUrl: e.target.value })}
-                className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono"
-              />
-              {meta?.id === 'CUSTOM_OPENAI' && (
-                <p className="text-[11px] text-gray-500 mt-1">
-                  Contoh untuk Ollama dari Docker:{' '}
-                  <code className="font-mono">http://host.docker.internal:11434/v1</code>
-                </p>
+          {!isLocal && (
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {meta?.supportsModelFetch && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  isLoading={isFetchingModels}
+                  onClick={onFetchModels}
+                >
+                  Muat Model API
+                </Button>
               )}
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2 pt-0.5">
-            {meta?.supportsModelFetch && (
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                isLoading={isFetchingModels}
-                onClick={onFetchModels}
+                isLoading={isVerifying}
+                onClick={onVerifySlot}
               >
-                Muat Model API
+                Uji Koneksi
               </Button>
-            )}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              isLoading={isVerifying}
-              onClick={onVerifySlot}
-            >
-              Uji Koneksi
-            </Button>
-          </div>
-        </>
-      )}
+            </div>
+          )}
+        </div>
+      </div>
 
       {verifyResult && (
         <div
@@ -650,62 +667,174 @@ export const AiModelConfigPanel: React.FC<AiModelConfigPanelProps> = ({
         </label>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-gray-100">
-        <div>
-          <label className="block text-[11px] font-medium text-gray-600 mb-1">Temperature</label>
-          <input
-            type="number"
-            min={0}
-            max={1.5}
-            step={0.1}
-            value={config.temperature}
-            onChange={(e) =>
-              onChangeConfig((c) => ({
-                ...c,
-                temperature: Number.isFinite(Number(e.target.value))
-                  ? Number(e.target.value)
-                  : 0.4,
-              }))
-            }
-            className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
-          />
+      <div className="space-y-3 pt-3 border-t border-gray-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label className="block text-[11px] font-medium text-gray-700">
+                Max Tokens (Batas Output)
+              </label>
+              <span className="text-[10px] text-gray-400 font-mono">64 – 131.072</span>
+            </div>
+            <input
+              type="number"
+              min={64}
+              max={131072}
+              step={1}
+              value={config.maxTokens}
+              onChange={(e) =>
+                onChangeConfig((c) => ({
+                  ...c,
+                  maxTokens: Number.isFinite(Number(e.target.value))
+                    ? Number(e.target.value)
+                    : 2048,
+                }))
+              }
+              className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
+            />
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {[
+                { label: '2K', value: 2048 },
+                { label: '4K', value: 4096 },
+                { label: '6.4K', value: 6400 },
+                { label: '8K', value: 8192 },
+                { label: '16K', value: 16384 },
+                { label: '32K', value: 32768 },
+                { label: '64K', value: 65536 },
+              ].map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  onClick={() =>
+                    onChangeConfig((c) => ({ ...c, maxTokens: preset.value }))
+                  }
+                  className={`px-1.5 py-0.5 rounded border text-[10px] font-mono transition-colors ${
+                    config.maxTokens === preset.value
+                      ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-semibold'
+                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label className="block text-[11px] font-medium text-gray-700">
+                Context Length (Jendela Konteks)
+              </label>
+              <span className="text-[10px] text-gray-400 font-mono">2.048 – 2.097.152</span>
+            </div>
+            <input
+              type="number"
+              min={2048}
+              max={2097152}
+              step={1}
+              value={config.contextLength || 32768}
+              onChange={(e) =>
+                onChangeConfig((c) => ({
+                  ...c,
+                  contextLength: Number.isFinite(Number(e.target.value))
+                    ? Number(e.target.value)
+                    : 32768,
+                }))
+              }
+              className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
+            />
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {[
+                { label: '8K', value: 8192 },
+                { label: '16K', value: 16384 },
+                { label: '32K', value: 32768 },
+                { label: '64K', value: 65536 },
+                { label: '128K', value: 131072 },
+                { label: '256K', value: 262144 },
+                { label: '1M', value: 1048576 },
+              ].map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  onClick={() =>
+                    onChangeConfig((c) => ({ ...c, contextLength: preset.value }))
+                  }
+                  className={`px-1.5 py-0.5 rounded border text-[10px] font-mono transition-colors ${
+                    (config.contextLength || 32768) === preset.value
+                      ? 'bg-indigo-50 border-indigo-200 text-indigo-700 font-semibold'
+                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-        <div>
-          <label className="block text-[11px] font-medium text-gray-600 mb-1">Max Tokens</label>
-          <input
-            type="number"
-            min={64}
-            max={4096}
-            step={50}
-            value={config.maxTokens}
-            onChange={(e) =>
-              onChangeConfig((c) => ({
-                ...c,
-                maxTokens: Number.isFinite(Number(e.target.value))
-                  ? Number(e.target.value)
-                  : 800,
-              }))
-            }
-            className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
-          />
-        </div>
-        <div>
-          <label className="block text-[11px] font-medium text-gray-600 mb-1">Timeout (dtk)</label>
-          <input
-            type="number"
-            min={3}
-            max={60}
-            step={1}
-            value={Math.round((config.timeoutMs || 15000) / 1000)}
-            onChange={(e) => {
-              const sec = Number(e.target.value);
-              onChangeConfig((c) => ({
-                ...c,
-                timeoutMs: Number.isFinite(sec) ? Math.max(3, Math.min(60, sec)) * 1000 : 15000,
-              }));
-            }}
-            className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
-          />
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div>
+            <label className="block text-[11px] font-medium text-gray-600 mb-1">
+              Temperature (0 – 1.5)
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={1.5}
+              step="any"
+              value={config.temperature}
+              onChange={(e) =>
+                onChangeConfig((c) => ({
+                  ...c,
+                  temperature: Number.isFinite(Number(e.target.value))
+                    ? Number(e.target.value)
+                    : 0.4,
+                }))
+              }
+              className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-gray-600 mb-1">
+              Riwayat Chat Konteks (Pesan)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              step={1}
+              value={config.maxHistoryMessages || 20}
+              onChange={(e) =>
+                onChangeConfig((c) => ({
+                  ...c,
+                  maxHistoryMessages: Number.isFinite(Number(e.target.value))
+                    ? Math.max(1, Math.min(100, Number(e.target.value)))
+                    : 20,
+                }))
+              }
+              className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-gray-600 mb-1">
+              Timeout (dtk)
+            </label>
+            <input
+              type="number"
+              min={3}
+              max={180}
+              step={1}
+              value={Math.round((config.timeoutMs || 15000) / 1000)}
+              onChange={(e) => {
+                const sec = Number(e.target.value);
+                onChangeConfig((c) => ({
+                  ...c,
+                  timeoutMs: Number.isFinite(sec) ? Math.max(3, Math.min(180, sec)) * 1000 : 15000,
+                }));
+              }}
+              className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono"
+            />
+          </div>
         </div>
       </div>
 
