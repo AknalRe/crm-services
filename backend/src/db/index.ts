@@ -621,17 +621,40 @@ export async function initDb() {
   `);
   await safeExec('deduplicate_waha_chat_messages', async () => {
     const stanzaRemoved = await _queryClient.unsafe(`
-      WITH ranked_stanza AS (
+      WITH extracted AS (
         SELECT
           id,
+          company_id,
+          conversation_id,
+          COALESCE(LOWER(TRIM(waha_session)), '') AS norm_session,
+          direction,
+          sender_name,
+          sender_phone,
+          media_url,
+          ack_status,
+          delivered_at,
+          read_at,
+          metadata_json,
+          created_at,
+          COALESCE(
+            SUBSTRING(waha_message_id FROM '@(?:g\\.us|c\\.us|s\\.whatsapp\\.net|lid)_([^_@]+)'),
+            REGEXP_REPLACE(waha_message_id, '^.*_', '')
+          ) AS stanza_id
+        FROM chat_messages
+        WHERE channel = 'WHATSAPP'
+          AND waha_message_id IS NOT NULL
+          AND waha_message_id NOT LIKE '%status@broadcast%'
+      ),
+      ranked_stanza AS (
+        SELECT
+          id,
+          ack_status,
+          delivered_at,
+          read_at,
           FIRST_VALUE(id) OVER (
-            PARTITION BY
-              company_id,
-              conversation_id,
-              COALESCE(LOWER(TRIM(waha_session)), ''),
-              direction,
-              REGEXP_REPLACE(waha_message_id, '^.*_', '')
+            PARTITION BY company_id, conversation_id, norm_session, direction, stanza_id
             ORDER BY
+              (CASE WHEN COALESCE(metadata_json, '') LIKE '%"sentVia":"CRM"%' THEN 1 ELSE 0 END) DESC,
               (CASE WHEN sender_name IS NOT NULL AND TRIM(sender_name) <> '' THEN 1 ELSE 0 END) DESC,
               (CASE WHEN sender_phone IS NOT NULL AND TRIM(sender_phone) <> '' THEN 1 ELSE 0 END) DESC,
               (CASE WHEN media_url IS NOT NULL THEN 1 ELSE 0 END) DESC,
@@ -639,27 +662,38 @@ export async function initDb() {
               id ASC
           ) AS keep_id,
           ROW_NUMBER() OVER (
-            PARTITION BY
-              company_id,
-              conversation_id,
-              COALESCE(LOWER(TRIM(waha_session)), ''),
-              direction,
-              REGEXP_REPLACE(waha_message_id, '^.*_', '')
+            PARTITION BY company_id, conversation_id, norm_session, direction, stanza_id
             ORDER BY
+              (CASE WHEN COALESCE(metadata_json, '') LIKE '%"sentVia":"CRM"%' THEN 1 ELSE 0 END) DESC,
               (CASE WHEN sender_name IS NOT NULL AND TRIM(sender_name) <> '' THEN 1 ELSE 0 END) DESC,
               (CASE WHEN sender_phone IS NOT NULL AND TRIM(sender_phone) <> '' THEN 1 ELSE 0 END) DESC,
               (CASE WHEN media_url IS NOT NULL THEN 1 ELSE 0 END) DESC,
               created_at ASC,
               id ASC
           ) AS rn
-        FROM chat_messages
-        WHERE channel = 'WHATSAPP'
-          AND waha_message_id IS NOT NULL
-          AND waha_message_id NOT LIKE '%status@broadcast%'
-          AND LENGTH(REGEXP_REPLACE(waha_message_id, '^.*_', '')) >= 8
+        FROM extracted
+        WHERE LENGTH(stanza_id) >= 8 AND stanza_id NOT LIKE '%@%'
       ),
       dups AS (
-        SELECT id, keep_id FROM ranked_stanza WHERE rn > 1 AND id <> keep_id
+        SELECT id, keep_id, ack_status, delivered_at, read_at FROM ranked_stanza WHERE rn > 1 AND id <> keep_id
+      ),
+      upgraded AS (
+        UPDATE chat_messages m
+        SET
+          ack_status = GREATEST(COALESCE(m.ack_status, 0), agg.max_ack),
+          status = CASE
+            WHEN GREATEST(COALESCE(m.ack_status, 0), agg.max_ack) >= 3 THEN 'READ'
+            WHEN GREATEST(COALESCE(m.ack_status, 0), agg.max_ack) = 2 THEN 'DELIVERED'
+            ELSE m.status
+          END,
+          delivered_at = COALESCE(m.delivered_at, agg.max_delivered_at),
+          read_at = COALESCE(m.read_at, agg.max_read_at)
+        FROM (
+          SELECT keep_id, MAX(COALESCE(ack_status, 0)) AS max_ack, MAX(delivered_at) AS max_delivered_at, MAX(read_at) AS max_read_at
+          FROM dups
+          GROUP BY keep_id
+        ) agg
+        WHERE m.id = agg.keep_id
       ),
       relinked AS (
         UPDATE chat_messages m
@@ -718,7 +752,69 @@ export async function initDb() {
       WHERE id IN (SELECT dup_id FROM media_dups)
       RETURNING id;
     `);
-    const totalRemoved = (stanzaRemoved?.length || 0) + (mediaRemoved?.length || 0);
+    const outboundRaceRemoved = await _queryClient.unsafe(`
+      WITH outbound_dups AS (
+        SELECT DISTINCT ON (b.id)
+          b.id AS dup_id,
+          a.id AS keep_id,
+          COALESCE(b.ack_status, 0) AS dup_ack,
+          b.delivered_at AS dup_delivered_at,
+          b.read_at AS dup_read_at,
+          b.waha_message_id AS dup_waha_id
+        FROM chat_messages a
+        JOIN chat_messages b
+          ON a.company_id = b.company_id
+         AND a.conversation_id = b.conversation_id
+         AND a.direction = 'OUTBOUND'
+         AND b.direction = 'OUTBOUND'
+         AND a.body = b.body
+         AND a.id <> b.id
+         AND ABS(EXTRACT(EPOCH FROM (b.created_at - a.created_at))) <= 30
+        WHERE a.channel = 'WHATSAPP'
+          AND b.channel = 'WHATSAPP'
+          AND LENGTH(TRIM(a.body)) > 0
+          AND COALESCE(a.metadata_json, '') LIKE '%"sentVia":"CRM"%'
+          AND COALESCE(b.metadata_json, '') NOT LIKE '%"sentVia":"CRM"%'
+        ORDER BY b.id, ABS(EXTRACT(EPOCH FROM (b.created_at - a.created_at))) ASC, a.created_at ASC
+      ),
+      upgraded AS (
+        UPDATE chat_messages m
+        SET
+          ack_status = GREATEST(COALESCE(m.ack_status, 0), agg.max_ack),
+          status = CASE
+            WHEN GREATEST(COALESCE(m.ack_status, 0), agg.max_ack) >= 3 THEN 'READ'
+            WHEN GREATEST(COALESCE(m.ack_status, 0), agg.max_ack) = 2 THEN 'DELIVERED'
+            ELSE m.status
+          END,
+          delivered_at = COALESCE(m.delivered_at, agg.max_delivered_at),
+          read_at = COALESCE(m.read_at, agg.max_read_at),
+          waha_message_id = COALESCE(m.waha_message_id, agg.any_waha_id)
+        FROM (
+          SELECT
+            keep_id,
+            MAX(dup_ack) AS max_ack,
+            MAX(dup_delivered_at) AS max_delivered_at,
+            MAX(dup_read_at) AS max_read_at,
+            MAX(dup_waha_id) AS any_waha_id
+          FROM outbound_dups
+          GROUP BY keep_id
+        ) agg
+        WHERE m.id = agg.keep_id
+      ),
+      relinked AS (
+        UPDATE chat_messages m
+        SET reply_to_message_id = d.keep_id
+        FROM outbound_dups d
+        WHERE m.reply_to_message_id = d.dup_id
+      )
+      DELETE FROM chat_messages
+      WHERE id IN (SELECT dup_id FROM outbound_dups)
+      RETURNING id;
+    `);
+    const totalRemoved =
+      (stanzaRemoved?.length || 0) +
+      (mediaRemoved?.length || 0) +
+      (outboundRaceRemoved?.length || 0);
     if (totalRemoved > 0) {
       console.log(`[DB Init] Cleaned ${totalRemoved} duplicate WhatsApp message row(s)`);
     }

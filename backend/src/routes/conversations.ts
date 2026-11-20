@@ -3798,6 +3798,138 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
+  // GET per-participant delivery & read receipts for a message (especially WhatsApp groups)
+  fastify.get('/:id/messages/:messageId/receipts', async (req: FastifyRequest<{
+    Params: { id: string; messageId: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const [convRow] = await db
+        .select({
+          id: conversations.id,
+          isGroup: conversations.isGroup,
+          externalThreadId: conversations.externalThreadId,
+          wahaSession: conversations.wahaSession,
+        })
+        .from(conversations)
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
+        .limit(1);
+      if (!convRow) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
+      const [msgRow] = await db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.id, req.params.messageId),
+            eq(chatMessages.conversationId, req.params.id),
+            eq(chatMessages.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!msgRow) {
+        return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
+      }
+
+      let meta: Record<string, any> = {};
+      if (msgRow.metadataJson) {
+        try {
+          meta = JSON.parse(msgRow.metadataJson);
+        } catch {
+          meta = {};
+        }
+      }
+
+      const rawReceipts: Array<{
+        jid: string;
+        phone?: string | null;
+        name?: string | null;
+        ackStatus: number;
+        deliveredAt?: string | null;
+        readAt?: string | null;
+        playedAt?: string | null;
+      }> = Array.isArray(meta?.receipts) ? meta.receipts : [];
+
+      // Enrich contact display names & avatars by phone
+      const phones = Array.from(
+        new Set(
+          rawReceipts
+            .map((r) => (r.phone ? String(r.phone).replace(/\D/g, '') : ''))
+            .filter(Boolean)
+        )
+      );
+      const contactByPhone = new Map<string, { name: string; avatarUrl: string | null }>();
+      if (phones.length > 0) {
+        const variants = Array.from(
+          new Set(
+            phones.flatMap((p) => [p, `+${p}`, p.startsWith('62') ? `0${p.slice(2)}` : ''].filter(Boolean))
+          )
+        );
+        const cRows = await db
+          .select({
+            nomorWhatsapp: contacts.nomorWhatsapp,
+            namaLengkap: contacts.namaLengkap,
+            profilePictureUrl: contacts.profilePictureUrl,
+          })
+          .from(contacts)
+          .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)));
+        for (const c of cRows) {
+          const digits = String(c.nomorWhatsapp || '').replace(/\D/g, '');
+          const norm = digits.startsWith('0') ? `62${digits.slice(1)}` : digits;
+          if (norm) {
+            contactByPhone.set(norm, { name: c.namaLengkap, avatarUrl: c.profilePictureUrl || null });
+          }
+        }
+      }
+
+      const enriched = rawReceipts.map((r) => {
+        const normPhone = r.phone
+          ? (() => {
+              const d = String(r.phone).replace(/\D/g, '');
+              return d.startsWith('0') ? `62${d.slice(1)}` : d;
+            })()
+          : null;
+        const matched = normPhone ? contactByPhone.get(normPhone) : undefined;
+        return {
+          jid: r.jid,
+          phone: normPhone || r.phone || null,
+          name: matched?.name || r.name || (normPhone ? `+${normPhone}` : r.jid.replace(/@.*$/, '')),
+          avatarUrl: matched?.avatarUrl || null,
+          ackStatus: r.ackStatus || 2,
+          deliveredAt: r.deliveredAt || null,
+          readAt: r.readAt || null,
+          playedAt: r.playedAt || null,
+        };
+      });
+
+      const readBy = enriched
+        .filter((r) => r.ackStatus >= 3)
+        .sort((a, b) => new Date(b.readAt || 0).getTime() - new Date(a.readAt || 0).getTime());
+      const deliveredTo = enriched
+        .filter((r) => r.ackStatus === 2)
+        .sort((a, b) => new Date(b.deliveredAt || 0).getTime() - new Date(a.deliveredAt || 0).getTime());
+
+      return reply.send({
+        success: true,
+        data: {
+          messageId: msgRow.id,
+          isGroup: Boolean(convRow.isGroup),
+          ackStatus: msgRow.ackStatus,
+          status: msgRow.status,
+          sentAt: msgRow.sentAt,
+          deliveredAt: msgRow.deliveredAt,
+          readAt: msgRow.readAt,
+          readBy,
+          deliveredTo,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
   // POST retry sending a FAILED outbound message in-place
   fastify.post('/:id/messages/:messageId/retry', async (req: FastifyRequest<{
     Params: { id: string; messageId: string };

@@ -1800,6 +1800,42 @@ export const api = {
     const res = await client.patch('/tenants/current', data);
     return res.data.data;
   },
+
+  getMessageReceipts: async (
+    conversationId: string,
+    messageId: string
+  ): Promise<{
+    messageId: string;
+    isGroup: boolean;
+    ackStatus: number;
+    status: string;
+    sentAt?: string | null;
+    deliveredAt?: string | null;
+    readAt?: string | null;
+    readBy: Array<{
+      jid: string;
+      phone?: string | null;
+      name: string;
+      avatarUrl?: string | null;
+      ackStatus: number;
+      deliveredAt?: string | null;
+      readAt?: string | null;
+      playedAt?: string | null;
+    }>;
+    deliveredTo: Array<{
+      jid: string;
+      phone?: string | null;
+      name: string;
+      avatarUrl?: string | null;
+      ackStatus: number;
+      deliveredAt?: string | null;
+      readAt?: string | null;
+      playedAt?: string | null;
+    }>;
+  }> => {
+    const res = await client.get(`/conversations/${conversationId}/messages/${messageId}/receipts`);
+    return res.data.data;
+  },
 };
 
 export default api;

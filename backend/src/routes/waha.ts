@@ -1370,6 +1370,107 @@ export function extractStatusAckParticipant(payload: any, exactIds: string[]): s
   return null;
 }
 
+export interface GroupMessageReceiptEntry {
+  jid: string;
+  phone?: string | null;
+  name?: string | null;
+  ackStatus: number; // 2 = DELIVERED, 3 = READ, 4 = PLAYED
+  deliveredAt?: string | null;
+  readAt?: string | null;
+  playedAt?: string | null;
+}
+
+export function extractGroupAckParticipant(payload: any, exactIds: string[]): string | null {
+  const directCandidates = [
+    payload?.participant,
+    payload?.id?.participant,
+    payload?._data?.Receipt?.Sender,
+    payload?._data?.Receipt?.SenderAlt,
+    payload?._data?.Info?.SenderAlt,
+    payload?._data?.Info?.Sender,
+    payload?._data?.participant,
+    payload?._data?.key?.participant,
+  ];
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      const lower = trimmed.toLowerCase();
+      if (trimmed && !lower.endsWith('@g.us') && !lower.startsWith('status@broadcast')) {
+        return trimmed;
+      }
+    }
+  }
+  for (const idStr of exactIds) {
+    const suffixMatch = idStr.match(/@g\.us_[^_]+_(.+)$/i);
+    if (suffixMatch?.[1]) {
+      const participant = suffixMatch[1].trim();
+      const lower = participant.toLowerCase();
+      if (participant && !lower.endsWith('@g.us') && !lower.startsWith('status@broadcast')) {
+        return participant;
+      }
+    }
+  }
+  return null;
+}
+
+export function upsertGroupMessageReceiptInMetadata(
+  existingMetadataJson: string | null | undefined,
+  entry: {
+    jid: string;
+    phone?: string | null;
+    name?: string | null;
+    ackStatus: number;
+    at: Date;
+  }
+): string {
+  let meta: Record<string, any> = {};
+  if (existingMetadataJson) {
+    try {
+      const parsed = JSON.parse(existingMetadataJson);
+      if (parsed && typeof parsed === 'object') meta = parsed;
+    } catch {
+      meta = {};
+    }
+  }
+  const prevList: GroupMessageReceiptEntry[] = Array.isArray(meta.receipts) ? [...meta.receipts] : [];
+  const cleanJid = entry.jid.trim();
+  const cleanPhone = entry.phone ? entry.phone.trim() : null;
+  const cleanName = entry.name ? entry.name.trim() : null;
+  const atIso = entry.at.toISOString();
+
+  const matchIdx = prevList.findIndex((item) => {
+    if (!item) return false;
+    if (cleanPhone && item.phone && item.phone === cleanPhone) return true;
+    return item.jid.toLowerCase() === cleanJid.toLowerCase();
+  });
+
+  if (matchIdx >= 0) {
+    const existing = prevList[matchIdx];
+    const nextAck = Math.max(existing.ackStatus || 0, entry.ackStatus);
+    prevList[matchIdx] = {
+      jid: existing.jid || cleanJid,
+      phone: cleanPhone || existing.phone || null,
+      name: cleanName || existing.name || null,
+      ackStatus: nextAck,
+      deliveredAt: existing.deliveredAt || (entry.ackStatus >= 2 ? atIso : null),
+      readAt: existing.readAt || (entry.ackStatus >= 3 ? atIso : null),
+      playedAt: existing.playedAt || (entry.ackStatus >= 4 ? atIso : null),
+    };
+  } else {
+    prevList.push({
+      jid: cleanJid,
+      phone: cleanPhone,
+      name: cleanName,
+      ackStatus: entry.ackStatus,
+      deliveredAt: entry.ackStatus >= 2 ? atIso : null,
+      readAt: entry.ackStatus >= 3 ? atIso : null,
+      playedAt: entry.ackStatus >= 4 ? atIso : null,
+    });
+  }
+
+  return JSON.stringify({ ...meta, receipts: prevList });
+}
+
 export interface PollVoteMetadataEntry {
   voterId: string;
   voterName?: string | null;
@@ -1925,25 +2026,110 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             }
           }
 
-          // Update ChatMessages if matched (never downgrade ackStatus)
+          // Update ChatMessages if matched (never downgrade ackStatus) and record per-participant group receipts
           const chatConditions = [
             inArray(chatMessages.wahaMessageId, allIds),
-            ...stanzaIds.map((stanza) => like(chatMessages.wahaMessageId, `%_${stanza}`)),
+            ...stanzaIds.flatMap((stanza) => {
+              const escaped = stanza.replace(/[\\%_]/g, '\\$&');
+              return [
+                like(chatMessages.wahaMessageId, `%_${escaped}`),
+                like(chatMessages.wahaMessageId, `%_${escaped}_%`),
+              ];
+            }),
           ];
-          await db
-            .update(chatMessages)
-            .set({
-              ackStatus: ackValue,
-              status: ackValue >= 3 ? 'READ' : ackValue === 2 ? 'DELIVERED' : 'SENT',
-              deliveredAt: ackValue >= 2 ? now : undefined,
-              readAt: ackValue >= 3 ? now : undefined,
+          const matchedChatMsgs = await db
+            .select({
+              id: chatMessages.id,
+              conversationId: chatMessages.conversationId,
+              ackStatus: chatMessages.ackStatus,
+              wahaSession: chatMessages.wahaSession,
+              metadataJson: chatMessages.metadataJson,
             })
-            .where(and(eq(chatMessages.companyId, companyId), or(...chatConditions), lt(chatMessages.ackStatus, ackValue)));
+            .from(chatMessages)
+            .where(and(eq(chatMessages.companyId, companyId), or(...chatConditions)))
+            .limit(10);
 
-          // Record real-time WhatsApp Status/Story viewer receipts
           const ackFrom = String(
             payload?.from || payload?.to || payload?.chatId || payload?._data?.Info?.Chat || ''
           ).toLowerCase();
+          const isGroupAck =
+            ackFrom.endsWith('@g.us') ||
+            exactIds.some((idVal) => idVal.toLowerCase().includes('@g.us'));
+
+          let groupReceiptParticipant: {
+            jid: string;
+            phone: string | null;
+            name: string | null;
+          } | null = null;
+
+          if (isGroupAck && ackValue >= 2 && matchedChatMsgs.length > 0) {
+            const pJid = extractGroupAckParticipant(payload, exactIds);
+            if (pJid) {
+              let pPhone: string | null = null;
+              const lowerP = pJid.toLowerCase();
+              if (lowerP.endsWith('@lid')) {
+                pPhone = await wahaService
+                  .resolveLidToPhone(webhookSession || matchedChatMsgs[0].wahaSession || undefined, pJid)
+                  .catch(() => null);
+              } else {
+                const rawDigits = fromWahaChatId(pJid);
+                pPhone = rawDigits ? normalizePhoneNumber(rawDigits) || null : null;
+              }
+              let pName: string | null =
+                String(
+                  payload?.notifyName ||
+                    payload?._data?.notifyName ||
+                    payload?._data?.Info?.PushName ||
+                    ''
+                ).trim() || null;
+              if (pPhone) {
+                const variants = Array.from(
+                  new Set([pPhone, `+${pPhone}`, pPhone.startsWith('62') ? `0${pPhone.slice(2)}` : ''].filter(Boolean))
+                );
+                const cRow = await db
+                  .select({ namaLengkap: contacts.namaLengkap })
+                  .from(contacts)
+                  .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
+                  .limit(1);
+                if (cRow[0]?.namaLengkap) {
+                  pName = cRow[0].namaLengkap;
+                }
+              }
+              groupReceiptParticipant = { jid: pJid, phone: pPhone, name: pName };
+            }
+          }
+
+          const updatedConvIds = new Set<string>();
+          for (const mRow of matchedChatMsgs) {
+            const updateFields: Record<string, any> = {};
+            if (ackValue > (mRow.ackStatus ?? 0)) {
+              updateFields.ackStatus = ackValue;
+              updateFields.status = ackValue >= 3 ? 'READ' : ackValue === 2 ? 'DELIVERED' : 'SENT';
+              if (ackValue >= 2) updateFields.deliveredAt = now;
+              if (ackValue >= 3) updateFields.readAt = now;
+            }
+            if (groupReceiptParticipant) {
+              updateFields.metadataJson = upsertGroupMessageReceiptInMetadata(mRow.metadataJson, {
+                jid: groupReceiptParticipant.jid,
+                phone: groupReceiptParticipant.phone,
+                name: groupReceiptParticipant.name,
+                ackStatus: ackValue,
+                at: now,
+              });
+            }
+            if (Object.keys(updateFields).length > 0) {
+              await db
+                .update(chatMessages)
+                .set(updateFields)
+                .where(eq(chatMessages.id, mRow.id));
+              updatedConvIds.add(mRow.conversationId);
+            }
+          }
+          for (const cId of updatedConvIds) {
+            liveEvents.emit('conversations:update', { conversationId: cId }, companyId);
+          }
+
+          // Record real-time WhatsApp Status/Story viewer receipts
           const isStatusAck =
             ackFrom === 'status@broadcast' ||
             exactIds.some((idVal) => idVal.toLowerCase().includes('status@broadcast'));

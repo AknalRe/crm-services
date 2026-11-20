@@ -1110,6 +1110,38 @@ test('WhatsApp Status sending, deletion, viewer parsing, and ACK ID extraction w
   });
   assert.ok(groupLidIds.stanzaIds.includes('3EB0GRP987654'));
 
+  // 1c. Test per-participant group message receipt extraction & metadata upsert
+  const { extractGroupAckParticipant, upsertGroupMessageReceiptInMetadata } =
+    require('../routes/waha') as typeof import('../routes/waha');
+  assert.equal(
+    extractGroupAckParticipant(
+      { id: 'true_120363123456789012@g.us_3EB0GRP987654_628123456789@c.us', from: '120363123456789012@g.us', ack: 2 },
+      ['true_120363123456789012@g.us_3EB0GRP987654_628123456789@c.us']
+    ),
+    '628123456789@c.us'
+  );
+  const t1 = new Date('2026-11-20T06:30:00.000Z');
+  const t2 = new Date('2026-11-20T06:31:00.000Z');
+  const afterDelivered = upsertGroupMessageReceiptInMetadata(null, {
+    jid: '628123456789@c.us',
+    phone: '628123456789',
+    name: 'Mba Dwi',
+    ackStatus: 2,
+    at: t1,
+  });
+  const afterRead = upsertGroupMessageReceiptInMetadata(afterDelivered, {
+    jid: '628123456789@c.us',
+    phone: '628123456789',
+    name: 'Mba Dwi',
+    ackStatus: 3,
+    at: t2,
+  });
+  const parsedReceipts = JSON.parse(afterRead).receipts;
+  assert.equal(parsedReceipts.length, 1);
+  assert.equal(parsedReceipts[0].ackStatus, 3);
+  assert.equal(parsedReceipts[0].deliveredAt, t1.toISOString());
+  assert.equal(parsedReceipts[0].readAt, t2.toISOString());
+
   const nestedParticipant = extractStatusAckParticipant(
     { participant: '628987654321@lid', id: 'false_status@broadcast_3EB0999' },
     ['false_status@broadcast_3EB0999']
