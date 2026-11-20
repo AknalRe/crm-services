@@ -28,7 +28,6 @@ import {
   Package,
   Tag,
   FileText,
-  Home,
   Building2,
   Check,
 } from 'lucide-react';
@@ -67,7 +66,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectSettingsSection,
   licenseInfo,
   user,
-  onOpenLanding,
   onOpenPlans,
   onUserUpdated,
   onWorkspaceSwitched,
@@ -775,23 +773,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       {/* User Card */}
-      {(user || onOpenLanding) && (
+      {user && (
         <div className="p-3 border-t border-[#1E2438] space-y-2">
-          {onOpenLanding && (
-            <button
-              type="button"
-              onClick={() => {
-                onOpenLanding();
-                onClose?.();
-              }}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium text-gray-300 bg-[#181D2D]/80 hover:bg-[#1E2438] hover:text-white border border-[#242B42] transition-colors"
-            >
-              <Home className="w-3.5 h-3.5 shrink-0 text-gray-400" />
-              <span className="truncate">Halaman Utama CRM</span>
-            </button>
-          )}
-          {user && (
-            <div className="px-2.5 py-2 rounded-md bg-[#181D2D] border border-[#242B42] space-y-2">
+          <div className="px-2.5 py-2 rounded-md bg-[#181D2D] border border-[#242B42] space-y-2">
               <div className="space-y-0.5">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-medium text-white truncate min-w-0 flex-1">{user.name}</p>
@@ -884,7 +868,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               </div>
             </div>
-          )}
         </div>
       )}
     </aside>

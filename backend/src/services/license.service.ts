@@ -964,44 +964,85 @@ export class LicenseService {
         } catch {
           // Fallback to DB row when Reneo Panel is offline
         }
-      } else if (
-        !company.isDefault &&
-        company.status !== 'SUSPENDED' &&
-        company.licenseKey &&
-        !company.licenseKey.startsWith('RN-TRIAL-') &&
-        !company.licenseKey.startsWith('RN-SAAS-') &&
-        reneoUrl
-      ) {
-        try {
-          const verifyRes = await axios.get(`${reneoUrl}/api/v1/app-licenses/verify`, {
-            params: { key: company.licenseKey, catalogId: 'reneo-crm' },
-            headers: this.getReneoHeaders(),
-            timeout: 4500,
-          });
-          if (verifyRes.data && verifyRes.data.valid && verifyRes.data.expiresAt) {
-            const expDate = new Date(verifyRes.data.expiresAt);
-            const isExpired = expDate.getTime() < Date.now();
-            const planName = verifyRes.data.planName || company.licensePlan || 'Growth Pro Bulanan';
-            const features = resolveFeatures(verifyRes.data.features, isExpired, planName);
-            await db
-              .update(companies)
-              .set({
-                licenseStatus: isExpired ? 'EXPIRED' : 'ACTIVE',
-                licensePlan: planName,
-                licenseExpiresAt: expDate,
-                licenseFeaturesJson: JSON.stringify(features),
-                updatedAt: new Date(),
-              })
-              .where(eq(companies.id, company.id));
-            const refreshed = await this.getCompanyRow(cid);
-            if (refreshed) {
-              const info = this.buildLicenseFromCompanyRow(refreshed, this.cachedPublicUrls);
-              this.cacheByCompany.set(cid, { license: info, checkedAt: Date.now() });
-              return info;
+      } else if (!company.isDefault && company.status !== 'SUSPENDED' && reneoUrl) {
+        // Check if company owner email belongs to a Reneo Panel hosting superadmin (no license needed)
+        if (company.ownerEmail) {
+          try {
+            const saRes = await axios.get(`${reneoUrl}/api/v1/app-catalog/license/reneo-crm`, {
+              params: { email: company.ownerEmail.trim().toLowerCase() },
+              headers: this.getReneoHeaders(),
+              timeout: 4500,
+            });
+            if (saRes.data?.ok && saRes.data?.isSuperadminBypass === true) {
+              const expDate = saRes.data.expiresAt
+                ? new Date(saRes.data.expiresAt)
+                : new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000);
+              const planName = saRes.data.plan || 'Superadmin Hosting';
+              const features = resolveFeatures(saRes.data.features, false, planName);
+              await db
+                .update(companies)
+                .set({
+                  licenseKey: String(saRes.data.licenseKey || 'RN-SUPERADMIN-HOSTING'),
+                  licenseStatus: 'ACTIVE',
+                  licensePlan: planName,
+                  licensePlanSlug: 'superadmin-unlimited',
+                  licensePeriod: 'annual',
+                  licensePriceAmount: 0,
+                  licenseStartedAt: company.licenseStartedAt || new Date(),
+                  licenseExpiresAt: expDate,
+                  licenseFeaturesJson: JSON.stringify(features),
+                  updatedAt: new Date(),
+                })
+                .where(eq(companies.id, company.id));
+              const refreshed = await this.getCompanyRow(cid);
+              if (refreshed) {
+                const info = this.buildLicenseFromCompanyRow(refreshed, this.cachedPublicUrls);
+                this.cacheByCompany.set(cid, { license: info, checkedAt: Date.now() });
+                return info;
+              }
             }
+          } catch {
+            // Continue to normal license verification
           }
-        } catch {
-          // Offline / standalone fallback
+        }
+
+        if (
+          company.licenseKey &&
+          !company.licenseKey.startsWith('RN-TRIAL-') &&
+          !company.licenseKey.startsWith('RN-SAAS-') &&
+          company.licenseKey !== 'RN-SUPERADMIN-HOSTING'
+        ) {
+          try {
+            const verifyRes = await axios.get(`${reneoUrl}/api/v1/app-licenses/verify`, {
+              params: { key: company.licenseKey, catalogId: 'reneo-crm' },
+              headers: this.getReneoHeaders(),
+              timeout: 4500,
+            });
+            if (verifyRes.data && verifyRes.data.valid && verifyRes.data.expiresAt) {
+              const expDate = new Date(verifyRes.data.expiresAt);
+              const isExpired = expDate.getTime() < Date.now();
+              const planName = verifyRes.data.planName || company.licensePlan || 'Growth Pro Bulanan';
+              const features = resolveFeatures(verifyRes.data.features, isExpired, planName);
+              await db
+                .update(companies)
+                .set({
+                  licenseStatus: isExpired ? 'EXPIRED' : 'ACTIVE',
+                  licensePlan: planName,
+                  licenseExpiresAt: expDate,
+                  licenseFeaturesJson: JSON.stringify(features),
+                  updatedAt: new Date(),
+                })
+                .where(eq(companies.id, company.id));
+              const refreshed = await this.getCompanyRow(cid);
+              if (refreshed) {
+                const info = this.buildLicenseFromCompanyRow(refreshed, this.cachedPublicUrls);
+                this.cacheByCompany.set(cid, { license: info, checkedAt: Date.now() });
+                return info;
+              }
+            }
+          } catch {
+            // Offline / standalone fallback
+          }
         }
       }
 

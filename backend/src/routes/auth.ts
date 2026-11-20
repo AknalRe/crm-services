@@ -12,6 +12,7 @@ import {
   seedCompanyDefaults,
   upsertSystemSetting,
 } from '../services/tenantContext';
+import { licenseService } from '../services/license.service';
 
 const SESSION_COOKIE = 'crm_session';
 export const ALL_PERMISSIONS = [
@@ -873,6 +874,7 @@ export default async function authRouter(fastify: FastifyInstance) {
 
       await ensureDefaultRolesSeeded(companyId);
       await seedCompanyDefaults(companyId);
+      await licenseService.syncWithReneo(companyId).catch(() => {});
 
       const adminRoleId = getCompanyAdminRoleId(companyId);
       const [agent] = await db

@@ -276,7 +276,10 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
 
       return reply.status(201).send({
         success: true,
-        message: `Workspace "${name}" berhasil dibuat. Silakan aktifkan paket lisensi untuk workspace ini.`,
+        message:
+          license.status === 'ACTIVE' && !license.isExpired
+            ? `Workspace "${name}" berhasil dibuat dan langsung aktif (${license.plan}).`
+            : `Workspace "${name}" berhasil dibuat. Silakan aktifkan paket lisensi untuk workspace ini.`,
         data: { user: session, company: created, license },
       });
     } catch (error: any) {
