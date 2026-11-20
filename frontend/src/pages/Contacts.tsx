@@ -1491,7 +1491,7 @@ export const Contacts: React.FC<ContactsProps> = ({
                 <div className="min-w-0">
                   <div className="text-xs font-semibold text-gray-900 truncate flex items-center gap-1.5">
                     <span className="truncate">{editingContact.nama_lengkap}</span>
-                    <VerifiedMetaBadge contact={editingContact} showLabel />
+                    <VerifiedMetaBadge contact={editingContact} />
                   </div>
                   {editingContact.verified_name &&
                     editingContact.verified_name.trim().toLowerCase() !== editingContact.nama_lengkap.trim().toLowerCase() && (

@@ -9352,7 +9352,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
             <h4 className="font-semibold text-gray-900 text-sm break-words inline-flex flex-wrap items-center justify-center gap-1.5">
               <span>{getConversationDisplayTitle(selectedConversation)}</span>
               {!selectedConversation.isGroup && (
-                <VerifiedMetaBadge contact={selectedConversation.contact} showLabel />
+                <VerifiedMetaBadge contact={selectedConversation.contact} />
               )}
             </h4>
             {!selectedConversation.isGroup &&

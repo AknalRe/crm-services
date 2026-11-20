@@ -1,7 +1,7 @@
 {
   "name": "crm-backend",
   "private": true,
-  "version": "1.6.84",
+  "version": "1.6.85",
   "description": "Reneo CRM Omnichannel Backend API (Fastify & Drizzle ORM)",
   "main": "dist/server.js",
   "scripts": {
