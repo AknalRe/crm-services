@@ -112,6 +112,29 @@ export const PlansModal: React.FC<PlansModalProps> = ({
   const [expandedPlanDetails, setExpandedPlanDetails] = useState<Record<string, boolean>>({});
   const [showAllOverviewQuotas, setShowAllOverviewQuotas] = useState(false);
   const plansScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updatePlansScrollState = () => {
+    const el = plansScrollRef.current;
+    if (!el) {
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+      return;
+    }
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+
+  useEffect(() => {
+    if (!isOpen || view !== 'plans') return;
+    const raf = requestAnimationFrame(updatePlansScrollState);
+    window.addEventListener('resize', updatePlansScrollState);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', updatePlansScrollState);
+    };
+  }, [isOpen, view, plans.length]);
 
   const togglePlanDetails = (slug: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -381,9 +404,9 @@ export const PlansModal: React.FC<PlansModalProps> = ({
     : 'Pilih paket dan durasi langganan sesuai kebutuhan Anda';
 
   const footerContent = activeOrder ? (
-    <div className="w-full flex items-center justify-between gap-3 flex-wrap">
-      <div className="flex items-center gap-2">
-        <Button variant="secondary" size="sm" onClick={() => window.print()}>
+    <div className="w-full flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
+      <div className="grid grid-cols-2 sm:flex sm:items-center gap-2">
+        <Button variant="secondary" size="sm" onClick={() => window.print()} className="justify-center">
           Cetak Invoice
         </Button>
         <Button
@@ -391,38 +414,63 @@ export const PlansModal: React.FC<PlansModalProps> = ({
           size="sm"
           onClick={() => setActiveOrder(null)}
           disabled={isPaying}
+          className="justify-center"
         >
-          Ubah Paket / Durasi
+          Ubah Paket
         </Button>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="grid grid-cols-2 sm:flex sm:items-center gap-2">
         {!paymentSuccess && (
-          <Button variant="primary" onClick={handleCheckOrderStatus} isLoading={isPaying}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleCheckOrderStatus}
+            isLoading={isPaying}
+            className="justify-center col-span-2 sm:col-span-1"
+          >
             Cek Status Pembayaran
           </Button>
         )}
-        <Button variant="secondary" onClick={onClose} disabled={isPaying}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onClose}
+          disabled={isPaying}
+          className={`justify-center ${paymentSuccess ? 'col-span-2 sm:col-span-1' : 'hidden sm:inline-flex'}`}
+        >
           Selesai
         </Button>
       </div>
     </div>
   ) : view === 'overview' ? (
-    <div className="w-full flex items-center justify-between gap-2.5 flex-wrap">
-      <Button variant="secondary" onClick={onClose}>
+    <div className="w-full flex items-center justify-between gap-2">
+      <Button variant="secondary" size="sm" onClick={onClose} className="hidden sm:inline-flex">
         Tutup
       </Button>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button variant="secondary" onClick={handleOpenUpgrade}>
-          Upgrade / Ganti Paket
+      <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleOpenUpgrade}
+          className="justify-center whitespace-nowrap"
+        >
+          <span className="sm:hidden">Ganti Paket</span>
+          <span className="hidden sm:inline">Upgrade / Ganti Paket</span>
         </Button>
-        <Button variant="primary" onClick={handleOpenExtend}>
-          Perpanjang Masa Aktif
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleOpenExtend}
+          className="justify-center whitespace-nowrap"
+        >
+          <span className="sm:hidden">Perpanjang</span>
+          <span className="hidden sm:inline">Perpanjang Masa Aktif</span>
         </Button>
       </div>
     </div>
   ) : (
-    <div className="w-full flex items-center justify-between gap-3 flex-wrap">
-      <div className="text-xs text-gray-600">
+    <div className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+      <div className="text-xs text-gray-600 truncate">
         {selectedPlan ? (
           <span>
             <strong className="text-gray-900">{selectedPlan.name}</strong> &middot;{' '}
@@ -435,24 +483,46 @@ export const PlansModal: React.FC<PlansModalProps> = ({
           <span>Pilih paket untuk melanjutkan</span>
         )}
       </div>
-      <div className="flex items-center gap-2">
-        {hasRegisteredLicense && (
+      <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
+        {hasRegisteredLicense ? (
           <Button
-            variant="ghost"
+            variant="secondary"
+            size="sm"
             onClick={() => setView('overview')}
             disabled={isSubmitting}
+            className="justify-center"
           >
             Info Lisensi
           </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="justify-center"
+          >
+            Batal
+          </Button>
         )}
-        <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
-          Batal
-        </Button>
+        {hasRegisteredLicense && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="hidden sm:inline-flex"
+          >
+            Batal
+          </Button>
+        )}
         <Button
           variant="primary"
+          size="sm"
           onClick={handleCreateOrder}
           isLoading={isSubmitting}
           disabled={loadingPlans || plans.length === 0}
+          className="justify-center whitespace-nowrap"
         >
           Terbitkan Invoice
         </Button>
@@ -604,12 +674,12 @@ export const PlansModal: React.FC<PlansModalProps> = ({
             )}
           </div>
         ) : view === 'overview' && currentLicense ? (
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {/* License Status Hero Card */}
-            <div className={`rounded-xl border p-4 sm:p-5 space-y-4 ${licenseStatusMeta.bannerCls}`}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className={`rounded-xl border p-3 sm:p-5 space-y-3 sm:space-y-4 ${licenseStatusMeta.bannerCls}`}>
+              <div className="flex items-start justify-between gap-2">
                 <div className="space-y-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <span
                       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold border ${licenseStatusMeta.badgeCls}`}
                     >
@@ -624,7 +694,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                       Siklus {periodLabel}
                     </span>
                   </div>
-                  <h4 className="text-lg font-bold text-gray-900 tracking-tight">
+                  <h4 className="text-base sm:text-lg font-bold text-gray-900 tracking-tight leading-snug">
                     {currentLicense.plan}
                   </h4>
                 </div>
@@ -635,22 +705,24 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   size="sm"
                   onClick={() => void handleSyncLicense()}
                   isLoading={syncing}
+                  className="shrink-0"
+                  title="Sinkronkan Status"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 mr-1 ${syncing ? 'animate-spin' : ''}`} />
-                  Sinkronkan Status
+                  <RefreshCw className={`w-3.5 h-3.5 sm:mr-1 ${syncing ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">Sinkronkan Status</span>
                 </Button>
               </div>
 
               {/* 3 Key Metrics */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 space-y-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 text-xs">
+                <div className="p-2.5 sm:p-3 rounded-lg bg-gray-50 border border-gray-200 space-y-1.5">
                   <span className="text-[11px] text-gray-500 block">Sisa Masa Aktif</span>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <strong className="text-base font-bold text-gray-900 font-mono tabular-nums">
+                  <div className="flex items-baseline justify-between gap-1.5">
+                    <strong className="text-sm sm:text-base font-bold text-gray-900 font-mono tabular-nums">
                       {currentLicense.isExpired ? '0 Hari' : `${currentLicense.daysLeft} Hari`}
                     </strong>
                     {currentLicense.daysLeft > 0 && currentLicense.daysLeft <= 7 && (
-                      <span className="text-[10px] font-medium text-amber-700">Perpanjang segera</span>
+                      <span className="text-[10px] font-medium text-amber-700">Segera</span>
                     )}
                   </div>
                   <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
@@ -661,24 +733,24 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   </div>
                 </div>
 
-                <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 space-y-1">
+                <div className="p-2.5 sm:p-3 rounded-lg bg-gray-50 border border-gray-200 space-y-1">
                   <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
-                    <Calendar className="w-3 h-3" />
+                    <Calendar className="w-3 h-3 shrink-0" />
                     Berlaku Hingga
                   </span>
-                  <div className="text-xs font-semibold text-gray-900">
+                  <div className="text-xs font-semibold text-gray-900 leading-snug">
                     {formatDateId(currentLicense.expiresAt)}
                   </div>
                   {currentLicense.startedAt && (
-                    <div className="text-[10px] text-gray-500">
+                    <div className="text-[10px] text-gray-500 truncate">
                       Mulai: {formatDateId(currentLicense.startedAt)}
                     </div>
                   )}
                 </div>
 
-                <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 space-y-1">
+                <div className="col-span-2 sm:col-span-1 p-2.5 sm:p-3 rounded-lg bg-gray-50 border border-gray-200 space-y-1">
                   <span className="text-[11px] text-gray-500 inline-flex items-center gap-1">
-                    <KeyRound className="w-3 h-3" />
+                    <KeyRound className="w-3 h-3 shrink-0" />
                     Kunci Lisensi
                   </span>
                   <div className="flex items-center justify-between gap-1.5">
@@ -734,14 +806,14 @@ export const PlansModal: React.FC<PlansModalProps> = ({
             </div>
 
             {/* Active Quotas & Unlocked Modules */}
-            <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h5 className="text-xs font-semibold text-gray-900 uppercase tracking-wider text-[11px]">
+            <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-2.5 sm:space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+                <h5 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider">
                   Kuota &amp; Modul pada Paket Ini
                 </h5>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
                   <span className="text-[11px] text-gray-500">
-                    Prioritas Support:{' '}
+                    Support:{' '}
                     <strong className="uppercase text-gray-800 font-mono">
                       {currentLicense.features?.supportPriority || 'standard'}
                     </strong>
@@ -761,7 +833,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                 {[
                   {
                     label: 'Penyimpanan Dokumen & Media',
@@ -848,7 +920,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   .map((feat) => (
                     <div
                       key={feat.label}
-                      className={`px-3 py-2 rounded-lg border flex items-center justify-between gap-2 ${
+                      className={`px-2.5 sm:px-3 py-2 rounded-lg border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 ${
                         feat.unlocked
                           ? 'bg-emerald-50/40 border-emerald-200/80 text-gray-800'
                           : 'bg-gray-50 border-gray-200 text-gray-500'
@@ -862,7 +934,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                         )}
                         <span className="truncate">{feat.label}</span>
                       </div>
-                      <span className="font-mono text-[11px] font-semibold text-gray-900 shrink-0">
+                      <span className="font-mono text-[11px] font-semibold text-gray-900 pl-5 sm:pl-0 sm:shrink-0">
                         {feat.value}
                       </span>
                     </div>
@@ -892,23 +964,25 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                 )}
               </div>
 
-              {plans.length > 2 && (
+              {plans.length > 1 && (
                 <div className="flex items-center gap-1.5 ml-auto">
                   <span className="text-[11px] text-gray-400 hidden sm:inline">
                     Geser paket ({plans.length})
                   </span>
                   <button
                     type="button"
-                    onClick={() => scrollPlansBy(-285)}
-                    className="w-7 h-7 rounded-md border border-gray-200 bg-white hover:bg-gray-50 flex items-center justify-center text-gray-600"
+                    onClick={() => scrollPlansBy(-256)}
+                    disabled={!canScrollLeft}
+                    className="w-7 h-7 rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-gray-600 transition-colors"
                     title="Geser ke kiri"
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => scrollPlansBy(285)}
-                    className="w-7 h-7 rounded-md border border-gray-200 bg-white hover:bg-gray-50 flex items-center justify-center text-gray-600"
+                    onClick={() => scrollPlansBy(256)}
+                    disabled={!canScrollRight}
+                    className="w-7 h-7 rounded-md border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-gray-600 transition-colors"
                     title="Geser ke kanan"
                   >
                     <ChevronRight className="w-3.5 h-3.5" />
@@ -947,28 +1021,30 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   </div>
                 )}
 
-                {/* Horizontal Scrollable Plan Cards (Single Row) */}
-                <div
-                  ref={plansScrollRef}
-                  className="flex gap-3.5 overflow-x-auto pb-2 snap-x snap-mandatory scroll-smooth"
-                >
-                  {plans.map((p) => {
-                    const isSelected = selectedPlanSlug === p.slug;
-                    const isExpanded = Boolean(expandedPlanDetails[p.slug]);
-                    const isCurrentTier = Boolean(
-                      currentLicense &&
-                        currentLicense.status !== 'UNLICENSED' &&
-                        (currentLicense.plan.toLowerCase().includes(p.name.toLowerCase()) ||
-                          currentLicense.plan.toLowerCase().includes(p.slug.split('-')[0]))
-                    );
-                    return (
-                      <div
-                        key={p.slug}
-                        onClick={() => {
-                          setSelectedPlanSlug(p.slug);
-                          setQuantity(1);
-                        }}
-                        className={`w-[260px] sm:w-[272px] shrink-0 snap-start cursor-pointer rounded-xl p-4 border transition-all flex flex-col justify-between relative ${
+                {/* Horizontal Scrollable Plan Cards (Single Row, no visible scrollbar) */}
+                <div className="relative">
+                  <div
+                    ref={plansScrollRef}
+                    onScroll={updatePlansScrollState}
+                    className="flex flex-nowrap gap-3 overflow-x-auto py-0.5 snap-x snap-mandatory scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  >
+                    {plans.map((p) => {
+                      const isSelected = selectedPlanSlug === p.slug;
+                      const isExpanded = Boolean(expandedPlanDetails[p.slug]);
+                      const isCurrentTier = Boolean(
+                        currentLicense &&
+                          currentLicense.status !== 'UNLICENSED' &&
+                          (currentLicense.plan.toLowerCase().includes(p.name.toLowerCase()) ||
+                            currentLicense.plan.toLowerCase().includes(p.slug.split('-')[0]))
+                      );
+                      return (
+                        <div
+                          key={p.slug}
+                          onClick={() => {
+                            setSelectedPlanSlug(p.slug);
+                            setQuantity(1);
+                          }}
+                          className={`w-[236px] sm:w-[244px] shrink-0 snap-start cursor-pointer rounded-xl p-3.5 sm:p-4 border transition-all flex flex-col justify-between relative ${
                           isSelected
                             ? 'border-indigo-600 bg-indigo-50/40 ring-1 ring-indigo-600'
                             : 'border-gray-200 bg-white hover:border-gray-300'
@@ -1223,6 +1299,19 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                       </div>
                     );
                   })}
+                  </div>
+                  {canScrollLeft && (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 left-0 w-7 bg-gradient-to-r from-white via-white/75 to-transparent"
+                    />
+                  )}
+                  {canScrollRight && (
+                    <div
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-l from-white via-white/75 to-transparent"
+                    />
+                  )}
                 </div>
               </>
             )}
@@ -1290,20 +1379,20 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-indigo-100">
-                  <div className="px-3 py-2 rounded-lg bg-white border border-gray-200">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 pt-2 border-t border-indigo-100">
+                  <div className="px-2.5 sm:px-3 py-2 rounded-lg bg-white border border-gray-200">
                     <span className="text-[10px] text-gray-500 block">Durasi</span>
                     <strong className="text-xs font-semibold font-mono text-gray-900">
                       {totalAddedMonths} Bulan
                     </strong>
                   </div>
-                  <div className="px-3 py-2 rounded-lg bg-white border border-gray-200">
+                  <div className="px-2.5 sm:px-3 py-2 rounded-lg bg-white border border-gray-200">
                     <span className="text-[10px] text-gray-500 block">Aktif Hingga</span>
                     <strong className="text-xs font-semibold text-emerald-700">
                       {formatDateId(estimatedNewExpiry.toISOString())}
                     </strong>
                   </div>
-                  <div className="px-3 py-2 rounded-lg bg-white border border-gray-200">
+                  <div className="col-span-2 sm:col-span-1 px-2.5 sm:px-3 py-2 rounded-lg bg-white border border-gray-200 flex items-center justify-between sm:block">
                     <span className="text-[10px] text-gray-500 block">Total Harga</span>
                     <strong className="text-sm font-bold font-mono text-indigo-700 tabular-nums">
                       Rp {totalSubtotal.toLocaleString('id-ID')}
