@@ -1768,6 +1768,38 @@ export const api = {
     const res = await client.post('/tenants/switch', { companyId });
     return res.data.data;
   },
+
+  getCurrentCompany: async (): Promise<{
+    company: {
+      id: string;
+      name: string;
+      slug: string;
+      ownerName?: string | null;
+      ownerEmail?: string | null;
+      ownerPhone?: string | null;
+    };
+    license?: import('../types').LicenseInfo;
+  }> => {
+    const res = await client.get('/tenants/current');
+    return res.data.data;
+  },
+
+  updateCurrentCompany: async (data: {
+    name?: string;
+    ownerName?: string;
+    ownerEmail?: string;
+    ownerPhone?: string;
+  }): Promise<{
+    id: string;
+    name: string;
+    slug: string;
+    ownerName?: string | null;
+    ownerEmail?: string | null;
+    ownerPhone?: string | null;
+  }> => {
+    const res = await client.patch('/tenants/current', data);
+    return res.data.data;
+  },
 };
 
 export default api;

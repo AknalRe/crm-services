@@ -30,6 +30,7 @@ import {
   FileText,
   Building2,
   Check,
+  Pencil,
 } from 'lucide-react';
 import {
   AgentAvailabilityStatus,
@@ -39,6 +40,7 @@ import {
   TenantWorkspaceItem,
 } from '../types';
 import { ReneoCrmLogo } from './ReneoCrmLogo';
+import { CompanyProfileModal } from './CompanyProfileModal';
 import { hasPerm } from '../lib/permissions';
 import api from '../services/api';
 import { useToast } from './ui/ToastProvider';
@@ -120,6 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState<string | null>(null);
+  const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false);
 
   const loadWorkspaces = async () => {
     if (!user) return;
@@ -478,7 +481,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
 
                 {isAdmin && (
-                  <div className="pt-1.5 border-t border-[#242B42]">
+                  <div className="pt-1.5 border-t border-[#242B42] space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWorkspaceMenuOpen(false);
+                        setShowCompanyProfileModal(true);
+                      }}
+                      className="w-full px-2 py-1.5 rounded bg-[#181D2D] hover:bg-[#232B45] text-gray-200 text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#242B42] transition-colors"
+                    >
+                      <Pencil className="w-3 h-3 text-indigo-400" />
+                      <span>Edit Data Usaha</span>
+                    </button>
                     {!showNewWorkspaceForm ? (
                       <button
                         type="button"
@@ -871,6 +885,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
     </aside>
+    {user && isAdmin && (
+      <CompanyProfileModal
+        isOpen={showCompanyProfileModal}
+        onClose={() => setShowCompanyProfileModal(false)}
+        onSaved={(updated) => {
+          onUserUpdated?.({ ...user, companyName: updated.name });
+          setWorkspaces((prev) =>
+            prev.map((ws) => (ws.id === updated.id ? { ...ws, name: updated.name } : ws))
+          );
+        }}
+      />
+    )}
     </>
   );
 };

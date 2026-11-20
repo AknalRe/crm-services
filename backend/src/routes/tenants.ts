@@ -88,16 +88,23 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
 
   // PATCH current company metadata
   fastify.patch<{
-    Body: { name?: string; ownerName?: string; ownerPhone?: string };
+    Body: { name?: string; ownerName?: string; ownerEmail?: string; ownerPhone?: string };
   }>('/current', { preHandler: requireCompanyAdmin }, async (req, reply) => {
     try {
       const companyId = getRequestCompanyId(req);
       const updates: Record<string, any> = { updatedAt: new Date() };
-      if (typeof req.body?.name === 'string' && req.body.name.trim()) {
-        updates.name = req.body.name.trim();
+      if (typeof req.body?.name === 'string') {
+        const cleanName = req.body.name.trim();
+        if (!cleanName) {
+          return reply.status(400).send({ success: false, error: 'Nama usaha tidak boleh kosong' });
+        }
+        updates.name = cleanName;
       }
       if (typeof req.body?.ownerName === 'string') {
         updates.ownerName = req.body.ownerName.trim() || null;
+      }
+      if (typeof req.body?.ownerEmail === 'string') {
+        updates.ownerEmail = req.body.ownerEmail.trim().toLowerCase() || null;
       }
       if (typeof req.body?.ownerPhone === 'string') {
         updates.ownerPhone = req.body.ownerPhone.trim() || null;
