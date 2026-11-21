@@ -438,15 +438,20 @@ export async function handleInboundAutomation(params: {
       try {
         const aiCfg = await getAiAgentConfig();
         const [convState] = await db
-          .select({ escalatedAt: conversations.escalatedAt })
+          .select({
+            escalatedAt: conversations.escalatedAt,
+            assignedAgentId: conversations.assignedAgentId,
+            status: conversations.status,
+          })
           .from(conversations)
           .where(eq(conversations.id, conversationId))
           .limit(1);
-        const alreadyEscalated = Boolean(convState?.escalatedAt);
+        const isHandledByHuman = Boolean(convState?.escalatedAt || convState?.assignedAgentId);
         if (
           aiCfg.enabled &&
           aiCfg.autoReplyDm &&
-          !alreadyEscalated &&
+          !isHandledByHuman &&
+          convState?.status !== 'RESOLVED' &&
           (!isExcluded || aiCfg.replyToNonPenilaian !== false) &&
           isAiAllowedForDm(aiCfg, channel, sessionName, isGroup) &&
           (!isGroup ||

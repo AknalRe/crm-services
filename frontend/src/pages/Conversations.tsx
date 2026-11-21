@@ -976,6 +976,32 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setTogglingAiStatus(true);
       await api.updateConversation(selectedConversation.id, { resetEscalation: true });
       toast.success('Balasan Agent AI diaktifkan kembali untuk percakapan ini');
+      setSelectedConversation((prev) =>
+        prev
+          ? {
+              ...prev,
+              escalatedAt: null,
+              escalationReason: null,
+              escalationSummary: null,
+              assignedAgentId: null,
+              assignedAgentName: null,
+            }
+          : null
+      );
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === selectedConversation.id
+            ? {
+                ...c,
+                escalatedAt: null,
+                escalationReason: null,
+                escalationSummary: null,
+                assignedAgentId: null,
+                assignedAgentName: null,
+              }
+            : c
+        )
+      );
       await fetchConvAiStatus(selectedConversation.id);
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Gagal mengaktifkan kembali Agent AI');
@@ -990,6 +1016,27 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setTogglingAiStatus(true);
       await api.updateConversation(selectedConversation.id, { pauseAi: true, escalateReason: 'Dijeda manual oleh staf' });
       toast.info('Balasan Agent AI dijeda. Percakapan kini ditangani manual.');
+      const nowIso = new Date().toISOString();
+      setSelectedConversation((prev) =>
+        prev
+          ? {
+              ...prev,
+              escalatedAt: nowIso,
+              escalationReason: 'Dijeda manual oleh staf',
+            }
+          : null
+      );
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === selectedConversation.id
+            ? {
+                ...c,
+                escalatedAt: nowIso,
+                escalationReason: 'Dijeda manual oleh staf',
+              }
+            : c
+        )
+      );
       await fetchConvAiStatus(selectedConversation.id);
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Gagal menjeda Agent AI');
@@ -3897,6 +3944,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
     try {
       await api.updateConversation(selectedConversation.id, { assignedAgentId: agentId });
       toast.success(agentId ? 'Percakapan ditugaskan ke agent' : 'Penugasan agent dihapus');
+      const matched = agentId ? assignableAgents.find((a) => a.id === agentId) : null;
+      setSelectedConversation((prev) =>
+        prev
+          ? {
+              ...prev,
+              assignedAgentId: agentId,
+              assignedAgentName: matched ? matched.name : null,
+            }
+          : null
+      );
+      void fetchConvAiStatus(selectedConversation.id);
       void fetchConversations();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal menugaskan agent');
@@ -4150,6 +4208,25 @@ export const Conversations: React.FC<ConversationsProps> = ({
         );
       }
       void fetchConversations();
+      setSelectedConversation((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: nextStatus,
+              ...(nextStatus === 'RESOLVED'
+                ? {
+                    assignedAgentId: null,
+                    assignedAgentName: null,
+                    escalatedAt: null,
+                    escalationReason: null,
+                    escalationSummary: null,
+                    resolvedAt: new Date().toISOString(),
+                  }
+                : {}),
+            }
+          : null
+      );
+      void fetchConvAiStatus(selectedConversation.id);
       if (nextStatus === 'RESOLVED') {
         void fetchMessages(selectedConversation.id);
       }
@@ -5096,7 +5173,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                             Dinilai
                           </span>
-                          {conv.escalatedAt && conv.status !== 'RESOLVED' && (
+                          {conv.escalatedAt &&
+                            conv.status !== 'RESOLVED' &&
+                            (!conv.firstResponseAt ||
+                              new Date(conv.firstResponseAt).getTime() <
+                                new Date(conv.escalatedAt).getTime()) && (
                             <span
                               title={`Menunggu agen manusia sejak eskalasi AI${conv.escalationReason ? `: ${conv.escalationReason}` : ''}`}
                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0"
@@ -5868,7 +5949,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
             );
           })()}
 
-          {selectedConversation.escalatedAt && selectedConversation.status !== 'RESOLVED' && (
+          {selectedConversation.escalatedAt &&
+            selectedConversation.status !== 'RESOLVED' &&
+            (!selectedConversation.firstResponseAt ||
+              new Date(selectedConversation.firstResponseAt).getTime() <
+                new Date(selectedConversation.escalatedAt).getTime()) && (
             <div className="shrink-0 flex flex-wrap items-start gap-x-3 gap-y-1 px-3 py-2 bg-indigo-50 border-b border-indigo-200 text-xs text-indigo-900">
               <span className="inline-flex items-center gap-1.5 font-semibold shrink-0">
                 <Clock className="w-3.5 h-3.5" strokeWidth={1.75} />

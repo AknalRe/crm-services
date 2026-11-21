@@ -211,7 +211,17 @@ export async function upsertInboundChannelMessage(params: {
           ? now
           : existing.sessionStartedAt || existing.firstInboundAt || existing.createdAt,
         resolvedAt: isReopeningFromResolved ? null : existing.resolvedAt,
-        firstInboundAt: existing.firstInboundAt || now,
+        ...(isReopeningFromResolved
+          ? {
+              assignedAgentId: null,
+              assignedAgentName: null,
+              escalatedAt: null,
+              escalationReason: null,
+              escalationSummary: null,
+              firstResponseAt: null,
+            }
+          : {}),
+        firstInboundAt: isReopeningFromResolved ? now : (existing.firstInboundAt || now),
         lastInboundAt: now,
         lastMessage: body,
         lastMessageAt: now,

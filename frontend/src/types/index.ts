@@ -1215,8 +1215,11 @@ export interface ConversationAiStatus {
   reason: string;
   isEligible: boolean;
   isEscalated: boolean;
+  assignedAgentId?: string | null;
+  assignedAgentName?: string | null;
   escalatedAt: string | null;
   escalationReason: string | null;
+  escalationSummary?: string | null;
   aiName: string;
   provider: string;
   model: string;

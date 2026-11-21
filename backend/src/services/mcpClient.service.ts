@@ -826,12 +826,16 @@ async function listTenantGalleryFiles(params: {
   return items.slice(0, maxItems);
 }
 
-// Antrean eskalasi: percakapan yang menunggu agen manusia, urut dari yang paling awal
+// Antrean eskalasi: percakapan yang menunggu respon pertama dari agen manusia setelah eskalasi
 export async function getEscalationQueue(
   companyId: string
 ): Promise<Array<{ id: string; escalatedAt: Date | null }>> {
   const rows = await db
-    .select({ id: conversations.id, escalatedAt: conversations.escalatedAt })
+    .select({
+      id: conversations.id,
+      escalatedAt: conversations.escalatedAt,
+      firstResponseAt: conversations.firstResponseAt,
+    })
     .from(conversations)
     .where(
       and(
@@ -841,7 +845,10 @@ export async function getEscalationQueue(
       )
     )
     .orderBy(asc(conversations.escalatedAt));
-  return rows;
+  return rows.filter((r) => {
+    if (!r.firstResponseAt || !r.escalatedAt) return true;
+    return new Date(r.firstResponseAt).getTime() < new Date(r.escalatedAt).getTime();
+  });
 }
 
 export async function getSlaTargetMinutes(companyId: string): Promise<number> {

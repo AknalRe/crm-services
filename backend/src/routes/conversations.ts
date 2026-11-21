@@ -1742,7 +1742,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       const aiCfg = await runWithCompany(companyId, () => getAiAgentConfig());
       const isGroup = Boolean(conv.isGroup || conv.externalThreadId?.toLowerCase().endsWith('@g.us'));
       const isExcluded = Boolean(conv.excludeFromMetrics);
-      const isEscalated = Boolean(conv.escalatedAt);
+      const isAssigned = Boolean(conv.assignedAgentId);
+      const isEscalated = Boolean(conv.escalatedAt || isAssigned);
 
       let status:
         | 'ACTIVE'
@@ -1771,8 +1772,15 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         reason = 'Fitur "Balas pesan obrolan & chat masuk secara otomatis" dimatikan di Pengaturan AI.';
       } else if (isEscalated) {
         status = 'ESCALATED';
-        statusLabel = 'AI Dijeda (Eskalasi CS)';
-        reason = `Obrolan ini telah dieskalasi ke tim CS${conv.escalationReason ? `: ${conv.escalationReason}` : ''}. Balasan AI dijeda agar tidak tumpang tindih dengan agen manusia.`;
+        if (conv.assignedAgentName) {
+          statusLabel = `AI Dijeda (Staf: ${conv.assignedAgentName})`;
+          reason = `Obrolan ini sedang ditangani oleh staf ${conv.assignedAgentName}. Balasan AI dijeda agar tidak tumpang tindih dengan agen manusia.`;
+        } else {
+          statusLabel = 'AI Dijeda (Eskalasi CS)';
+          reason = conv.escalationReason
+            ? `Obrolan ini telah dieskalasi ke tim CS: ${conv.escalationReason}. Balasan AI dijeda agar tidak tumpang tindih dengan agen manusia.`
+            : 'Obrolan ini telah dieskalasi ke antrean CS. Balasan AI dijeda agar tidak tumpang tindih dengan agen manusia.';
+        }
       } else if (isExcluded && aiCfg.replyToNonPenilaian === false) {
         status = 'NON_PENILAIAN_EXCLUDED';
         statusLabel = 'Non-Penilaian Dikecualikan';
@@ -1808,8 +1816,11 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           reason,
           isEligible: status === 'ACTIVE',
           isEscalated,
+          assignedAgentId: conv.assignedAgentId || null,
+          assignedAgentName: conv.assignedAgentName || null,
           escalatedAt: conv.escalatedAt ? conv.escalatedAt.toISOString() : null,
           escalationReason: conv.escalationReason || null,
+          escalationSummary: conv.escalationSummary || null,
           aiName: aiCfg.name,
           provider: aiCfg.provider,
           model: aiCfg.model,
@@ -2676,6 +2687,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         convUpdate.escalatedAt = null;
         convUpdate.escalationReason = null;
         convUpdate.escalationSummary = null;
+        convUpdate.assignedAgentId = null;
+        convUpdate.assignedAgentName = null;
       } else if (req.body?.pauseAi === true) {
         convUpdate.escalatedAt = now;
         convUpdate.escalationReason = req.body.escalateReason || 'Dijeda manual oleh staf';
@@ -2692,6 +2705,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           convUpdate.escalatedAt = null;
           convUpdate.escalationReason = null;
           convUpdate.escalationSummary = null;
+          if (req.body?.assignedAgentId === undefined) {
+            convUpdate.assignedAgentId = null;
+            convUpdate.assignedAgentName = null;
+          }
           if (!existing.sessionStartedAt) {
             convUpdate.sessionStartedAt = existing.firstInboundAt || existing.createdAt;
           }
@@ -2855,7 +2872,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           })
         );
       }
-      if (req.body?.assignedAgentId !== undefined && convUpdate.assignedAgentId !== existing.assignedAgentId) {
+      if (convUpdate.assignedAgentId !== undefined && convUpdate.assignedAgentId !== existing.assignedAgentId) {
         activityTasks.push(
           recordConversationActivity({
             companyId,
@@ -3903,9 +3920,6 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           .update(conversations)
           .set({
             wahaSession: effectiveSession || conversation.conv.wahaSession,
-            escalatedAt: null,
-            escalationReason: null,
-            escalationSummary: null,
             firstResponseAt:
               conversation.conv.firstInboundAt && !conversation.conv.firstResponseAt
                 ? now
