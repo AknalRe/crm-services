@@ -147,6 +147,46 @@ export async function computeCompanyStorageUsageBytes(companyId: string): Promis
   }
 }
 
+export async function clearCompanyMediaFiles(companyId: string): Promise<number> {
+  let removed = 0;
+  try {
+    if (!fs.existsSync(UPLOADS_DIR)) return 0;
+    const entries = await fs.promises.readdir(UPLOADS_DIR, { withFileTypes: true });
+    const isDefault = !companyId || companyId === 'company_default';
+
+    for (const ent of entries) {
+      if (!ent.isFile() || ent.name.startsWith('.')) continue;
+      const meta = await readMediaMetadata(ent.name);
+      const fileCompanyId = meta?.companyId || 'company_default';
+      if (fileCompanyId !== companyId && !(isDefault && !meta?.companyId)) {
+        continue;
+      }
+      try {
+        await fs.promises.unlink(path.join(UPLOADS_DIR, ent.name));
+        removed++;
+      } catch {
+        // ignore missing file
+      }
+      try {
+        const metaPath = path.join(META_DIR, `${ent.name}.json`);
+        if (fs.existsSync(metaPath)) {
+          await fs.promises.unlink(metaPath);
+        }
+      } catch {
+        // ignore missing meta
+      }
+      try {
+        await db.delete(persistedMedia).where(eq(persistedMedia.key, `uploads/${ent.name}`));
+      } catch {
+        // ignore DB media cleanup error
+      }
+    }
+  } catch {
+    // ignore read error
+  }
+  return removed;
+}
+
 export async function saveMediaMetadata(filename: string, meta: MediaMetadata): Promise<void> {
   try {
     if (!fs.existsSync(META_DIR)) {

@@ -33,6 +33,7 @@ import {
 } from './auth';
 import { licenseService } from '../services/license.service';
 import { liveEvents } from '../services/events.service';
+import { clearCompanyMediaFiles } from './media';
 import {
   generateUniqueCompanySlug,
   getSystemSettingMap,
@@ -465,6 +466,7 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
       await db.delete(scheduledPosts).where(eq(scheduledPosts.companyId, companyId));
       await db.delete(contentIdeas).where(eq(contentIdeas.companyId, companyId));
       await db.delete(webhookDeliveries).where(eq(webhookDeliveries.companyId, companyId));
+      const deletedMediaCount = await clearCompanyMediaFiles(companyId);
 
       licenseService.invalidateCache(companyId);
       const license = await licenseService.getLicense(companyId, true);
@@ -474,14 +476,14 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
 
       return reply.send({
         success: true,
-        message: `Data operasional bisnis berhasil dibersihkan (${deletedContacts.length} kontak, ${deletedConversations.length} percakapan, ${deletedCampaigns.length} kampanye).`,
+        message: `Data operasional bisnis berhasil dibersihkan (${deletedContacts.length} kontak, ${deletedConversations.length} percakapan, ${deletedCampaigns.length} kampanye, ${deletedMediaCount} file galeri).`,
         data: {
           cleared: {
             contacts: deletedContacts.length,
             conversations: deletedConversations.length,
             messages: deletedMessages.length,
             campaigns: deletedCampaigns.length,
-            media: 0,
+            media: deletedMediaCount,
           },
           license,
         },

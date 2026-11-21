@@ -1041,7 +1041,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       onConfirm={handleConfirmClearCompanyData}
       isLoading={clearingData}
       title={`Bersihkan Data "${user?.companyName || licenseInfo?.companyName || 'Bisnis Ini'}"?`}
-      description="Seluruh data operasional pada bisnis ini (kontak, percakapan, pesan, siaran/kampanye, jadwal post, dan komentar) akan dihapus permanen. Workspace bisnis, paket lisensi aktif, akun tim/agen CS, dan pengaturan koneksi kanal tetap aman."
+      description="Seluruh data operasional pada bisnis ini (kontak, percakapan, pesan, siaran/kampanye, jadwal post, komentar, dan galeri media) akan dihapus permanen. Workspace bisnis, paket lisensi aktif, akun tim/agen CS, dan pengaturan koneksi kanal tetap aman."
       confirmLabel="Bersihkan Data"
       variant="danger"
     />
