@@ -1463,6 +1463,38 @@ async function executeBuiltinCrmTool(
       createdAt: now,
     });
 
+    // Catat peristiwa perpindahan tugas di linimasa aktivitas percakapan (terlihat di Live Chat)
+    await db.insert(chatMessages).values({
+      id: crypto.randomUUID(),
+      companyId: convCompanyId,
+      conversationId: conv.id,
+      contactId: conv.contactId,
+      direction: 'SYSTEM',
+      messageType: 'ACTIVITY',
+      channel: conv.channel || 'WHATSAPP',
+      wahaSession: conv.wahaSession,
+      senderName: 'Agent AI',
+      body: chosenAgent
+        ? `Agent AI mengalihkan tugas ke Agent ${chosenAgent.name}`
+        : `Agent AI mengalihkan tugas ke Antrean Tim CS (#${queueNo})`,
+      metadataJson: JSON.stringify({
+        kind: 'ACTIVITY',
+        action: 'AI_HANDOVER',
+        actorName: 'Agent AI',
+        actorRole: 'AI Assistant',
+        detail: {
+          queueNo,
+          queueTotal,
+          reason,
+          toAgentId: chosenAgent?.id || null,
+          toAgentName: chosenAgent?.name || null,
+        },
+      }),
+      status: 'SYSTEM',
+      ackStatus: 0,
+      createdAt: now,
+    });
+
     liveEvents.emit('conversations:update', {
       conversationId: conv.id,
       escalated: true,
