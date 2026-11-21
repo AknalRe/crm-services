@@ -310,6 +310,7 @@ export async function handleInboundAutomation(params: {
   externalThreadId?: string | null;
   sessionName?: string | null;
   isNewConversation: boolean;
+  isGroup?: boolean;
   companyId?: string;
 }): Promise<void> {
   const {
@@ -322,6 +323,7 @@ export async function handleInboundAutomation(params: {
     externalThreadId = null,
     sessionName,
     isNewConversation,
+    isGroup = false,
     companyId: companyIdParam,
   } = params;
 
@@ -332,7 +334,7 @@ export async function handleInboundAutomation(params: {
 
     // 1. Auto-Assign Agent if unassigned (only assign to ONLINE / ready agents, skip AWAY/OFFLINE)
     const assignMode = settings.auto_assign_mode || 'NONE';
-    if (!assignedAgentId && (assignMode === 'ROUND_ROBIN' || assignMode === 'LEAST_BUSY')) {
+    if (!isGroup && !assignedAgentId && (assignMode === 'ROUND_ROBIN' || assignMode === 'LEAST_BUSY')) {
       const allActiveAgents = await db
         .select()
         .from(crmAgents)
@@ -387,7 +389,7 @@ export async function handleInboundAutomation(params: {
       channel,
       channelAccountId,
       externalThreadId,
-      phone: contact.nomorWhatsapp,
+      phone: isGroup ? null : contact.nomorWhatsapp,
       sessionName,
     };
 
@@ -395,7 +397,7 @@ export async function handleInboundAutomation(params: {
 
     // 2. Keyword Auto-Reply Rules (WhatsApp & Omnichannel)
     const trimmedBody = (inboundBody || '').trim().toLowerCase();
-    if (trimmedBody) {
+    if (trimmedBody && !isGroup) {
       const rules = await db
         .select()
         .from(autoReplyRules)
@@ -421,7 +423,7 @@ export async function handleInboundAutomation(params: {
     }
 
     // 3. Welcome Message for new conversations
-    if (isNewConversation && settings.welcome_enabled === 'true' && settings.welcome_message?.trim()) {
+    if (!isGroup && isNewConversation && settings.welcome_enabled === 'true' && settings.welcome_message?.trim()) {
       await sendAutoReplyMessage({
         ...replyBase,
         text: formatPersonalization(settings.welcome_message.trim(), contact),
@@ -443,7 +445,10 @@ export async function handleInboundAutomation(params: {
           aiCfg.enabled &&
           aiCfg.autoReplyDm &&
           !alreadyEscalated &&
-          isAiAllowedForDm(aiCfg, channel, sessionName)
+          isAiAllowedForDm(aiCfg, channel, sessionName, isGroup) &&
+          (!isGroup ||
+            !aiCfg.groupMentionOnly ||
+            inboundBody.toLowerCase().includes(aiCfg.name.trim().toLowerCase()))
         ) {
           const maxHist = Math.max(2, Math.min(100, aiCfg.maxHistoryMessages || 20));
           const recentRows = await db
@@ -533,6 +538,7 @@ export async function handleInboundAutomation(params: {
 
     // 5. Off-Hours Auto-Reply (throttled per conversation)
     if (
+      !isGroup &&
       settings.offhours_enabled === 'true' &&
       settings.offhours_message?.trim() &&
       !isWithinBusinessHours(settings)

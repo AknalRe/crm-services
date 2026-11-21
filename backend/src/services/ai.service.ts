@@ -88,6 +88,8 @@ export interface AiAgentConfig {
   dmChannels: string[];
   commentChannels: string[];
   dmWahaSessions: string[];
+  dmScope: 'PERSONAL' | 'GROUP' | 'BOTH';
+  groupMentionOnly: boolean;
   provider: AiProviderId;
   model: string;
   baseUrl?: string;
@@ -320,13 +322,26 @@ function sanitizeSessionList(raw: unknown, fallback: string[]): string[] {
   ).slice(0, 100);
 }
 
+function sanitizeDmScope(raw: unknown, fallback: 'PERSONAL' | 'GROUP' | 'BOTH'): 'PERSONAL' | 'GROUP' | 'BOTH' {
+  const v = String(raw || '').toUpperCase();
+  return v === 'PERSONAL' || v === 'GROUP' || v === 'BOTH' ? v : fallback;
+}
+
 // Cek apakah Agent AI boleh membalas DM pada kanal & sesi WhatsApp ini
 export function isAiAllowedForDm(
-  cfg: Pick<AiAgentConfig, 'dmChannels' | 'dmWahaSessions'>,
+  cfg: Pick<AiAgentConfig, 'dmChannels' | 'dmWahaSessions'> &
+    Partial<Pick<AiAgentConfig, 'dmScope'>>,
   channel: string,
-  sessionName?: string | null
+  sessionName?: string | null,
+  isGroup = false
 ): boolean {
   const ch = String(channel || 'WHATSAPP').toUpperCase();
+  const scope = cfg.dmScope || 'PERSONAL';
+  if (isGroup) {
+    if (scope === 'PERSONAL' || ch !== 'WHATSAPP') return false;
+  } else if (scope === 'GROUP') {
+    return false;
+  }
   const channels = Array.isArray(cfg.dmChannels) ? cfg.dmChannels : [...AI_DM_CHANNELS];
   if (!channels.includes(ch)) return false;
   if (ch === 'WHATSAPP') {
@@ -390,6 +405,8 @@ export const DEFAULT_AI_CONFIG: AiAgentConfig = {
   dmChannels: [...AI_DM_CHANNELS],
   commentChannels: [...AI_COMMENT_CHANNELS],
   dmWahaSessions: [],
+  dmScope: 'PERSONAL',
+  groupMentionOnly: true,
   provider: 'LOCAL_KB',
   model: 'local-kb-matcher',
   baseUrl: '',
@@ -567,6 +584,11 @@ function sanitizeStoredConfig(raw: any): AiAgentConfig {
       ...AI_COMMENT_CHANNELS,
     ]),
     dmWahaSessions: sanitizeSessionList(raw?.dmWahaSessions, []),
+    dmScope: sanitizeDmScope(raw?.dmScope, DEFAULT_AI_CONFIG.dmScope),
+    groupMentionOnly:
+      raw?.groupMentionOnly !== undefined
+        ? Boolean(raw.groupMentionOnly)
+        : DEFAULT_AI_CONFIG.groupMentionOnly,
     provider,
     model,
     baseUrl,
@@ -699,6 +721,11 @@ export function mergeAiAgentConfig(prev: AiAgentConfig, incoming: Partial<AiAgen
       prev.commentChannels || [...AI_COMMENT_CHANNELS]
     ),
     dmWahaSessions: sanitizeSessionList(incoming?.dmWahaSessions, prev.dmWahaSessions || []),
+    dmScope: sanitizeDmScope(incoming?.dmScope, prev.dmScope || 'PERSONAL'),
+    groupMentionOnly:
+      incoming?.groupMentionOnly !== undefined
+        ? Boolean(incoming.groupMentionOnly)
+        : prev.groupMentionOnly ?? true,
     provider: nextProvider,
     model: nextModel,
     baseUrl: nextBaseUrl,
@@ -1712,6 +1739,16 @@ function generateLocalKbReply(
   return { reply: replyText, matchedKb: Boolean(bestItem) };
 }
 
+// Pastikan pelanggan menerima nomor antrean walau model tidak menyebutkannya
+function appendEscalationQueueNotice(
+  reply: string,
+  escalation?: { queueNo: number; queueTotal: number; slaTarget: number } | null
+): string {
+  if (!escalation) return reply;
+  if (/antre/i.test(reply) && reply.includes(`#${escalation.queueNo}`)) return reply;
+  return `${reply}\n\nPercakapan Anda sudah diteruskan ke tim kami. Nomor antrean Anda: #${escalation.queueNo} dari ${escalation.queueTotal}. Target respons tim sekitar ${escalation.slaTarget} menit.`;
+}
+
 function parseSkillTools(raw: unknown): string[] {
   if (Array.isArray(raw)) return raw.map((x) => String(x));
   if (typeof raw === 'string') {
@@ -1961,7 +1998,7 @@ export async function generateAiAgentReply(
       });
       return {
         config: cfg,
-        reply: invocation.reply,
+        reply: appendEscalationQueueNotice(invocation.reply, toolRegistry.sideEffects.escalation),
         source: target.provider,
         providerLabel: entry.label,
         model: target.model,

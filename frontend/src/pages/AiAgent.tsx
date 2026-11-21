@@ -187,6 +187,8 @@ const DEFAULT_FORM_CONFIG: AiAgentConfig = {
   dmChannels: ['WHATSAPP', 'INSTAGRAM', 'FACEBOOK', 'THREADS', 'TELEGRAM'],
   commentChannels: ['INSTAGRAM', 'FACEBOOK', 'THREADS'],
   dmWahaSessions: [],
+  dmScope: 'PERSONAL',
+  groupMentionOnly: true,
   provider: 'LOCAL_KB',
   model: 'local-kb-matcher',
   baseUrl: '',

@@ -13,6 +13,12 @@ const DM_CHANNEL_OPTIONS = [
 
 const COMMENT_CHANNEL_OPTIONS = DM_CHANNEL_OPTIONS.filter((o) => o.id !== 'WHATSAPP' && o.id !== 'TELEGRAM');
 
+const SCOPE_OPTIONS: Array<{ id: 'PERSONAL' | 'GROUP' | 'BOTH'; label: string }> = [
+  { id: 'PERSONAL', label: 'Chat personal saja' },
+  { id: 'GROUP', label: 'Grup saja' },
+  { id: 'BOTH', label: 'Personal & grup' },
+];
+
 function toggleItem(list: string[], item: string): string[] {
   return list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
 }
@@ -260,7 +266,45 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
             </p>
           </div>
 
-          <div className={config.autoReplyDm ? '' : 'opacity-50'}>
+          <div>
+            <div className="text-[11px] font-medium text-gray-700 mb-1.5">Jenis percakapan WhatsApp</div>
+            <div className="flex flex-wrap gap-1.5">
+              {SCOPE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => onChangeConfig({ dmScope: opt.id })}
+                  className={`h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors ${
+                    (config.dmScope || 'PERSONAL') === opt.id
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {(config.dmScope === 'GROUP' || config.dmScope === 'BOTH') && (
+              <label className="flex items-center gap-2 text-[11px] text-gray-700 mt-2">
+                <input
+                  type="checkbox"
+                  checked={config.groupMentionOnly !== false}
+                  onChange={(e) => onChangeConfig({ groupMentionOnly: e.target.checked })}
+                />
+                <span>
+                  Di grup, balas hanya jika pesan menyebut nama agent{' '}
+                  <span className="font-mono">{config.name}</span>
+                </span>
+              </label>
+            )}
+            {!config.autoReplyDm && (
+              <p className="text-[10px] text-amber-700 mt-1.5">
+                Aktifkan &quot;Balas DM masuk secara otomatis&quot; agar pengaturan cakupan ini berlaku.
+              </p>
+            )}
+          </div>
+
+          <div>
             <div className="text-[11px] font-medium text-gray-700 mb-1.5">Live chat / DM</div>
             <div className="flex flex-wrap gap-1.5">
               {DM_CHANNEL_OPTIONS.map((opt) => {
@@ -269,9 +313,8 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
                   <button
                     key={opt.id}
                     type="button"
-                    disabled={!config.autoReplyDm}
                     onClick={() => onChangeConfig({ dmChannels: toggleItem(config.dmChannels || [], opt.id) })}
-                    className={`h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors disabled:cursor-not-allowed ${
+                    className={`h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors ${
                       active
                         ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                         : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
@@ -283,7 +326,7 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
               })}
             </div>
 
-            {config.autoReplyDm && (config.dmChannels || []).includes('WHATSAPP') && (
+            {(config.dmChannels || []).includes('WHATSAPP') && (
               <div className="mt-2.5">
                 <div className="text-[11px] font-medium text-gray-700 mb-1.5">
                   Sesi WhatsApp{' '}
@@ -324,7 +367,7 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
             )}
           </div>
 
-          <div className={config.autoReplyComment ? '' : 'opacity-50'}>
+          <div>
             <div className="text-[11px] font-medium text-gray-700 mb-1.5">Komentar sosial media</div>
             <div className="flex flex-wrap gap-1.5">
               {COMMENT_CHANNEL_OPTIONS.map((opt) => {
@@ -333,11 +376,10 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
                   <button
                     key={opt.id}
                     type="button"
-                    disabled={!config.autoReplyComment}
                     onClick={() =>
                       onChangeConfig({ commentChannels: toggleItem(config.commentChannels || [], opt.id) })
                     }
-                    className={`h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors disabled:cursor-not-allowed ${
+                    className={`h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors ${
                       active
                         ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
                         : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'

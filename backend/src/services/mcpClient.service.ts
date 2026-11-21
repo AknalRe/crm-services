@@ -100,6 +100,7 @@ export interface AiToolSideEffects {
   replyToMessageId?: string | null;
   replyToPreview?: string | null;
   inspectedImages: Array<{ dataUri: string; mimeType: string; label?: string }>;
+  escalation?: { queueNo: number; queueTotal: number; slaTarget: number } | null;
 }
 
 export const BUILTIN_CRM_TOOLS: BuiltinCrmToolMeta[] = [
@@ -1468,6 +1469,9 @@ async function executeBuiltinCrmTool(
       assignedAgentId: chosenAgent?.id || conv.assignedAgentId || null,
       assignedAgentName: chosenAgent?.name || conv.assignedAgentName || null,
     });
+    if (ctx?.sideEffects) {
+      ctx.sideEffects.escalation = { queueNo, queueTotal, slaTarget };
+    }
     const queueInfo = `Nomor antrean pelanggan: #${queueNo} dari ${queueTotal} percakapan menunggu. Target respons tim sekitar ${slaTarget} menit per percakapan; jangan menjanjikan waktu pasti.`;
     return {
       ok: true,

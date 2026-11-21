@@ -1148,6 +1148,8 @@ export interface AiAgentConfig {
   dmChannels: string[];
   commentChannels: string[];
   dmWahaSessions: string[];
+  dmScope: 'PERSONAL' | 'GROUP' | 'BOTH';
+  groupMentionOnly: boolean;
   provider: AiProviderId;
   model: string;
   baseUrl?: string;
