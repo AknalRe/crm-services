@@ -26,6 +26,44 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
   const [connectLinks, setConnectLinks] = useState<ChannelConnectLink[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ChannelAccount | null>(null);
   const [deletingChannel, setDeletingChannel] = useState(false);
+  const [channelCampaignCheck, setChannelCampaignCheck] = useState<{
+    loading: boolean;
+    hasCampaigns: boolean;
+    totalCampaigns: number;
+    activeCampaigns: number;
+    campaignTitles: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!deleteTarget) {
+      setChannelCampaignCheck(null);
+      return;
+    }
+    let isMounted = true;
+    api.checkSessionCampaigns({
+      channel: deleteTarget.channel,
+      channelAccountId: deleteTarget.id,
+    })
+      .then((res) => {
+        if (isMounted) {
+          setChannelCampaignCheck({
+            loading: false,
+            hasCampaigns: res.hasCampaigns,
+            totalCampaigns: res.totalCampaigns,
+            activeCampaigns: res.activeCampaigns,
+            campaignTitles: res.campaignTitles || [],
+          });
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setChannelCampaignCheck(null);
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [deleteTarget]);
   const [linkLabel, setLinkLabel] = useState('');
   const [creatingLink, setCreatingLink] = useState(false);
   const [oauthCfg, setOauthCfg] = useState<{
@@ -433,8 +471,16 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
               <span>Peringatan Data Riwayat &amp; Kampanye Siaran</span>
             </div>
             <p className="leading-relaxed text-amber-800">
-              Jika akun channel sesi ini pernah atau sedang digunakan untuk kampanye siaran (broadcast), data kampanye bisa saja menjadi tidak valid atau sistem tidak dapat mengambil data yang sesuai karena identitas akun atau nomor sesi telah berganti atau dihapus.
+              Sesi akun channel ini pernah digunakan untuk kampanye siaran (berdasarkan pencocokan riwayat channel &quot;{deleteTarget?.name}&quot; • {deleteTarget?.channel}{channelCampaignCheck?.totalCampaigns ? `, tercatat ${channelCampaignCheck.totalCampaigns} kampanye` : ''}{channelCampaignCheck?.campaignTitles?.length ? `: "${channelCampaignCheck.campaignTitles.join('", "')}"` : ''}).
             </p>
+            <p className="leading-relaxed text-amber-900 font-medium">
+              Data kampanye bisa saja tidak valid karena tidak bisa ambil data yang sesuai karena sesi telah berganti (nomor sesi atau identitas sesi).
+            </p>
+            {Boolean(channelCampaignCheck?.activeCampaigns && channelCampaignCheck.activeCampaigns > 0) && (
+              <div className="font-semibold text-red-700 bg-red-50 p-2 rounded border border-red-200 mt-1">
+                Perhatian: Terdapat {channelCampaignCheck?.activeCampaigns} kampanye siaran yang sedang berjalan pada akun ini!
+              </div>
+            )}
           </div>
         </div>
       </ConfirmModal>

@@ -72,6 +72,10 @@ export function formatRecipient(r: any, contact?: any, campaign?: any) {
 
 export default async function broadcastsRouter(fastify: FastifyInstance) {
   fastify.addHook('preHandler', async (req, reply) => {
+    if (req.url.includes('/session-check')) {
+      const allowed = requirePermission('broadcasts', 'tracking', 'waha.manage', 'settings');
+      return allowed(req, reply);
+    }
     const allowed =
       req.method === 'GET'
         ? requirePermission('broadcasts', 'tracking')
@@ -127,6 +131,26 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // GET check session campaigns history for logout / delete session warnings
+  fastify.get('/session-check', async (req: FastifyRequest<{
+    Querystring: { session?: string; channel?: string; channelAccountId?: string; sessionPhone?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const { session, channel, channelAccountId, sessionPhone } = req.query;
+      const result = await BroadcastService.checkSessionCampaigns({
+        companyId,
+        sessionName: session,
+        channel,
+        channelAccountId,
+        sessionPhone,
+      });
+      return reply.send({ success: true, data: result });
+    } catch (err: any) {
+      return reply.status(500).send({ success: false, error: err.message });
     }
   });
 

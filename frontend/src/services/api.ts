@@ -206,6 +206,23 @@ export const api = {
     const res = await client.delete(`/broadcasts/${id}`);
     return res.data;
   },
+  checkSessionCampaigns: async (params: {
+    session?: string;
+    channel?: string;
+    channelAccountId?: string;
+    sessionPhone?: string;
+  }): Promise<{
+    hasCampaigns: boolean;
+    totalCampaigns: number;
+    activeCampaigns: number;
+    campaignTitles: string[];
+    sessionName?: string;
+    sessionPhone?: string;
+    channel: string;
+  }> => {
+    const res = await client.get('/broadcasts/session-check', { params });
+    return res.data.data;
+  },
   getRecipientTracking: async (params?: {
     status?: string;
     search?: string;

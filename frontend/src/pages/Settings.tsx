@@ -154,6 +154,15 @@ export const Settings: React.FC<SettingsProps> = ({
   const [sessionActionLoading, setSessionActionLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'stop' | 'logout' | null>(null);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
+  const [sessionCampaignCheck, setSessionCampaignCheck] = useState<{
+    loading: boolean;
+    hasCampaigns: boolean;
+    totalCampaigns: number;
+    activeCampaigns: number;
+    campaignTitles: string[];
+    sessionName?: string;
+    sessionPhone?: string;
+  } | null>(null);
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [webhookUrlDraft, setWebhookUrlDraft] = useState('');
   const webhookDirtyRef = useRef(false);
@@ -951,6 +960,66 @@ export const Settings: React.FC<SettingsProps> = ({
     ? String(connectedMe.id).split('@')[0].split(':')[0]
     : '';
   const connectedPushName = connectedMe?.pushName ? String(connectedMe.pushName) : '';
+
+  // Pencocokan riwayat kampanye & identitas sesi saat akan logout/hentikan/hapus sesi
+  useEffect(() => {
+    const targetSession = confirmAction ? inspectedSession : confirmDeleteSession;
+    if (!targetSession) {
+      setSessionCampaignCheck(null);
+      return;
+    }
+
+    const sessItem = sessions.find((s) => s.name === targetSession);
+    const rawPhone = sessItem?.me?.id || (targetSession === inspectedSession ? connectedPhone : '');
+    const cleanPhone = rawPhone ? String(rawPhone).split('@')[0].split(':')[0].replace(/\D/g, '') : undefined;
+
+    let isMounted = true;
+    setSessionCampaignCheck({
+      loading: true,
+      hasCampaigns: false,
+      totalCampaigns: 0,
+      activeCampaigns: 0,
+      campaignTitles: [],
+      sessionName: targetSession,
+      sessionPhone: cleanPhone,
+    });
+
+    api.checkSessionCampaigns({
+      session: targetSession,
+      channel: 'WHATSAPP',
+      sessionPhone: cleanPhone,
+    })
+      .then((res) => {
+        if (isMounted) {
+          setSessionCampaignCheck({
+            loading: false,
+            hasCampaigns: res.hasCampaigns,
+            totalCampaigns: res.totalCampaigns,
+            activeCampaigns: res.activeCampaigns,
+            campaignTitles: res.campaignTitles || [],
+            sessionName: res.sessionName || targetSession,
+            sessionPhone: res.sessionPhone || cleanPhone,
+          });
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setSessionCampaignCheck({
+            loading: false,
+            hasCampaigns: false,
+            totalCampaigns: 0,
+            activeCampaigns: 0,
+            campaignTitles: [],
+            sessionName: targetSession,
+            sessionPhone: cleanPhone,
+          });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [confirmAction, confirmDeleteSession, inspectedSession, connectedPhone, sessions]);
 
   const getSessionStatusMeta = (raw?: string | null) => {
     const st = String(raw || 'STOPPED').toUpperCase();
@@ -3126,8 +3195,16 @@ export const Settings: React.FC<SettingsProps> = ({
               <span>Peringatan Data Riwayat &amp; Kampanye Siaran</span>
             </div>
             <p className="leading-relaxed text-amber-800">
-              Jika sesi ini pernah atau sedang digunakan untuk kampanye siaran (broadcast), data kampanye bisa saja menjadi tidak valid atau sistem tidak dapat mengambil data yang sesuai (status laporan terkirim, sampai, dan dibaca) karena nomor sesi atau identitas sesi telah berganti.
+              Sesi ini pernah digunakan untuk mengirim kampanye siaran (berdasarkan pencocokan riwayat sesi &quot;{inspectedSession}&quot;{sessionCampaignCheck?.sessionPhone ? ` • +${sessionCampaignCheck.sessionPhone}` : connectedPhone ? ` • +${connectedPhone}` : ''}{sessionCampaignCheck?.totalCampaigns ? `, tercatat ${sessionCampaignCheck.totalCampaigns} kampanye` : ''}{sessionCampaignCheck?.campaignTitles?.length ? `: "${sessionCampaignCheck.campaignTitles.join('", "')}"` : ''}).
             </p>
+            <p className="leading-relaxed text-amber-900 font-medium">
+              Data kampanye bisa saja tidak valid karena tidak bisa ambil data yang sesuai karena sesi telah berganti (nomor sesi atau identitas sesi).
+            </p>
+            {Boolean(sessionCampaignCheck?.activeCampaigns && sessionCampaignCheck.activeCampaigns > 0) && (
+              <div className="font-semibold text-red-700 bg-red-50 p-2 rounded border border-red-200 mt-1">
+                Perhatian: Terdapat {sessionCampaignCheck?.activeCampaigns} kampanye siaran yang saat ini sedang dalam antrean pengiriman / terjadwal pada sesi ini!
+              </div>
+            )}
           </div>
         </div>
       </ConfirmModal>
@@ -3152,8 +3229,16 @@ export const Settings: React.FC<SettingsProps> = ({
               <span>Peringatan Data Riwayat &amp; Kampanye Siaran</span>
             </div>
             <p className="leading-relaxed text-amber-800">
-              Jika sesi ini pernah atau sedang digunakan untuk kampanye siaran (broadcast), data kampanye bisa saja menjadi tidak valid atau sistem tidak dapat mengambil data yang sesuai (status laporan terkirim, sampai, dan dibaca) karena nomor sesi atau identitas sesi telah berganti atau dihapus.
+              Sesi ini pernah digunakan untuk mengirim kampanye siaran (berdasarkan pencocokan riwayat sesi &quot;{confirmDeleteSession}&quot;{sessionCampaignCheck?.sessionPhone ? ` • +${sessionCampaignCheck.sessionPhone}` : ''}{sessionCampaignCheck?.totalCampaigns ? `, tercatat ${sessionCampaignCheck.totalCampaigns} kampanye` : ''}{sessionCampaignCheck?.campaignTitles?.length ? `: "${sessionCampaignCheck.campaignTitles.join('", "')}"` : ''}).
             </p>
+            <p className="leading-relaxed text-amber-900 font-medium">
+              Data kampanye bisa saja tidak valid karena tidak bisa ambil data yang sesuai karena sesi telah berganti (nomor sesi atau identitas sesi).
+            </p>
+            {Boolean(sessionCampaignCheck?.activeCampaigns && sessionCampaignCheck.activeCampaigns > 0) && (
+              <div className="font-semibold text-red-700 bg-red-50 p-2 rounded border border-red-200 mt-1">
+                Perhatian: Terdapat {sessionCampaignCheck?.activeCampaigns} kampanye siaran yang saat ini sedang dalam antrean pengiriman / terjadwal pada sesi ini!
+              </div>
+            )}
           </div>
         </div>
       </ConfirmModal>

@@ -1,6 +1,6 @@
-import { eq, inArray, and, gte, ne, sql } from 'drizzle-orm';
+import { eq, inArray, and, gte, ne, sql, desc } from 'drizzle-orm';
 import { db } from '../db';
-import { contacts, campaigns, campaignRecipients, contactIdentities } from '../db/schema';
+import { contacts, campaigns, campaignRecipients, contactIdentities, chatMessages } from '../db/schema';
 import { broadcastQueue } from './queue.service';
 import { licenseService } from './license.service';
 import { OmnichannelType } from './channel.service';
@@ -493,5 +493,132 @@ export class BroadcastService {
     }
 
     return { retriedCount: failedRecipients.length };
+  }
+
+  /**
+   * Check campaign history associated with a specific channel session / account
+   * Matches session identity and broadcast history accurately
+   */
+  public static async checkSessionCampaigns(params: {
+    companyId?: string;
+    sessionName?: string | null;
+    channel?: string;
+    channelAccountId?: string | null;
+    sessionPhone?: string | null;
+  }) {
+    const companyId = getActiveCompanyId(params.companyId);
+    const targetChannel = (params.channel || 'WHATSAPP').toUpperCase() as OmnichannelType;
+    const sessionName = params.sessionName?.trim() || null;
+    const channelAccountId = params.channelAccountId?.trim() || null;
+    let sessionPhone = params.sessionPhone?.trim() || null;
+
+    if (targetChannel === 'WHATSAPP' && sessionName && !sessionPhone) {
+      try {
+        const listed = await wahaService.listSessions();
+        const found = listed.sessions.find(
+          (s) => s.name.toLowerCase() === sessionName.toLowerCase()
+        );
+        if (found?.me?.id) {
+          sessionPhone = found.me.id.split('@')[0].split(':')[0].replace(/\D/g, '');
+        }
+      } catch {
+        // ignore if offline
+      }
+    }
+
+    // Ambil kampanye untuk channel ini
+    const allChannelCampaigns = await db
+      .select({
+        id: campaigns.id,
+        title: campaigns.title,
+        status: campaigns.status,
+        totalCount: campaigns.totalCount,
+        channelAccountId: campaigns.channelAccountId,
+        createdAt: campaigns.createdAt,
+      })
+      .from(campaigns)
+      .where(and(eq(campaigns.companyId, companyId), eq(campaigns.channel, targetChannel)))
+      .orderBy(desc(campaigns.createdAt));
+
+    // Periksa pesan siaran di tabel chat_messages
+    let hasBroadcastMessagesInSession = false;
+    if (targetChannel === 'WHATSAPP' && sessionName) {
+      try {
+        const bcastRows = await db
+          .select({ id: chatMessages.id })
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.companyId, companyId),
+              eq(chatMessages.wahaSession, sessionName),
+              sql`${chatMessages.metadataJson} ILIKE '%BROADCAST%'`
+            )
+          )
+          .limit(1);
+        if (bcastRows.length > 0) {
+          hasBroadcastMessagesInSession = true;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const matchedCampaignsList: Array<{
+      id: string;
+      title: string;
+      status: string;
+      totalCount: number;
+      createdAt: Date;
+    }> = [];
+
+    for (const c of allChannelCampaigns) {
+      let isMatch = false;
+      if (targetChannel === 'WHATSAPP') {
+        const accId = (c.channelAccountId || '').trim();
+        if (sessionName && accId) {
+          if (
+            accId.toLowerCase() === sessionName.toLowerCase() ||
+            (sessionPhone && accId.includes(sessionPhone))
+          ) {
+            isMatch = true;
+          }
+        } else if (!accId) {
+          // Kampanye terdahulu yang tidak mencatat channelAccountId eksplisit
+          if (hasBroadcastMessagesInSession || allChannelCampaigns.length <= 5) {
+            isMatch = true;
+          }
+        }
+      } else {
+        if (channelAccountId && c.channelAccountId === channelAccountId) {
+          isMatch = true;
+        }
+      }
+
+      if (isMatch) {
+        matchedCampaignsList.push({
+          id: c.id,
+          title: c.title,
+          status: c.status,
+          totalCount: c.totalCount,
+          createdAt: c.createdAt,
+        });
+      }
+    }
+
+    const activeCount = matchedCampaignsList.filter(
+      (c) => c.status === 'PROCESSING' || c.status === 'SCHEDULED'
+    ).length;
+
+    const hasMatched = matchedCampaignsList.length > 0 || hasBroadcastMessagesInSession;
+
+    return {
+      hasCampaigns: hasMatched,
+      totalCampaigns: matchedCampaignsList.length,
+      activeCampaigns: activeCount,
+      campaignTitles: matchedCampaignsList.slice(0, 3).map((c) => c.title),
+      sessionName: sessionName || channelAccountId,
+      sessionPhone,
+      channel: targetChannel,
+    };
   }
 }
