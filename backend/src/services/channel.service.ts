@@ -11,6 +11,7 @@ import {
 } from '../db/schema';
 import { liveEvents } from './events.service';
 import { handleInboundAutomation } from './automation.service';
+import { licenseService } from './license.service';
 
 export type OmnichannelType =
   | 'WHATSAPP'
@@ -105,6 +106,10 @@ export async function upsertInboundChannelMessage(params: {
   }
 
   if (!contactId) {
+    const withinQuota = await licenseService.canAddContacts(1, companyId);
+    if (!withinQuota) {
+      return { conversationId: '', contactId: '' };
+    }
     const displayName =
       (senderName || '').trim() ||
       (senderHandle ? `@${senderHandle.replace(/^@/, '')}` : '') ||

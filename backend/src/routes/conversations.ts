@@ -2357,6 +2357,15 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         if (contactRows[0]) {
           contact = contactRows[0];
         } else {
+          try {
+            await licenseService.assertQuota('contacts', 1, companyId);
+          } catch (qErr: any) {
+            return reply.status(qErr?.statusCode || 403).send({
+              success: false,
+              code: qErr?.code,
+              error: qErr.message,
+            });
+          }
           const newId = crypto.randomUUID();
           const displayName = customName || `Kontak +${normalized}`;
           const [inserted] = await db

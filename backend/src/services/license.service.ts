@@ -1111,6 +1111,27 @@ export class LicenseService {
     return lic;
   }
 
+  public async canAddContacts(delta = 1, companyId?: string): Promise<boolean> {
+    try {
+      const cid = getActiveCompanyId(companyId);
+      const lic = await this.getLicense(cid, false);
+      if (lic.isExpired || lic.status === 'UNLICENSED' || lic.status === 'SUSPENDED') {
+        return false;
+      }
+      if (lic.features.unlimitedContacts) return true;
+      const max = lic.features.maxContacts;
+      if (max <= 0) return false;
+      const [row] = await db
+        .select({ val: count() })
+        .from(contacts)
+        .where(eq(contacts.companyId, cid));
+      const current = Number(row?.val ?? 0);
+      return current + delta <= max;
+    } catch {
+      return false;
+    }
+  }
+
   public async assertQuota(
     metric: 'contacts' | 'agents' | 'templates' | 'channels' | 'broadcasts' | 'sessions' | 'storage',
     targetCountOrDelta = 1,

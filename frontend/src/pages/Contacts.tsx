@@ -148,6 +148,8 @@ export const Contacts: React.FC<ContactsProps> = ({
   const [syncingProfile, setSyncingProfile] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [formData, setFormData] = useState({
     nama_lengkap: '',
@@ -427,6 +429,25 @@ export const Contacts: React.FC<ContactsProps> = ({
       toast.error(err.response?.data?.error || 'Gagal menghapus kontak');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedIds.length === 0 || bulkDeleting) return;
+    setBulkDeleting(true);
+    try {
+      const idsToDelete = [...selectedIds];
+      const res = await api.bulkDeleteContacts(idsToDelete);
+      toast.success(
+        res.message || `${res.deleted.toLocaleString('id-ID')} kontak berhasil dihapus permanen.`
+      );
+      setSelectedIds([]);
+      setBulkDeleteOpen(false);
+      await Promise.all([fetchContacts(), loadMetaTags()]);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menghapus kontak terpilih');
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -765,6 +786,19 @@ export const Contacts: React.FC<ContactsProps> = ({
                           <span>Siaran ({selectedIds.length} dipilih)</span>
                         </button>
                       )}
+                      {canDeleteContact && selectedIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMobileActions(false);
+                            setBulkDeleteOpen(true);
+                          }}
+                          className="w-full px-3 py-2 text-left flex items-center gap-2 font-semibold text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus ({selectedIds.length} dipilih)</span>
+                        </button>
+                      )}
                       {canCreateContact && (
                         <>
                           <button
@@ -854,8 +888,17 @@ export const Contacts: React.FC<ContactsProps> = ({
             {licenseInfo && licenseInfo.features?.maxContacts > 0 && (
               <div className="col-span-2 sm:hidden flex items-center justify-between pt-0.5 text-[11px] text-gray-500">
                 <span>Kuota Kontak:</span>
-                <span className="font-mono font-medium text-gray-700 tabular-nums">
+                <span
+                  className={`font-mono font-medium tabular-nums ${
+                    totalAll >= licenseInfo.features.maxContacts ? 'text-red-600 font-semibold' : 'text-gray-700'
+                  }`}
+                >
                   {totalAll.toLocaleString('id-ID')}/{licenseInfo.features.maxContacts.toLocaleString('id-ID')}
+                  {totalAll > licenseInfo.features.maxContacts
+                    ? ' (Melebihi Kuota)'
+                    : totalAll === licenseInfo.features.maxContacts
+                    ? ' (Penuh)'
+                    : ''}
                 </span>
               </div>
             )}
@@ -865,7 +908,18 @@ export const Contacts: React.FC<ContactsProps> = ({
         <div className="hidden sm:flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
           {licenseInfo && licenseInfo.features?.maxContacts > 0 && (
             <div className="flex items-center justify-between sm:justify-start">
-              <span className="inline-flex items-center h-8 sm:h-9 px-2.5 rounded-md text-[11px] sm:text-xs font-mono font-medium bg-gray-50 text-gray-700 border border-gray-200 tabular-nums">
+              <span
+                className={`inline-flex items-center h-8 sm:h-9 px-2.5 rounded-md text-[11px] sm:text-xs font-mono font-medium border tabular-nums ${
+                  totalAll >= licenseInfo.features.maxContacts
+                    ? 'bg-red-50 text-red-700 border-red-200'
+                    : 'bg-gray-50 text-gray-700 border-gray-200'
+                }`}
+                title={
+                  totalAll >= licenseInfo.features.maxContacts
+                    ? 'Kuota kontak paket sudah penuh. Hapus kontak lama atau upgrade paket untuk menambah kontak baru.'
+                    : 'Pemakaian kuota kontak pada paket aktif'
+                }
+              >
                 {totalAll.toLocaleString('id-ID')}/{licenseInfo.features.maxContacts.toLocaleString('id-ID')} kontak
               </span>
             </div>
@@ -881,6 +935,17 @@ export const Contacts: React.FC<ContactsProps> = ({
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Siaran ({selectedIds.length})</span>
+              </Button>
+            )}
+            {canDeleteContact && selectedIds.length > 0 && (
+              <Button
+                variant="danger"
+                size="md"
+                onClick={() => setBulkDeleteOpen(true)}
+                className="col-span-2 sm:col-span-1 justify-center"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Hapus ({selectedIds.length})</span>
               </Button>
             )}
 
@@ -1427,6 +1492,16 @@ export const Contacts: React.FC<ContactsProps> = ({
                     <span>Kirim Siaran ({selectedIds.length.toLocaleString('id-ID')})</span>
                   </button>
                 )}
+                {canDeleteContact && (
+                  <button
+                    type="button"
+                    onClick={() => setBulkDeleteOpen(true)}
+                    className="text-xs font-semibold text-red-600 hover:underline inline-flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Hapus Terpilih ({selectedIds.length.toLocaleString('id-ID')})</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setSelectedIds([])}
@@ -1941,6 +2016,17 @@ export const Contacts: React.FC<ContactsProps> = ({
         title="Hapus Data Pelanggan?"
         description={`Kontak "${deleteTarget?.name || ''}" akan dihapus secara permanen dari daftar pelanggan.`}
         confirmLabel="Hapus Kontak"
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={bulkDeleteOpen}
+        onClose={() => !bulkDeleting && setBulkDeleteOpen(false)}
+        onConfirm={handleConfirmBulkDelete}
+        isLoading={bulkDeleting}
+        title={`Hapus ${selectedIds.length.toLocaleString('id-ID')} Kontak Terpilih?`}
+        description={`Sebanyak ${selectedIds.length.toLocaleString('id-ID')} kontak yang dipilih akan dihapus secara permanen beserta riwayat percakapan terkait. Tindakan ini tidak dapat dibatalkan.`}
+        confirmLabel={`Hapus ${selectedIds.length.toLocaleString('id-ID')} Kontak`}
         variant="danger"
       />
 

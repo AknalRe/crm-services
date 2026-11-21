@@ -100,6 +100,13 @@ export const api = {
   deleteContact: async (id: string): Promise<void> => {
     await client.delete(`/contacts/${id}`);
   },
+  bulkDeleteContacts: async (ids: string[]): Promise<{ deleted: number; message?: string }> => {
+    const res = await client.post('/contacts/bulk-delete', { ids });
+    return {
+      deleted: Number(res.data?.deleted ?? 0),
+      message: res.data?.message,
+    };
+  },
   bulkImportContacts: async (contacts: Partial<Contact>[]): Promise<any> => {
     const res = await client.post('/contacts/bulk', { contacts });
     return res.data;

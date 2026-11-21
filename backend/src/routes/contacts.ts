@@ -48,7 +48,7 @@ export default async function contactsRouter(fastify: FastifyInstance) {
     if (req.method === 'GET') {
       return requirePermission('contacts', 'conversations', 'broadcasts')(req, reply);
     }
-    if (req.method === 'DELETE') {
+    if (req.method === 'DELETE' || path.includes('/bulk-delete')) {
       return requirePermission('contacts.delete')(req, reply);
     }
     if (req.method === 'PUT' || path.includes('/merge')) {
@@ -458,7 +458,47 @@ export default async function contactsRouter(fastify: FastifyInstance) {
       if (!deleted[0]) {
         return reply.status(404).send({ success: false, error: 'Kontak tidak ditemukan' });
       }
+      liveEvents.emit('contacts:update', { action: 'delete', contactId: req.params.id }, companyId);
       return reply.send({ success: true, message: 'Kontak berhasil dihapus' });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST bulk delete contacts
+  fastify.post<{
+    Body: { ids?: string[] };
+  }>('/bulk-delete', async (req, reply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
+      const uniqueIds = Array.from(
+        new Set(rawIds.map((id) => String(id || '').trim()).filter(Boolean))
+      );
+      if (uniqueIds.length === 0) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Pilih minimal 1 kontak untuk dihapus.',
+        });
+      }
+
+      let deletedCount = 0;
+      const chunkSize = 500;
+      for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+        const chunk = uniqueIds.slice(i, i + chunkSize);
+        const deletedRows = await db
+          .delete(contacts)
+          .where(and(eq(contacts.companyId, companyId), inArray(contacts.id, chunk)))
+          .returning({ id: contacts.id });
+        deletedCount += deletedRows.length;
+      }
+
+      liveEvents.emit('contacts:update', { action: 'bulk_delete', count: deletedCount }, companyId);
+      return reply.send({
+        success: true,
+        deleted: deletedCount,
+        message: `${deletedCount.toLocaleString('id-ID')} kontak berhasil dihapus permanen.`,
+      });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
     }

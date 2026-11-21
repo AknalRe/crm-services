@@ -2671,33 +2671,36 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               contact = byId[0];
             }
             if (!contact) {
-              const grpInfo = await wahaService
-                .getGroupInfo(fallbackChatJid, inboundSession || undefined)
-                .catch(() => null);
-              const grpName = grpInfo?.subject || `Grup WhatsApp ${fromWahaChatId(fallbackChatJid).slice(-6)}`;
-              const [insertedGrp] = await db
-                .insert(contacts)
-                .values({
-                  id: crypto.randomUUID(),
+              const withinQuota = await licenseService.canAddContacts(1, companyId);
+              if (withinQuota) {
+                const grpInfo = await wahaService
+                  .getGroupInfo(fallbackChatJid, inboundSession || undefined)
+                  .catch(() => null);
+                const grpName = grpInfo?.subject || `Grup WhatsApp ${fromWahaChatId(fallbackChatJid).slice(-6)}`;
+                const [insertedGrp] = await db
+                  .insert(contacts)
+                  .values({
+                    id: crypto.randomUUID(),
+                    companyId,
+                    namaLengkap: grpName,
+                    nomorWhatsapp: null,
+                    kategori: 'Grup WhatsApp',
+                    tags: 'Grup WhatsApp,Non-Penilaian',
+                    excludeFromMetrics: true,
+                    excludeReason: 'Grup WhatsApp',
+                    createdAt: now,
+                    updatedAt: now,
+                  })
+                  .returning();
+                contact = insertedGrp;
+                contact = await claimGroupIdentity({
                   companyId,
-                  namaLengkap: grpName,
-                  nomorWhatsapp: null,
-                  kategori: 'Grup WhatsApp',
-                  tags: 'Grup WhatsApp,Non-Penilaian',
-                  excludeFromMetrics: true,
-                  excludeReason: 'Grup WhatsApp',
-                  createdAt: now,
-                  updatedAt: now,
-                })
-                .returning();
-              contact = insertedGrp;
-              contact = await claimGroupIdentity({
-                companyId,
-                groupJid: fallbackChatJid,
-                contact,
-                name: grpName,
-                now,
-              });
+                  groupJid: fallbackChatJid,
+                  contact,
+                  name: grpName,
+                  now,
+                });
+              }
             }
           } else {
             const isLidChat = lowerChatJid.endsWith('@lid');
@@ -2741,20 +2744,23 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               }
             }
             if (!contact) {
-              const suffix = targetPhone ? targetPhone.slice(-4) : fallbackChatJid.split('@')[0].slice(-4);
-              const [inserted] = await db
-                .insert(contacts)
-                .values({
-                  id: crypto.randomUUID(),
-                  companyId,
-                  namaLengkap: voteInfo.voterName || `Kontak ${suffix}`,
-                  nomorWhatsapp: targetPhone || null,
-                  tags: 'Inbound Lead',
-                  createdAt: now,
-                  updatedAt: now,
-                })
-                .returning();
-              contact = inserted;
+              const withinQuota = await licenseService.canAddContacts(1, companyId);
+              if (withinQuota) {
+                const suffix = targetPhone ? targetPhone.slice(-4) : fallbackChatJid.split('@')[0].slice(-4);
+                const [inserted] = await db
+                  .insert(contacts)
+                  .values({
+                    id: crypto.randomUUID(),
+                    companyId,
+                    namaLengkap: voteInfo.voterName || `Kontak ${suffix}`,
+                    nomorWhatsapp: targetPhone || null,
+                    tags: 'Inbound Lead',
+                    createdAt: now,
+                    updatedAt: now,
+                  })
+                  .returning();
+                contact = inserted;
+              }
             }
           }
 
@@ -3618,6 +3624,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             `Grup WhatsApp ${fromWahaChatId(groupJid).slice(-6)}`;
 
           if (!contact) {
+            const withinQuota = await licenseService.canAddContacts(1, companyId);
+            if (!withinQuota) {
+              return reply.send({ success: true, ignored: true, reason: 'contact_quota_exceeded' });
+            }
             const [insertedGrp] = await db
               .insert(contacts)
               .values({
@@ -3754,6 +3764,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             : { isVerified: false, verifiedName: null, verifiedLevel: null };
 
           if (!contact) {
+            const withinQuota = await licenseService.canAddContacts(1, companyId);
+            if (!withinQuota) {
+              return reply.send({ success: true, ignored: true, reason: 'contact_quota_exceeded' });
+            }
             const fallbackSuffix = fromPhone ? fromPhone.slice(-4) : rawFrom.split('@')[0].slice(-4);
             const contactName =
               inboundVerification.verifiedName ||
