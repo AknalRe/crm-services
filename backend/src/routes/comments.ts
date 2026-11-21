@@ -4,7 +4,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { channelAccounts, commentAutomations, socialComments } from '../db/schema';
-import { generateAiAgentReply, getAiAgentConfig } from '../services/ai.service';
+import { generateAiAgentReply, getAiAgentConfig, isAiAllowedForComment } from '../services/ai.service';
 import { licenseService } from '../services/license.service';
 import { getActiveCompanyId, runWithCompany } from '../services/tenantContext';
 import { getRequestCompanyId, requirePermission } from './auth';
@@ -79,7 +79,12 @@ export async function applyCommentAutomations(
         if (!comment.replyText && lic.features.aiAgent) {
           const aiCfg = await getAiAgentConfig();
           const ageMs = Date.now() - new Date(comment.createdAt).getTime();
-          if (aiCfg.enabled && aiCfg.autoReplyComment && ageMs <= 24 * 60 * 60 * 1000) {
+          if (
+            aiCfg.enabled &&
+            aiCfg.autoReplyComment &&
+            isAiAllowedForComment(aiCfg, comment.channel) &&
+            ageMs <= 24 * 60 * 60 * 1000
+          ) {
             try {
               const aiRes = await generateAiAgentReply(comment.content, {
                 configOverride: aiCfg,

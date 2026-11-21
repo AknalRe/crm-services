@@ -881,6 +881,16 @@ function getMessageSenderGroupKey(m: ChatMessage | null): string {
   return `n:${String(m.senderName || '').trim().toLowerCase()}`;
 }
 
+// Format lama menunggu sejak eskalasi AI
+function formatEscalationWait(iso?: string | null): string {
+  if (!iso) return '-';
+  const diffMin = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (diffMin < 1) return 'kurang dari 1 menit';
+  if (diffMin < 60) return `${diffMin} menit`;
+  const h = Math.floor(diffMin / 60);
+  const m = diffMin % 60;
+  return m > 0 ? `${h} jam ${m} menit` : `${h} jam`;
+}
 interface ConversationsProps {
   licenseInfo?: LicenseInfo | null;
   currentUser?: AuthStatus['user'] | null;
@@ -4974,6 +4984,15 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                             Dinilai
                           </span>
+                          {conv.escalatedAt && conv.status !== 'RESOLVED' && (
+                            <span
+                              title={`Menunggu agen manusia sejak eskalasi AI${conv.escalationReason ? `: ${conv.escalationReason}` : ''}`}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0"
+                            >
+                              <Clock className="w-2.5 h-2.5" strokeWidth={1.75} />
+                              {conv.escalationQueueNo ? `Antrean #${conv.escalationQueueNo}` : 'Eskalasi'}
+                            </span>
+                          )}
                           {conv.assignedAgentName && (
                             <span
                               title={`Ditugaskan ke: ${conv.assignedAgentName}`}
@@ -5712,6 +5731,24 @@ export const Conversations: React.FC<ConversationsProps> = ({
             );
           })()}
 
+          {selectedConversation.escalatedAt && selectedConversation.status !== 'RESOLVED' && (
+            <div className="shrink-0 flex flex-wrap items-start gap-x-3 gap-y-1 px-3 py-2 bg-indigo-50 border-b border-indigo-200 text-xs text-indigo-900">
+              <span className="inline-flex items-center gap-1.5 font-semibold shrink-0">
+                <Clock className="w-3.5 h-3.5" strokeWidth={1.75} />
+                {selectedConversation.escalationQueueNo
+                  ? `Antrean #${selectedConversation.escalationQueueNo} dari ${selectedConversation.escalationQueueTotal || selectedConversation.escalationQueueNo}`
+                  : 'Eskalasi dari Agent AI'}
+              </span>
+              <span className="font-mono text-[11px] text-indigo-700 shrink-0">
+                Menunggu {formatEscalationWait(selectedConversation.escalatedAt)}
+              </span>
+              {(selectedConversation.escalationSummary || selectedConversation.escalationReason) && (
+                <span className="basis-full text-[11px] leading-relaxed text-indigo-800 line-clamp-2">
+                  {selectedConversation.escalationSummary || selectedConversation.escalationReason}
+                </span>
+              )}
+            </div>
+          )}
           <div className="relative flex-1 min-h-0 flex flex-col">
             <div
               ref={messagesContainerRef}
@@ -6067,10 +6104,10 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         ref={(el) => {
                           msgElementRefs.current[msg.id] = el;
                         }}
-                        className="flex justify-center py-0.5"
+                        className="flex justify-end py-0.5 pl-6 sm:pl-16"
                       >
                         <div
-                          className={`max-w-[92%] sm:max-w-[85%] rounded-lg px-3.5 py-2 text-xs border bg-amber-50 border-amber-200 text-amber-950 space-y-1 min-w-0 ${
+                          className={`max-w-full sm:max-w-[75%] rounded-lg px-3.5 py-2 text-xs border space-y-1 min-w-0 ${(msg.body || '').startsWith('[Eskalasi Agent AI') ? 'bg-indigo-50 border-indigo-200 text-indigo-950' : 'bg-amber-50 border-amber-200 text-amber-950'} ${
                             isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
                           }`}
                         >

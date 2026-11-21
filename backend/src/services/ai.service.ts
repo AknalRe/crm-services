@@ -85,6 +85,9 @@ export interface AiAgentConfig {
   enabledBuiltinTools: string[];
   autoReplyDm: boolean;
   autoReplyComment: boolean;
+  dmChannels: string[];
+  commentChannels: string[];
+  dmWahaSessions: string[];
   provider: AiProviderId;
   model: string;
   baseUrl?: string;
@@ -297,6 +300,54 @@ const EXTERNAL_PROVIDER_IDS = new Set<ExternalAiProviderId>([
 
 const MAX_FALLBACKS = 10;
 
+export const AI_DM_CHANNELS = ['WHATSAPP', 'INSTAGRAM', 'FACEBOOK', 'THREADS', 'TELEGRAM'] as const;
+export const AI_COMMENT_CHANNELS = ['INSTAGRAM', 'FACEBOOK', 'THREADS'] as const;
+
+function sanitizeChannelList(raw: unknown, allowed: readonly string[], fallback: string[]): string[] {
+  if (!Array.isArray(raw)) return fallback;
+  const allowedSet = new Set(allowed);
+  return Array.from(
+    new Set(
+      raw.map((x) => String(x || '').trim().toUpperCase()).filter((x) => allowedSet.has(x))
+    )
+  );
+}
+
+function sanitizeSessionList(raw: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(raw)) return fallback;
+  return Array.from(
+    new Set(raw.map((x) => String(x || '').trim()).filter(Boolean))
+  ).slice(0, 100);
+}
+
+// Cek apakah Agent AI boleh membalas DM pada kanal & sesi WhatsApp ini
+export function isAiAllowedForDm(
+  cfg: Pick<AiAgentConfig, 'dmChannels' | 'dmWahaSessions'>,
+  channel: string,
+  sessionName?: string | null
+): boolean {
+  const ch = String(channel || 'WHATSAPP').toUpperCase();
+  const channels = Array.isArray(cfg.dmChannels) ? cfg.dmChannels : [...AI_DM_CHANNELS];
+  if (!channels.includes(ch)) return false;
+  if (ch === 'WHATSAPP') {
+    const sessions = Array.isArray(cfg.dmWahaSessions) ? cfg.dmWahaSessions : [];
+    if (sessions.length > 0) {
+      const sess = String(sessionName || '').trim().toLowerCase();
+      return sessions.some((s) => s.trim().toLowerCase() === sess);
+    }
+  }
+  return true;
+}
+
+// Cek apakah Agent AI boleh membalas komentar pada kanal ini
+export function isAiAllowedForComment(
+  cfg: Pick<AiAgentConfig, 'commentChannels'>,
+  channel: string
+): boolean {
+  const channels = Array.isArray(cfg.commentChannels) ? cfg.commentChannels : [...AI_COMMENT_CHANNELS];
+  return channels.includes(String(channel || '').toUpperCase());
+}
+
 const DEFAULT_PERSONALITY: AiPersonalityProfile = {
   roleTitle: 'Customer Service & Konsultan CRM',
   tone: 'PROFESSIONAL',
@@ -336,6 +387,9 @@ export const DEFAULT_AI_CONFIG: AiAgentConfig = {
   ],
   autoReplyDm: false,
   autoReplyComment: false,
+  dmChannels: [...AI_DM_CHANNELS],
+  commentChannels: [...AI_COMMENT_CHANNELS],
+  dmWahaSessions: [],
   provider: 'LOCAL_KB',
   model: 'local-kb-matcher',
   baseUrl: '',
@@ -508,6 +562,11 @@ function sanitizeStoredConfig(raw: any): AiAgentConfig {
       raw?.autoReplyComment !== undefined
         ? Boolean(raw.autoReplyComment)
         : DEFAULT_AI_CONFIG.autoReplyComment,
+    dmChannels: sanitizeChannelList(raw?.dmChannels, AI_DM_CHANNELS, [...AI_DM_CHANNELS]),
+    commentChannels: sanitizeChannelList(raw?.commentChannels, AI_COMMENT_CHANNELS, [
+      ...AI_COMMENT_CHANNELS,
+    ]),
+    dmWahaSessions: sanitizeSessionList(raw?.dmWahaSessions, []),
     provider,
     model,
     baseUrl,
@@ -629,6 +688,17 @@ export function mergeAiAgentConfig(prev: AiAgentConfig, incoming: Partial<AiAgen
       incoming?.autoReplyComment !== undefined
         ? Boolean(incoming.autoReplyComment)
         : prev.autoReplyComment,
+    dmChannels: sanitizeChannelList(
+      incoming?.dmChannels,
+      AI_DM_CHANNELS,
+      prev.dmChannels || [...AI_DM_CHANNELS]
+    ),
+    commentChannels: sanitizeChannelList(
+      incoming?.commentChannels,
+      AI_COMMENT_CHANNELS,
+      prev.commentChannels || [...AI_COMMENT_CHANNELS]
+    ),
+    dmWahaSessions: sanitizeSessionList(incoming?.dmWahaSessions, prev.dmWahaSessions || []),
     provider: nextProvider,
     model: nextModel,
     baseUrl: nextBaseUrl,
@@ -1824,7 +1894,7 @@ export async function generateAiAgentReply(
       : `[BATASAN & LARANGAN]\nJangan mengarang harga, promo, atau kebijakan yang tidak tercantum di Knowledge Book atau hasil tool.`,
     skillContext ? `[SKILL AKTIF YANG TERPASANG]\n${skillContext}` : '',
     toolRegistry.definitions.length > 0
-      ? `[TOOL MCP & CRM TERSEDIA]\nAnda memiliki akses tool fungsi (${toolRegistry.definitions.map((t) => t.llmName).join(', ')}). Gunakan tool bila perlu memeriksa katalog produk, membaca riwayat WhatsApp, memeriksa foto pelanggan, mengutip/reply pesan spesifik, mengirim foto/brosur dari Galeri Media, menyimpan catatan/label pelanggan, atau eskalasi ke agen manusia.`
+      ? `[TOOL MCP & CRM TERSEDIA]\nAnda memiliki akses tool fungsi (${toolRegistry.definitions.map((t) => t.llmName).join(', ')}). Gunakan tool bila perlu memeriksa katalog produk, membaca riwayat WhatsApp, memeriksa foto pelanggan, mengutip/reply pesan spesifik, mengirim foto/brosur dari Galeri Media, menyimpan catatan/label pelanggan, atau eskalasi ke agen manusia. Saat memanggil eskalasi, WAJIB isi reason dan summary (kesimpulan percakapan, kebutuhan pelanggan, langkah yang sudah dicoba, dan tindak lanjut untuk agen). Setelah eskalasi, beri tahu pelanggan nomor antrean dan estimasi tunggu sesuai hasil tool.`
       : '',
     `[KNOWLEDGE BOOK AKTIF]\n${kbContext || 'Belum ada materi di Knowledge Book.'}`,
   ];

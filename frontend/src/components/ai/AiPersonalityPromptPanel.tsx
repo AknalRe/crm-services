@@ -1,6 +1,21 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { AiAgentConfig, AiPersonalityProfile } from '../../types';
+import { api } from '../../services/api';
 import { Button } from '../ui/Button';
+
+const DM_CHANNEL_OPTIONS = [
+  { id: 'WHATSAPP', label: 'WhatsApp' },
+  { id: 'INSTAGRAM', label: 'Instagram' },
+  { id: 'FACEBOOK', label: 'Facebook' },
+  { id: 'THREADS', label: 'Threads' },
+  { id: 'TELEGRAM', label: 'Telegram' },
+];
+
+const COMMENT_CHANNEL_OPTIONS = DM_CHANNEL_OPTIONS.filter((o) => o.id !== 'WHATSAPP' && o.id !== 'TELEGRAM');
+
+function toggleItem(list: string[], item: string): string[] {
+  return list.includes(item) ? list.filter((x) => x !== item) : [...list, item];
+}
 
 interface AiPersonalityPromptPanelProps {
   config: AiAgentConfig;
@@ -16,6 +31,22 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
   onSave,
 }) => {
   const personality = config.personality;
+  const [sessionNames, setSessionNames] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getWahaSessions()
+      .then((res) => {
+        if (!cancelled) setSessionNames((res.sessions || []).map((s) => s.name));
+      })
+      .catch(() => {
+        if (!cancelled) setSessionNames([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const updatePersonality = (patch: Partial<AiPersonalityProfile>) => {
     onChangeConfig({
@@ -218,6 +249,106 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
               Balas komentar sosial media masuk secara otomatis (jika tidak cocok aturan kata kunci)
             </span>
           </label>
+        </div>
+
+        <div className="space-y-3 pt-2 border-t border-gray-100">
+          <div>
+            <div className="text-xs font-semibold text-gray-900">Cakupan Balasan Otomatis AI</div>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Batasi kanal dan sesi tempat AI boleh membalas. Kanal yang tidak dicentang tetap
+              ditangani tim manusia.
+            </p>
+          </div>
+
+          <div className={config.autoReplyDm ? '' : 'opacity-50'}>
+            <div className="text-[11px] font-medium text-gray-700 mb-1.5">Live chat / DM</div>
+            <div className="flex flex-wrap gap-1.5">
+              {DM_CHANNEL_OPTIONS.map((opt) => {
+                const active = (config.dmChannels || []).includes(opt.id);
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={!config.autoReplyDm}
+                    onClick={() => onChangeConfig({ dmChannels: toggleItem(config.dmChannels || [], opt.id) })}
+                    className={`h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors disabled:cursor-not-allowed ${
+                      active
+                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {config.autoReplyDm && (config.dmChannels || []).includes('WHATSAPP') && (
+              <div className="mt-2.5">
+                <div className="text-[11px] font-medium text-gray-700 mb-1.5">
+                  Sesi WhatsApp{' '}
+                  <span className="font-normal text-gray-500">
+                    ({(config.dmWahaSessions || []).length === 0 ? 'semua sesi' : `${config.dmWahaSessions.length} sesi dipilih`})
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {sessionNames.length === 0 && (
+                    <span className="text-[11px] text-gray-500">
+                      Belum ada sesi WhatsApp terdaftar. AI membalas di semua sesi.
+                    </span>
+                  )}
+                  {sessionNames.map((name) => {
+                    const active = (config.dmWahaSessions || []).includes(name);
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() =>
+                          onChangeConfig({ dmWahaSessions: toggleItem(config.dmWahaSessions || [], name) })
+                        }
+                        className={`h-7 px-2.5 rounded-md border text-[11px] font-mono transition-colors ${
+                          active
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Kosongkan pilihan untuk mengaktifkan AI di semua sesi WhatsApp.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className={config.autoReplyComment ? '' : 'opacity-50'}>
+            <div className="text-[11px] font-medium text-gray-700 mb-1.5">Komentar sosial media</div>
+            <div className="flex flex-wrap gap-1.5">
+              {COMMENT_CHANNEL_OPTIONS.map((opt) => {
+                const active = (config.commentChannels || []).includes(opt.id);
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={!config.autoReplyComment}
+                    onClick={() =>
+                      onChangeConfig({ commentChannels: toggleItem(config.commentChannels || [], opt.id) })
+                    }
+                    className={`h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors disabled:cursor-not-allowed ${
+                      active
+                        ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         <div className="pt-1">

@@ -184,6 +184,9 @@ const DEFAULT_FORM_CONFIG: AiAgentConfig = {
   ],
   autoReplyDm: false,
   autoReplyComment: false,
+  dmChannels: ['WHATSAPP', 'INSTAGRAM', 'FACEBOOK', 'THREADS', 'TELEGRAM'],
+  commentChannels: ['INSTAGRAM', 'FACEBOOK', 'THREADS'],
+  dmWahaSessions: [],
   provider: 'LOCAL_KB',
   model: 'local-kb-matcher',
   baseUrl: '',
@@ -211,6 +214,11 @@ function normalizeConfigState(cfg?: Partial<AiAgentConfig> | null): AiAgentConfi
       ? cfg.enabledBuiltinTools
       : DEFAULT_FORM_CONFIG.enabledBuiltinTools,
     fallbacks: Array.isArray(cfg?.fallbacks) ? cfg.fallbacks : [],
+    dmChannels: Array.isArray(cfg?.dmChannels) ? cfg.dmChannels : DEFAULT_FORM_CONFIG.dmChannels,
+    commentChannels: Array.isArray(cfg?.commentChannels)
+      ? cfg.commentChannels
+      : DEFAULT_FORM_CONFIG.commentChannels,
+    dmWahaSessions: Array.isArray(cfg?.dmWahaSessions) ? cfg.dmWahaSessions : [],
   };
 }
 

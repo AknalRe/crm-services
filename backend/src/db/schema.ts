@@ -151,6 +151,9 @@ export const conversations = pgTable('conversations', {
   csatOverallScore: doublePrecision('csat_overall_score'),
   csatFeedback: text('csat_feedback'),
   csatSubmittedAt: timestamp('csat_submitted_at'),
+  escalatedAt: timestamp('escalated_at'),
+  escalationReason: text('escalation_reason'),
+  escalationSummary: text('escalation_summary'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

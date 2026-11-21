@@ -142,6 +142,11 @@ export interface Conversation {
   firstResponseAt?: string | null;
   lastInboundAt?: string | null;
   resolvedAt?: string | null;
+  escalatedAt?: string | null;
+  escalationReason?: string | null;
+  escalationSummary?: string | null;
+  escalationQueueNo?: number | null;
+  escalationQueueTotal?: number;
   csatToken?: string | null;
   csatRating?: number | null;
   csatOverallScore?: number | null;
@@ -1140,6 +1145,9 @@ export interface AiAgentConfig {
   enabledBuiltinTools: string[];
   autoReplyDm: boolean;
   autoReplyComment: boolean;
+  dmChannels: string[];
+  commentChannels: string[];
+  dmWahaSessions: string[];
   provider: AiProviderId;
   model: string;
   baseUrl?: string;

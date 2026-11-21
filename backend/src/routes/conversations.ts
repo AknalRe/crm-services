@@ -47,6 +47,7 @@ import { readUploadedMediaAsDataUri, saveBase64MediaFile, saveMediaBufferFile } 
 import { extractInboundWahaMediaMeta, pickBestContactDisplayName, isGenericDisplayName } from './waha';
 import { syncWhatsAppProfile } from '../services/profile.service';
 import { syncRecentWhatsAppChatMessages } from '../services/chatSync.service';
+import { getEscalationQueue } from '../services/mcpClient.service';
 import crypto from 'crypto';
 
 const VALID_STATUSES = new Set(['OPEN', 'PENDING', 'RESOLVED']);
@@ -1643,9 +1644,19 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         });
       }
 
+      const escalationQueue = await getEscalationQueue(companyId).catch(() => []);
+      const escalationQueueNoMap = new Map<string, number>(
+        escalationQueue.map((q, idx) => [q.id, idx + 1])
+      );
+
       const data = rows.map((r) => ({
         id: r.conv.id,
         contactId: r.conv.contactId,
+        escalatedAt: r.conv.escalatedAt || null,
+        escalationReason: r.conv.escalationReason || null,
+        escalationSummary: r.conv.escalationSummary || null,
+        escalationQueueNo: escalationQueueNoMap.get(r.conv.id) || null,
+        escalationQueueTotal: escalationQueue.length,
         wahaSession: r.conv.wahaSession,
         pushName: r.conv.pushName || null,
         channelDisplayName: r.conv.channelDisplayName || null,
@@ -2560,6 +2571,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         convUpdate.status = nextStatus;
         if (nextStatus === 'RESOLVED') {
           convUpdate.resolvedAt = existing.status === 'RESOLVED' ? (existing.resolvedAt || now) : now;
+          convUpdate.escalatedAt = null;
+          convUpdate.escalationReason = null;
+          convUpdate.escalationSummary = null;
           if (!existing.sessionStartedAt) {
             convUpdate.sessionStartedAt = existing.firstInboundAt || existing.createdAt;
           }
@@ -3771,6 +3785,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
           .update(conversations)
           .set({
             wahaSession: effectiveSession || conversation.conv.wahaSession,
+            escalatedAt: null,
+            escalationReason: null,
+            escalationSummary: null,
             firstResponseAt:
               conversation.conv.firstInboundAt && !conversation.conv.firstResponseAt
                 ? now

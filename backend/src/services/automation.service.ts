@@ -16,6 +16,7 @@ import {
   AiQueuedOutboundMedia,
   generateAiAgentReply,
   getAiAgentConfig,
+  isAiAllowedForDm,
 } from './ai.service';
 import { wahaService } from './waha.service';
 import { OmnichannelType, sendOutboundChannelMessage } from './channel.service';
@@ -432,7 +433,18 @@ export async function handleInboundAutomation(params: {
     if (inboundBody.trim()) {
       try {
         const aiCfg = await getAiAgentConfig();
-        if (aiCfg.enabled && aiCfg.autoReplyDm) {
+        const [convState] = await db
+          .select({ escalatedAt: conversations.escalatedAt })
+          .from(conversations)
+          .where(eq(conversations.id, conversationId))
+          .limit(1);
+        const alreadyEscalated = Boolean(convState?.escalatedAt);
+        if (
+          aiCfg.enabled &&
+          aiCfg.autoReplyDm &&
+          !alreadyEscalated &&
+          isAiAllowedForDm(aiCfg, channel, sessionName)
+        ) {
           const maxHist = Math.max(2, Math.min(100, aiCfg.maxHistoryMessages || 20));
           const recentRows = await db
             .select({

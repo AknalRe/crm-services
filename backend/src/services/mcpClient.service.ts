@@ -2,13 +2,14 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { db } from '../db';
 import {
   aiKnowledgeBooks,
   aiKnowledgeItems,
   aiMcpServers,
   chatMessages,
+  companySettings,
   contacts,
   conversations,
   crmAgents,
@@ -279,10 +280,15 @@ export const BUILTIN_CRM_TOOLS: BuiltinCrmToolMeta[] = [
       properties: {
         reason: {
           type: 'string',
-          description: 'Ringkasan singkat alasan eskalasi dan kebutuhan pelanggan.',
+          description: 'Ringkasan singkat alasan eskalasi (mis. komplain berat, refund, di luar kewenangan AI).',
+        },
+        summary: {
+          type: 'string',
+          description:
+            'Kesimpulan percakapan untuk agen manusia: kebutuhan pelanggan, data penting (nomor pesanan, nama, keluhan), langkah yang sudah dicoba AI, dan saran tindak lanjut.',
         },
       },
-      required: ['reason'],
+      required: ['reason', 'summary'],
     },
   },
 ];
@@ -814,6 +820,34 @@ async function listTenantGalleryFiles(params: {
   return items.slice(0, maxItems);
 }
 
+// Antrean eskalasi: percakapan yang menunggu agen manusia, urut dari yang paling awal
+export async function getEscalationQueue(
+  companyId: string
+): Promise<Array<{ id: string; escalatedAt: Date | null }>> {
+  const rows = await db
+    .select({ id: conversations.id, escalatedAt: conversations.escalatedAt })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.companyId, companyId),
+        isNotNull(conversations.escalatedAt),
+        ne(conversations.status, 'RESOLVED')
+      )
+    )
+    .orderBy(asc(conversations.escalatedAt));
+  return rows;
+}
+
+export async function getSlaTargetMinutes(companyId: string): Promise<number> {
+  const [row] = await db
+    .select({ value: companySettings.value })
+    .from(companySettings)
+    .where(and(eq(companySettings.companyId, companyId), eq(companySettings.key, 'sla_target_minutes')))
+    .limit(1);
+  const parsed = Number.parseInt(row?.value || '15', 10);
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.min(1440, parsed) : 15;
+}
+
 async function executeBuiltinCrmTool(
   toolName: string,
   args: Record<string, any>,
@@ -1312,11 +1346,26 @@ async function executeBuiltinCrmTool(
 
   if (toolName === 'crm_escalate_to_human') {
     const reason = String(args?.reason || 'Pelanggan meminta bantuan agen manusia').trim();
+    let summary = String(args?.summary || '').trim();
     if (!ctx?.conversationId || ctx?.isSimulator) {
       return {
         ok: true,
-        output: `Eskalasi simulasi dicatat: "${reason}". Beri tahu pelanggan dengan sopan bahwa tim CS manusia akan membantu.`,
+        output: `Eskalasi simulasi dicatat: "${reason}"${summary ? ` | Kesimpulan: "${summary}"` : ''}. Beri tahu pelanggan dengan sopan bahwa tim CS manusia akan membantu dan Anda sudah menempatkan mereka di antrean (simulasi: antrean #1).`,
       };
+    }
+
+    if (!summary) {
+      const recent = await db
+        .select({ direction: chatMessages.direction, body: chatMessages.body, messageType: chatMessages.messageType })
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, ctx.conversationId))
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(6);
+      summary = recent
+        .filter((m) => m.messageType !== 'NOTE' && m.messageType !== 'ACTIVITY' && m.body)
+        .reverse()
+        .map((m) => `${m.direction === 'INBOUND' ? 'Pelanggan' : 'CS'}: ${String(m.body).slice(0, 160)}`)
+        .join(' | ');
     }
 
     const [conv] = await db
@@ -1365,6 +1414,9 @@ async function executeBuiltinCrmTool(
     const convUpdates: Record<string, any> = {
       status: 'OPEN',
       resolvedAt: null,
+      escalatedAt: conv.escalatedAt || now,
+      escalationReason: reason.slice(0, 500),
+      escalationSummary: summary ? summary.slice(0, 2000) : null,
       updatedAt: now,
     };
     if (chosenAgent) {
@@ -1377,9 +1429,22 @@ async function executeBuiltinCrmTool(
       .set(convUpdates)
       .where(eq(conversations.id, conv.id));
 
-    const notePrefix = chosenAgent
-      ? `[Eskalasi Agent AI -> ${chosenAgent.name}]`
-      : '[Eskalasi Agent AI · Menunggu Agen Siap]';
+    const queue = await getEscalationQueue(convCompanyId);
+    const queueIdx = queue.findIndex((q) => q.id === conv.id);
+    const queueNo = queueIdx >= 0 ? queueIdx + 1 : queue.length + 1;
+    const queueTotal = Math.max(queue.length, queueNo);
+    const slaTarget = await getSlaTargetMinutes(convCompanyId);
+
+    const noteHeader = chosenAgent
+      ? `[Eskalasi Agent AI → ${chosenAgent.name}] Antrean #${queueNo} dari ${queueTotal}`
+      : `[Eskalasi Agent AI · Menunggu Agen Siap] Antrean #${queueNo} dari ${queueTotal}`;
+    const noteBody = [
+      noteHeader,
+      `Alasan: ${reason}`,
+      summary ? `Kesimpulan AI: ${summary}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     await db.insert(chatMessages).values({
       id: crypto.randomUUID(),
@@ -1389,9 +1454,11 @@ async function executeBuiltinCrmTool(
       direction: 'OUTBOUND',
       messageType: 'NOTE',
       wahaSession: conv.wahaSession,
-      body: `${notePrefix} ${reason}`,
+      senderName: 'Agent AI',
+      body: noteBody,
       status: 'NOTE',
       ackStatus: 0,
+      metadataJson: JSON.stringify({ kind: 'AI_ESCALATION', queueNo, queueTotal }),
       createdAt: now,
     });
 
@@ -1401,11 +1468,12 @@ async function executeBuiltinCrmTool(
       assignedAgentId: chosenAgent?.id || conv.assignedAgentId || null,
       assignedAgentName: chosenAgent?.name || conv.assignedAgentName || null,
     });
+    const queueInfo = `Nomor antrean pelanggan: #${queueNo} dari ${queueTotal} percakapan menunggu. Target respons tim sekitar ${slaTarget} menit per percakapan; jangan menjanjikan waktu pasti.`;
     return {
       ok: true,
       output: chosenAgent
-        ? `Percakapan berhasil dieskalasi dan ditugaskan ke agen aktif "${chosenAgent.name}" dengan catatan: "${reason}".`
-        : `Percakapan berhasil ditandai untuk agen manusia (saat ini semua agen sedang istirahat/offline) dengan catatan: "${reason}".`,
+        ? `Percakapan berhasil dieskalasi dan ditugaskan ke agen aktif "${chosenAgent.name}". ${queueInfo} Sampaikan nomor antrean ini ke pelanggan dengan sopan.`
+        : `Percakapan berhasil ditandai untuk agen manusia (saat ini semua agen sedang istirahat/offline). ${queueInfo} Sampaikan nomor antrean ini ke pelanggan dengan sopan.`,
     };
   }
 
