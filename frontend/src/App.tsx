@@ -32,11 +32,12 @@ import {
   getAppRootPath,
   getLandingPath,
   getLoginPath,
-  getRelativeSubpath,
   isConnectChannelPathname,
   isCsatPathname,
   isLandingPathname,
   isLoginPathname,
+  parseCompanyAndTabFromPathname,
+  toCompanySlug,
 } from './services/paths';
 import {
   AuthStatus,
@@ -81,24 +82,19 @@ function normalizeSettingsSection(raw: string): SettingsSection {
 }
 
 function parseLocationTab(pathname: string, hash: string): { tab: string; settingsSection: SettingsSection } | null {
-  const rel = getRelativeSubpath(pathname);
-  if (rel) {
-    const segs = rel.split('/').filter(Boolean);
-    if (segs[0] === 'settings') {
-      return {
-        tab: 'settings',
-        settingsSection: normalizeSettingsSection(segs[1] || 'whatsapp'),
-      };
-    }
-    if (VALID_TABS.has(segs[0])) {
-      let savedSub: SettingsSection = 'whatsapp';
+  const parsedPath = parseCompanyAndTabFromPathname(pathname);
+  if (parsedPath.tab && VALID_TABS.has(parsedPath.tab)) {
+    let savedSub: SettingsSection = 'whatsapp';
+    if (parsedPath.settingsSection) {
+      savedSub = normalizeSettingsSection(parsedPath.settingsSection);
+    } else {
       try {
         savedSub = normalizeSettingsSection(localStorage.getItem('crm_settings_section') || '');
       } catch {
         // ignore
       }
-      return { tab: segs[0], settingsSection: savedSub };
     }
+    return { tab: parsedPath.tab, settingsSection: savedSub };
   }
   const rawHash = (hash || '').replace(/^#\/?/, '').trim();
   if (rawHash.startsWith('settings/')) {
@@ -188,7 +184,7 @@ function AppShell() {
     } else if (
       window.location.hash === '#landing' ||
       searchParams.get('landing') === '1' ||
-      /\/landing\/+$/i.test(window.location.pathname)
+      /\/landing\/?$/i.test(window.location.pathname)
     ) {
       setShowLandingPage(true);
       navigatePath(getLandingPath(window.location.pathname), '', true);
@@ -208,17 +204,26 @@ function AppShell() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const syncRoutePath = (tab: string, section: SettingsSection, replace = false) => {
+  const activeCompanySlug = authStatus?.user
+    ? toCompanySlug(authStatus.user.companySlug, authStatus.user.companyName)
+    : null;
+
+  const syncRoutePath = (
+    tab: string,
+    section: SettingsSection,
+    replace = false,
+    companySlugOverride?: string | null
+  ) => {
     if (typeof window === 'undefined') return;
     if (
       isLoginPathname(window.location.pathname) ||
-      isLandingPathname(window.location.pathname) ||
       isCsatPathname(window.location.pathname) ||
       isConnectChannelPathname(window.location.pathname)
     ) {
       return;
     }
-    const targetPath = buildTabPath(window.location.pathname, tab, section);
+    const slugToUse = companySlugOverride !== undefined ? companySlugOverride : activeCompanySlug;
+    const targetPath = buildTabPath(window.location.pathname, tab, section, slugToUse);
     if (window.location.pathname !== targetPath || window.location.hash) {
       if (replace) {
         window.history.replaceState(null, '', targetPath);
@@ -349,10 +354,21 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (authStatus?.authenticated && isLoginRoute) {
-      navigatePath(rootPath, '', true);
+    if (!authStatus?.authenticated || !authStatus.user) return;
+    const companySlug = toCompanySlug(authStatus.user.companySlug, authStatus.user.companyName);
+    if (isLoginRoute) {
+      setShowLandingPage(false);
+      navigatePath(buildTabPath(currentPathname, currentTab, settingsSection, companySlug), '', true);
+      return;
     }
-  }, [authStatus?.authenticated, isLoginRoute, rootPath]);
+    // Jika berada di workspace (bukan landing), pastikan URL selalu memuat /:companySlug/:tab
+    if (!showLandingPage) {
+      const parsed = parseCompanyAndTabFromPathname(currentPathname);
+      if (!parsed.companySlug || parsed.companySlug !== companySlug) {
+        navigatePath(buildTabPath(currentPathname, currentTab, settingsSection, companySlug), '', true);
+      }
+    }
+  }, [authStatus?.authenticated, authStatus?.user?.companyId, authStatus?.user?.companySlug, isLoginRoute, showLandingPage]);
 
   useEffect(() => {
     if (!authStatus?.authenticated) return;
@@ -585,9 +601,11 @@ function AppShell() {
             authenticated: true,
             user,
           });
-          navigatePath(rootPath, '', true);
+          const companySlug = toCompanySlug((user as any).companySlug, (user as any).companyName);
+          navigatePath(buildTabPath(currentPathname, 'dashboard', settingsSection, companySlug), '', true);
         }}
         onBackToLanding={() => {
+          setShowLandingPage(true);
           navigatePath(landingPath);
         }}
       />
@@ -601,9 +619,8 @@ function AppShell() {
         authenticated={true}
         onEnterLogin={() => {
           setShowLandingPage(false);
-          const targetHash =
-            currentTab === 'settings' ? `#settings/${settingsSection}` : `#${currentTab}`;
-          navigatePath(rootPath, targetHash);
+          const companySlug = toCompanySlug(authStatus.user?.companySlug, authStatus.user?.companyName);
+          navigatePath(buildTabPath(currentPathname, currentTab, settingsSection, companySlug));
         }}
       />
     );
@@ -675,6 +692,8 @@ function AppShell() {
           if (nextLicense) {
             setLicenseInfo(nextLicense);
           }
+          const nextSlug = toCompanySlug(nextUser.companySlug, nextUser.companyName);
+          syncRoutePath(currentTab, settingsSection, false, nextSlug);
           void handleGlobalRefresh();
         }}
         onLogout={async () => {
