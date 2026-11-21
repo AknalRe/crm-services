@@ -144,6 +144,7 @@ export interface AiGenerationResult {
   outboundMedia?: AiQueuedOutboundMedia[];
   replyToMessageId?: string | null;
   replyToPreview?: string | null;
+  escalation?: { queueNo: number; queueTotal: number; slaTarget: number; executeHandoverNotes?: () => Promise<void> } | null;
 }
 
 export const AI_PROVIDER_CATALOG: AiProviderCatalogEntry[] = [
@@ -1986,6 +1987,7 @@ export async function generateAiAgentReply(
         outboundMedia: toolRegistry.sideEffects.outboundMedia,
         replyToMessageId: toolRegistry.sideEffects.replyToMessageId,
         replyToPreview: toolRegistry.sideEffects.replyToPreview,
+        escalation: toolRegistry.sideEffects.escalation || null,
       };
     }
 
@@ -2025,6 +2027,7 @@ export async function generateAiAgentReply(
         outboundMedia: toolRegistry.sideEffects.outboundMedia,
         replyToMessageId: toolRegistry.sideEffects.replyToMessageId,
         replyToPreview: toolRegistry.sideEffects.replyToPreview,
+        escalation: toolRegistry.sideEffects.escalation || null,
       };
     } catch (err: any) {
       const cleanError = sanitizeAiError(err, target.apiKey);

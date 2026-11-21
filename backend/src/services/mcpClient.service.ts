@@ -100,7 +100,12 @@ export interface AiToolSideEffects {
   replyToMessageId?: string | null;
   replyToPreview?: string | null;
   inspectedImages: Array<{ dataUri: string; mimeType: string; label?: string }>;
-  escalation?: { queueNo: number; queueTotal: number; slaTarget: number } | null;
+  escalation?: {
+    queueNo: number;
+    queueTotal: number;
+    slaTarget: number;
+    executeHandoverNotes?: () => Promise<void>;
+  } | null;
 }
 
 export const BUILTIN_CRM_TOOLS: BuiltinCrmToolMeta[] = [
@@ -1411,25 +1416,6 @@ async function executeBuiltinCrmTool(
       }, onlineAgents[0]);
     }
 
-    const now = new Date();
-    const convUpdates: Record<string, any> = {
-      status: 'OPEN',
-      resolvedAt: null,
-      escalatedAt: conv.escalatedAt || now,
-      escalationReason: reason.slice(0, 500),
-      escalationSummary: summary ? summary.slice(0, 2000) : null,
-      updatedAt: now,
-    };
-    if (chosenAgent) {
-      convUpdates.assignedAgentId = chosenAgent.id;
-      convUpdates.assignedAgentName = chosenAgent.name;
-    }
-
-    await db
-      .update(conversations)
-      .set(convUpdates)
-      .where(eq(conversations.id, conv.id));
-
     const queue = await getEscalationQueue(convCompanyId);
     const queueIdx = queue.findIndex((q) => q.id === conv.id);
     const queueNo = queueIdx >= 0 ? queueIdx + 1 : queue.length + 1;
@@ -1447,62 +1433,91 @@ async function executeBuiltinCrmTool(
       .filter(Boolean)
       .join('\n');
 
-    await db.insert(chatMessages).values({
-      id: crypto.randomUUID(),
-      companyId: convCompanyId,
-      conversationId: conv.id,
-      contactId: conv.contactId,
-      direction: 'OUTBOUND',
-      messageType: 'NOTE',
-      wahaSession: conv.wahaSession,
-      senderName: 'Agent AI',
-      body: noteBody,
-      status: 'NOTE',
-      ackStatus: 0,
-      metadataJson: JSON.stringify({ kind: 'AI_ESCALATION', queueNo, queueTotal }),
-      createdAt: now,
-    });
+    const executeHandoverNotes = async () => {
+      const postNow = new Date();
+      const convUpdates: Record<string, any> = {
+        status: 'OPEN',
+        resolvedAt: null,
+        escalatedAt: conv.escalatedAt || postNow,
+        escalationReason: reason.slice(0, 500),
+        escalationSummary: summary ? summary.slice(0, 2000) : null,
+        updatedAt: postNow,
+      };
+      if (chosenAgent) {
+        convUpdates.assignedAgentId = chosenAgent.id;
+        convUpdates.assignedAgentName = chosenAgent.name;
+      }
 
-    // Catat peristiwa perpindahan tugas di linimasa aktivitas percakapan (terlihat di Live Chat)
-    await db.insert(chatMessages).values({
-      id: crypto.randomUUID(),
-      companyId: convCompanyId,
-      conversationId: conv.id,
-      contactId: conv.contactId,
-      direction: 'SYSTEM',
-      messageType: 'ACTIVITY',
-      channel: conv.channel || 'WHATSAPP',
-      wahaSession: conv.wahaSession,
-      senderName: 'Agent AI',
-      body: chosenAgent
-        ? `Agent AI mengalihkan tugas ke Agent ${chosenAgent.name}`
-        : `Agent AI mengalihkan tugas ke Antrean Tim CS (#${queueNo})`,
-      metadataJson: JSON.stringify({
-        kind: 'ACTIVITY',
-        action: 'AI_HANDOVER',
-        actorName: 'Agent AI',
-        actorRole: 'AI Assistant',
-        detail: {
-          queueNo,
-          queueTotal,
-          reason,
-          toAgentId: chosenAgent?.id || null,
-          toAgentName: chosenAgent?.name || null,
-        },
-      }),
-      status: 'SYSTEM',
-      ackStatus: 0,
-      createdAt: now,
-    });
+      await db
+        .update(conversations)
+        .set(convUpdates)
+        .where(eq(conversations.id, conv.id));
 
-    liveEvents.emit('conversations:update', {
-      conversationId: conv.id,
-      escalated: true,
-      assignedAgentId: chosenAgent?.id || conv.assignedAgentId || null,
-      assignedAgentName: chosenAgent?.name || conv.assignedAgentName || null,
-    });
+      await db.insert(chatMessages).values({
+        id: crypto.randomUUID(),
+        companyId: convCompanyId,
+        conversationId: conv.id,
+        contactId: conv.contactId,
+        direction: 'OUTBOUND',
+        messageType: 'NOTE',
+        wahaSession: conv.wahaSession,
+        senderName: 'Agent AI',
+        body: noteBody,
+        status: 'NOTE',
+        ackStatus: 0,
+        metadataJson: JSON.stringify({ kind: 'AI_ESCALATION', queueNo, queueTotal }),
+        createdAt: postNow,
+      });
+
+      // Catat peristiwa perpindahan tugas di linimasa aktivitas percakapan (terlihat di Live Chat)
+      await db.insert(chatMessages).values({
+        id: crypto.randomUUID(),
+        companyId: convCompanyId,
+        conversationId: conv.id,
+        contactId: conv.contactId,
+        direction: 'SYSTEM',
+        messageType: 'ACTIVITY',
+        channel: conv.channel || 'WHATSAPP',
+        wahaSession: conv.wahaSession,
+        senderName: 'Agent AI',
+        body: chosenAgent
+          ? `Agent AI mengalihkan tugas ke Agent ${chosenAgent.name}`
+          : `Agent AI mengalihkan tugas ke Antrean Tim CS (#${queueNo})`,
+        metadataJson: JSON.stringify({
+          kind: 'ACTIVITY',
+          action: 'AI_HANDOVER',
+          actorName: 'Agent AI',
+          actorRole: 'AI Assistant',
+          detail: {
+            queueNo,
+            queueTotal,
+            reason,
+            toAgentId: chosenAgent?.id || null,
+            toAgentName: chosenAgent?.name || null,
+          },
+        }),
+        status: 'SYSTEM',
+        ackStatus: 0,
+        createdAt: new Date(postNow.getTime() + 100),
+      });
+
+      liveEvents.emit('conversations:update', {
+        conversationId: conv.id,
+        escalated: true,
+        assignedAgentId: chosenAgent?.id || conv.assignedAgentId || null,
+        assignedAgentName: chosenAgent?.name || conv.assignedAgentName || null,
+      });
+    };
+
     if (ctx?.sideEffects) {
-      ctx.sideEffects.escalation = { queueNo, queueTotal, slaTarget };
+      ctx.sideEffects.escalation = {
+        queueNo,
+        queueTotal,
+        slaTarget,
+        executeHandoverNotes,
+      };
+    } else {
+      await executeHandoverNotes();
     }
     const queueInfo = `Nomor antrean pelanggan: #${queueNo} dari ${queueTotal} percakapan menunggu. Target respons tim sekitar ${slaTarget} menit per percakapan; jangan menjanjikan waktu pasti.`;
     return {

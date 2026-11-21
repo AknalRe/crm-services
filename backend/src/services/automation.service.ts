@@ -523,23 +523,34 @@ export async function handleInboundAutomation(params: {
             // Tampilkan status "sedang mengetik..." tanpa sendSeen dulu agar pesan tidak tertandai dibaca jika AI gagal / tidak membalas
             await wahaService.setTyping(waTypingTarget, true, sessionName || undefined).catch(() => {});
           }
+          // Pancarkan informasi real-time ke Live Chat CRM bahwa AI sedang berpikir & menyusun balasan
+          liveEvents.emit('conversations:ai_typing', {
+            conversationId,
+            isTyping: true,
+            aiName: aiCfg.name || 'Agent AI',
+          });
 
           let aiResult: Awaited<ReturnType<typeof generateAiAgentReply>>;
           try {
             aiResult = await generateAiAgentReply(trimmedInbound, {
-            configOverride: aiCfg,
-            history,
-            imageUrl: latestImageDataUri,
-            mediaName: latestMediaName,
-            conversationId,
-            contactName: contact.namaPanggilan || contact.namaLengkap || null,
-            contactPhone: contact.nomorWhatsapp || null,
+              configOverride: aiCfg,
+              history,
+              imageUrl: latestImageDataUri,
+              mediaName: latestMediaName,
+              conversationId,
+              contactName: contact.namaPanggilan || contact.namaLengkap || null,
+              contactPhone: contact.nomorWhatsapp || null,
               channel,
             });
           } catch (genErr) {
             if (waTypingTarget) {
               await wahaService.setTyping(waTypingTarget, false, sessionName || undefined).catch(() => {});
             }
+            liveEvents.emit('conversations:ai_typing', {
+              conversationId,
+              isTyping: false,
+              aiName: aiCfg.name || 'Agent AI',
+            });
             throw genErr;
           }
           if (aiResult.reply) {
@@ -552,21 +563,42 @@ export async function handleInboundAutomation(params: {
               await wahaService.sendSeen(waTypingTarget, sessionName || undefined).catch(() => {});
             }
             try {
+              // 1. Kirim pesan balasan ke pelanggan terlebih dahulu
               await sendAutoReplyMessage({
                 ...replyBase,
                 text: aiResult.reply,
                 replyToMessageId: aiResult.replyToMessageId || null,
                 outboundMedia: aiResult.outboundMedia,
               });
+
+              // 2. Setelah pesan terkirim, baru buat catatan internal dan linimasa aktivitas perpindahan tugas
+              if (aiResult.escalation?.executeHandoverNotes) {
+                await aiResult.escalation.executeHandoverNotes().catch((err: any) => {
+                  console.error('[AutomationService] Failed to execute deferred escalation note:', err);
+                });
+              }
             } finally {
               if (waTypingTarget) {
                 await wahaService.setTyping(waTypingTarget, false, sessionName || undefined).catch(() => {});
               }
+              liveEvents.emit('conversations:ai_typing', {
+                conversationId,
+                isTyping: false,
+                aiName: aiCfg.name || 'Agent AI',
+              });
             }
             return;
           }
           if (waTypingTarget) {
             await wahaService.setTyping(waTypingTarget, false, sessionName || undefined).catch(() => {});
+          }
+          liveEvents.emit('conversations:ai_typing', {
+            conversationId,
+            isTyping: false,
+            aiName: aiCfg.name || 'Agent AI',
+          });
+          if (aiResult.escalation?.executeHandoverNotes) {
+            await aiResult.escalation.executeHandoverNotes().catch(() => {});
           }
         }
       } catch (aiErr: any) {

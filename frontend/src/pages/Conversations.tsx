@@ -1136,6 +1136,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [presenceByConvId, setPresenceByConvId] = useState<
     Record<string, { status: 'typing' | 'recording' | 'online' | 'paused'; expiresAt: number }>
   >({});
+  const [aiTypingByConvId, setAiTypingByConvId] = useState<
+    Record<string, { aiName: string; expiresAt: number }>
+  >({});
   const [groupPresenceByConvId, setGroupPresenceByConvId] = useState<
     Record<
       string,
@@ -1525,8 +1528,42 @@ export const Conversations: React.FC<ConversationsProps> = ({
         }));
       }
     });
+    const unsubAiTyping = subscribeLiveEvent('conversations:ai_typing', (evt: any) => {
+      const d = evt?.data || evt;
+      const convId = String(d?.conversationId || '').trim();
+      const isTyping = Boolean(d?.isTyping);
+      const aiName = String(d?.aiName || 'Agent AI').trim();
+      if (!convId) return;
+
+      setAiTypingByConvId((prev) => {
+        if (!isTyping) {
+          if (!prev[convId]) return prev;
+          const next = { ...prev };
+          delete next[convId];
+          return next;
+        }
+        return {
+          ...prev,
+          [convId]: { aiName, expiresAt: Date.now() + 25000 },
+        };
+      });
+    });
     const presencePruner = window.setInterval(() => {
       const now = Date.now();
+      setAiTypingByConvId((prev) => {
+        const keys = Object.keys(prev);
+        if (keys.length === 0) return prev;
+        let changed = false;
+        const next: typeof prev = {};
+        for (const k of keys) {
+          if (prev[k].expiresAt > now) {
+            next[k] = prev[k];
+          } else {
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
       setPresenceByConvId((prev) => {
         const keys = Object.keys(prev);
         if (keys.length === 0) return prev;
@@ -1572,6 +1609,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
     return () => {
       unsub();
       unsubPresence();
+      unsubAiTyping();
       window.clearInterval(presencePruner);
       window.clearInterval(timer);
     };
@@ -4985,6 +5023,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   </span>
                                 );
                               }
+                              if (aiTypingByConvId[conv.id]) {
+                                return (
+                                  <span className="text-indigo-600 font-medium italic flex items-center gap-1">
+                                    <Bot className="w-3 h-3 text-indigo-500 shrink-0" />
+                                    <span>AI sedang mengetik...</span>
+                                  </span>
+                                );
+                              }
                               return previewText;
                             })()}
                           </p>
@@ -5295,6 +5341,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               : activePresence === 'recording'
                               ? 'Merekam audio...'
                               : 'Online'}
+                          </span>
+                        ) : aiTypingByConvId[selectedConversation.id] ? (
+                          <span className="inline-flex items-center gap-1 text-indigo-600 font-medium shrink-0">
+                            <Bot className="w-3 h-3 text-indigo-500 animate-pulse" />
+                            <span>{aiTypingByConvId[selectedConversation.id].aiName || 'Agent AI'} sedang merespons...</span>
                           </span>
                         ) : (
                           <span className="font-mono truncate">
@@ -7615,6 +7666,21 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </>
               );
             })()}
+            {aiTypingByConvId[selectedConversation.id] && (
+              <div className="flex justify-end my-1.5">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg rounded-tr-xs bg-indigo-50 border border-indigo-200 text-xs text-indigo-700 shadow-2xs">
+                  <Bot className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span className="font-medium">
+                    {aiTypingByConvId[selectedConversation.id].aiName || 'Agent AI'} sedang menyusun balasan...
+                  </span>
+                  <span className="inline-flex items-center gap-0.5 shrink-0" aria-hidden="true">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.2s]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.1s]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" />
+                  </span>
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
             </div>
             {(() => {

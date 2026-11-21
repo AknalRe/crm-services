@@ -6,6 +6,7 @@ export type LiveEventType =
   | 'tracking:update'
   | 'conversations:update'
   | 'conversations:presence'
+  | 'conversations:ai_typing'
   | 'license:update'
   | 'sla:breach'
   | 'csat:low'
