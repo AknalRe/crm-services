@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
-  ArrowUpRight,
   Bot,
   CalendarClock,
   Check,
@@ -18,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ReneoCrmLogo } from '../components/ReneoCrmLogo';
 import { api } from '../services/api';
+import type { LicensePlan } from '../types';
 
 interface LandingPageProps {
   initialized: boolean;
@@ -28,12 +28,11 @@ interface LandingPageProps {
 
 const PANEL_URL = 'https://panel.reneo.my.id';
 const PANEL_INSTALL_URL = 'https://panel.reneo.my.id/install';
-const PANEL_ORDER_URL = 'https://panel.reneo.my.id/order?addon=reneo-crm';
 
 const NAV_LINKS = [
   { href: '#fitur', label: 'Fitur' },
   { href: '#kanal', label: 'Kanal' },
-  { href: '#cerita', label: 'Latar Belakang' },
+  { href: '#paket', label: 'Paket & Harga' },
   { href: '#perbandingan', label: 'Perbandingan' },
   { href: '#faq', label: 'FAQ' },
 ];
@@ -302,6 +301,43 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [activeHeroChannelId, setActiveHeroChannelId] = useState(HERO_CHANNEL_PREVIEWS[0].id);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [plans, setPlans] = useState<LicensePlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annual'>('monthly');
+
+  useEffect(() => {
+    let active = true;
+    api
+      .getLicensePlans()
+      .then((rows) => {
+        if (!active) return;
+        setPlans(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (active) setPlans([]);
+      })
+      .finally(() => {
+        if (active) setPlansLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const hasAnnualPlans = useMemo(
+    () => plans.some((p) => p.period === 'annual' || p.months >= 12),
+    [plans]
+  );
+
+  const visiblePlans = useMemo(() => {
+    if (!hasAnnualPlans) return plans;
+    const matched = plans.filter((p) =>
+      billingPeriod === 'annual'
+        ? p.period === 'annual' || p.months >= 12
+        : p.period !== 'annual' && p.months < 12
+    );
+    return matched.length > 0 ? matched : plans;
+  }, [plans, hasAnnualPlans, billingPeriod]);
   const [inquiryType, setInquiryType] = useState<
     'Tambah Fitur Khusus' | 'Beli Aset Program' | 'Konsultasi & Implementasi'
   >('Tambah Fitur Khusus');
@@ -430,12 +466,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </button>
               )}
               <a
-                href={PANEL_ORDER_URL}
-                target="_top"
+                href="#paket"
+                onClick={() => setMobileMenuOpen(false)}
                 className="h-10 px-4 rounded-lg bg-white/10 text-white text-sm font-medium inline-flex items-center justify-center gap-1.5"
               >
-                <span>Order Hosting + CRM</span>
-                <ArrowUpRight className="w-4 h-4" />
+                <span>Lihat Paket &amp; Harga CRM</span>
               </a>
             </div>
           </nav>
@@ -474,12 +509,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <ArrowRight className="w-4 h-4" strokeWidth={2} />
                 </button>
                 <a
-                  href={PANEL_ORDER_URL}
-                  target="_top"
+                  href="#paket"
                   className="h-11 px-5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-100 border border-white/15 text-sm font-medium inline-flex items-center justify-center gap-2 transition-colors"
                 >
-                  <span>Order Hosting + CRM</span>
-                  <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
+                  <span>Lihat Paket &amp; Harga</span>
                 </a>
                 {!authenticated && (
                   <button
@@ -834,6 +867,169 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
         </section>
 
+        {/* Standalone CRM Subscription Plans */}
+        <section id="paket" className="bg-white border-b border-slate-200">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20 space-y-8">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+              <div className="max-w-2xl space-y-2">
+                <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-[-0.02em] leading-tight">
+                  Berlangganan Reneo CRM langsung, tanpa perlu sewa hosting
+                </h2>
+                <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+                  Daftar akun, coba gratis 7 hari, lalu pilih paket langganan sesuai ukuran tim dan jumlah bisnis Anda.
+                </p>
+              </div>
+
+              {hasAnnualPlans && (
+                <div className="inline-flex items-center p-1 rounded-lg bg-slate-100 border border-slate-200 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setBillingPeriod('monthly')}
+                    className={`h-8 px-3 rounded-md text-xs font-semibold transition-colors ${
+                      billingPeriod === 'monthly'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Bulanan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBillingPeriod('annual')}
+                    className={`h-8 px-3 rounded-md text-xs font-semibold transition-colors ${
+                      billingPeriod === 'annual'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Tahunan
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {plansLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[1, 2, 3].map((n) => (
+                  <div
+                    key={n}
+                    className="h-72 rounded-xl border border-slate-200 bg-slate-50 animate-pulse"
+                  />
+                ))}
+              </div>
+            ) : visiblePlans.length > 0 ? (
+              <div
+                className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${
+                  visiblePlans.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
+                }`}
+              >
+                {visiblePlans.map((plan) => {
+                  const f = plan.features || {};
+                  const maxContacts = Number(f.maxContacts ?? 0);
+                  const maxAgents = Number(f.maxAgents ?? 1);
+                  const maxSessions = Number(f.maxSessions ?? 1);
+                  const maxStorageMb = Number(f.maxStorageMb ?? 250);
+                  const storageLabel =
+                    maxStorageMb >= 1024
+                      ? `${Math.round((maxStorageMb / 1024) * 10) / 10} GB penyimpanan media`
+                      : `${maxStorageMb} MB penyimpanan media`;
+
+                  const highlights: string[] = [
+                    maxContacts === 0
+                      ? 'Kontak pelanggan tanpa batas'
+                      : `Hingga ${maxContacts.toLocaleString('id-ID')} kontak pelanggan`,
+                    f.multiSession
+                      ? `Multi-nomor WhatsApp hingga ${maxSessions} sesi`
+                      : '1 sesi nomor WhatsApp',
+                    f.multiAgent
+                      ? `Hingga ${maxAgents} akun tim & peran kerja`
+                      : '1 akun admin usaha',
+                    storageLabel,
+                  ];
+                  if (f.liveChatCrm) highlights.push('Kotak Masuk Live Chat & rating layanan');
+                  if (f.omnichannel) highlights.push('Instagram, Facebook, Threads & Telegram');
+                  if (f.scheduledPosts) highlights.push('Kalender jadwal konten & Story WA');
+                  if (f.aiAgent) highlights.push('Asisten otomatis berbasis katalog usaha');
+
+                  const unitLabel =
+                    plan.period === 'annual' || plan.months >= 12
+                      ? '/ tahun'
+                      : plan.months > 1
+                      ? `/ ${plan.months} bln`
+                      : '/ bulan';
+
+                  return (
+                    <div
+                      key={plan.slug}
+                      className={`rounded-xl border p-5 flex flex-col justify-between gap-5 ${
+                        plan.highlighted
+                          ? 'border-[#2563EB] bg-blue-50/20 ring-1 ring-[#2563EB]/20'
+                          : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-base font-bold text-slate-900">{plan.name}</h3>
+                            {plan.highlighted && (
+                              <span className="px-2 py-0.5 rounded bg-[#2563EB] text-white text-[10px] font-semibold">
+                                Populer
+                              </span>
+                            )}
+                          </div>
+                          {plan.tagline && (
+                            <p className="text-xs text-slate-600 leading-relaxed">{plan.tagline}</p>
+                          )}
+                        </div>
+
+                        <div className="pb-4 border-b border-slate-200">
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
+                              Rp {Number(plan.priceAmount || 0).toLocaleString('id-ID')}
+                            </span>
+                            <span className="text-xs text-slate-500">{unitLabel}</span>
+                          </div>
+                          {(plan.trialDays ?? 0) > 0 && (
+                            <p className="mt-1 text-[11px] font-medium text-emerald-700">
+                              Termasuk uji coba gratis {plan.trialDays} hari
+                            </p>
+                          )}
+                        </div>
+
+                        <ul className="space-y-2 text-xs text-slate-700">
+                          {highlights.map((line) => (
+                            <li key={line} className="flex items-start gap-2">
+                              <Check className="w-3.5 h-3.5 text-[#2563EB] shrink-0 mt-0.5" strokeWidth={2.25} />
+                              <span className="leading-snug">{line}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={authenticated ? onEnterLogin : handleRegister}
+                        className={`w-full h-10 px-4 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${FOCUS_RING} ${
+                          plan.highlighted
+                            ? 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white'
+                            : 'bg-slate-900 hover:bg-slate-800 text-white'
+                        }`}
+                      >
+                        <span>{authenticated ? 'Pilih di Workspace' : 'Langganan Paket Ini'}</span>
+                        <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            <p className="text-xs text-slate-500">
+              Langganan aktif langsung di cloud Reneo CRM — tidak perlu membeli hosting terpisah. Jika usaha Anda memiliki lebih dari satu cabang atau merek, setiap bisnis dapat berlangganan paketnya sendiri dalam satu akun.
+            </p>
+          </div>
+        </section>
+
         {/* FAQ + Custom Inquiry Side-by-Side */}
         <section id="faq" className="bg-[#FAFAFA] border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
@@ -1007,7 +1203,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 Mulai rapikan operasional layanan pelanggan hari ini
               </h2>
               <p className="text-sm sm:text-base text-slate-400">
-                Uji coba gratis 7 hari langsung di ruang kerja usaha Anda, atau pesan paket lengkap bersama hosting Reneo.
+                Uji coba gratis 7 hari langsung di ruang kerja usaha Anda, lalu lanjutkan dengan paket langganan CRM sesuai kebutuhan tim.
               </p>
             </div>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
@@ -1016,16 +1212,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 onClick={authenticated ? onEnterLogin : handleRegister}
                 className={`h-11 px-5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
               >
-                <span>{authenticated ? 'Buka Workspace CRM' : 'Daftar Akun CRM'}</span>
+                <span>{authenticated ? 'Buka Workspace CRM' : 'Daftar & Langganan CRM'}</span>
                 <ArrowRight className="w-4 h-4" strokeWidth={2} />
               </button>
               <a
-                href={PANEL_ORDER_URL}
-                target="_top"
+                href="#paket"
                 className="h-11 px-5 rounded-lg bg-white/5 hover:bg-white/10 text-white border border-white/15 text-sm font-medium inline-flex items-center justify-center gap-2 transition-colors"
               >
-                <span>Order Hosting + CRM</span>
-                <ArrowUpRight className="w-4 h-4" strokeWidth={1.75} />
+                <span>Lihat Paket &amp; Harga</span>
               </a>
             </div>
           </div>
@@ -1041,14 +1235,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <span>· Kelola Pelanggan &amp; Operasional Tim</span>
           </div>
           <div className="flex flex-wrap items-center gap-5">
+            <a href="#paket" className="hover:text-white transition-colors">
+              Paket &amp; Harga CRM
+            </a>
             <a href={PANEL_URL} target="_top" className="hover:text-white transition-colors">
-              Reneo Panel
+              Butuh Hosting Sendiri?
             </a>
             <a href={PANEL_INSTALL_URL} target="_top" className="hover:text-white transition-colors">
               Panduan Pemasangan
-            </a>
-            <a href={PANEL_ORDER_URL} target="_top" className="hover:text-white transition-colors">
-              Paket &amp; Harga
             </a>
           </div>
         </div>
