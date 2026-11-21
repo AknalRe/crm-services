@@ -1769,6 +1769,19 @@ export const api = {
     return res.data.data;
   },
 
+  deleteMyWorkspace: async (
+    companyId: string
+  ): Promise<{
+    deletedId: string;
+    switched: boolean;
+    user?: NonNullable<import('../types').AuthStatus['user']>;
+    company?: any;
+    license?: import('../types').LicenseInfo;
+  }> => {
+    const res = await client.delete(`/tenants/my-workspaces/${encodeURIComponent(companyId)}`);
+    return res.data.data;
+  },
+
   getCurrentCompany: async (): Promise<{
     company: {
       id: string;

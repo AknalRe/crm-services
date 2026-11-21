@@ -31,6 +31,8 @@ import {
   Building2,
   Check,
   Pencil,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   AgentAvailabilityStatus,
@@ -123,6 +125,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState<string | null>(null);
   const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false);
+  const [workspaceToDelete, setWorkspaceToDelete] = useState<TenantWorkspaceItem | null>(null);
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
 
   const loadWorkspaces = async () => {
     if (!user) return;
@@ -185,14 +189,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setNewWorkspaceName('');
       setShowNewWorkspaceForm(false);
       setWorkspaceMenuOpen(false);
+      const isAlreadyActive = res.license?.status === 'ACTIVE' && !res.license?.isExpired;
       toast.success(
-        `Bisnis "${cleanName}" berhasil dibuat. Silakan pilih paket lisensi untuk mengaktifkannya.`
+        isAlreadyActive
+          ? `Bisnis "${cleanName}" berhasil dibuat dan langsung aktif (${res.license.plan}).`
+          : `Bisnis "${cleanName}" berhasil dibuat. Silakan pilih paket lisensi untuk mengaktifkannya.`
       );
       onWorkspaceSwitched?.(res.user, res.license);
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Gagal membuat workspace baru.');
     } finally {
       setCreatingWorkspace(false);
+    }
+  };
+
+  const handleConfirmDeleteWorkspace = async () => {
+    if (!workspaceToDelete || deletingWorkspace) return;
+    const target = workspaceToDelete;
+    setDeletingWorkspace(true);
+    try {
+      const res = await api.deleteMyWorkspace(target.id);
+      setWorkspaces((prev) => prev.filter((ws) => ws.id !== target.id));
+      setWorkspaceToDelete(null);
+      if (res.switched && res.user) {
+        setWorkspaceMenuOpen(false);
+        toast.success(
+          `Bisnis "${target.name}" dihapus permanen. Beralih ke "${res.company?.name || res.user.companyName}".`
+        );
+        onWorkspaceSwitched?.(res.user, res.license);
+      } else {
+        toast.success(`Bisnis "${target.name}" beserta seluruh datanya telah dihapus permanen.`);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || `Gagal menghapus bisnis "${target.name}".`);
+    } finally {
+      setDeletingWorkspace(false);
     }
   };
 
@@ -441,81 +472,156 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
 
             {workspaceMenuOpen && (
-              <div className="mt-1.5 p-2 rounded-md bg-[#161B29] border border-[#28314E] space-y-1.5 text-xs">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 px-1">
-                  Workspace Bisnis Anda
+              <div className="mt-2 p-2.5 rounded-lg bg-[#151A28] border border-[#27304B] space-y-2 text-xs shadow-lg">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                    Workspace Bisnis Anda
+                  </span>
+                  {!loadingWorkspaces && workspaces.length > 0 && (
+                    <span className="text-[10px] font-mono text-gray-400 bg-[#1E2438] px-1.5 py-0.5 rounded">
+                      {workspaces.length} Bisnis
+                    </span>
+                  )}
                 </div>
+
                 {loadingWorkspaces ? (
-                  <div className="px-2 py-1.5 text-[11px] text-gray-400">Memuat workspace...</div>
+                  <div className="px-2 py-2.5 text-[11px] text-gray-400 text-center">
+                    Memuat daftar bisnis...
+                  </div>
                 ) : (
-                  <div className="max-h-36 overflow-y-auto space-y-1">
+                  <div className="max-h-52 overflow-y-auto space-y-1.5 pr-0.5 sidebar-scroll">
                     {workspaces.map((ws) => {
                       const active = ws.isCurrent || ws.id === user.companyId;
+                      const isUnlicensed = ws.license.status === 'UNLICENSED';
+                      const isExpired = !isUnlicensed && ws.license.isExpired;
+                      const canDelete = isAdmin && !ws.isDefault && workspaces.length > 1;
+                      const statusDotCls = isUnlicensed
+                        ? 'bg-amber-400'
+                        : isExpired
+                        ? 'bg-red-400'
+                        : 'bg-emerald-400';
+                      const statusText = isUnlicensed
+                        ? 'Belum Berlisensi'
+                        : isExpired
+                        ? 'Lisensi Berakhir'
+                        : `${ws.license.plan} · ${ws.license.daysLeft}h`;
+
                       return (
-                        <button
+                        <div
                           key={ws.id}
-                          type="button"
-                          disabled={Boolean(switchingWorkspaceId)}
-                          onClick={() => void handleSwitchWorkspace(ws.id)}
-                          className={`w-full px-2 py-1.5 rounded flex items-center justify-between gap-2 text-left transition-colors ${
+                          className={`group rounded-md border transition-colors flex items-center gap-1.5 p-1.5 ${
                             active
-                              ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/40'
-                              : 'text-gray-300 hover:bg-[#1E2438]'
+                              ? 'bg-indigo-600/15 border-indigo-500/45'
+                              : 'bg-[#191F30]/60 border-transparent hover:bg-[#1E253A] hover:border-[#2C3552]'
                           }`}
                         >
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-medium truncate">{ws.name}</div>
-                            <div className="text-[10px] text-gray-400 truncate">
-                              {ws.license.status === 'UNLICENSED'
-                                ? 'Belum Berlisensi'
-                                : ws.license.isExpired
-                                ? 'Lisensi Berakhir'
-                                : `${ws.license.plan} (${ws.license.daysLeft}h)`}
+                          <button
+                            type="button"
+                            disabled={Boolean(switchingWorkspaceId)}
+                            onClick={() => void handleSwitchWorkspace(ws.id)}
+                            className="min-w-0 flex-1 text-left px-1 py-0.5 rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400"
+                            title={`Beralih ke ${ws.name}`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span
+                                className={`text-xs font-semibold truncate ${
+                                  active ? 'text-white' : 'text-gray-200'
+                                }`}
+                              >
+                                {ws.name}
+                              </span>
+                              {active && (
+                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-500/25 text-indigo-200 border border-indigo-400/30">
+                                  Aktif
+                                </span>
+                              )}
                             </div>
-                          </div>
-                          {active && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
-                        </button>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-400 min-w-0">
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDotCls}`} />
+                              <span className="truncate">{statusText}</span>
+                            </div>
+                          </button>
+
+                          {isAdmin && (
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              {active && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setWorkspaceMenuOpen(false);
+                                    setShowCompanyProfileModal(true);
+                                  }}
+                                  className="p-1.5 rounded text-gray-400 hover:text-indigo-300 hover:bg-[#242C44] transition-colors"
+                                  title={`Edit profil bisnis ${ws.name}`}
+                                  aria-label={`Edit profil bisnis ${ws.name}`}
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setWorkspaceToDelete(ws);
+                                  }}
+                                  className="p-1.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/15 transition-colors"
+                                  title={`Hapus bisnis ${ws.name}`}
+                                  aria-label={`Hapus bisnis ${ws.name}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
                 )}
 
                 {isAdmin && (
-                  <div className="pt-1.5 border-t border-[#242B42] space-y-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setWorkspaceMenuOpen(false);
-                        setShowCompanyProfileModal(true);
-                      }}
-                      className="w-full px-2 py-1.5 rounded bg-[#181D2D] hover:bg-[#232B45] text-gray-200 text-[11px] font-medium flex items-center justify-center gap-1.5 border border-[#242B42] transition-colors"
-                    >
-                      <Pencil className="w-3 h-3 text-indigo-400" />
-                      <span>Edit Data Usaha</span>
-                    </button>
+                  <div className="pt-2 border-t border-[#242B42] space-y-1.5">
                     {!showNewWorkspaceForm ? (
-                      <button
-                        type="button"
-                        onClick={() => setShowNewWorkspaceForm(true)}
-                        className="w-full px-2 py-1.5 rounded bg-[#1E2438] hover:bg-indigo-600/30 text-indigo-300 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Tambah Bisnis Baru (Lisensi Baru)</span>
-                      </button>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWorkspaceMenuOpen(false);
+                            setShowCompanyProfileModal(true);
+                          }}
+                          className="px-2 py-1.5 rounded-md bg-[#1B2134] hover:bg-[#232B45] text-gray-200 text-[11px] font-medium flex items-center justify-center gap-1 border border-[#28314E] transition-colors"
+                        >
+                          <Pencil className="w-3 h-3 text-indigo-400 shrink-0" />
+                          <span className="truncate">Edit Usaha</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowNewWorkspaceForm(true)}
+                          className="px-2 py-1.5 rounded-md bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-200 text-[11px] font-medium flex items-center justify-center gap-1 border border-indigo-500/35 transition-colors"
+                        >
+                          <Plus className="w-3 h-3 shrink-0" />
+                          <span className="truncate">Bisnis Baru</span>
+                        </button>
+                      </div>
                     ) : (
-                      <form onSubmit={handleCreateWorkspace} className="space-y-1.5">
+                      <form onSubmit={handleCreateWorkspace} className="space-y-1.5 bg-[#101420] p-2 rounded-md border border-[#28314E]">
+                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                          Tambah Bisnis / Cabang Baru
+                        </label>
                         <input
                           type="text"
                           value={newWorkspaceName}
                           onChange={(e) => setNewWorkspaceName(e.target.value)}
-                          placeholder="Nama bisnis / toko baru..."
-                          className="w-full h-7 px-2 rounded bg-[#0F131D] border border-[#2B3554] text-white text-xs focus:outline-none focus:border-indigo-400"
+                          placeholder="Contoh: Toko Cabang Surabaya..."
+                          className="w-full h-8 px-2.5 rounded bg-[#161B2A] border border-[#2B3554] text-white text-xs focus:outline-none focus:border-indigo-400"
                           autoFocus
                         />
                         <p className="text-[10px] text-gray-400 leading-snug">
-                          Setiap bisnis baru memiliki ruang kerja &amp; paket langganan lisensi terpisah.
+                          Setiap bisnis memiliki ruang kerja, kontak, dan paket lisensi sendiri.
                         </p>
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="flex items-center justify-end gap-1.5 pt-0.5">
                           <button
                             type="button"
                             onClick={() => {
@@ -896,6 +1002,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         }}
       />
+    )}
+    {workspaceToDelete && (
+      <div
+        className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4"
+        onClick={() => {
+          if (!deletingWorkspace) setWorkspaceToDelete(null);
+        }}
+      >
+        <div
+          className="w-full max-w-md rounded-xl bg-white border border-gray-200 shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-5 space-y-3.5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-red-50 border border-red-200 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-gray-900">
+                  Hapus Bisnis &ldquo;{workspaceToDelete.name}&rdquo;?
+                </h3>
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                  Tindakan ini bersifat permanen dan tidak dapat dibatalkan. Seluruh data kontak, riwayat chat, jadwal kampanye, kanal, dan pengaturan pada bisnis ini akan ikut terhapus.
+                </p>
+              </div>
+            </div>
+
+            {(workspaceToDelete.isCurrent || workspaceToDelete.id === user?.companyId) && (
+              <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
+                Anda sedang berada di workspace ini. Setelah dihapus, sistem otomatis memindahkan Anda ke bisnis lain yang masih aktif.
+              </div>
+            )}
+          </div>
+
+          <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={deletingWorkspace}
+              onClick={() => setWorkspaceToDelete(null)}
+              className="h-9 px-3.5 rounded-md border border-gray-300 bg-white hover:bg-gray-100 text-xs font-medium text-gray-700 disabled:opacity-50 transition-colors"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              disabled={deletingWorkspace}
+              onClick={() => void handleConfirmDeleteWorkspace()}
+              className="h-9 px-3.5 rounded-md bg-red-600 hover:bg-red-700 text-xs font-semibold text-white disabled:opacity-60 inline-flex items-center gap-1.5 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{deletingWorkspace ? 'Menghapus...' : 'Hapus Bisnis Permanen'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
     )}
     </>
   );

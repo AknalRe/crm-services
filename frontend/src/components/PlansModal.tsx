@@ -17,6 +17,7 @@ import {
   ChevronUp,
   ChevronLeft,
   ChevronRight,
+  Building2,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { LicenseInfo, LicensePlan, LicenseOrder, PaymentMethodItem } from '../types';
@@ -693,10 +694,19 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                     <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200 text-[11px] font-medium">
                       Siklus {periodLabel}
                     </span>
+                    {currentLicense.companyName && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-medium">
+                        <Building2 className="w-3 h-3 shrink-0" />
+                        <span>Bisnis: {currentLicense.companyName}</span>
+                      </span>
+                    )}
                   </div>
                   <h4 className="text-base sm:text-lg font-bold text-gray-900 tracking-tight leading-snug">
                     {currentLicense.plan}
                   </h4>
+                  <p className="text-[11px] text-gray-500">
+                    Lisensi berlaku khusus untuk bisnis ini. Penambahan bisnis baru menggunakan paket lisensi masing-masing.
+                  </p>
                 </div>
 
                 <Button
@@ -806,24 +816,133 @@ export const PlansModal: React.FC<PlansModalProps> = ({
             </div>
 
             {/* Active Quotas & Unlocked Modules */}
-            <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-2.5 sm:space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
-                <h5 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider">
-                  Kuota &amp; Modul pada Paket Ini
-                </h5>
-                <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
+            <div className="rounded-xl border border-gray-200 bg-white p-3.5 sm:p-4 space-y-4">
+              {/* Section 1: Rincian Pemakaian Kuota */}
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h5 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider">
+                    Rincian Pemakaian Kuota
+                  </h5>
                   <span className="text-[11px] text-gray-500">
                     Support:{' '}
                     <strong className="uppercase text-gray-800 font-mono">
                       {currentLicense.features?.supportPriority || 'standard'}
                     </strong>
                   </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {(() => {
+                    const storageUsedMb = currentLicense.usage?.storageUsedMb ?? 0;
+                    const storageMaxMb = currentLicense.features?.maxStorageMb || 1024;
+                    const storagePct = storageMaxMb > 0 ? Math.min(100, Math.round((storageUsedMb / storageMaxMb) * 100)) : 0;
+
+                    const contactsUsed = currentLicense.usage?.contacts ?? 0;
+                    const contactsMax = currentLicense.features?.maxContacts ?? 0;
+                    const contactsPct = contactsMax > 0 ? Math.min(100, Math.round((contactsUsed / contactsMax) * 100)) : 0;
+
+                    const agentsUsed = currentLicense.usage?.agents ?? 1;
+                    const agentsMax = currentLicense.features?.multiAgent
+                      ? currentLicense.features?.maxAgents || 5
+                      : 1;
+                    const agentsPct = agentsMax > 0 ? Math.min(100, Math.round((agentsUsed / agentsMax) * 100)) : 0;
+
+                    const broadcastsUsed = currentLicense.usage?.broadcastsThisMonth ?? 0;
+                    const broadcastsUnlimited = Boolean(currentLicense.features?.unlimitedBroadcast);
+                    const broadcastsMax = currentLicense.features?.maxBroadcastPerMonth || 1500;
+                    const broadcastsPct =
+                      !broadcastsUnlimited && broadcastsMax > 0
+                        ? Math.min(100, Math.round((broadcastsUsed / broadcastsMax) * 100))
+                        : 0;
+
+                    const channelsUsed = currentLicense.usage?.channels ?? 0;
+                    const channelsMax = currentLicense.features?.maxChannels ?? 0;
+                    const maxSessions = currentLicense.features?.multiSession
+                      ? currentLicense.features?.maxSessions || 3
+                      : currentLicense.features?.maxSessions || 1;
+                    const templatesUsed = currentLicense.usage?.templates ?? 0;
+
+                    const barColor = (pct: number) =>
+                      pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-emerald-500';
+
+                    const quotaCards = [
+                      {
+                        label: 'Penyimpanan Dokumen & Media',
+                        usedText: `${storageUsedMb.toLocaleString('id-ID')} MB`,
+                        limitText: formatStorageQuota(storageMaxMb),
+                        subText: `Batas unggah maks ${currentLicense.features?.maxAttachmentSizeMb || 10} MB per file`,
+                        pct: storagePct,
+                        hasBar: storageMaxMb > 0,
+                      },
+                      {
+                        label: 'Kapasitas Kontak Pelanggan',
+                        usedText: `${contactsUsed.toLocaleString('id-ID')} Kontak`,
+                        limitText: contactsMax === 0 ? 'Tanpa Batas' : contactsMax.toLocaleString('id-ID'),
+                        subText: contactsMax === 0 ? 'Tidak ada batas jumlah kontak pada paket ini' : `${contactsPct}% dari kapasitas tersimpan`,
+                        pct: contactsPct,
+                        hasBar: contactsMax > 0,
+                      },
+                      {
+                        label: 'Tim & Agen CS Aktif',
+                        usedText: `${agentsUsed.toLocaleString('id-ID')} Akun`,
+                        limitText: currentLicense.features?.multiAgent ? `${agentsMax} Akun` : '1 Admin',
+                        subText: currentLicense.features?.multiAgent ? 'Mendukung pembagian peran & hak akses' : 'Mode admin tunggal',
+                        pct: agentsPct,
+                        hasBar: true,
+                      },
+                      {
+                        label: 'Siaran & Kampanye WA (Bulan Ini)',
+                        usedText: `${broadcastsUsed.toLocaleString('id-ID')} Terkirim`,
+                        limitText: broadcastsUnlimited ? 'Tanpa Batas' : `${broadcastsMax.toLocaleString('id-ID')}/bln`,
+                        subText: `${templatesUsed.toLocaleString('id-ID')} template pesan tersimpan · ${channelsUsed} kanal aktif (maks ${maxSessions} sesi WA${
+                          channelsMax > 0 ? `, ${channelsMax} kanal` : ''
+                        })`,
+                        pct: broadcastsPct,
+                        hasBar: !broadcastsUnlimited && broadcastsMax > 0,
+                      },
+                    ];
+
+                    return quotaCards.map((q) => (
+                      <div
+                        key={q.label}
+                        className="p-3 rounded-lg border border-gray-200 bg-gray-50/80 space-y-1.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-xs font-medium text-gray-800 leading-snug">
+                            {q.label}
+                          </span>
+                          <span className="font-mono text-[11px] font-semibold text-gray-900 tabular-nums shrink-0">
+                            {q.usedText}{' '}
+                            <span className="text-gray-400 font-normal">/ {q.limitText}</span>
+                          </span>
+                        </div>
+                        {q.hasBar && (
+                          <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${barColor(q.pct)}`}
+                              style={{ width: `${Math.max(q.pct > 0 ? 4 : 0, q.pct)}%` }}
+                            />
+                          </div>
+                        )}
+                        <p className="text-[11px] text-gray-500 leading-snug">{q.subText}</p>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+
+              {/* Section 2: Modul & Fitur Termasuk */}
+              <div className="pt-3 border-t border-gray-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h5 className="text-[11px] font-semibold text-gray-900 uppercase tracking-wider">
+                    Modul &amp; Fitur pada Paket Ini
+                  </h5>
                   <button
                     type="button"
                     onClick={() => setShowAllOverviewQuotas((v) => !v)}
                     className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
                   >
-                    <span>{showAllOverviewQuotas ? 'Ringkas detail' : 'Lihat semua detail'}</span>
+                    <span>{showAllOverviewQuotas ? 'Ringkas modul' : 'Lihat semua modul'}</span>
                     {showAllOverviewQuotas ? (
                       <ChevronUp className="w-3.5 h-3.5" />
                     ) : (
@@ -831,114 +950,89 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                     )}
                   </button>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
-                {[
-                  {
-                    label: 'Penyimpanan Dokumen & Media',
-                    value: `${(currentLicense.usage?.storageUsedMb ?? 0).toLocaleString('id-ID')} MB / ${formatStorageQuota(
-                      currentLicense.features?.maxStorageMb || 1024
-                    )} (Maks ${currentLicense.features?.maxAttachmentSizeMb || 10} MB/file)`,
-                    unlocked: !currentLicense.isExpired,
-                  },
-                  {
-                    label: 'Kapasitas Kontak',
-                    value:
-                      currentLicense.features?.maxContacts === 0
-                        ? `${(currentLicense.usage?.contacts ?? 0).toLocaleString('id-ID')} / Tanpa Batas`
-                        : `${(currentLicense.usage?.contacts ?? 0).toLocaleString('id-ID')} / ${(currentLicense.features?.maxContacts || 0).toLocaleString('id-ID')}`,
-                    unlocked: !currentLicense.isExpired,
-                  },
-                  {
-                    label: 'Siaran & Kampanye WA',
-                    value: currentLicense.features?.unlimitedBroadcast
-                      ? 'Tanpa Batas'
-                      : `${(currentLicense.usage?.broadcastsThisMonth ?? 0).toLocaleString('id-ID')} / ${(currentLicense.features?.maxBroadcastPerMonth || 1500).toLocaleString('id-ID')}/bln`,
-                    unlocked: !currentLicense.isExpired,
-                  },
-                  {
-                    label: 'Menu Inbox Live Chat CRM & CSAT',
-                    value: currentLicense.features?.liveChatCrm ? 'Terbuka' : 'Terkunci',
-                    unlocked: Boolean(currentLicense.features?.liveChatCrm),
-                  },
-                  {
-                    label: 'Multi-Sesi Nomor WhatsApp',
-                    value: currentLicense.features?.multiSession
-                      ? `Hingga ${currentLicense.features?.maxSessions || 3} Sesi`
-                      : `Maks ${currentLicense.features?.maxSessions || 1} Sesi`,
-                    unlocked: Boolean(currentLicense.features?.multiSession),
-                  },
-                  {
-                    label: 'Tim & Agen CS (Role Granular)',
-                    value: currentLicense.features?.multiAgent
-                      ? `${currentLicense.usage?.agents ?? 1} / ${currentLicense.features?.maxAgents || 5} Akun`
-                      : '1 Akun Admin',
-                    unlocked: Boolean(currentLicense.features?.multiAgent),
-                  },
-                  {
-                    label: 'Menu Komentar, Feed & Omnichannel',
-                    value: currentLicense.features?.omnichannel
-                      ? currentLicense.features?.maxChannels === 0
-                        ? 'Terbuka (Tanpa Batas)'
-                        : `Terbuka (${currentLicense.features?.maxChannels || 4} Kanal)`
-                      : 'Terkunci',
-                    unlocked: Boolean(currentLicense.features?.omnichannel),
-                  },
-                  {
-                    label: 'Menu Jadwal Post, Story & Ide Konten',
-                    value: currentLicense.features?.scheduledPosts ? 'Terbuka' : 'Terkunci',
-                    unlocked: Boolean(currentLicense.features?.scheduledPosts),
-                  },
-                  {
-                    label: 'Menu Otomasi Komentar & Auto-Reply',
-                    value:
-                      currentLicense.features?.autoReply !== false ? 'Terbuka' : 'Terkunci',
-                    unlocked: currentLicense.features?.autoReply !== false && !currentLicense.isExpired,
-                  },
-                  {
-                    label: 'Menu Ulang Tahun & Galeri Media',
-                    value: currentLicense.features?.birthdayAutomation ? 'Terbuka' : 'Terkunci',
-                    unlocked: Boolean(currentLicense.features?.birthdayAutomation),
-                  },
-                  {
-                    label: 'Menu Agent AI, KB & Konektor MCP',
-                    value: currentLicense.features?.aiAgent ? 'Terbuka' : 'Terkunci',
-                    unlocked: Boolean(currentLicense.features?.aiAgent),
-                  },
-                  {
-                    label: 'Ekspor Laporan CSV & Akses API',
-                    value: currentLicense.features?.exportReports
-                      ? currentLicense.features?.apiAccess
-                        ? 'CSV + API Aktif'
-                        : 'Ekspor CSV Aktif'
-                      : 'Terkunci',
-                    unlocked: Boolean(currentLicense.features?.exportReports),
-                  },
-                ]
-                  .slice(0, showAllOverviewQuotas ? 12 : 6)
-                  .map((feat) => (
-                    <div
-                      key={feat.label}
-                      className={`px-2.5 sm:px-3 py-2 rounded-lg border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 ${
-                        feat.unlocked
-                          ? 'bg-emerald-50/40 border-emerald-200/80 text-gray-800'
-                          : 'bg-gray-50 border-gray-200 text-gray-500'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {feat.unlocked ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        ) : (
-                          <Lock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                        )}
-                        <span className="truncate">{feat.label}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {[
+                    {
+                      label: 'Inbox Live Chat CRM & CSAT',
+                      value: currentLicense.features?.liveChatCrm ? 'Terbuka' : 'Terkunci',
+                      unlocked: Boolean(currentLicense.features?.liveChatCrm),
+                    },
+                    {
+                      label: 'Multi-Sesi Nomor WhatsApp',
+                      value: currentLicense.features?.multiSession
+                        ? `Hingga ${currentLicense.features?.maxSessions || 3} Sesi`
+                        : `Maks ${currentLicense.features?.maxSessions || 1} Sesi`,
+                      unlocked: Boolean(currentLicense.features?.multiSession),
+                    },
+                    {
+                      label: 'Komentar, Feed & Omnichannel',
+                      value: currentLicense.features?.omnichannel
+                        ? currentLicense.features?.maxChannels === 0
+                          ? 'Terbuka (Tanpa Batas)'
+                          : `Terbuka (${currentLicense.features?.maxChannels || 4} Kanal)`
+                        : 'Terkunci',
+                      unlocked: Boolean(currentLicense.features?.omnichannel),
+                    },
+                    {
+                      label: 'Jadwal Post, Story & Ide Konten',
+                      value: currentLicense.features?.scheduledPosts ? 'Terbuka' : 'Terkunci',
+                      unlocked: Boolean(currentLicense.features?.scheduledPosts),
+                    },
+                    {
+                      label: 'Otomasi Komentar & Auto-Reply',
+                      value:
+                        currentLicense.features?.autoReply !== false ? 'Terbuka' : 'Terkunci',
+                      unlocked: currentLicense.features?.autoReply !== false && !currentLicense.isExpired,
+                    },
+                    {
+                      label: 'Otomasi Ulang Tahun & Galeri Media',
+                      value: currentLicense.features?.birthdayAutomation ? 'Terbuka' : 'Terkunci',
+                      unlocked: Boolean(currentLicense.features?.birthdayAutomation),
+                    },
+                    {
+                      label: 'Agent AI, Knowledge Book & Konektor MCP',
+                      value: currentLicense.features?.aiAgent ? 'Terbuka' : 'Terkunci',
+                      unlocked: Boolean(currentLicense.features?.aiAgent),
+                    },
+                    {
+                      label: 'Ekspor Laporan CSV & Akses API',
+                      value: currentLicense.features?.exportReports
+                        ? currentLicense.features?.apiAccess
+                          ? 'CSV + API Aktif'
+                          : 'Ekspor CSV Aktif'
+                        : 'Terkunci',
+                      unlocked: Boolean(currentLicense.features?.exportReports),
+                    },
+                  ]
+                    .slice(0, showAllOverviewQuotas ? 8 : 4)
+                    .map((feat) => (
+                      <div
+                        key={feat.label}
+                        className={`px-3 py-2 rounded-lg border flex items-center justify-between gap-2 ${
+                          feat.unlocked
+                            ? 'bg-emerald-50/40 border-emerald-200/80 text-gray-800'
+                            : 'bg-gray-50 border-gray-200 text-gray-500'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {feat.unlocked ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          ) : (
+                            <Lock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                          )}
+                          <span className="leading-snug">{feat.label}</span>
+                        </div>
+                        <span
+                          className={`font-mono text-[11px] font-semibold shrink-0 ${
+                            feat.unlocked ? 'text-emerald-800' : 'text-gray-500'
+                          }`}
+                        >
+                          {feat.value}
+                        </span>
                       </div>
-                      <span className="font-mono text-[11px] font-semibold text-gray-900 pl-5 sm:pl-0 sm:shrink-0">
-                        {feat.value}
-                      </span>
-                    </div>
-                  ))}
+                    ))}
+                </div>
               </div>
             </div>
           </div>

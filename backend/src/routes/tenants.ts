@@ -294,6 +294,134 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
     }
   });
 
+  // DELETE a non-default business workspace owned by current Admin account
+  fastify.delete<{
+    Params: { companyId: string };
+  }>('/my-workspaces/:companyId', { preHandler: requireCompanyAdmin }, async (req, reply) => {
+    try {
+      const user = await getCurrentAuthUser(req);
+      if (!user) {
+        return reply.status(401).send({ success: false, error: 'Sesi tidak valid' });
+      }
+      const targetId = String(req.params.companyId || '').trim();
+      if (!targetId) {
+        return reply.status(400).send({ success: false, error: 'ID bisnis tidak valid.' });
+      }
+
+      const [targetCompany] = await db
+        .select()
+        .from(companies)
+        .where(eq(companies.id, targetId))
+        .limit(1);
+      if (!targetCompany) {
+        return reply.status(404).send({ success: false, error: 'Bisnis / workspace tidak ditemukan.' });
+      }
+
+      if (targetCompany.isDefault || targetCompany.id === DEFAULT_COMPANY_ID) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Workspace utama platform tidak dapat dihapus.',
+        });
+      }
+
+      const isAllowed =
+        user.isPlatformAdmin ||
+        targetCompany.id === user.homeCompanyId ||
+        (targetCompany.ownerEmail || '').toLowerCase() === user.email.toLowerCase();
+      if (!isAllowed) {
+        return reply.status(403).send({
+          success: false,
+          error: 'Anda tidak memiliki hak untuk menghapus bisnis tersebut.',
+        });
+      }
+
+      const allCompanies = await db
+        .select()
+        .from(companies)
+        .orderBy(desc(companies.isDefault), asc(companies.createdAt));
+
+      const accessible = allCompanies.filter(
+        (c) =>
+          user.isPlatformAdmin ||
+          c.id === user.homeCompanyId ||
+          c.id === user.companyId ||
+          (c.ownerEmail || '').toLowerCase() === user.email.toLowerCase()
+      );
+      const remaining = accessible.filter((c) => c.id !== targetCompany.id);
+
+      if (remaining.length === 0) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Minimal harus tersisa 1 bisnis aktif pada akun Anda.',
+        });
+      }
+
+      const fallbackCompany = remaining[0];
+
+      // Preserve the current admin account if its home companyId points to the workspace being deleted
+      let [agentRow] = await db
+        .select()
+        .from(crmAgents)
+        .where(eq(crmAgents.id, user.id))
+        .limit(1);
+
+      if (agentRow && agentRow.companyId === targetCompany.id) {
+        const [updatedAgent] = await db
+          .update(crmAgents)
+          .set({ companyId: fallbackCompany.id, updatedAt: new Date() })
+          .where(eq(crmAgents.id, agentRow.id))
+          .returning();
+        if (updatedAgent) {
+          agentRow = updatedAgent;
+        }
+      }
+
+      const [deleted] = await db
+        .delete(companies)
+        .where(eq(companies.id, targetCompany.id))
+        .returning();
+      if (!deleted) {
+        return reply.status(404).send({ success: false, error: 'Bisnis tidak ditemukan.' });
+      }
+
+      licenseService.invalidateCache(targetCompany.id);
+      liveEvents.emit('tenants:update', { action: 'delete', id: targetCompany.id });
+
+      if (user.companyId === targetCompany.id && agentRow) {
+        const secret = await getAuthSigningSecret();
+        const token = signSessionToken(agentRow.email, secret, fallbackCompany.id);
+        reply.header(
+          'Set-Cookie',
+          `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`
+        );
+        const session = await resolveAgentRoleSession(agentRow, fallbackCompany.id);
+        const license = await licenseService.getLicense(fallbackCompany.id, true);
+        return reply.send({
+          success: true,
+          message: `Bisnis "${deleted.name}" telah dihapus permanen. Beralih ke "${fallbackCompany.name}".`,
+          data: {
+            deletedId: deleted.id,
+            switched: true,
+            user: session,
+            company: fallbackCompany,
+            license,
+          },
+        });
+      }
+
+      return reply.send({
+        success: true,
+        message: `Bisnis "${deleted.name}" beserta seluruh datanya telah dihapus permanen.`,
+        data: {
+          deletedId: deleted.id,
+          switched: false,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
   // POST switch active workspace for Platform Superadmin or Multi-Tenant Account Owner
   fastify.post<{
     Body: { companyId?: string };
