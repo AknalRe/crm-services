@@ -73,7 +73,7 @@ export function formatRecipient(r: any, contact?: any, campaign?: any) {
 export default async function broadcastsRouter(fastify: FastifyInstance) {
   fastify.addHook('preHandler', async (req, reply) => {
     if (req.url.includes('/session-check')) {
-      const allowed = requirePermission('broadcasts', 'tracking', 'waha.manage', 'settings');
+      const allowed = requirePermission('broadcasts', 'tracking', 'settings', 'settings.edit');
       return allowed(req, reply);
     }
     const allowed =

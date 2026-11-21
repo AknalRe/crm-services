@@ -276,15 +276,10 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           conversationId: convId,
           contactId,
           direction: 'OUTBOUND',
-          messageType: mediaUrl
-            ? (mediaType?.startsWith('image')
-                ? 'IMAGE'
-                : mediaType?.startsWith('video')
-                ? 'VIDEO'
-                : 'DOCUMENT')
-            : 'TEXT',
+          messageType: mediaUrl ? 'MEDIA' : 'TEXT',
           mediaUrl: mediaUrl || null,
-          mediaMimetype: mediaType || null,
+          mediaType: mediaType || null,
+          mediaName: mediaName || null,
           channel: targetChannel,
           externalMessageId: sendResult.messageId || null,
           wahaSession: effectiveSession,
