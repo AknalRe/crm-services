@@ -255,6 +255,16 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
               Balas komentar sosial media masuk secara otomatis (jika tidak cocok aturan kata kunci)
             </span>
           </label>
+          <label className="flex items-center gap-2 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={config.humanTyping !== false}
+              onChange={(e) => onChangeConfig({ humanTyping: e.target.checked })}
+            />
+            <span>
+              Tandai dibaca dan tampilkan &quot;sedang mengetik...&quot; di WhatsApp sebelum AI mengirim balasan
+            </span>
+          </label>
         </div>
 
         <div className="space-y-3 pt-2 border-t border-gray-100">

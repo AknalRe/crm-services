@@ -511,7 +511,20 @@ export async function handleInboundAutomation(params: {
             }
           }
 
-          const aiResult = await generateAiAgentReply(trimmedInbound, {
+          const waTypingTarget =
+            channel === 'WHATSAPP' && aiCfg.humanTyping !== false
+              ? (isGroup ? externalThreadId : contact.nomorWhatsapp || externalThreadId) || null
+              : null;
+          const aiStartedAt = Date.now();
+          if (waTypingTarget) {
+            // Tandai pesan dibaca lalu tampilkan indikator "sedang mengetik" seperti agen manusia
+            await wahaService.sendSeen(waTypingTarget, sessionName || undefined).catch(() => {});
+            await wahaService.setTyping(waTypingTarget, true, sessionName || undefined).catch(() => {});
+          }
+
+          let aiResult: Awaited<ReturnType<typeof generateAiAgentReply>>;
+          try {
+            aiResult = await generateAiAgentReply(trimmedInbound, {
             configOverride: aiCfg,
             history,
             imageUrl: latestImageDataUri,
@@ -519,16 +532,37 @@ export async function handleInboundAutomation(params: {
             conversationId,
             contactName: contact.namaPanggilan || contact.namaLengkap || null,
             contactPhone: contact.nomorWhatsapp || null,
-            channel,
-          });
-          if (aiResult.reply) {
-            await sendAutoReplyMessage({
-              ...replyBase,
-              text: aiResult.reply,
-              replyToMessageId: aiResult.replyToMessageId || null,
-              outboundMedia: aiResult.outboundMedia,
+              channel,
             });
+          } catch (genErr) {
+            if (waTypingTarget) {
+              await wahaService.setTyping(waTypingTarget, false, sessionName || undefined).catch(() => {});
+            }
+            throw genErr;
+          }
+          if (aiResult.reply) {
+            if (waTypingTarget) {
+              // Durasi mengetik menyesuaikan panjang balasan (maks. 8 detik, termasuk waktu AI berpikir)
+              const typingMs = Math.min(8000, Math.max(1500, aiResult.reply.length * 35));
+              const remainingMs = typingMs - (Date.now() - aiStartedAt);
+              if (remainingMs > 0) await new Promise((resolve) => setTimeout(resolve, remainingMs));
+            }
+            try {
+              await sendAutoReplyMessage({
+                ...replyBase,
+                text: aiResult.reply,
+                replyToMessageId: aiResult.replyToMessageId || null,
+                outboundMedia: aiResult.outboundMedia,
+              });
+            } finally {
+              if (waTypingTarget) {
+                await wahaService.setTyping(waTypingTarget, false, sessionName || undefined).catch(() => {});
+              }
+            }
             return;
+          }
+          if (waTypingTarget) {
+            await wahaService.setTyping(waTypingTarget, false, sessionName || undefined).catch(() => {});
           }
         }
       } catch (aiErr: any) {

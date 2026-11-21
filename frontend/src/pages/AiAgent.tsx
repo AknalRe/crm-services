@@ -189,6 +189,7 @@ const DEFAULT_FORM_CONFIG: AiAgentConfig = {
   dmWahaSessions: [],
   dmScope: 'PERSONAL',
   groupMentionOnly: true,
+  humanTyping: true,
   provider: 'LOCAL_KB',
   model: 'local-kb-matcher',
   baseUrl: '',

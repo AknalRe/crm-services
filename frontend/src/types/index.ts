@@ -1150,6 +1150,7 @@ export interface AiAgentConfig {
   dmWahaSessions: string[];
   dmScope: 'PERSONAL' | 'GROUP' | 'BOTH';
   groupMentionOnly: boolean;
+  humanTyping: boolean;
   provider: AiProviderId;
   model: string;
   baseUrl?: string;

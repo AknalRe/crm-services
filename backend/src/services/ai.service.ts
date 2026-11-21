@@ -90,6 +90,7 @@ export interface AiAgentConfig {
   dmWahaSessions: string[];
   dmScope: 'PERSONAL' | 'GROUP' | 'BOTH';
   groupMentionOnly: boolean;
+  humanTyping: boolean;
   provider: AiProviderId;
   model: string;
   baseUrl?: string;
@@ -407,6 +408,7 @@ export const DEFAULT_AI_CONFIG: AiAgentConfig = {
   dmWahaSessions: [],
   dmScope: 'PERSONAL',
   groupMentionOnly: true,
+  humanTyping: true,
   provider: 'LOCAL_KB',
   model: 'local-kb-matcher',
   baseUrl: '',
@@ -589,6 +591,8 @@ function sanitizeStoredConfig(raw: any): AiAgentConfig {
       raw?.groupMentionOnly !== undefined
         ? Boolean(raw.groupMentionOnly)
         : DEFAULT_AI_CONFIG.groupMentionOnly,
+    humanTyping:
+      raw?.humanTyping !== undefined ? Boolean(raw.humanTyping) : DEFAULT_AI_CONFIG.humanTyping,
     provider,
     model,
     baseUrl,
@@ -726,6 +730,8 @@ export function mergeAiAgentConfig(prev: AiAgentConfig, incoming: Partial<AiAgen
       incoming?.groupMentionOnly !== undefined
         ? Boolean(incoming.groupMentionOnly)
         : prev.groupMentionOnly ?? true,
+    humanTyping:
+      incoming?.humanTyping !== undefined ? Boolean(incoming.humanTyping) : prev.humanTyping ?? true,
     provider: nextProvider,
     model: nextModel,
     baseUrl: nextBaseUrl,
