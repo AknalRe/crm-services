@@ -1000,6 +1000,22 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setTogglingAiStatus(false);
     }
   }, [selectedConversation, fetchConvAiStatus, toast]);
+
+  const handleEnableAutoReplyDm = useCallback(async () => {
+    try {
+      setTogglingAiStatus(true);
+      await api.saveAiAgentConfig({ autoReplyDm: true });
+      toast.success('Fitur balasan chat obrolan otomatis berhasil diaktifkan');
+      setShowAiStatusPopover(false);
+      if (selectedConversation) {
+        await fetchConvAiStatus(selectedConversation.id);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal mengaktifkan balasan chat otomatis');
+    } finally {
+      setTogglingAiStatus(false);
+    }
+  }, [selectedConversation, fetchConvAiStatus, toast]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [search, setSearch] = useState('');
@@ -5370,17 +5386,27 @@ export const Conversations: React.FC<ConversationsProps> = ({
                                   type="button"
                                   disabled={togglingAiStatus}
                                   onClick={() => void handleResetEscalation()}
-                                  className="w-full py-1.5 px-3 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                                  className="w-full py-1.5 px-3 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
                                 >
                                   <RotateCcw className="w-3.5 h-3.5" />
                                   <span>Aktifkan Kembali Balasan AI</span>
+                                </button>
+                              ) : convAiStatus.status === 'AUTO_REPLY_OFF' ? (
+                                <button
+                                  type="button"
+                                  disabled={togglingAiStatus}
+                                  onClick={() => void handleEnableAutoReplyDm()}
+                                  className="w-full py-1.5 px-3 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                                >
+                                  <Zap className="w-3.5 h-3.5" />
+                                  <span>Aktifkan Balas Chat Otomatis Sekarang</span>
                                 </button>
                               ) : convAiStatus.status === 'ACTIVE' ? (
                                 <button
                                   type="button"
                                   disabled={togglingAiStatus}
                                   onClick={() => void handlePauseAi()}
-                                  className="w-full py-1.5 px-3 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                                  className="w-full py-1.5 px-3 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
                                 >
                                   <span>Jeda Balasan AI (Ambil Alih Manual)</span>
                                 </button>
@@ -9927,6 +9953,16 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span>Aktifkan Kembali Balasan AI</span>
+                    </button>
+                  ) : convAiStatus.status === 'AUTO_REPLY_OFF' ? (
+                    <button
+                      type="button"
+                      disabled={togglingAiStatus}
+                      onClick={() => void handleEnableAutoReplyDm()}
+                      className="w-full py-1.5 px-3 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Aktifkan Balas Chat Otomatis</span>
                     </button>
                   ) : convAiStatus.status === 'ACTIVE' ? (
                     <button

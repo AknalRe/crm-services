@@ -1767,8 +1767,8 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         reason = 'Agent AI dimatikan di menu Pengaturan Agent AI.';
       } else if (!aiCfg.autoReplyDm) {
         status = 'AUTO_REPLY_OFF';
-        statusLabel = 'Auto-Reply DM Nonaktif';
-        reason = 'Fitur "Balas DM masuk secara otomatis" dimatikan di Pengaturan AI.';
+        statusLabel = 'Balas Chat Otomatis Nonaktif';
+        reason = 'Fitur "Balas pesan obrolan & chat masuk secara otomatis" dimatikan di Pengaturan AI.';
       } else if (isEscalated) {
         status = 'ESCALATED';
         statusLabel = 'AI Dijeda (Eskalasi CS)';

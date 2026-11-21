@@ -243,7 +243,7 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
               checked={config.autoReplyDm}
               onChange={(e) => onChangeConfig({ autoReplyDm: e.target.checked })}
             />
-            <span>Balas DM masuk secara otomatis (WhatsApp, IG, FB, Threads, Telegram)</span>
+            <span>Balas pesan obrolan / chat masuk secara otomatis (WhatsApp, IG, FB, Threads, Telegram)</span>
           </label>
           <label className="flex items-center gap-2 text-xs text-gray-700">
             <input
@@ -319,13 +319,13 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
             )}
             {!config.autoReplyDm && (
               <p className="text-[10px] text-amber-700 mt-1.5">
-                Aktifkan &quot;Balas DM masuk secara otomatis&quot; agar pengaturan cakupan ini berlaku.
+                Aktifkan &quot;Balas pesan obrolan / chat masuk secara otomatis&quot; di atas agar pengaturan cakupan ini berlaku.
               </p>
             )}
           </div>
 
           <div>
-            <div className="text-[11px] font-medium text-gray-700 mb-1.5">Live chat / DM</div>
+            <div className="text-[11px] font-medium text-gray-700 mb-1.5">Kanal obrolan / chat masuk</div>
             <div className="flex flex-wrap gap-1.5">
               {DM_CHANNEL_OPTIONS.map((opt) => {
                 const active = (config.dmChannels || []).includes(opt.id);
