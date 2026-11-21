@@ -311,6 +311,7 @@ export async function handleInboundAutomation(params: {
   sessionName?: string | null;
   isNewConversation: boolean;
   isGroup?: boolean;
+  isExcluded?: boolean;
   companyId?: string;
 }): Promise<void> {
   const {
@@ -324,6 +325,7 @@ export async function handleInboundAutomation(params: {
     sessionName,
     isNewConversation,
     isGroup = false,
+    isExcluded = false,
     companyId: companyIdParam,
   } = params;
 
@@ -332,9 +334,9 @@ export async function handleInboundAutomation(params: {
   try {
     const settings = await getSettingMap(resolvedCompanyId);
 
-    // 1. Auto-Assign Agent if unassigned (only assign to ONLINE / ready agents, skip AWAY/OFFLINE)
+    // 1. Auto-Assign Agent if unassigned (only assign to ONLINE / ready agents, skip AWAY/OFFLINE, skip groups & non-penilaian)
     const assignMode = settings.auto_assign_mode || 'NONE';
-    if (!isGroup && !assignedAgentId && (assignMode === 'ROUND_ROBIN' || assignMode === 'LEAST_BUSY')) {
+    if (!isGroup && !isExcluded && !assignedAgentId && (assignMode === 'ROUND_ROBIN' || assignMode === 'LEAST_BUSY')) {
       const allActiveAgents = await db
         .select()
         .from(crmAgents)
@@ -397,7 +399,7 @@ export async function handleInboundAutomation(params: {
 
     // 2. Keyword Auto-Reply Rules (WhatsApp & Omnichannel)
     const trimmedBody = (inboundBody || '').trim().toLowerCase();
-    if (trimmedBody && !isGroup) {
+    if (trimmedBody && !isGroup && !isExcluded) {
       const rules = await db
         .select()
         .from(autoReplyRules)
@@ -423,7 +425,7 @@ export async function handleInboundAutomation(params: {
     }
 
     // 3. Welcome Message for new conversations
-    if (!isGroup && isNewConversation && settings.welcome_enabled === 'true' && settings.welcome_message?.trim()) {
+    if (!isGroup && !isExcluded && isNewConversation && settings.welcome_enabled === 'true' && settings.welcome_message?.trim()) {
       await sendAutoReplyMessage({
         ...replyBase,
         text: formatPersonalization(settings.welcome_message.trim(), contact),
@@ -445,6 +447,7 @@ export async function handleInboundAutomation(params: {
           aiCfg.enabled &&
           aiCfg.autoReplyDm &&
           !alreadyEscalated &&
+          (!isExcluded || aiCfg.replyToNonPenilaian !== false) &&
           isAiAllowedForDm(aiCfg, channel, sessionName, isGroup) &&
           (!isGroup ||
             !aiCfg.groupMentionOnly ||
@@ -517,8 +520,7 @@ export async function handleInboundAutomation(params: {
               : null;
           const aiStartedAt = Date.now();
           if (waTypingTarget) {
-            // Tandai pesan dibaca lalu tampilkan indikator "sedang mengetik" seperti agen manusia
-            await wahaService.sendSeen(waTypingTarget, sessionName || undefined).catch(() => {});
+            // Tampilkan status "sedang mengetik..." tanpa sendSeen dulu agar pesan tidak tertandai dibaca jika AI gagal / tidak membalas
             await wahaService.setTyping(waTypingTarget, true, sessionName || undefined).catch(() => {});
           }
 
@@ -546,6 +548,8 @@ export async function handleInboundAutomation(params: {
               const typingMs = Math.min(8000, Math.max(1500, aiResult.reply.length * 35));
               const remainingMs = typingMs - (Date.now() - aiStartedAt);
               if (remainingMs > 0) await new Promise((resolve) => setTimeout(resolve, remainingMs));
+              // Tandai pesan dibaca (centang 2 biru) sesaat sebelum balasan terkirim
+              await wahaService.sendSeen(waTypingTarget, sessionName || undefined).catch(() => {});
             }
             try {
               await sendAutoReplyMessage({
@@ -573,6 +577,7 @@ export async function handleInboundAutomation(params: {
     // 5. Off-Hours Auto-Reply (throttled per conversation)
     if (
       !isGroup &&
+      !isExcluded &&
       settings.offhours_enabled === 'true' &&
       settings.offhours_message?.trim() &&
       !isWithinBusinessHours(settings)

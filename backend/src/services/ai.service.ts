@@ -91,6 +91,7 @@ export interface AiAgentConfig {
   dmScope: 'PERSONAL' | 'GROUP' | 'BOTH';
   groupMentionOnly: boolean;
   humanTyping: boolean;
+  replyToNonPenilaian: boolean;
   provider: AiProviderId;
   model: string;
   baseUrl?: string;
@@ -409,6 +410,7 @@ export const DEFAULT_AI_CONFIG: AiAgentConfig = {
   dmScope: 'PERSONAL',
   groupMentionOnly: true,
   humanTyping: true,
+  replyToNonPenilaian: true,
   provider: 'LOCAL_KB',
   model: 'local-kb-matcher',
   baseUrl: '',
@@ -593,6 +595,10 @@ function sanitizeStoredConfig(raw: any): AiAgentConfig {
         : DEFAULT_AI_CONFIG.groupMentionOnly,
     humanTyping:
       raw?.humanTyping !== undefined ? Boolean(raw.humanTyping) : DEFAULT_AI_CONFIG.humanTyping,
+    replyToNonPenilaian:
+      raw?.replyToNonPenilaian !== undefined
+        ? Boolean(raw.replyToNonPenilaian)
+        : DEFAULT_AI_CONFIG.replyToNonPenilaian,
     provider,
     model,
     baseUrl,
@@ -732,6 +738,10 @@ export function mergeAiAgentConfig(prev: AiAgentConfig, incoming: Partial<AiAgen
         : prev.groupMentionOnly ?? true,
     humanTyping:
       incoming?.humanTyping !== undefined ? Boolean(incoming.humanTyping) : prev.humanTyping ?? true,
+    replyToNonPenilaian:
+      incoming?.replyToNonPenilaian !== undefined
+        ? Boolean(incoming.replyToNonPenilaian)
+        : prev.replyToNonPenilaian ?? true,
     provider: nextProvider,
     model: nextModel,
     baseUrl: nextBaseUrl,

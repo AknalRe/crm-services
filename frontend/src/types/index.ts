@@ -1151,6 +1151,7 @@ export interface AiAgentConfig {
   dmScope: 'PERSONAL' | 'GROUP' | 'BOTH';
   groupMentionOnly: boolean;
   humanTyping: boolean;
+  replyToNonPenilaian: boolean;
   provider: AiProviderId;
   model: string;
   baseUrl?: string;

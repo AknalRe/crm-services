@@ -262,7 +262,17 @@ export const AiPersonalityPromptPanel: React.FC<AiPersonalityPromptPanelProps> =
               onChange={(e) => onChangeConfig({ humanTyping: e.target.checked })}
             />
             <span>
-              Tandai dibaca dan tampilkan &quot;sedang mengetik...&quot; di WhatsApp sebelum AI mengirim balasan
+              Tandai dibaca dan tampilkan &quot;sedang mengetik...&quot; di WhatsApp saat AI membalas
+            </span>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={config.replyToNonPenilaian !== false}
+              onChange={(e) => onChangeConfig({ replyToNonPenilaian: e.target.checked })}
+            />
+            <span>
+              Izinkan AI membalas kontak &quot;Non-Penilaian&quot; (misal nomor internal staf atau pengujian)
             </span>
           </label>
         </div>

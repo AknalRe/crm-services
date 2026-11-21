@@ -190,6 +190,7 @@ const DEFAULT_FORM_CONFIG: AiAgentConfig = {
   dmScope: 'PERSONAL',
   groupMentionOnly: true,
   humanTyping: true,
+  replyToNonPenilaian: true,
   provider: 'LOCAL_KB',
   model: 'local-kb-matcher',
   baseUrl: '',
@@ -222,6 +223,12 @@ function normalizeConfigState(cfg?: Partial<AiAgentConfig> | null): AiAgentConfi
       ? cfg.commentChannels
       : DEFAULT_FORM_CONFIG.commentChannels,
     dmWahaSessions: Array.isArray(cfg?.dmWahaSessions) ? cfg.dmWahaSessions : [],
+    humanTyping:
+      cfg?.humanTyping !== undefined ? Boolean(cfg.humanTyping) : DEFAULT_FORM_CONFIG.humanTyping,
+    replyToNonPenilaian:
+      cfg?.replyToNonPenilaian !== undefined
+        ? Boolean(cfg.replyToNonPenilaian)
+        : DEFAULT_FORM_CONFIG.replyToNonPenilaian,
   };
 }
 

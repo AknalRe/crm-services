@@ -4306,7 +4306,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         liveEvents.emit('tracking:update', { conversationId: convId }, companyId);
 
         const convIsExcludedNow = existingConv ? Boolean(existingConv.excludeFromMetrics) : contactExcluded;
-        if (body && !isFromMe && (isGroupChat || !convIsExcludedNow)) {
+        if (body && !isFromMe) {
           void runWithCompany(companyId, () =>
             handleInboundAutomation({
               conversationId: convId,
@@ -4314,6 +4314,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
               assignedAgentId: existingConv?.assignedAgentId || null,
               inboundBody: body,
               isGroup: isGroupChat,
+              isExcluded: convIsExcludedNow,
               externalThreadId: isLidSource
                 ? rawFrom
                 : existingConv?.externalThreadId || (isGroupChat ? rawFrom : null),
