@@ -32,7 +32,6 @@ import {
   Check,
   Pencil,
   Trash2,
-  AlertTriangle,
   Eraser,
 } from 'lucide-react';
 import {
@@ -44,6 +43,7 @@ import {
 } from '../types';
 import { ReneoCrmLogo } from './ReneoCrmLogo';
 import { CompanyProfileModal } from './CompanyProfileModal';
+import { ConfirmModal } from './ui/ConfirmModal';
 import { hasPerm } from '../lib/permissions';
 import api from '../services/api';
 import { useToast } from './ui/ToastProvider';
@@ -1021,114 +1021,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }}
       />
     )}
-    {workspaceToDelete && (
-      <div
-        className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4"
-        onClick={() => {
-          if (!deletingWorkspace) setWorkspaceToDelete(null);
-        }}
-      >
-        <div
-          className="w-full max-w-md rounded-xl bg-white border border-gray-200 shadow-2xl overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="p-5 space-y-3.5">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-red-50 border border-red-200 text-red-600 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-gray-900">
-                  Hapus Bisnis &ldquo;{workspaceToDelete.name}&rdquo;?
-                </h3>
-                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
-                  Tindakan ini bersifat permanen dan tidak dapat dibatalkan. Seluruh data kontak, riwayat chat, jadwal kampanye, kanal, dan pengaturan pada bisnis ini akan ikut terhapus.
-                </p>
-              </div>
-            </div>
-
-            {(workspaceToDelete.isCurrent || workspaceToDelete.id === user?.companyId) && (
-              <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
-                Anda sedang berada di workspace ini. Setelah dihapus, sistem otomatis memindahkan Anda ke bisnis lain yang masih aktif.
-              </div>
-            )}
-          </div>
-
-          <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              disabled={deletingWorkspace}
-              onClick={() => setWorkspaceToDelete(null)}
-              className="h-9 px-3.5 rounded-md border border-gray-300 bg-white hover:bg-gray-100 text-xs font-medium text-gray-700 disabled:opacity-50 transition-colors"
-            >
-              Batal
-            </button>
-            <button
-              type="button"
-              disabled={deletingWorkspace}
-              onClick={() => void handleConfirmDeleteWorkspace()}
-              className="h-9 px-3.5 rounded-md bg-red-600 hover:bg-red-700 text-xs font-semibold text-white disabled:opacity-60 inline-flex items-center gap-1.5 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>{deletingWorkspace ? 'Menghapus...' : 'Hapus Bisnis Permanen'}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
-    {showClearDataModal && user && (
-      <div
-        className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4"
-        onClick={() => {
-          if (!clearingData) setShowClearDataModal(false);
-        }}
-      >
-        <div
-          className="w-full max-w-md rounded-xl bg-white border border-gray-200 shadow-2xl overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="p-5 space-y-3.5">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shrink-0">
-                <Eraser className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-bold text-gray-900">
-                  Bersihkan Data &ldquo;{user.companyName || licenseInfo?.companyName || 'Bisnis Ini'}&rdquo;?
-                </h3>
-                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
-                  Seluruh data operasional pada bisnis ini akan dihapus permanen: <strong>kontak, percakapan, pesan, siaran/kampanye, jadwal post, komentar, dan media</strong>.
-                </p>
-              </div>
-            </div>
-
-            <div className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800 leading-relaxed">
-              Workspace bisnis, paket lisensi aktif, akun tim/agen CS, dan pengaturan koneksi kanal WhatsApp <strong>tetap aman dan tidak dihapus</strong>.
-            </div>
-          </div>
-
-          <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              disabled={clearingData}
-              onClick={() => setShowClearDataModal(false)}
-              className="h-9 px-3.5 rounded-md border border-gray-300 bg-white hover:bg-gray-100 text-xs font-medium text-gray-700 disabled:opacity-50 transition-colors"
-            >
-              Batal
-            </button>
-            <button
-              type="button"
-              disabled={clearingData}
-              onClick={() => void handleConfirmClearCompanyData()}
-              className="h-9 px-3.5 rounded-md bg-amber-600 hover:bg-amber-700 text-xs font-semibold text-white disabled:opacity-60 inline-flex items-center gap-1.5 transition-colors"
-            >
-              <Eraser className="w-3.5 h-3.5" />
-              <span>{clearingData ? 'Membersihkan...' : 'Bersihkan Data Sekarang'}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
+    <ConfirmModal
+      isOpen={workspaceToDelete !== null}
+      onClose={() => !deletingWorkspace && setWorkspaceToDelete(null)}
+      onConfirm={handleConfirmDeleteWorkspace}
+      isLoading={deletingWorkspace}
+      title={`Hapus Bisnis "${workspaceToDelete?.name || ''}"?`}
+      description={
+        workspaceToDelete && (workspaceToDelete.isCurrent || workspaceToDelete.id === user?.companyId)
+          ? `Seluruh data kontak, riwayat chat, jadwal kampanye, kanal, dan pengaturan pada bisnis "${workspaceToDelete.name}" akan dihapus permanen. Setelah dihapus, sistem otomatis memindahkan Anda ke bisnis lain yang masih aktif.`
+          : `Seluruh data kontak, riwayat chat, jadwal kampanye, kanal, dan pengaturan pada bisnis "${workspaceToDelete?.name || ''}" akan dihapus permanen dan tidak dapat dibatalkan.`
+      }
+      confirmLabel="Hapus Bisnis"
+      variant="danger"
+    />
+    <ConfirmModal
+      isOpen={showClearDataModal && Boolean(user)}
+      onClose={() => !clearingData && setShowClearDataModal(false)}
+      onConfirm={handleConfirmClearCompanyData}
+      isLoading={clearingData}
+      title={`Bersihkan Data "${user?.companyName || licenseInfo?.companyName || 'Bisnis Ini'}"?`}
+      description="Seluruh data operasional pada bisnis ini (kontak, percakapan, pesan, siaran/kampanye, jadwal post, dan komentar) akan dihapus permanen. Workspace bisnis, paket lisensi aktif, akun tim/agen CS, dan pengaturan koneksi kanal tetap aman."
+      confirmLabel="Bersihkan Data"
+      variant="danger"
+    />
     </>
   );
 };
