@@ -66,12 +66,120 @@ export function isConnectChannelPathname(pathname: string): boolean {
 
 export function isGuidePathname(pathname: string): boolean {
   const rel = getRelativeSubpath(pathname).toLowerCase();
-  return rel === 'guide' || rel === 'panduan' || rel === 'docs';
+  const first = rel.split('/')[0] || '';
+  return first === 'guide' || first === 'panduan' || first === 'docs';
 }
 
-export function getGuidePath(pathname: string): string {
+export const GUIDE_SECTION_ALIASES: Record<string, string> = {
+  quickstart: 'quickstart',
+  'memulai-cepat': 'quickstart',
+  sop: 'quickstart',
+  pengantar: 'quickstart',
+  workspace: 'workspace',
+  'multi-workspace': 'workspace',
+  bisnis: 'workspace',
+  'profil-usaha': 'workspace',
+  perusahaan: 'workspace',
+  whatsapp: 'whatsapp',
+  waha: 'whatsapp',
+  wa: 'whatsapp',
+  'anti-banned': 'whatsapp',
+  qr: 'whatsapp',
+  omnichannel: 'omnichannel',
+  instagram: 'omnichannel',
+  facebook: 'omnichannel',
+  telegram: 'omnichannel',
+  threads: 'omnichannel',
+  contacts: 'contacts',
+  kontak: 'contacts',
+  'impor-data': 'contacts',
+  excel: 'contacts',
+  csv: 'contacts',
+  inbox: 'inbox',
+  'live-chat': 'inbox',
+  chat: 'inbox',
+  percakapan: 'inbox',
+  broadcasts: 'broadcasts',
+  siaran: 'broadcasts',
+  kampanye: 'broadcasts',
+  'pesan-siaran': 'broadcasts',
+  automation: 'automation',
+  otomasi: 'automation',
+  'auto-reply': 'automation',
+  'ulang-tahun': 'automation',
+  birthday: 'automation',
+  'ai-agent': 'ai-agent',
+  ai: 'ai-agent',
+  agent: 'ai-agent',
+  'knowledge-books': 'ai-agent',
+  posts: 'posts',
+  'jadwal-post': 'posts',
+  story: 'posts',
+  'story-wa': 'posts',
+  media: 'posts',
+  galeri: 'posts',
+  'sla-csat': 'sla-csat',
+  sla: 'sla-csat',
+  csat: 'sla-csat',
+  rating: 'sla-csat',
+  'team-rbac': 'team-rbac',
+  tim: 'team-rbac',
+  rbac: 'team-rbac',
+  agen: 'team-rbac',
+  'hak-akses': 'team-rbac',
+  'license-maintenance': 'license-maintenance',
+  license: 'license-maintenance',
+  lisensi: 'license-maintenance',
+  paket: 'license-maintenance',
+  harga: 'license-maintenance',
+  troubleshooting: 'troubleshooting',
+  faq: 'troubleshooting',
+  kendala: 'troubleshooting',
+  bantuan: 'troubleshooting',
+  error: 'troubleshooting',
+};
+
+export function normalizeGuideSectionId(raw?: string | null): string | null {
+  if (!raw) return null;
+  const candidate = String(raw).trim().toLowerCase().replace(/^#\/?/, '').replace(/\/+$/, '');
+  return GUIDE_SECTION_ALIASES[candidate] || candidate;
+}
+
+export function parseGuideSectionFromPathname(pathname: string, hash = ''): string | null {
+  const rel = getRelativeSubpath(pathname).toLowerCase();
+  const segs = rel.split('/').filter(Boolean);
+  const first = segs[0] || '';
+  if (first === 'guide' || first === 'panduan' || first === 'docs') {
+    if (segs[1]) {
+      return normalizeGuideSectionId(segs[1]);
+    }
+  }
+  const cleanHash = (hash || '').replace(/^#\/?/, '').trim().toLowerCase();
+  if (cleanHash.startsWith('panduan/')) return normalizeGuideSectionId(cleanHash.slice('panduan/'.length));
+  if (cleanHash.startsWith('guide/')) return normalizeGuideSectionId(cleanHash.slice('guide/'.length));
+  if (cleanHash.startsWith('docs/')) return normalizeGuideSectionId(cleanHash.slice('docs/'.length));
+  if (
+    cleanHash &&
+    !cleanHash.startsWith('landing') &&
+    !cleanHash.startsWith('login') &&
+    !cleanHash.startsWith('paket') &&
+    !cleanHash.startsWith('fitur')
+  ) {
+    return normalizeGuideSectionId(cleanHash);
+  }
+  return null;
+}
+
+export function buildGuidePath(pathname: string, sectionId?: string | null): string {
   const root = getAppRootPath(pathname);
-  return root === '/' ? '/panduan' : `${root}panduan`;
+  const base = root === '/' ? '/panduan' : `${root}panduan`;
+  const normId = normalizeGuideSectionId(sectionId);
+  if (!normId || normId === 'quickstart') return base;
+  return `${base}/${normId}`;
+}
+
+export function getGuidePath(pathname: string, sectionId?: string | null): string {
+  return buildGuidePath(pathname, sectionId);
 }
 
 export function getLoginPath(pathname: string): string {

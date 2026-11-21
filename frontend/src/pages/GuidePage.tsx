@@ -37,15 +37,24 @@ import {
   Star,
   FileText,
   UserCheck,
+  Share2,
+  Link2,
 } from 'lucide-react';
 import { ReneoCrmLogo } from '../components/ReneoCrmLogo';
 import { Button } from '../components/ui/Button';
 import { AuthStatus, SettingsSection } from '../types';
+import {
+  buildGuidePath,
+  normalizeGuideSectionId,
+  parseGuideSectionFromPathname,
+} from '../services/paths';
 
 export interface GuidePageProps {
   authenticated?: boolean;
   user?: AuthStatus['user'] | null;
   isStandaloneRoute?: boolean;
+  initialSectionId?: string | null;
+  onSectionChange?: (sectionId: string) => void;
   onBackToApp?: () => void;
   onBackToLanding?: () => void;
   onNavigateToTab?: (tab: string, section?: SettingsSection) => void;
@@ -84,14 +93,27 @@ export const GuidePage: React.FC<GuidePageProps> = ({
   authenticated = false,
   user,
   isStandaloneRoute = false,
+  initialSectionId = null,
+  onSectionChange,
   onBackToApp,
   onBackToLanding,
   onNavigateToTab,
 }) => {
-  const [activeSectionId, setActiveSectionId] = useState<string>('quickstart');
+  const [activeSectionId, setActiveSectionId] = useState<string>(() => {
+    if (initialSectionId) {
+      return normalizeGuideSectionId(initialSectionId) || 'quickstart';
+    }
+    if (typeof window !== 'undefined') {
+      const parsed = parseGuideSectionFromPathname(window.location.pathname, window.location.hash);
+      if (parsed) return parsed;
+    }
+    return 'quickstart';
+  });
+
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
+  const [copiedShareUrl, setCopiedShareUrl] = useState<string | null>(null);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -100,6 +122,51 @@ export const GuidePage: React.FC<GuidePageProps> = ({
       setCopiedSnippet((prev) => (prev === text ? null : prev));
     }, 2000);
   };
+
+  const handleCopyShareLink = (secId: string) => {
+    if (typeof window === 'undefined') return;
+    const sharePath = buildGuidePath(window.location.pathname, secId);
+    const fullUrl = `${window.location.origin}${sharePath}`;
+    navigator.clipboard.writeText(fullUrl);
+    setCopiedShareUrl(secId);
+    setTimeout(() => {
+      setCopiedShareUrl((prev) => (prev === secId ? null : prev));
+    }, 2500);
+  };
+
+  const selectSection = (secId: string) => {
+    const norm = normalizeGuideSectionId(secId) || secId;
+    setActiveSectionId(norm);
+    setMobileMenuOpen(false);
+    if (typeof window !== 'undefined') {
+      const targetPath = buildGuidePath(window.location.pathname, norm);
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState(null, '', targetPath);
+      }
+    }
+    onSectionChange?.(norm);
+  };
+
+  useEffect(() => {
+    if (initialSectionId) {
+      const normalized = normalizeGuideSectionId(initialSectionId);
+      if (normalized && normalized !== activeSectionId) {
+        setActiveSectionId(normalized);
+      }
+    }
+  }, [initialSectionId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = () => {
+      const parsed = parseGuideSectionFromPathname(window.location.pathname, window.location.hash);
+      if (parsed && parsed !== activeSectionId) {
+        setActiveSectionId(parsed);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [activeSectionId]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1296,10 +1363,7 @@ export const GuidePage: React.FC<GuidePageProps> = ({
                       <button
                         key={sec.id}
                         type="button"
-                        onClick={() => {
-                          setActiveSectionId(sec.id);
-                          setMobileMenuOpen(false);
-                        }}
+                        onClick={() => selectSection(sec.id)}
                         className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                           isActive
                             ? 'bg-blue-50 text-blue-700 font-semibold border border-blue-200/80 shadow-2xs'
@@ -1343,24 +1407,52 @@ export const GuidePage: React.FC<GuidePageProps> = ({
                       {activeSection.category}
                     </span>
                     <span className="text-xs text-gray-400">· Bab {activeSection.order}</span>
+                    <span className="font-mono text-[10.5px] text-gray-400 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded hidden sm:inline">
+                      /panduan/{activeSection.id}
+                    </span>
                   </div>
 
-                  {activeSection.tabTarget && onNavigateToTab && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() =>
-                        onNavigateToTab(
-                          activeSection.tabTarget!.tab,
-                          activeSection.tabTarget!.section
-                        )
-                      }
-                      title={activeSection.tabTarget.label}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleCopyShareLink(activeSection.id)}
+                      className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium border transition-colors shadow-2xs ${
+                        copiedShareUrl === activeSection.id
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:text-gray-900'
+                      }`}
+                      title="Salin tautan permanen untuk membagikan bab panduan ini"
                     >
-                      <ExternalLink className="w-3.5 h-3.5 text-blue-600 shrink-0 mr-1" />
-                      <span>{activeSection.tabTarget.label}</span>
-                    </Button>
-                  )}
+                      {copiedShareUrl === activeSection.id ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span className="font-semibold text-emerald-700">Tautan Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Share2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span>Salin Tautan Bagian</span>
+                        </>
+                      )}
+                    </button>
+
+                    {activeSection.tabTarget && onNavigateToTab && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          onNavigateToTab(
+                            activeSection.tabTarget!.tab,
+                            activeSection.tabTarget!.section
+                          )
+                        }
+                        title={activeSection.tabTarget.label}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-blue-600 shrink-0 mr-1" />
+                        <span>{activeSection.tabTarget.label}</span>
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
@@ -1388,7 +1480,7 @@ export const GuidePage: React.FC<GuidePageProps> = ({
                         <Button
                           variant="secondary"
                           size="md"
-                          onClick={() => setActiveSectionId(prevSection.id)}
+                          onClick={() => selectSection(prevSection.id)}
                           className="max-w-xs"
                         >
                           <ArrowLeft className="w-3.5 h-3.5 mr-1 text-gray-500" />
@@ -1402,7 +1494,7 @@ export const GuidePage: React.FC<GuidePageProps> = ({
                         <Button
                           variant="primary"
                           size="md"
-                          onClick={() => setActiveSectionId(nextSection.id)}
+                          onClick={() => selectSection(nextSection.id)}
                           className="ml-auto max-w-xs"
                         >
                           <span className="truncate">{nextSection.title}</span>

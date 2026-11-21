@@ -29,6 +29,7 @@ import api from './services/api';
 import { hasAnyPerm, hasPerm } from './lib/permissions';
 import { subscribeLiveEvent } from './services/liveEvents';
 import {
+  buildGuidePath,
   buildTabPath,
   getAppRootPath,
   getGuidePath,
@@ -39,7 +40,9 @@ import {
   isGuidePathname,
   isLandingPathname,
   isLoginPathname,
+  normalizeGuideSectionId,
   parseCompanyAndTabFromPathname,
+  parseGuideSectionFromPathname,
   toCompanySlug,
 } from './services/paths';
 import {
@@ -244,7 +247,9 @@ function AppShell() {
     if (
       isLoginPathname(window.location.pathname) ||
       isCsatPathname(window.location.pathname) ||
-      isConnectChannelPathname(window.location.pathname)
+      isConnectChannelPathname(window.location.pathname) ||
+      isGuidePathname(window.location.pathname) ||
+      showGuidePage
     ) {
       return;
     }
@@ -387,14 +392,14 @@ function AppShell() {
       navigatePath(buildTabPath(currentPathname, currentTab, settingsSection, companySlug), '', true);
       return;
     }
-    // Jika berada di workspace (bukan landing), pastikan URL selalu memuat /:companySlug/:tab
-    if (!showLandingPage) {
+    // Jika berada di workspace (bukan landing dan bukan guide), pastikan URL selalu memuat /:companySlug/:tab
+    if (!showLandingPage && !showGuidePage && !isGuidePathname(currentPathname)) {
       const parsed = parseCompanyAndTabFromPathname(currentPathname);
       if (!parsed.companySlug || parsed.companySlug !== companySlug) {
         navigatePath(buildTabPath(currentPathname, currentTab, settingsSection, companySlug), '', true);
       }
     }
-  }, [authStatus?.authenticated, authStatus?.user?.companyId, authStatus?.user?.companySlug, isLoginRoute, showLandingPage]);
+  }, [authStatus?.authenticated, authStatus?.user?.companyId, authStatus?.user?.companySlug, isLoginRoute, showLandingPage, showGuidePage]);
 
   useEffect(() => {
     if (!authStatus?.authenticated) return;
@@ -540,10 +545,10 @@ function AppShell() {
     navigatePath(landingPath, '');
   };
 
-  const openGuidePage = () => {
+  const openGuidePage = (sectionId?: string) => {
     setShowGuidePage(true);
     setShowLandingPage(false);
-    navigatePath(getGuidePath(currentPathname), '');
+    navigatePath(buildGuidePath(currentPathname, sectionId), '');
   };
 
   if (accessRestriction) {
@@ -571,11 +576,24 @@ function AppShell() {
   }
 
   if (showGuidePage) {
+    const currentGuideSection = parseGuideSectionFromPathname(
+      currentPathname,
+      typeof window !== 'undefined' ? window.location.hash : ''
+    );
+
     return (
       <GuidePage
         authenticated={Boolean(authStatus?.authenticated)}
         user={authStatus?.user}
         isStandaloneRoute={!authStatus?.authenticated}
+        initialSectionId={currentGuideSection}
+        onSectionChange={(secId) => {
+          const nextUrl = buildGuidePath(currentPathname, secId);
+          if (currentPathname !== nextUrl) {
+            window.history.pushState(null, '', nextUrl);
+            setCurrentPathname(nextUrl);
+          }
+        }}
         onBackToApp={
           authStatus?.authenticated
             ? () => {
