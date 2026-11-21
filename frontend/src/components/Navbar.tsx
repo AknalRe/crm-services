@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, AlertTriangle, Menu, ShieldCheck, Clock, Home } from 'lucide-react';
+import { RefreshCw, AlertTriangle, Menu, ShieldCheck, Clock, Home, BookOpen } from 'lucide-react';
 import { LicenseInfo } from '../types';
 import { Button } from './ui/Button';
 
@@ -9,6 +9,7 @@ interface NavbarProps {
   onRefresh: () => void;
   onOpenPlans?: () => void;
   onOpenLanding?: () => void;
+  onOpenGuide?: () => void;
   onMenuClick?: () => void;
   isRefreshing?: boolean;
 }
@@ -19,6 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onRefresh,
   onOpenPlans,
   onOpenLanding,
+  onOpenGuide,
   onMenuClick,
   isRefreshing = false,
 }) => {
@@ -81,6 +83,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               Info Lisensi
             </span>
           </button>
+        )}
+
+        {onOpenGuide && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onOpenGuide}
+            title="Buku Petunjuk & Panduan Penggunaan Reneo CRM"
+            aria-label="Buku Panduan"
+          >
+            <BookOpen className="w-3.5 h-3.5 shrink-0 text-indigo-600" />
+            <span className="hidden sm:inline">Buku Panduan</span>
+          </Button>
         )}
 
         {onOpenLanding && (

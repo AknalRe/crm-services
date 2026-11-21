@@ -1,4 +1,14 @@
-const RESERVED_FIRST_SEGMENTS = new Set(['login', 'landing', 'csat', 'connect-channel', 'api', 'assets']);
+const RESERVED_FIRST_SEGMENTS = new Set([
+  'login',
+  'landing',
+  'csat',
+  'connect-channel',
+  'api',
+  'assets',
+  'guide',
+  'panduan',
+  'docs',
+]);
 
 export const CRM_TAB_SEGMENTS = new Set([
   'dashboard',
@@ -52,6 +62,16 @@ export function isCsatPathname(pathname: string): boolean {
 
 export function isConnectChannelPathname(pathname: string): boolean {
   return getRelativeSubpath(pathname).toLowerCase() === 'connect-channel';
+}
+
+export function isGuidePathname(pathname: string): boolean {
+  const rel = getRelativeSubpath(pathname).toLowerCase();
+  return rel === 'guide' || rel === 'panduan' || rel === 'docs';
+}
+
+export function getGuidePath(pathname: string): string {
+  const root = getAppRootPath(pathname);
+  return root === '/' ? '/panduan' : `${root}panduan`;
 }
 
 export function getLoginPath(pathname: string): string {

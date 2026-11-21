@@ -24,16 +24,19 @@ import Settings from './pages/Settings';
 import PublicCsatPage from './pages/PublicCsatPage';
 import PublicChannelConnectPage from './pages/PublicChannelConnectPage';
 import LandingPage from './pages/LandingPage';
+import GuidePage from './pages/GuidePage';
 import api from './services/api';
 import { hasAnyPerm, hasPerm } from './lib/permissions';
 import { subscribeLiveEvent } from './services/liveEvents';
 import {
   buildTabPath,
   getAppRootPath,
+  getGuidePath,
   getLandingPath,
   getLoginPath,
   isConnectChannelPathname,
   isCsatPathname,
+  isGuidePathname,
   isLandingPathname,
   isLoginPathname,
   parseCompanyAndTabFromPathname,
@@ -153,6 +156,14 @@ function AppShell() {
     if (typeof window === 'undefined') return false;
     return isLandingPathname(window.location.pathname) || window.location.hash === '#landing';
   });
+  const [showGuidePage, setShowGuidePage] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      isGuidePathname(window.location.pathname) ||
+      window.location.hash === '#panduan' ||
+      window.location.hash === '#guide'
+    );
+  });
   const [authGateInitialMode, setAuthGateInitialMode] = useState<'login' | 'setup'>('login');
 
   const rootPath = getAppRootPath(currentPathname);
@@ -187,13 +198,28 @@ function AppShell() {
       /\/landing\/?$/i.test(window.location.pathname)
     ) {
       setShowLandingPage(true);
+      setShowGuidePage(false);
       navigatePath(getLandingPath(window.location.pathname), '', true);
+    } else if (
+      window.location.hash === '#panduan' ||
+      window.location.hash === '#guide' ||
+      searchParams.get('guide') === '1' ||
+      isGuidePathname(window.location.pathname)
+    ) {
+      setShowGuidePage(true);
+      setShowLandingPage(false);
+      navigatePath(getGuidePath(window.location.pathname), '', true);
     }
 
     const onPopState = () => {
       const nextPath = window.location.pathname;
       setCurrentPathname(nextPath);
       setShowLandingPage(isLandingPathname(nextPath) || window.location.hash === '#landing');
+      setShowGuidePage(
+        isGuidePathname(nextPath) ||
+          window.location.hash === '#panduan' ||
+          window.location.hash === '#guide'
+      );
       const parsed = parseLocationTab(nextPath, window.location.hash);
       if (parsed) {
         setCurrentTabState(parsed.tab);
@@ -510,7 +536,14 @@ function AppShell() {
 
   const openLandingPage = () => {
     setShowLandingPage(true);
+    setShowGuidePage(false);
     navigatePath(landingPath, '');
+  };
+
+  const openGuidePage = () => {
+    setShowGuidePage(true);
+    setShowLandingPage(false);
+    navigatePath(getGuidePath(currentPathname), '');
   };
 
   if (accessRestriction) {
@@ -537,6 +570,42 @@ function AppShell() {
     );
   }
 
+  if (showGuidePage) {
+    return (
+      <GuidePage
+        authenticated={Boolean(authStatus?.authenticated)}
+        user={authStatus?.user}
+        isStandaloneRoute={!authStatus?.authenticated}
+        onBackToApp={
+          authStatus?.authenticated
+            ? () => {
+                setShowGuidePage(false);
+                const companySlug = toCompanySlug(
+                  authStatus.user?.companySlug,
+                  authStatus.user?.companyName
+                );
+                navigatePath(buildTabPath(currentPathname, currentTab, settingsSection, companySlug));
+              }
+            : undefined
+        }
+        onBackToLanding={() => {
+          setShowGuidePage(false);
+          setShowLandingPage(true);
+          navigatePath(landingPath);
+        }}
+        onNavigateToTab={
+          authStatus?.authenticated
+            ? (tab, section) => {
+                setShowGuidePage(false);
+                setShowLandingPage(false);
+                setCurrentTab(tab, section);
+              }
+            : undefined
+        }
+      />
+    );
+  }
+
   if (!authChecked) {
     let hasAuthHint = false;
     try {
@@ -557,6 +626,7 @@ function AppShell() {
             setAuthGateInitialMode('setup');
             navigatePath(loginPath);
           }}
+          onOpenGuide={openGuidePage}
         />
       );
     }
@@ -581,6 +651,7 @@ function AppShell() {
             setAuthGateInitialMode('setup');
             navigatePath(loginPath);
           }}
+          onOpenGuide={openGuidePage}
         />
       );
     }
@@ -596,6 +667,7 @@ function AppShell() {
             // Ignore storage errors
           }
           setShowLandingPage(false);
+          setShowGuidePage(false);
           setAuthStatus({
             initialized: true,
             authenticated: true,
@@ -606,6 +678,7 @@ function AppShell() {
         }}
         onBackToLanding={() => {
           setShowLandingPage(true);
+          setShowGuidePage(false);
           navigatePath(landingPath);
         }}
       />
@@ -619,9 +692,11 @@ function AppShell() {
         authenticated={true}
         onEnterLogin={() => {
           setShowLandingPage(false);
+          setShowGuidePage(false);
           const companySlug = toCompanySlug(authStatus.user?.companySlug, authStatus.user?.companyName);
           navigatePath(buildTabPath(currentPathname, currentTab, settingsSection, companySlug));
         }}
+        onOpenGuide={openGuidePage}
       />
     );
   }
@@ -684,6 +759,7 @@ function AppShell() {
         user={authStatus?.user}
         onOpenLanding={openLandingPage}
         onOpenPlans={() => openPlansModal('plans')}
+        onOpenGuide={openGuidePage}
         onUserUpdated={(nextUser) => {
           setAuthStatus((prev) => (prev ? { ...prev, user: nextUser } : prev));
         }}
@@ -722,6 +798,7 @@ function AppShell() {
           onRefresh={handleGlobalRefresh}
           onOpenPlans={() => openPlansModal('overview')}
           onOpenLanding={openLandingPage}
+          onOpenGuide={openGuidePage}
           onMenuClick={() => setIsSidebarOpen(true)}
           isRefreshing={isRefreshing}
         />

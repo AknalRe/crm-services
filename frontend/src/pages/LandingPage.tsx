@@ -24,6 +24,7 @@ interface LandingPageProps {
   authenticated?: boolean;
   onEnterLogin: () => void;
   onEnterRegister?: () => void;
+  onOpenGuide?: () => void;
 }
 
 const PANEL_URL = 'https://panel.reneo.my.id';
@@ -35,6 +36,7 @@ const NAV_LINKS = [
   { href: '#paket', label: 'Paket & Harga' },
   { href: '#perbandingan', label: 'Perbandingan' },
   { href: '#faq', label: 'FAQ' },
+  { href: '/panduan', label: 'Buku Panduan' },
 ];
 
 const HERO_CHANNEL_PREVIEWS = [
@@ -295,6 +297,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   authenticated = false,
   onEnterLogin,
   onEnterRegister,
+  onOpenGuide,
 }) => {
   const handleRegister = onEnterRegister ?? onEnterLogin;
   const [activeModuleId, setActiveModuleId] = useState(MODULE_TABS[0].id);
@@ -403,6 +406,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <a
                 key={link.href}
                 href={link.href}
+                onClick={(e) => {
+                  if (link.href === '/panduan' && onOpenGuide) {
+                    e.preventDefault();
+                    onOpenGuide();
+                  }
+                }}
                 className="hover:text-white transition-colors py-1"
               >
                 {link.label}
@@ -446,7 +455,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <a
                 key={link.href}
                 href={link.href}
-                onClick={() => setMobileMenuOpen(false)}
+                onClick={(e) => {
+                  setMobileMenuOpen(false);
+                  if (link.href === '/panduan' && onOpenGuide) {
+                    e.preventDefault();
+                    onOpenGuide();
+                  }
+                }}
                 className="px-3 py-2 rounded-lg text-slate-200 hover:bg-white/10 font-medium"
               >
                 {link.label}
@@ -1237,6 +1252,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           <div className="flex flex-wrap items-center gap-5">
             <a href="#paket" className="hover:text-white transition-colors">
               Paket &amp; Harga CRM
+            </a>
+            <a
+              href="/panduan"
+              onClick={(e) => {
+                if (onOpenGuide) {
+                  e.preventDefault();
+                  onOpenGuide();
+                }
+              }}
+              className="hover:text-white transition-colors"
+            >
+              Buku Panduan Penggunaan
             </a>
             <a href={PANEL_URL} target="_top" className="hover:text-white transition-colors">
               Butuh Hosting Sendiri?

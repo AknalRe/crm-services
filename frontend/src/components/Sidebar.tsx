@@ -33,6 +33,7 @@ import {
   Pencil,
   Trash2,
   Eraser,
+  BookOpen,
 } from 'lucide-react';
 import {
   AgentAvailabilityStatus,
@@ -57,6 +58,7 @@ interface SidebarProps {
   user?: AuthStatus['user'] | null;
   onOpenLanding?: () => void;
   onOpenPlans?: () => void;
+  onOpenGuide?: () => void;
   onUserUpdated?: (user: NonNullable<AuthStatus['user']>) => void;
   onWorkspaceSwitched?: (user: NonNullable<AuthStatus['user']>, license?: LicenseInfo) => void;
   onLogout?: () => void;
@@ -72,6 +74,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   licenseInfo,
   user,
   onOpenPlans,
+  onOpenGuide,
   onUserUpdated,
   onWorkspaceSwitched,
   onLogout,
@@ -906,6 +909,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {onOpenGuide && (
+          <div className="pt-2 border-t border-[#1E2438]">
+            <button
+              type="button"
+              onClick={() => {
+                onOpenGuide();
+                onClose?.();
+              }}
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[13px] font-medium text-indigo-300 hover:text-white hover:bg-indigo-600/20 transition-colors"
+            >
+              <BookOpen className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span className="truncate flex-1 text-left">Buku Panduan</span>
+            </button>
           </div>
         )}
       </nav>
