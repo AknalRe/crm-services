@@ -1789,6 +1789,24 @@ export const api = {
     return res.data.data;
   },
 
+  clearCurrentCompanyData: async (): Promise<{
+    message?: string;
+    cleared: {
+      contacts: number;
+      conversations: number;
+      messages: number;
+      campaigns: number;
+      media: number;
+    };
+    license?: import('../types').LicenseInfo;
+  }> => {
+    const res = await client.post('/tenants/current/clear-data');
+    return {
+      message: res.data?.message,
+      ...(res.data?.data || {}),
+    };
+  },
+
   getCurrentCompany: async (): Promise<{
     company: {
       id: string;

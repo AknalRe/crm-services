@@ -3,11 +3,21 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { asc, count, desc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import {
+  campaigns,
+  campaignRecipients,
+  chatMessages,
   companies,
+  contactIdentities,
   contacts,
+  contentIdeas,
   conversations,
   crmAgents,
+  csatResponses,
   DEFAULT_COMPANY_ID,
+  scheduledPosts,
+  socialComments,
+  webhookDeliveries,
+  whatsappStatusViews,
 } from '../db/schema';
 import {
   ALL_PERMISSIONS,
@@ -415,6 +425,65 @@ export default async function tenantsRouter(fastify: FastifyInstance) {
         data: {
           deletedId: deleted.id,
           switched: false,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST clear operational data of the currently active company (preserves company, license, agents/roles, settings, channels)
+  fastify.post('/current/clear-data', { preHandler: requireCompanyAdmin }, async (req, reply) => {
+    try {
+      const user = await getCurrentAuthUser(req);
+      if (!user) {
+        return reply.status(401).send({ success: false, error: 'Sesi tidak valid' });
+      }
+      const companyId = getRequestCompanyId(req);
+
+      const deletedMessages = await db
+        .delete(chatMessages)
+        .where(eq(chatMessages.companyId, companyId))
+        .returning({ id: chatMessages.id });
+      await db.delete(csatResponses).where(eq(csatResponses.companyId, companyId));
+      const deletedConversations = await db
+        .delete(conversations)
+        .where(eq(conversations.companyId, companyId))
+        .returning({ id: conversations.id });
+      await db.delete(campaignRecipients).where(eq(campaignRecipients.companyId, companyId));
+      const deletedCampaigns = await db
+        .delete(campaigns)
+        .where(eq(campaigns.companyId, companyId))
+        .returning({ id: campaigns.id });
+      await db.delete(contactIdentities).where(eq(contactIdentities.companyId, companyId));
+      const deletedContacts = await db
+        .delete(contacts)
+        .where(eq(contacts.companyId, companyId))
+        .returning({ id: contacts.id });
+      await db.delete(socialComments).where(eq(socialComments.companyId, companyId));
+      await db.delete(whatsappStatusViews).where(eq(whatsappStatusViews.companyId, companyId));
+      await db.delete(scheduledPosts).where(eq(scheduledPosts.companyId, companyId));
+      await db.delete(contentIdeas).where(eq(contentIdeas.companyId, companyId));
+      await db.delete(webhookDeliveries).where(eq(webhookDeliveries.companyId, companyId));
+
+      licenseService.invalidateCache(companyId);
+      const license = await licenseService.getLicense(companyId, true);
+      liveEvents.emitForCompany(companyId, 'contacts:update', { action: 'clear_company_data' });
+      liveEvents.emitForCompany(companyId, 'conversations:update', { action: 'clear_company_data' });
+      liveEvents.emitForCompany(companyId, 'license:update', { action: 'clear_company_data' });
+
+      return reply.send({
+        success: true,
+        message: `Data operasional bisnis berhasil dibersihkan (${deletedContacts.length} kontak, ${deletedConversations.length} percakapan, ${deletedCampaigns.length} kampanye).`,
+        data: {
+          cleared: {
+            contacts: deletedContacts.length,
+            conversations: deletedConversations.length,
+            messages: deletedMessages.length,
+            campaigns: deletedCampaigns.length,
+            media: 0,
+          },
+          license,
         },
       });
     } catch (error: any) {

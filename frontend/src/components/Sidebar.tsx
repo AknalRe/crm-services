@@ -33,6 +33,7 @@ import {
   Pencil,
   Trash2,
   AlertTriangle,
+  Eraser,
 } from 'lucide-react';
 import {
   AgentAvailabilityStatus,
@@ -127,6 +128,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [showCompanyProfileModal, setShowCompanyProfileModal] = useState(false);
   const [workspaceToDelete, setWorkspaceToDelete] = useState<TenantWorkspaceItem | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
+  const [showClearDataModal, setShowClearDataModal] = useState(false);
+  const [clearingData, setClearingData] = useState(false);
 
   const loadWorkspaces = async () => {
     if (!user) return;
@@ -224,6 +227,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
       toast.error(err?.response?.data?.error || `Gagal menghapus bisnis "${target.name}".`);
     } finally {
       setDeletingWorkspace(false);
+    }
+  };
+
+  const handleConfirmClearCompanyData = async () => {
+    if (clearingData || !user) return;
+    setClearingData(true);
+    try {
+      const res = await api.clearCurrentCompanyData();
+      setShowClearDataModal(false);
+      setWorkspaceMenuOpen(false);
+      toast.success(
+        res.message || 'Seluruh data operasional bisnis ini berhasil dibersihkan.'
+      );
+      onWorkspaceSwitched?.(user, res.license);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal membersihkan data bisnis ini.');
+    } finally {
+      setClearingData(false);
     }
   };
 
@@ -440,7 +461,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Multi-Tenant Workspace Switcher (Each workspace has its own license subscription) */}
         {user && (
-          <div className="px-3 pt-2.5 pb-1 border-b border-[#1E2438]">
+          <div className="px-3 py-2.5 border-b border-[#1E2438]">
             <button
               type="button"
               onClick={() => {
@@ -450,47 +471,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   void loadWorkspaces();
                 }
               }}
-              className="w-full px-2.5 py-1.5 rounded-md bg-[#181D2D] hover:bg-[#1E2438] border border-[#242B42] flex items-center justify-between gap-2 text-left transition-colors"
-              title="Beralih atau tambah bisnis / tenant baru (lisensi terpisah)"
+              className={`w-full px-2.5 py-2 rounded-lg border flex items-center justify-between gap-2 text-left transition-colors ${
+                workspaceMenuOpen
+                  ? 'bg-[#1B2235] border-indigo-500/40'
+                  : 'bg-[#171C2B] hover:bg-[#1D2336] border-[#252D45]'
+              }`}
+              title="Kelola atau beralih workspace bisnis"
             >
-              <div className="flex items-center gap-2 min-w-0">
-                <Building2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="w-7 h-7 rounded-md bg-indigo-500/15 border border-indigo-500/25 text-indigo-400 flex items-center justify-center shrink-0">
+                  <Building2 className="w-3.5 h-3.5" />
+                </span>
                 <div className="min-w-0">
-                  <div className="text-xs font-semibold text-white truncate">
+                  <div className="text-xs font-semibold text-white truncate leading-tight">
                     {user.companyName || licenseInfo?.companyName || 'Workspace Utama'}
                   </div>
-                  <div className="text-[10px] text-gray-400 truncate">
+                  <div className="text-[10.5px] text-gray-400 truncate mt-0.5 leading-tight">
                     {licenseInfo?.plan || 'Lisensi Aktif'}
                   </div>
                 </div>
               </div>
               <ChevronDown
                 className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${
-                  workspaceMenuOpen ? 'rotate-180' : ''
+                  workspaceMenuOpen ? 'rotate-180 text-indigo-300' : ''
                 }`}
               />
             </button>
 
             {workspaceMenuOpen && (
-              <div className="mt-2 p-2.5 rounded-lg bg-[#151A28] border border-[#27304B] space-y-2 text-xs shadow-lg">
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                    Workspace Bisnis Anda
+              <div className="mt-1.5 rounded-lg bg-[#151A28] border border-[#262F48] overflow-hidden text-xs shadow-xl">
+                {/* Compact Single-Line Header */}
+                <div className="px-2.5 py-2 border-b border-[#222A40] flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 whitespace-nowrap">
+                    Bisnis Anda {!loadingWorkspaces && workspaces.length > 0 ? `(${workspaces.length})` : ''}
                   </span>
-                  {!loadingWorkspaces && workspaces.length > 0 && (
-                    <span className="text-[10px] font-mono text-gray-400 bg-[#1E2438] px-1.5 py-0.5 rounded">
-                      {workspaces.length} Bisnis
-                    </span>
+                  {isAdmin && !showNewWorkspaceForm && (
+                    <button
+                      type="button"
+                      onClick={() => setShowNewWorkspaceForm(true)}
+                      className="text-[11px] font-medium text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5 whitespace-nowrap transition-colors"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Baru</span>
+                    </button>
                   )}
                 </div>
 
-                {loadingWorkspaces ? (
-                  <div className="px-2 py-2.5 text-[11px] text-gray-400 text-center">
-                    Memuat daftar bisnis...
-                  </div>
-                ) : (
-                  <div className="max-h-52 overflow-y-auto space-y-1.5 pr-0.5 sidebar-scroll">
-                    {workspaces.map((ws) => {
+                {/* Clean Flat Workspace List */}
+                <div className="p-1.5 max-h-48 overflow-y-auto space-y-0.5 sidebar-scroll">
+                  {loadingWorkspaces ? (
+                    <div className="px-2 py-2 text-[11px] text-gray-400 text-center">
+                      Memuat daftar bisnis...
+                    </div>
+                  ) : (
+                    workspaces.map((ws) => {
                       const active = ws.isCurrent || ws.id === user.companyId;
                       const isUnlicensed = ws.license.status === 'UNLICENSED';
                       const isExpired = !isUnlicensed && ws.license.isExpired;
@@ -509,32 +543,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       return (
                         <div
                           key={ws.id}
-                          className={`group rounded-md border transition-colors flex items-center gap-1.5 p-1.5 ${
+                          className={`group rounded-md flex items-center gap-1 px-2 py-1.5 transition-colors ${
                             active
-                              ? 'bg-indigo-600/15 border-indigo-500/45'
-                              : 'bg-[#191F30]/60 border-transparent hover:bg-[#1E253A] hover:border-[#2C3552]'
+                              ? 'bg-indigo-500/15 text-white'
+                              : 'text-gray-300 hover:bg-[#1E2538]'
                           }`}
                         >
                           <button
                             type="button"
                             disabled={Boolean(switchingWorkspaceId)}
                             onClick={() => void handleSwitchWorkspace(ws.id)}
-                            className="min-w-0 flex-1 text-left px-1 py-0.5 rounded focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400"
-                            title={`Beralih ke ${ws.name}`}
+                            className="min-w-0 flex-1 text-left focus-visible:outline-none"
+                            title={`${ws.name} — ${statusText}`}
                           >
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span
-                                className={`text-xs font-semibold truncate ${
-                                  active ? 'text-white' : 'text-gray-200'
-                                }`}
-                              >
-                                {ws.name}
-                              </span>
-                              {active && (
-                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-500/25 text-indigo-200 border border-indigo-400/30">
-                                  Aktif
-                                </span>
-                              )}
+                            <div className="text-xs font-medium truncate leading-snug">
+                              {ws.name}
                             </div>
                             <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-400 min-w-0">
                               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDotCls}`} />
@@ -542,86 +565,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                           </button>
 
-                          {isAdmin && (
-                            <div className="flex items-center gap-0.5 shrink-0">
-                              {active && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setWorkspaceMenuOpen(false);
-                                    setShowCompanyProfileModal(true);
-                                  }}
-                                  className="p-1.5 rounded text-gray-400 hover:text-indigo-300 hover:bg-[#242C44] transition-colors"
-                                  title={`Edit profil bisnis ${ws.name}`}
-                                  aria-label={`Edit profil bisnis ${ws.name}`}
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                              {canDelete && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setWorkspaceToDelete(ws);
-                                  }}
-                                  className="p-1.5 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/15 transition-colors"
-                                  title={`Hapus bisnis ${ws.name}`}
-                                  aria-label={`Hapus bisnis ${ws.name}`}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          )}
+                          {active ? (
+                            <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          ) : canDelete ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setWorkspaceToDelete(ws);
+                              }}
+                              className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-red-500/10 opacity-70 group-hover:opacity-100 transition-colors shrink-0"
+                              title={`Hapus bisnis ${ws.name}`}
+                              aria-label={`Hapus bisnis ${ws.name}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          ) : null}
                         </div>
                       );
-                    })}
-                  </div>
-                )}
+                    })
+                  )}
+                </div>
 
+                {/* Inline New Workspace Form or Clean Stacked Actions */}
                 {isAdmin && (
-                  <div className="pt-2 border-t border-[#242B42] space-y-1.5">
-                    {!showNewWorkspaceForm ? (
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setWorkspaceMenuOpen(false);
-                            setShowCompanyProfileModal(true);
-                          }}
-                          className="px-2 py-1.5 rounded-md bg-[#1B2134] hover:bg-[#232B45] text-gray-200 text-[11px] font-medium flex items-center justify-center gap-1 border border-[#28314E] transition-colors"
-                        >
-                          <Pencil className="w-3 h-3 text-indigo-400 shrink-0" />
-                          <span className="truncate">Edit Usaha</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowNewWorkspaceForm(true)}
-                          className="px-2 py-1.5 rounded-md bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-200 text-[11px] font-medium flex items-center justify-center gap-1 border border-indigo-500/35 transition-colors"
-                        >
-                          <Plus className="w-3 h-3 shrink-0" />
-                          <span className="truncate">Bisnis Baru</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <form onSubmit={handleCreateWorkspace} className="space-y-1.5 bg-[#101420] p-2 rounded-md border border-[#28314E]">
-                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                          Tambah Bisnis / Cabang Baru
-                        </label>
+                  <div className="p-1.5 border-t border-[#222A40] bg-[#121623]/70">
+                    {showNewWorkspaceForm ? (
+                      <form onSubmit={handleCreateWorkspace} className="p-1 space-y-2">
                         <input
                           type="text"
                           value={newWorkspaceName}
                           onChange={(e) => setNewWorkspaceName(e.target.value)}
-                          placeholder="Contoh: Toko Cabang Surabaya..."
-                          className="w-full h-8 px-2.5 rounded bg-[#161B2A] border border-[#2B3554] text-white text-xs focus:outline-none focus:border-indigo-400"
+                          placeholder="Nama bisnis / cabang baru..."
+                          className="w-full h-8 px-2.5 rounded-md bg-[#0E121D] border border-[#2B3554] text-white text-xs focus:outline-none focus:border-indigo-400"
                           autoFocus
                         />
                         <p className="text-[10px] text-gray-400 leading-snug">
-                          Setiap bisnis memiliki ruang kerja, kontak, dan paket lisensi sendiri.
+                          Bisnis baru memiliki ruang kerja &amp; lisensi terpisah.
                         </p>
-                        <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
                             onClick={() => {
@@ -635,12 +617,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           <button
                             type="submit"
                             disabled={creatingWorkspace || !newWorkspaceName.trim()}
-                            className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-[11px] font-semibold"
+                            className="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-[11px] font-semibold"
                           >
-                            {creatingWorkspace ? 'Membuat...' : 'Buat Bisnis'}
+                            {creatingWorkspace ? 'Membuat...' : 'Buat'}
                           </button>
                         </div>
                       </form>
+                    ) : (
+                      <div className="space-y-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWorkspaceMenuOpen(false);
+                            setShowCompanyProfileModal(true);
+                          }}
+                          className="w-full px-2 py-1.5 rounded-md text-[11.5px] font-medium text-gray-300 hover:text-white hover:bg-[#1E2538] flex items-center gap-2 transition-colors"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                          <span className="truncate">Edit Profil Bisnis</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowClearDataModal(true)}
+                          className="w-full px-2 py-1.5 rounded-md text-[11.5px] font-medium text-amber-300/90 hover:text-amber-200 hover:bg-amber-500/10 flex items-center gap-2 transition-colors"
+                        >
+                          <Eraser className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">Bersihkan Data Bisnis</span>
+                        </button>
+                        {(() => {
+                          const currentWs = workspaces.find((ws) => ws.isCurrent || ws.id === user.companyId);
+                          if (!currentWs || currentWs.isDefault || workspaces.length <= 1) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => setWorkspaceToDelete(currentWs)}
+                              className="w-full px-2 py-1.5 rounded-md text-[11.5px] font-medium text-red-400/90 hover:text-red-300 hover:bg-red-500/10 flex items-center gap-2 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">Hapus Bisnis Ini</span>
+                            </button>
+                          );
+                        })()}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1053,6 +1071,59 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>{deletingWorkspace ? 'Menghapus...' : 'Hapus Bisnis Permanen'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {showClearDataModal && user && (
+      <div
+        className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4"
+        onClick={() => {
+          if (!clearingData) setShowClearDataModal(false);
+        }}
+      >
+        <div
+          className="w-full max-w-md rounded-xl bg-white border border-gray-200 shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-5 space-y-3.5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shrink-0">
+                <Eraser className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-gray-900">
+                  Bersihkan Data &ldquo;{user.companyName || licenseInfo?.companyName || 'Bisnis Ini'}&rdquo;?
+                </h3>
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                  Seluruh data operasional pada bisnis ini akan dihapus permanen: <strong>kontak, percakapan, pesan, siaran/kampanye, jadwal post, komentar, dan media</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800 leading-relaxed">
+              Workspace bisnis, paket lisensi aktif, akun tim/agen CS, dan pengaturan koneksi kanal WhatsApp <strong>tetap aman dan tidak dihapus</strong>.
+            </div>
+          </div>
+
+          <div className="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              disabled={clearingData}
+              onClick={() => setShowClearDataModal(false)}
+              className="h-9 px-3.5 rounded-md border border-gray-300 bg-white hover:bg-gray-100 text-xs font-medium text-gray-700 disabled:opacity-50 transition-colors"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              disabled={clearingData}
+              onClick={() => void handleConfirmClearCompanyData()}
+              className="h-9 px-3.5 rounded-md bg-amber-600 hover:bg-amber-700 text-xs font-semibold text-white disabled:opacity-60 inline-flex items-center gap-1.5 transition-colors"
+            >
+              <Eraser className="w-3.5 h-3.5" />
+              <span>{clearingData ? 'Membersihkan...' : 'Bersihkan Data Sekarang'}</span>
             </button>
           </div>
         </div>
