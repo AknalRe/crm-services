@@ -1198,6 +1198,34 @@ export interface AiSimulatorChatTurn {
   };
 }
 
+export type ConversationAiStatusState =
+  | 'ACTIVE'
+  | 'ESCALATED'
+  | 'DISABLED'
+  | 'AUTO_REPLY_OFF'
+  | 'CHANNEL_EXCLUDED'
+  | 'SESSION_EXCLUDED'
+  | 'SCOPE_EXCLUDED'
+  | 'NON_PENILAIAN_EXCLUDED';
+
+export interface ConversationAiStatus {
+  conversationId: string;
+  status: ConversationAiStatusState;
+  statusLabel: string;
+  reason: string;
+  isEligible: boolean;
+  isEscalated: boolean;
+  escalatedAt: string | null;
+  escalationReason: string | null;
+  aiName: string;
+  provider: string;
+  model: string;
+  channel: string;
+  wahaSession: string | null;
+  isGroup: boolean;
+  excludeFromMetrics: boolean;
+}
+
 export interface AiAttemptTrace {
   role: 'PRIMARY' | 'FALLBACK' | 'LOCAL_KB';
   slotId: string;

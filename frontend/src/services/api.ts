@@ -517,10 +517,19 @@ export const api = {
       assignedAgentId?: string | null;
       sendCsat?: boolean;
       baseUrl?: string;
+      resetEscalation?: boolean;
+      pauseAi?: boolean;
+      escalateReason?: string | null;
     }
   ): Promise<{ csatSent?: boolean }> => {
     const res = await client.patch(`/conversations/${id}`, payload);
     return res.data.data || {};
+  },
+  getConversationAiStatus: async (
+    id: string
+  ): Promise<import('../types').ConversationAiStatus> => {
+    const res = await client.get(`/conversations/${id}/ai-status`);
+    return res.data.data;
   },
   getConversationParticipants: async (
     id: string,

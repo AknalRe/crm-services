@@ -67,6 +67,7 @@ import {
   FolderOpen,
   BookmarkPlus,
   Play,
+  Bot,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -79,6 +80,7 @@ import {
   ChatMessageMetadata,
   Contact,
   Conversation,
+  ConversationAiStatus,
   ConversationNavigationTarget,
   ConversationParticipantsResponse,
   CrmLabelItem,
@@ -948,6 +950,56 @@ export const Conversations: React.FC<ConversationsProps> = ({
     selectedConversation?.isGroup ||
       selectedConversation?.externalThreadId?.toLowerCase().endsWith('@g.us')
   );
+  const [convAiStatus, setConvAiStatus] = useState<ConversationAiStatus | null>(null);
+  const [loadingAiStatus, setLoadingAiStatus] = useState(false);
+  const [showAiStatusPopover, setShowAiStatusPopover] = useState(false);
+  const [togglingAiStatus, setTogglingAiStatus] = useState(false);
+
+  const fetchConvAiStatus = useCallback(async (convId: string) => {
+    if (!convId) {
+      setConvAiStatus(null);
+      return;
+    }
+    try {
+      setLoadingAiStatus(true);
+      const data = await api.getConversationAiStatus(convId);
+      setConvAiStatus(data);
+    } catch {
+      setConvAiStatus(null);
+    } finally {
+      setLoadingAiStatus(false);
+    }
+  }, []);
+
+  const handleResetEscalation = useCallback(async () => {
+    if (!selectedConversation) return;
+    try {
+      setTogglingAiStatus(true);
+      await api.updateConversation(selectedConversation.id, { resetEscalation: true });
+      toast.success('Balasan Agent AI diaktifkan kembali untuk percakapan ini');
+      setShowAiStatusPopover(false);
+      await fetchConvAiStatus(selectedConversation.id);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal mengaktifkan kembali Agent AI');
+    } finally {
+      setTogglingAiStatus(false);
+    }
+  }, [selectedConversation, fetchConvAiStatus, toast]);
+
+  const handlePauseAi = useCallback(async () => {
+    if (!selectedConversation) return;
+    try {
+      setTogglingAiStatus(true);
+      await api.updateConversation(selectedConversation.id, { pauseAi: true, escalateReason: 'Dijeda manual oleh staf' });
+      toast.info('Balasan Agent AI dijeda. Percakapan kini ditangani manual.');
+      setShowAiStatusPopover(false);
+      await fetchConvAiStatus(selectedConversation.id);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal menjeda Agent AI');
+    } finally {
+      setTogglingAiStatus(false);
+    }
+  }, [selectedConversation, fetchConvAiStatus, toast]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [search, setSearch] = useState('');
@@ -1611,6 +1663,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setContactNotesDraft(selectedConversation.contact?.notes || '');
       setChannelDisplayNameDraft(selectedConversation.channelDisplayName || '');
       setExcludeReasonDraft(selectedConversation.excludeReason || 'Bukan Customer');
+      void fetchConvAiStatus(selectedConversation.id);
       if (selectedConversation.isGroup || selectedConversation.externalThreadId?.endsWith('@g.us')) {
         void fetchParticipants(selectedConversation.id, true);
       } else {
@@ -1619,6 +1672,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
       const convId = selectedConversation.id;
       const unsub = subscribeLiveEvent('conversations:update', () => {
         void fetchMessages(convId, true);
+        void fetchConvAiStatus(convId);
       });
       const onVis = () => {
         if (document.visibilityState === 'visible') {
@@ -5244,6 +5298,106 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
                 {/* Compact Desktop Inline Controls (lg+) */}
                 <div className="hidden lg:flex items-center gap-1.5 shrink-0">
+                  {/* AI Status Badge & Popover */}
+                  {convAiStatus && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowAiStatusPopover((v) => !v)}
+                        title={`Status Agent AI: ${convAiStatus.statusLabel}. Klik untuk detail & kontrol.`}
+                        className={`h-7 px-2 rounded-md border text-[11px] font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 ${
+                          convAiStatus.status === 'ACTIVE'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                            : convAiStatus.status === 'ESCALATED'
+                            ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                            : convAiStatus.status === 'DISABLED' || convAiStatus.status === 'AUTO_REPLY_OFF'
+                            ? 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                        }`}
+                      >
+                        <Bot className="w-3.5 h-3.5 shrink-0" />
+                        <span className="font-semibold">{convAiStatus.statusLabel}</span>
+                      </button>
+
+                      {showAiStatusPopover && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-40"
+                            onClick={() => setShowAiStatusPopover(false)}
+                          />
+                          <div className="absolute right-0 mt-1.5 w-80 max-w-[calc(100vw-2rem)] rounded-lg bg-white border border-gray-200 shadow-xl p-3.5 z-50 space-y-3 text-xs">
+                            <div className="flex items-start justify-between gap-2 pb-2 border-b border-gray-100">
+                              <div>
+                                <div className="font-semibold text-gray-900 flex items-center gap-1.5">
+                                  <Bot className="w-4 h-4 text-indigo-600 shrink-0" />
+                                  <span>Agent AI: {convAiStatus.aiName}</span>
+                                </div>
+                                <div className="text-[10px] text-gray-500 font-mono mt-0.5">
+                                  {convAiStatus.provider} · {convAiStatus.model}
+                                </div>
+                              </div>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${
+                                  convAiStatus.status === 'ACTIVE'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : convAiStatus.status === 'ESCALATED'
+                                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                    : 'bg-gray-100 text-gray-600 border-gray-200'
+                                }`}
+                              >
+                                {convAiStatus.status === 'ACTIVE' ? 'Aktif' : convAiStatus.status === 'ESCALATED' ? 'Dijeda' : 'Nonaktif'}
+                              </span>
+                            </div>
+
+                            <div className="p-2.5 rounded bg-gray-50 border border-gray-100 text-[11px] text-gray-700 leading-relaxed">
+                              {convAiStatus.reason}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[10px] text-gray-600 pt-1 border-t border-gray-100">
+                              <div>
+                                <span className="text-gray-400 block">Sesi WhatsApp:</span>
+                                <span className="font-mono font-medium">{convAiStatus.wahaSession || 'Semua Sesi'}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400 block">Status Penilaian:</span>
+                                <span className="font-medium">{convAiStatus.excludeFromMetrics ? 'Non-Penilaian' : 'Dinilai'}</span>
+                              </div>
+                            </div>
+
+                            <div className="pt-2 border-t border-gray-100 flex flex-col gap-1.5">
+                              {convAiStatus.isEscalated ? (
+                                <button
+                                  type="button"
+                                  disabled={togglingAiStatus}
+                                  onClick={() => void handleResetEscalation()}
+                                  className="w-full py-1.5 px-3 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>Aktifkan Kembali Balasan AI</span>
+                                </button>
+                              ) : convAiStatus.status === 'ACTIVE' ? (
+                                <button
+                                  type="button"
+                                  disabled={togglingAiStatus}
+                                  onClick={() => void handlePauseAi()}
+                                  className="w-full py-1.5 px-3 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
+                                >
+                                  <span>Jeda Balasan AI (Ambil Alih Manual)</span>
+                                </button>
+                              ) : null}
+                              <a
+                                href="/ai-agent"
+                                className="w-full py-1 px-2 rounded text-center text-[11px] text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 font-medium transition-colors"
+                              >
+                                Buka Pengaturan Agent AI →
+                              </a>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   {selectedConversation.isGroup && (
                     <button
                       type="button"
@@ -9730,6 +9884,69 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Status & Kontrol Agent AI */}
+            {convAiStatus && (
+              <div className="border border-gray-200 rounded-lg bg-white overflow-hidden p-3 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-gray-900 flex items-center gap-1.5 truncate">
+                    <Bot className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                    <span>Status Agent AI</span>
+                  </span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${
+                      convAiStatus.status === 'ACTIVE'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : convAiStatus.status === 'ESCALATED'
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : convAiStatus.status === 'DISABLED' || convAiStatus.status === 'AUTO_REPLY_OFF'
+                        ? 'bg-gray-100 text-gray-600 border-gray-200'
+                        : 'bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    {convAiStatus.statusLabel}
+                  </span>
+                </div>
+
+                <div className="p-2 rounded bg-gray-50 border border-gray-100 text-[11px] text-gray-700 leading-relaxed">
+                  {convAiStatus.reason}
+                </div>
+
+                <div className="text-[10px] text-gray-500 font-mono flex items-center justify-between pt-1 border-t border-gray-100">
+                  <span>Model: {convAiStatus.provider} · {convAiStatus.model}</span>
+                  <span>Sesi: {convAiStatus.wahaSession || 'Semua'}</span>
+                </div>
+
+                <div className="pt-1 flex flex-col gap-1.5">
+                  {convAiStatus.isEscalated ? (
+                    <button
+                      type="button"
+                      disabled={togglingAiStatus}
+                      onClick={() => void handleResetEscalation()}
+                      className="w-full py-1.5 px-3 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Aktifkan Kembali Balasan AI</span>
+                    </button>
+                  ) : convAiStatus.status === 'ACTIVE' ? (
+                    <button
+                      type="button"
+                      disabled={togglingAiStatus}
+                      onClick={() => void handlePauseAi()}
+                      className="w-full py-1.5 px-3 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      <span>Jeda Balasan AI (Ambil Alih Manual)</span>
+                    </button>
+                  ) : null}
+                  <a
+                    href="/ai-agent"
+                    className="w-full py-1 text-center text-[10px] text-indigo-600 hover:underline font-medium"
+                  >
+                    Buka Pengaturan Agent AI →
+                  </a>
+                </div>
+              </div>
+            )}
 
             {/* 3. Partisipan Grup */}
             {selectedConversation.isGroup && (

@@ -26,8 +26,10 @@ import { liveEvents } from '../services/events.service';
 import {
   getActiveCompanyId,
   getCompanySettingValue,
+  runWithCompany,
   upsertCompanySetting,
 } from '../services/tenantContext';
+import { getAiAgentConfig, AI_DM_CHANNELS } from '../services/ai.service';
 import { OmnichannelType, sendOutboundChannelMessage } from '../services/channel.service';
 import {
   buildCsatSnapshot,
@@ -1718,6 +1720,110 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
   });
 
+  // GET real-time AI Agent status & diagnosis for conversation
+  fastify.get('/:id/ai-status', async (
+    req: FastifyRequest<{
+      Params: { id: string };
+    }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const convRows = await db
+        .select()
+        .from(conversations)
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
+        .limit(1);
+      const conv = convRows[0];
+      if (!conv) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
+      const aiCfg = await runWithCompany(companyId, () => getAiAgentConfig());
+      const isGroup = Boolean(conv.isGroup || conv.externalThreadId?.toLowerCase().endsWith('@g.us'));
+      const isExcluded = Boolean(conv.excludeFromMetrics);
+      const isEscalated = Boolean(conv.escalatedAt);
+
+      let status:
+        | 'ACTIVE'
+        | 'ESCALATED'
+        | 'DISABLED'
+        | 'AUTO_REPLY_OFF'
+        | 'CHANNEL_EXCLUDED'
+        | 'SESSION_EXCLUDED'
+        | 'SCOPE_EXCLUDED'
+        | 'NON_PENILAIAN_EXCLUDED' = 'ACTIVE';
+      let statusLabel = 'AI Aktif & Siap Membalas';
+      let reason = 'Agent AI aktif memantau dan siap menjawab pesan masuk.';
+
+      const channel = String(conv.channel || 'WHATSAPP').toUpperCase();
+      const channels = Array.isArray(aiCfg.dmChannels) ? aiCfg.dmChannels : [...AI_DM_CHANNELS];
+      const sessions = Array.isArray(aiCfg.dmWahaSessions) ? aiCfg.dmWahaSessions : [];
+      const scope = aiCfg.dmScope || 'PERSONAL';
+
+      if (!aiCfg.enabled) {
+        status = 'DISABLED';
+        statusLabel = 'AI Nonaktif Global';
+        reason = 'Agent AI dimatikan di menu Pengaturan Agent AI.';
+      } else if (!aiCfg.autoReplyDm) {
+        status = 'AUTO_REPLY_OFF';
+        statusLabel = 'Auto-Reply DM Nonaktif';
+        reason = 'Fitur "Balas DM masuk secara otomatis" dimatikan di Pengaturan AI.';
+      } else if (isEscalated) {
+        status = 'ESCALATED';
+        statusLabel = 'AI Dijeda (Eskalasi CS)';
+        reason = `Obrolan ini telah dieskalasi ke tim CS${conv.escalationReason ? `: ${conv.escalationReason}` : ''}. Balasan AI dijeda agar tidak tumpang tindih dengan agen manusia.`;
+      } else if (isExcluded && aiCfg.replyToNonPenilaian === false) {
+        status = 'NON_PENILAIAN_EXCLUDED';
+        statusLabel = 'Non-Penilaian Dikecualikan';
+        reason = 'Obrolan kontak berstatus Non-Penilaian diatur untuk tidak dibalas oleh AI.';
+      } else if (!channels.includes(channel)) {
+        status = 'CHANNEL_EXCLUDED';
+        statusLabel = `Kanal ${channel} Dikecualikan`;
+        reason = `Kanal ${channel} tidak dicentang pada daftar kanal balasan di Pengaturan AI.`;
+      } else if (
+        channel === 'WHATSAPP' &&
+        sessions.length > 0 &&
+        (!conv.wahaSession || !sessions.some((s) => s.toLowerCase() === conv.wahaSession?.toLowerCase()))
+      ) {
+        status = 'SESSION_EXCLUDED';
+        statusLabel = `Sesi ${conv.wahaSession || 'N/A'} Dikecualikan`;
+        reason = `Sesi WhatsApp "${conv.wahaSession || 'N/A'}" tidak dicentang di daftar sesi cakupan AI.`;
+      } else if (isGroup && scope === 'PERSONAL') {
+        status = 'SCOPE_EXCLUDED';
+        statusLabel = 'Grup Dikecualikan';
+        reason = 'Cakupan AI disetel hanya untuk percakapan personal (chat personal saja).';
+      } else if (!isGroup && scope === 'GROUP') {
+        status = 'SCOPE_EXCLUDED';
+        statusLabel = 'Personal Dikecualikan';
+        reason = 'Cakupan AI disetel hanya untuk grup WhatsApp.';
+      }
+
+      return reply.send({
+        success: true,
+        data: {
+          conversationId: conv.id,
+          status,
+          statusLabel,
+          reason,
+          isEligible: status === 'ACTIVE',
+          isEscalated,
+          escalatedAt: conv.escalatedAt ? conv.escalatedAt.toISOString() : null,
+          escalationReason: conv.escalationReason || null,
+          aiName: aiCfg.name,
+          provider: aiCfg.provider,
+          model: aiCfg.model,
+          channel: conv.channel,
+          wahaSession: conv.wahaSession || null,
+          isGroup,
+          excludeFromMetrics: isExcluded,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
   // GET messages for conversation (supports optional ?limit=80&before=<ISO> pagination)
   fastify.get('/:id/messages', async (
     req: FastifyRequest<{
@@ -2533,6 +2639,9 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       assignedAgentId?: string | null;
       sendCsat?: boolean;
       baseUrl?: string;
+      resetEscalation?: boolean;
+      pauseAi?: boolean;
+      escalateReason?: string | null;
     };
   }>, reply: FastifyReply) => {
     try {
@@ -2562,6 +2671,15 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
 
       const now = new Date();
       const convUpdate: any = { updatedAt: now };
+
+      if (req.body?.resetEscalation === true) {
+        convUpdate.escalatedAt = null;
+        convUpdate.escalationReason = null;
+        convUpdate.escalationSummary = null;
+      } else if (req.body?.pauseAi === true) {
+        convUpdate.escalatedAt = now;
+        convUpdate.escalationReason = req.body.escalateReason || 'Dijeda manual oleh staf';
+      }
 
       if (req.body?.status !== undefined) {
         const nextStatus = String(req.body.status).toUpperCase().trim();
