@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Globe2, Trash2, Copy, Check } from 'lucide-react';
+import { Globe2, Trash2, Copy, Check, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
 import { ChannelAccount, ChannelConnectLink, OmnichannelType } from '../types';
 import { Button } from './ui/Button';
+import { ConfirmModal } from './ui/ConfirmModal';
 import { useToast } from './ui/ToastProvider';
 
 const CHANNEL_OPTIONS: Array<{ value: OmnichannelType; label: string; idHint: string }> = [
@@ -23,6 +24,8 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
   const [saving, setSaving] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [connectLinks, setConnectLinks] = useState<ChannelConnectLink[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<ChannelAccount | null>(null);
+  const [deletingChannel, setDeletingChannel] = useState(false);
   const [linkLabel, setLinkLabel] = useState('');
   const [creatingLink, setCreatingLink] = useState(false);
   const [oauthCfg, setOauthCfg] = useState<{
@@ -125,12 +128,18 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleConfirmDeleteChannel = async () => {
+    if (!deleteTarget || deletingChannel) return;
+    setDeletingChannel(true);
     try {
-      await api.deleteChannel(id);
-      setAccounts((prev) => prev.filter((a) => a.id !== id));
+      await api.deleteChannel(deleteTarget.id);
+      setAccounts((prev) => prev.filter((a) => a.id !== deleteTarget.id));
+      toast.success(`Akun channel "${deleteTarget.name}" berhasil dihapus.`);
+      setDeleteTarget(null);
     } catch {
       toast.error('Gagal menghapus akun channel');
+    } finally {
+      setDeletingChannel(false);
     }
   };
 
@@ -314,8 +323,8 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
                 {canEdit && (
                   <button
                     type="button"
-                    onClick={() => void handleDelete(acc.id)}
-                    className="p-1.5 text-gray-400 hover:text-red-600"
+                    onClick={() => setDeleteTarget(acc)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 transition-colors"
                     title="Hapus Channel"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -403,6 +412,32 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDeleteChannel}
+        isLoading={deletingChannel}
+        title={`Hapus Akun Channel "${deleteTarget?.name}"?`}
+        confirmLabel="Ya, Hapus Channel"
+        variant="danger"
+      >
+        <div className="space-y-3">
+          <p className="text-[13px] text-gray-600 leading-relaxed">
+            Akun channel <strong>{deleteTarget?.name}</strong> ({deleteTarget?.channel}) akan diputuskan dan dihapus dari integrasi CRM.
+          </p>
+
+          <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-950">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Peringatan Data Riwayat &amp; Kampanye Siaran</span>
+            </div>
+            <p className="leading-relaxed text-amber-800">
+              Jika akun channel sesi ini pernah atau sedang digunakan untuk kampanye siaran (broadcast), data kampanye bisa saja menjadi tidak valid atau sistem tidak dapat mengambil data yang sesuai karena identitas akun atau nomor sesi telah berganti atau dihapus.
+            </p>
+          </div>
+        </div>
+      </ConfirmModal>
     </div>
   );
 };

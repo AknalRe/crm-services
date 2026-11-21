@@ -68,6 +68,12 @@ import {
   BookmarkPlus,
   Play,
   Bot,
+  Bold,
+  Italic,
+  Strikethrough,
+  Code,
+  Quote,
+  List,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -1227,6 +1233,110 @@ export const Conversations: React.FC<ConversationsProps> = ({
     el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
     el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
   }, [inputText, selectedConversation?.id, composerMode]);
+
+  const applyTextFormat = (
+    type: 'bold' | 'italic' | 'strike' | 'code' | 'codeblock' | 'quote' | 'bullet' | 'variable',
+    extraValue?: string
+  ) => {
+    const textarea = replyInputRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    const currentText = inputText;
+    const selectedText = currentText.substring(start, end);
+
+    let formatted = '';
+    let newCursorPos = start;
+
+    switch (type) {
+      case 'bold':
+        if (selectedText) {
+          formatted = `*${selectedText}*`;
+          newCursorPos = start + formatted.length;
+        } else {
+          formatted = '**';
+          newCursorPos = start + 1;
+        }
+        break;
+      case 'italic':
+        if (selectedText) {
+          formatted = `_${selectedText}_`;
+          newCursorPos = start + formatted.length;
+        } else {
+          formatted = '__';
+          newCursorPos = start + 1;
+        }
+        break;
+      case 'strike':
+        if (selectedText) {
+          formatted = `~${selectedText}~`;
+          newCursorPos = start + formatted.length;
+        } else {
+          formatted = '~~';
+          newCursorPos = start + 1;
+        }
+        break;
+      case 'code':
+        if (selectedText) {
+          formatted = `\`${selectedText}\``;
+          newCursorPos = start + formatted.length;
+        } else {
+          formatted = '``';
+          newCursorPos = start + 1;
+        }
+        break;
+      case 'codeblock':
+        if (selectedText) {
+          formatted = `\`\`\`\n${selectedText}\n\`\`\``;
+          newCursorPos = start + formatted.length;
+        } else {
+          formatted = '```\n\n```';
+          newCursorPos = start + 4;
+        }
+        break;
+      case 'quote':
+        if (selectedText) {
+          const lines = selectedText.split('\n');
+          formatted = lines.map((l) => (l.startsWith('> ') ? l : `> ${l}`)).join('\n');
+          newCursorPos = start + formatted.length;
+        } else {
+          formatted = '> ';
+          newCursorPos = start + 2;
+        }
+        break;
+      case 'bullet':
+        if (selectedText) {
+          const lines = selectedText.split('\n');
+          formatted = lines.map((l) => (l.startsWith('• ') ? l : `• ${l}`)).join('\n');
+          newCursorPos = start + formatted.length;
+        } else {
+          formatted = '• ';
+          newCursorPos = start + 2;
+        }
+        break;
+      case 'variable':
+        if (extraValue) {
+          formatted = extraValue;
+          newCursorPos = start + extraValue.length;
+        }
+        break;
+    }
+
+    const nextVal = currentText.substring(0, start) + formatted + currentText.substring(end);
+    handleReplyTextChange(nextVal);
+
+    requestAnimationFrame(() => {
+      if (replyInputRef.current) {
+        replyInputRef.current.focus();
+        if (selectedText && (type === 'bold' || type === 'italic' || type === 'strike' || type === 'code')) {
+          replyInputRef.current.setSelectionRange(start, start + formatted.length);
+        } else {
+          replyInputRef.current.setSelectionRange(newCursorPos, newCursorPos);
+        }
+      }
+    });
+  };
 
   // Right panel: Labels & Contact Notes
   const [newLabel, setNewLabel] = useState('');
@@ -9468,6 +9578,102 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   onChange={(e) => void handleAttachmentPick(e, true)}
                   className="hidden"
                 />
+
+                {/* Formatter / Rich Text Toolbar (Berlaku untuk Semua Channel) */}
+                <div
+                  className={`flex items-center justify-between gap-1 px-2.5 py-1 border-b text-xs select-none overflow-x-auto ${
+                    composerMode === 'NOTE'
+                      ? 'border-amber-200/70 bg-amber-100/40'
+                      : 'border-gray-100 bg-gray-50/70'
+                  }`}
+                >
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => applyTextFormat('bold')}
+                      title="Tebal (*teks*) - Shortcut: Ctrl+B"
+                      className="p-1 rounded hover:bg-gray-200/70 text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      <Bold className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyTextFormat('italic')}
+                      title="Miring (_teks_) - Shortcut: Ctrl+I"
+                      className="p-1 rounded hover:bg-gray-200/70 text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      <Italic className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyTextFormat('strike')}
+                      title="Coret (~teks~) - Shortcut: Ctrl+U"
+                      className="p-1 rounded hover:bg-gray-200/70 text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      <Strikethrough className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyTextFormat('code')}
+                      title="Kode Monospace (`teks`)"
+                      className="p-1 rounded hover:bg-gray-200/70 text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      <Code className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyTextFormat('quote')}
+                      title="Kutipan (> teks)"
+                      className="p-1 rounded hover:bg-gray-200/70 text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      <Quote className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyTextFormat('bullet')}
+                      title="Daftar Poin (• teks)"
+                      className="p-1 rounded hover:bg-gray-200/70 text-gray-700 hover:text-gray-900 transition-colors"
+                    >
+                      <List className="w-3.5 h-3.5" />
+                    </button>
+
+                    <div className="h-3.5 w-px bg-gray-300 mx-1 shrink-0" />
+
+                    {/* Quick Variable Pills */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-gray-400 font-medium hidden sm:inline">Variabel:</span>
+                      <button
+                        type="button"
+                        onClick={() => applyTextFormat('variable', ' {nama_panggilan} ')}
+                        title="Sisipkan {nama_panggilan}"
+                        className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
+                      >
+                        {'{nama_panggilan}'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyTextFormat('variable', ' {nama_lengkap} ')}
+                        title="Sisipkan {nama_lengkap}"
+                        className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
+                      >
+                        {'{nama_lengkap}'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyTextFormat('variable', ' {nomor_whatsapp} ')}
+                        title="Sisipkan {nomor_whatsapp}"
+                        className="hidden md:inline px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
+                      >
+                        {'{nomor_whatsapp}'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-[10px] text-gray-400 font-medium pl-1 hidden lg:inline">
+                    Format semua channel
+                  </div>
+                </div>
+
                 <textarea
                   ref={replyInputRef}
                   rows={3}
@@ -9483,6 +9689,23 @@ export const Conversations: React.FC<ConversationsProps> = ({
                   value={inputText}
                   onChange={(e) => handleReplyTextChange(e.target.value)}
                   onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+                      if (e.key === 'b' || e.key === 'B') {
+                        e.preventDefault();
+                        applyTextFormat('bold');
+                        return;
+                      }
+                      if (e.key === 'i' || e.key === 'I') {
+                        e.preventDefault();
+                        applyTextFormat('italic');
+                        return;
+                      }
+                      if (e.key === 'u' || e.key === 'U') {
+                        e.preventDefault();
+                        applyTextFormat('strike');
+                        return;
+                      }
+                    }
                     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       e.currentTarget.form?.requestSubmit();

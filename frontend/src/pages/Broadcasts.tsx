@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Send,
   Calendar,
@@ -11,6 +11,10 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  Paperclip,
+  Image as ImageIcon,
+  FolderOpen,
+  ExternalLink,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -32,6 +36,7 @@ import { ConfirmModal } from '../components/ui/ConfirmModal';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 import { TablePagination } from '../components/ui/Pagination';
+import { MediaLibraryPickerModal } from '../components/ui/MediaLibraryPickerModal';
 
 interface BroadcastsProps {
   currentUser?: AuthStatus['user'] | null;
@@ -82,6 +87,65 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
   const [intervalSeconds, setIntervalSeconds] = useState(30);
   const [batchSize, setBatchSize] = useState(10);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Attached Campaign Media
+  const [attachedMedia, setAttachedMedia] = useState<{
+    url: string;
+    type: string;
+    name: string;
+  } | null>(null);
+  const [showMediaPickerModal, setShowMediaPickerModal] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLocalFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error('Ukuran berkas maksimal 25 MB.');
+      e.target.value = '';
+      return;
+    }
+
+    setUploadingMedia(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = String(reader.result || '');
+          const res = await api.uploadMedia({
+            fileName: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            base64: base64Data,
+            source: 'BROADCAST',
+          });
+          const resolvedType = file.type.startsWith('image/')
+            ? 'image'
+            : file.type.startsWith('video/')
+            ? 'video'
+            : file.type.startsWith('audio/')
+            ? 'audio'
+            : 'document';
+          setAttachedMedia({
+            url: res.url || res.relativeUrl,
+            type: resolvedType,
+            name: file.name,
+          });
+          toast.success(`Media "${file.name}" berhasil dilampirkan ke siaran.`);
+        } catch (uploadErr: any) {
+          toast.error(uploadErr?.response?.data?.error || 'Gagal mengunggah berkas media');
+        } finally {
+          setUploadingMedia(false);
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      setUploadingMedia(false);
+      toast.error('Gagal membaca berkas');
+    }
+  };
 
   const [selectedCampaign, setSelectedCampaign] = useState<(Campaign & { recipients: CampaignRecipient[] }) | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -223,6 +287,9 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
       await api.createCampaign({
         title: title.trim(),
         messageTemplate,
+        mediaUrl: attachedMedia?.url || null,
+        mediaType: attachedMedia?.type || null,
+        mediaName: attachedMedia?.name || null,
         type: broadcastType,
         scheduledAt: broadcastType === 'SCHEDULED' ? scheduledAt : null,
         delaySeconds,
@@ -242,6 +309,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
       );
 
       setTitle('');
+      setAttachedMedia(null);
       setActiveTab('history');
       loadCampaigns();
     } catch (err: any) {
@@ -700,6 +768,95 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
                 className="w-full p-3 bg-white border border-gray-200 rounded-md text-[13px] leading-relaxed focus:outline-none focus:border-indigo-500"
                 placeholder="Tulis pesan siaran Anda..."
               />
+
+              {/* Lampiran Media Kampanye */}
+              <div className="pt-2 border-t border-gray-100">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+                  onChange={handleLocalFileUpload}
+                  className="hidden"
+                />
+
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                  <div className="flex items-center gap-1.5 text-xs text-gray-700 font-medium">
+                    <Paperclip className="w-3.5 h-3.5 text-gray-500" />
+                    <span>Lampiran Media Kampanye (Opsional)</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={uploadingMedia}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-md transition-colors disabled:opacity-50"
+                    >
+                      <Paperclip className="w-3.5 h-3.5 text-gray-500" />
+                      <span>{uploadingMedia ? 'Mengunggah...' : 'Unggah File'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowMediaPickerModal(true)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-md transition-colors"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Dari Galeri</span>
+                    </button>
+                  </div>
+                </div>
+
+                {attachedMedia ? (
+                  <div className="flex items-center justify-between gap-3 p-2.5 rounded-md bg-gray-50 border border-gray-200 text-xs">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {attachedMedia.type === 'image' ? (
+                        <img
+                          src={attachedMedia.url}
+                          alt="Pratinjau"
+                          className="w-10 h-10 object-cover rounded border border-gray-200 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                          <Paperclip className="w-5 h-5" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900 truncate max-w-[280px]">
+                          {attachedMedia.name}
+                        </div>
+                        <div className="text-[11px] text-gray-500 flex items-center gap-2">
+                          <span className="uppercase text-[10px] font-semibold text-indigo-600">
+                            {attachedMedia.type}
+                          </span>
+                          <span>•</span>
+                          <a
+                            href={attachedMedia.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center gap-0.5"
+                          >
+                            <span>Pratinjau</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setAttachedMedia(null)}
+                      title="Hapus Lampiran"
+                      className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-gray-400 italic">
+                    Belum ada media dilampirkan. Pesan akan dikirimkan berupa teks murni.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1008,6 +1165,49 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
                         </div>
                       </div>
 
+                      {/* Pratinjau Pesan & Media Kampanye */}
+                      <div className="mb-3 p-2.5 rounded-md bg-gray-50 border border-gray-200 text-xs text-gray-800 space-y-1.5">
+                        <div className="flex items-start gap-2">
+                          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider shrink-0 mt-0.5">
+                            Pesan:
+                          </span>
+                          <p className="whitespace-pre-line text-gray-700 leading-relaxed font-sans line-clamp-2">
+                            {camp.messageTemplate}
+                          </p>
+                        </div>
+
+                        {camp.mediaUrl && (
+                          <div className="flex items-center gap-2 pt-1 border-t border-gray-200/70">
+                            <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider shrink-0">
+                              Media:
+                            </span>
+                            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded bg-white border border-gray-200 text-[11px]">
+                              {camp.mediaType === 'image' ? (
+                                <img
+                                  src={camp.mediaUrl}
+                                  alt="Lampiran Kampanye"
+                                  className="w-5 h-5 object-cover rounded shrink-0 border border-gray-100"
+                                />
+                              ) : (
+                                <Paperclip className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                              )}
+                              <span className="font-mono text-gray-800 truncate max-w-[200px]">
+                                {camp.mediaName || 'Berkas Lampiran'}
+                              </span>
+                              <a
+                                href={camp.mediaUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center gap-0.5 ml-1"
+                              >
+                                <span>Buka</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="w-full bg-gray-100 h-2 rounded overflow-hidden flex mb-2.5">
                         <div
                           className="bg-indigo-600 h-2 transition-all"
@@ -1086,6 +1286,45 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
           <EmptyState title="Tidak ada penerima" description="Kampanye ini belum memiliki daftar penerima." />
         ) : (
           <>
+            {/* Ringkasan Konten Pesan & Lampiran Kampanye */}
+            <div className="mb-4 p-3 rounded-lg bg-gray-50 border border-gray-200 space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2 border-b border-gray-200/80 pb-1.5">
+                <span className="font-semibold text-gray-800">Isi Pesan Siaran</span>
+                <span className="text-[11px] text-gray-500">Saluran: {selectedCampaign.channel || 'WHATSAPP'}</span>
+              </div>
+              <div className="whitespace-pre-line text-gray-800 leading-relaxed font-sans bg-white p-2.5 rounded border border-gray-200 max-h-48 overflow-y-auto">
+                {selectedCampaign.messageTemplate}
+              </div>
+              {selectedCampaign.mediaUrl && (
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-[11px] font-medium text-gray-500">Media Terlampir:</span>
+                  <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded bg-white border border-gray-200 text-xs">
+                    {selectedCampaign.mediaType === 'image' ? (
+                      <img
+                        src={selectedCampaign.mediaUrl}
+                        alt="Lampiran"
+                        className="w-6 h-6 object-cover rounded border border-gray-100 shrink-0"
+                      />
+                    ) : (
+                      <Paperclip className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                    )}
+                    <span className="font-mono text-gray-700 truncate max-w-[240px]">
+                      {selectedCampaign.mediaName || 'Berkas Lampiran'}
+                    </span>
+                    <a
+                      href={selectedCampaign.mediaUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-1 text-[11px]"
+                    >
+                      <span>Lihat Berkas</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="sm:hidden border border-gray-200 rounded-md divide-y divide-gray-200">
               {selectedCampaign.recipients.map((rec) => {
                 const updatedText = rec.readAt
@@ -1204,6 +1443,33 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
         description="Sisa pesan dalam antrean tidak akan dikirimkan. Pesan yang sudah terkirim tetap tercatat."
         confirmLabel="Ya, Batalkan"
         variant="danger"
+      />
+
+      <MediaLibraryPickerModal
+        isOpen={showMediaPickerModal}
+        onClose={() => setShowMediaPickerModal(false)}
+        title="Pilih Media Lampiran Siaran"
+        allowedKinds={['image', 'video', 'document', 'audio']}
+        defaultKind="all"
+        onConfirm={(picked) => {
+          if (picked[0]) {
+            const item = picked[0];
+            const resolvedType = item.mimeType?.startsWith('image/')
+              ? 'image'
+              : item.mimeType?.startsWith('video/')
+              ? 'video'
+              : item.mimeType?.startsWith('audio/')
+              ? 'audio'
+              : 'document';
+            setAttachedMedia({
+              url: item.url || item.relativeUrl,
+              type: resolvedType,
+              name: item.filename || 'media-lampiran',
+            });
+            toast.success(`Media "${item.filename}" dipilih untuk kampanye siaran.`);
+          }
+          setShowMediaPickerModal(false);
+        }}
       />
     </div>
   );

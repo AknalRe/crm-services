@@ -11,6 +11,9 @@ export function formatCampaign(c: any) {
     id: c.id,
     title: c.title,
     messageTemplate: c.messageTemplate,
+    mediaUrl: c.mediaUrl || null,
+    mediaType: c.mediaType || null,
+    mediaName: c.mediaName || null,
     type: c.type,
     channel: c.channel || 'WHATSAPP',
     channelAccountId: c.channelAccountId || null,
@@ -176,6 +179,9 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
     Body: {
       title: string;
       messageTemplate: string;
+      mediaUrl?: string | null;
+      mediaType?: string | null;
+      mediaName?: string | null;
       type?: 'IMMEDIATE' | 'SCHEDULED' | 'BIRTHDAY';
       channel?: 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'THREADS' | 'TELEGRAM';
       channelAccountId?: string | null;
@@ -193,6 +199,9 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
       const {
         title,
         messageTemplate,
+        mediaUrl,
+        mediaType,
+        mediaName,
         type,
         channel,
         channelAccountId,
@@ -216,6 +225,9 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
         companyId,
         title,
         messageTemplate,
+        mediaUrl: mediaUrl || null,
+        mediaType: mediaType || null,
+        mediaName: mediaName || null,
         type: type || 'IMMEDIATE',
         channel: channel || 'WHATSAPP',
         channelAccountId: channelAccountId || null,

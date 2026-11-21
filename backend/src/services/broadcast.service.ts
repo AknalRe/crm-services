@@ -12,6 +12,9 @@ export interface CreateCampaignDTO {
   companyId?: string;
   title: string;
   messageTemplate: string;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
+  mediaName?: string | null;
   type?: 'IMMEDIATE' | 'SCHEDULED' | 'BIRTHDAY';
   channel?: OmnichannelType;
   channelAccountId?: string | null;
@@ -52,6 +55,9 @@ export class BroadcastService {
     const {
       title,
       messageTemplate,
+      mediaUrl = null,
+      mediaType = null,
+      mediaName = null,
       type = 'IMMEDIATE',
       channel = 'WHATSAPP',
       channelAccountId = null,
@@ -202,9 +208,12 @@ export class BroadcastService {
         companyId,
         title,
         messageTemplate,
+        mediaUrl: mediaUrl || null,
+        mediaType: mediaType || null,
+        mediaName: mediaName || null,
         type,
         channel: normalizedChannel,
-        channelAccountId: normalizedChannel === 'WHATSAPP' ? null : channelAccountId,
+        channelAccountId: normalizedChannel === 'WHATSAPP' ? (sessionName || null) : channelAccountId,
         status,
         scheduledAt: scheduleDate,
         delaySeconds: safeDelaySeconds,
@@ -317,9 +326,12 @@ export class BroadcastService {
           contactId: recipient.contactId,
           phone: recipient.phone,
           message: recipient.personalizedMessage,
+          mediaUrl: mediaUrl || null,
+          mediaType: mediaType || null,
+          mediaName: mediaName || null,
           sessionName: assignedSession,
           channel: normalizedChannel,
-          channelAccountId: normalizedChannel === 'WHATSAPP' ? null : channelAccountId,
+          channelAccountId: normalizedChannel === 'WHATSAPP' ? (assignedSession || null) : channelAccountId,
         },
         {
           delay: totalDelay,

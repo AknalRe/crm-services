@@ -32,6 +32,9 @@ export interface Campaign {
   id: string;
   title: string;
   messageTemplate: string;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
+  mediaName?: string | null;
   type: 'IMMEDIATE' | 'SCHEDULED' | 'BIRTHDAY';
   channel?: OmnichannelType;
   channelAccountId?: string | null;

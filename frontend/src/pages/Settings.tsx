@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  AlertTriangle,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -3106,28 +3107,56 @@ export const Settings: React.FC<SettingsProps> = ({
         isLoading={sessionActionLoading}
         title={
           confirmAction === 'logout'
-            ? `Logout Sesi "${inspectedSession}"?`
-            : `Hentikan Sesi "${inspectedSession}"?`
+            ? `Logout Sesi WhatsApp "${inspectedSession}"?`
+            : `Hentikan Sesi WhatsApp "${inspectedSession}"?`
         }
-        description={
-          confirmAction === 'logout'
-            ? `Sesi "${inspectedSession}" akan keluar dari perangkat tertaut dan perlu scan QR ulang untuk terhubung kembali.`
-            : `Sesi "${inspectedSession}" akan dihentikan sementara dan tidak dapat mengirim pesan hingga dijalankan kembali.`
-        }
-        confirmLabel={confirmAction === 'logout' ? 'Ya, Logout' : 'Ya, Hentikan'}
+        confirmLabel={confirmAction === 'logout' ? 'Ya, Logout Sesi' : 'Ya, Hentikan Sesi'}
         variant="danger"
-      />
+      >
+        <div className="space-y-3">
+          <p className="text-[13px] text-gray-600 leading-relaxed">
+            {confirmAction === 'logout'
+              ? `Sesi "${inspectedSession}" akan keluar dari perangkat tertaut dan perlu scan QR ulang untuk terhubung kembali.`
+              : `Sesi "${inspectedSession}" akan dihentikan sementara dan tidak dapat mengirim pesan hingga dijalankan kembali.`}
+          </p>
+
+          <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-950">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Peringatan Data Riwayat &amp; Kampanye Siaran</span>
+            </div>
+            <p className="leading-relaxed text-amber-800">
+              Jika sesi ini pernah atau sedang digunakan untuk kampanye siaran (broadcast), data kampanye bisa saja menjadi tidak valid atau sistem tidak dapat mengambil data yang sesuai (status laporan terkirim, sampai, dan dibaca) karena nomor sesi atau identitas sesi telah berganti.
+            </p>
+          </div>
+        </div>
+      </ConfirmModal>
 
       <ConfirmModal
         isOpen={confirmDeleteSession !== null}
         onClose={() => setConfirmDeleteSession(null)}
         onConfirm={handleConfirmDeleteSession}
         isLoading={sessionBusyName !== null}
-        title={`Hapus Sesi "${confirmDeleteSession}"?`}
-        description="Sesi WhatsApp ini akan dihapus dari server WAHA. Jika ini adalah sesi aktif, sistem akan mengalihkan sesi aktif ke sesi lain."
+        title={`Hapus Sesi WhatsApp "${confirmDeleteSession}"?`}
         confirmLabel="Ya, Hapus Sesi"
         variant="danger"
-      />
+      >
+        <div className="space-y-3">
+          <p className="text-[13px] text-gray-600 leading-relaxed">
+            Sesi WhatsApp &quot;{confirmDeleteSession}&quot; ini akan dihapus permanen dari server WAHA. Jika ini adalah sesi aktif, sistem akan mengalihkan sesi aktif ke sesi lain.
+          </p>
+
+          <div className="p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-950">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Peringatan Data Riwayat &amp; Kampanye Siaran</span>
+            </div>
+            <p className="leading-relaxed text-amber-800">
+              Jika sesi ini pernah atau sedang digunakan untuk kampanye siaran (broadcast), data kampanye bisa saja menjadi tidak valid atau sistem tidak dapat mengambil data yang sesuai (status laporan terkirim, sampai, dan dibaca) karena nomor sesi atau identitas sesi telah berganti atau dihapus.
+            </p>
+          </div>
+        </div>
+      </ConfirmModal>
 
       <ConfirmModal
         isOpen={confirmDeleteAgent !== null}

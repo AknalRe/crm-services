@@ -480,6 +480,9 @@ export async function initDb() {
     await _queryClient`ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_nomor_whatsapp_unique;`;
     await _queryClient`ALTER TABLE contacts ALTER COLUMN nomor_whatsapp DROP NOT NULL;`;
     await _queryClient`ALTER TABLE campaigns ALTER COLUMN scheduled_at DROP NOT NULL;`;
+    await _queryClient`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS media_url text;`;
+    await _queryClient`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS media_type text;`;
+    await _queryClient`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS media_name text;`;
     await _queryClient`ALTER TABLE scheduled_posts ALTER COLUMN channel_account_id DROP NOT NULL;`;
     await _queryClient`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_key;`;
     await _queryClient`ALTER TABLE campaign_recipients DROP CONSTRAINT IF EXISTS campaign_recipients_waha_message_id_unique;`;

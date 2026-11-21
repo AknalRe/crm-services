@@ -10,6 +10,7 @@ import {
 } from '../db/schema';
 import { wahaService } from './waha.service';
 import { sendOutboundChannelMessage, OmnichannelType } from './channel.service';
+import { readUploadedMediaAsDataUri } from '../routes/media';
 import { liveEvents } from './events.service';
 import { getActiveCompanyId, runWithCompany } from './tenantContext';
 import crypto from 'crypto';
@@ -21,6 +22,9 @@ export interface SendMessageJobData {
   contactId: string;
   phone: string;
   message: string;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
+  mediaName?: string | null;
   sessionName?: string;
   channel?: OmnichannelType;
   channelAccountId?: string | null;
@@ -55,6 +59,9 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
       contactId,
       phone,
       message,
+      mediaUrl,
+      mediaType,
+      mediaName,
       sessionName,
       channel = 'WHATSAPP',
       channelAccountId = null,
@@ -126,7 +133,31 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
         };
       }
     } else {
-      sendResult = await wahaService.sendTextMessage(phone, message, sessionName);
+      if (mediaUrl) {
+        try {
+          const loadedMedia = await readUploadedMediaAsDataUri(mediaUrl, mediaType || undefined);
+          if (loadedMedia?.dataUri) {
+            const resolvedMime = loadedMedia.mimetype || mediaType || 'application/octet-stream';
+            sendResult = await wahaService.sendMediaMessage(
+              phone,
+              {
+                base64: loadedMedia.dataUri,
+                mimetype: resolvedMime,
+                filename: mediaName || 'attachment',
+                caption: message,
+              },
+              sessionName
+            );
+          } else {
+            sendResult = await wahaService.sendTextMessage(phone, message, sessionName);
+          }
+        } catch (mediaErr: any) {
+          console.warn('[Queue Worker] Failed to send media, falling back to text:', mediaErr?.message);
+          sendResult = await wahaService.sendTextMessage(phone, message, sessionName);
+        }
+      } else {
+        sendResult = await wahaService.sendTextMessage(phone, message, sessionName);
+      }
     }
 
     if (sendResult.success) {
@@ -245,7 +276,15 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
           conversationId: convId,
           contactId,
           direction: 'OUTBOUND',
-          messageType: 'TEXT',
+          messageType: mediaUrl
+            ? (mediaType?.startsWith('image')
+                ? 'IMAGE'
+                : mediaType?.startsWith('video')
+                ? 'VIDEO'
+                : 'DOCUMENT')
+            : 'TEXT',
+          mediaUrl: mediaUrl || null,
+          mediaMimetype: mediaType || null,
           channel: targetChannel,
           externalMessageId: sendResult.messageId || null,
           wahaSession: effectiveSession,

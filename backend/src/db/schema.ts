@@ -70,6 +70,9 @@ export const campaigns = pgTable('campaigns', {
     .notNull(),
   title: text('title').notNull(),
   messageTemplate: text('message_template').notNull(),
+  mediaUrl: text('media_url'),
+  mediaType: text('media_type'),
+  mediaName: text('media_name'),
   type: text('type').default('IMMEDIATE').notNull(), // IMMEDIATE, SCHEDULED, BIRTHDAY
   channel: text('channel').default('WHATSAPP').notNull(), // WHATSAPP, INSTAGRAM, FACEBOOK, THREADS, TELEGRAM
   channelAccountId: text('channel_account_id'),

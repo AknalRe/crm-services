@@ -7,7 +7,8 @@ interface ConfirmModalProps {
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
   title: string;
-  description: string;
+  description?: React.ReactNode;
+  children?: React.ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'danger' | 'primary';
@@ -20,6 +21,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   onConfirm,
   title,
   description,
+  children,
   confirmLabel = 'Konfirmasi',
   cancelLabel = 'Batal',
   variant = 'danger',
@@ -43,7 +45,10 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         </>
       }
     >
-      <p className="text-[13px] text-gray-600 leading-relaxed">{description}</p>
+      {description && (
+        <div className="text-[13px] text-gray-600 leading-relaxed">{description}</div>
+      )}
+      {children}
     </Modal>
   );
 };

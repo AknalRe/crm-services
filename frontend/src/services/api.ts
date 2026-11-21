@@ -177,6 +177,9 @@ export const api = {
   createCampaign: async (data: {
     title: string;
     messageTemplate: string;
+    mediaUrl?: string | null;
+    mediaType?: string | null;
+    mediaName?: string | null;
     type?: string;
     scheduledAt?: string | null;
     delaySeconds?: number;
