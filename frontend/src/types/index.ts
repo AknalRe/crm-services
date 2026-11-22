@@ -49,6 +49,9 @@ export interface Campaign {
   deliveredCount: number;
   readCount: number;
   failedCount: number;
+  respondedCount?: number;
+  responseRate?: number;
+  unresponsiveCount?: number;
   startedAt?: string | null;
   completedAt?: string | null;
   createdAt: string;
@@ -574,6 +577,21 @@ export interface MessageTemplateItem {
   updatedAt?: string;
 }
 
+export interface RespondingLeadItem {
+  recipientId: string;
+  campaignId: string;
+  campaignTitle: string;
+  contactId: string;
+  contactName: string;
+  phone: string;
+  contactCategory?: string;
+  sentAt?: string | null;
+  respondedAt: string;
+  responseDelayMinutes: number;
+  responseSnippet: string;
+  conversationId?: string | null;
+}
+
 export interface DashboardStats {
   filters?: {
     period: string;
@@ -592,6 +610,11 @@ export interface DashboardStats {
     failed: number;
     deliveryRate: number;
     readRate: number;
+    totalCampaignResponses?: number;
+    campaignResponseRate?: number;
+    topCampaignName?: string;
+    topCampaignResponseRate?: number;
+    topCampaignRespondedCount?: number;
     birthdayTodayCount: number;
     contactCategories?: Array<{ category: string; count: number }>;
     activityTrend7d?: Array<{
@@ -606,9 +629,15 @@ export interface DashboardStats {
   conversationAnalytics?: ConversationAnalytics;
   recentCampaigns: Campaign[];
   recentActivity: CampaignRecipient[];
+  respondingLeads?: RespondingLeadItem[];
 }
 
-export type DashboardDrilldownKind = 'contacts' | 'recipients' | 'conversations' | 'csat';
+export type DashboardDrilldownKind =
+  | 'contacts'
+  | 'recipients'
+  | 'conversations'
+  | 'csat'
+  | 'campaign_responses';
 
 export interface DashboardDrilldownResponse {
   kind: DashboardDrilldownKind;
@@ -768,6 +797,9 @@ export interface CrmSlaCsatSettings {
   slaTargetMinutes: number;
   csatBaseUrl?: string;
   csatSurveyConfig?: CsatSurveyConfig;
+  autoResolveInactivityEnabled?: boolean;
+  autoResolveInactivityHours?: number;
+  autoResolveInactivitySendCsat?: boolean;
 }
 
 export interface LicenseInfo {
@@ -837,6 +869,9 @@ export interface LicensePlan {
   months: number;
   trialDays?: number;
   priceAmount: number;
+  originalPriceAmount?: number;
+  discountPercent?: number;
+  promoValidUntil?: string;
   features: {
     unlimitedBroadcast?: boolean;
     maxContacts?: number;

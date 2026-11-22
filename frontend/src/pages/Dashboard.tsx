@@ -502,7 +502,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* KPI Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-2.5 sm:gap-4">
         <StatCard
           title="Total Pelanggan"
           value={summary.totalContacts}
@@ -574,6 +574,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
               filter: 'read',
               shortcutTab: 'tracking',
               shortcutLabel: 'Buka Tracking Live',
+            })
+          }
+        />
+        <StatCard
+          title="Respon Masuk"
+          value={summary.totalCampaignResponses || 0}
+          subtitle={
+            (summary.campaignResponseRate || 0) > 0
+              ? `Response rate ${summary.campaignResponseRate}%`
+              : getPeriodSubtitle('Balasan pesan siaran')
+          }
+          icon={MessageSquare}
+          color="indigo"
+          trend={
+            (summary.campaignResponseRate || 0) > 0
+              ? { value: `${summary.campaignResponseRate}%`, positive: true }
+              : undefined
+          }
+          onClick={() =>
+            void openDrilldown({
+              title: 'Detail Respon Siaran Masuk',
+              subtitle: 'Lead / pelanggan yang membalas pesan setelah menerima siaran kampanye',
+              kind: 'campaign_responses',
+              filter: 'responded',
+              shortcutTab: 'conversations',
+              shortcutLabel: 'Buka Obrolan CRM',
             })
           }
         />
@@ -687,7 +713,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             </button>
 
-            <div className="pt-3 border-t border-gray-200 grid grid-cols-3 gap-2 sm:gap-2.5 text-center text-xs">
+            <button
+              type="button"
+              onClick={() =>
+                void openDrilldown({
+                  title: 'Detail Respon Masuk (Inbound Responses)',
+                  subtitle: `Response rate ${summary.campaignResponseRate || 0}% (${summary.totalCampaignResponses || 0} pesan balasan)`,
+                  kind: 'campaign_responses',
+                  filter: 'responded',
+                  shortcutTab: 'conversations',
+                  shortcutLabel: 'Buka Obrolan CRM',
+                })
+              }
+              className="w-full text-left group rounded-md p-1.5 -m-1.5 hover:bg-purple-50/40 transition-colors cursor-pointer"
+            >
+              <div className="flex justify-between text-xs font-medium mb-1.5">
+                <span className="text-gray-600 group-hover:text-purple-800">Tingkat Balasan Masuk (Response Rate)</span>
+                <span className="text-purple-700 font-semibold tabular-nums inline-flex items-center gap-1">
+                  {summary.campaignResponseRate || 0}% ({summary.totalCampaignResponses || 0} lead)
+                  <ChevronRight className="w-3 h-3 opacity-60" />
+                </span>
+              </div>
+              <div className="w-full bg-gray-100 rounded h-2 overflow-hidden">
+                <div
+                  className="bg-purple-600 h-2 rounded transition-all duration-300"
+                  style={{ width: `${Math.min(100, summary.campaignResponseRate || 0)}%` }}
+                />
+              </div>
+            </button>
+
+            <div className="pt-3 border-t border-gray-200 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 text-center text-xs">
               <button
                 type="button"
                 onClick={() =>
@@ -741,6 +796,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   Centang Biru
                 </span>
                 <span className="block font-bold text-gray-900 tabular-nums">{summary.read}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void openDrilldown({
+                    title: 'Detail Penerima Membalas Siaran',
+                    kind: 'campaign_responses',
+                    filter: 'responded',
+                    shortcutTab: 'conversations',
+                    shortcutLabel: 'Buka Obrolan CRM',
+                  })
+                }
+                className="bg-gray-50 hover:bg-gray-100 border border-gray-200 p-2 sm:p-2.5 rounded-md min-w-0 transition-colors cursor-pointer"
+              >
+                <span className="inline-flex items-center justify-center gap-1 text-gray-500 text-[10px] sm:text-[11px] truncate">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" />
+                  Membalas
+                </span>
+                <span className="block font-bold text-purple-700 tabular-nums">{summary.totalCampaignResponses || 0}</span>
               </button>
             </div>
           </div>
@@ -1960,6 +2034,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-700 border border-gray-200">
                             {camp.type}
                           </span>
+                          {camp.respondedCount !== undefined && camp.respondedCount > 0 && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                              Respon: {camp.respondedCount} lead ({camp.responseRate || 0}%)
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">
                           {camp.messageTemplate}
@@ -2003,7 +2082,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <span>
                         Total: <strong className="text-gray-900">{camp.totalCount}</strong> kontak
                       </span>
-                      <div className="flex gap-3">
+                      <div className="flex flex-wrap items-center gap-3">
                         <span className="text-emerald-700">
                           Terkirim: <strong>{camp.sentCount}</strong>
                         </span>
@@ -2013,6 +2092,30 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <span className="text-indigo-700">
                           Dibaca: <strong>{camp.readCount}</strong>
                         </span>
+                        <span className="text-purple-700">
+                          Respon: <strong>{camp.respondedCount || 0}</strong> ({camp.responseRate || 0}%)
+                        </span>
+                        {camp.respondedCount !== undefined && camp.respondedCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openDrilldown({
+                                title: `Respon Kampanye: ${camp.title}`,
+                                subtitle: `Daftar lead yang membalas setelah menerima "${camp.title}" (${camp.respondedCount} lead)`,
+                                kind: 'campaign_responses',
+                                filter: 'responded',
+                                value: camp.id,
+                                shortcutTab: 'conversations',
+                                shortcutLabel: 'Buka Obrolan CRM',
+                              });
+                            }}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 hover:bg-purple-200 text-purple-800 transition-colors cursor-pointer"
+                          >
+                            <MessageSquare className="w-2.5 h-2.5" />
+                            <span>Lihat Respon</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2136,6 +2239,124 @@ export const Dashboard: React.FC<DashboardProps> = ({
               })
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Lead Responsif (Membalas Kampanye Siaran) Widget */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col">
+        <div className="px-3.5 sm:px-5 py-3 sm:py-4 border-b border-gray-200 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => toggleMobileSection('respondingLeads')}
+            className="sm:pointer-events-none flex-1 min-w-0 text-left flex items-center justify-between gap-2"
+          >
+            <div className="min-w-0">
+              <h3 className="font-semibold text-gray-900 text-sm inline-flex items-center gap-1.5">
+                <MessageSquare className="w-4 h-4 text-purple-600 shrink-0" />
+                <span className="truncate">Lead Responsif (Membalas Kampanye Siaran)</span>
+                <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 text-[10px] font-mono shrink-0">
+                  {stats?.respondingLeads?.length || 0} lead
+                </span>
+                {summary.topCampaignName && (
+                  <span className="hidden md:inline-flex px-2 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] truncate">
+                    Top Konversi: {summary.topCampaignName} ({summary.topCampaignResponseRate || 0}%)
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">
+                Menampilkan prospek / pelanggan yang membalas pesan masuk setelah menerima siaran kampanye.
+              </p>
+            </div>
+            <span className="sm:hidden text-[11px] text-indigo-600 font-medium inline-flex items-center gap-0.5 shrink-0">
+              <span>{isMobileSectionOpen('respondingLeads') ? 'Tutup' : 'Detail'}</span>
+              {isMobileSectionOpen('respondingLeads') ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5" />
+              )}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void openDrilldown({
+                title: 'Semua Lead yang Membalas Kampanye',
+                subtitle: 'Daftar lengkap lead dan isi pesan balasan dari kampanye siaran',
+                kind: 'campaign_responses',
+                filter: 'responded',
+                shortcutTab: 'conversations',
+                shortcutLabel: 'Buka Obrolan CRM',
+              })
+            }
+            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium shrink-0 inline-flex items-center gap-1 cursor-pointer"
+          >
+            <span>Lihat Semua Respon</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className={`${isMobileSectionOpen('respondingLeads') ? 'p-3.5 sm:p-5' : 'hidden sm:block sm:p-5'}`}>
+          {!stats?.respondingLeads || stats.respondingLeads.length === 0 ? (
+            <EmptyState
+              title="Belum ada respon siaran terdeteksi"
+              description="Ketika penerima kampanye mengirim pesan balasan masuk ke nomor WhatsApp, daftar respon dan cuplikan pesannya akan langsung muncul di sini."
+            />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {stats.respondingLeads.slice(0, 6).map((lead) => (
+                <div
+                  key={`${lead.contactId}-${lead.campaignId}`}
+                  className="rounded-lg border border-gray-200 bg-gray-50/60 p-3.5 flex flex-col justify-between hover:border-purple-300 hover:bg-purple-50/20 transition-all space-y-2.5"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="font-semibold text-gray-900 text-xs sm:text-sm truncate">
+                          {lead.contactName || `+${lead.phone}`}
+                        </h4>
+                        <div className="text-[11px] font-mono text-gray-500 mt-0.5">
+                          +{lead.phone}
+                        </div>
+                      </div>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 shrink-0">
+                        {lead.responseDelayMinutes < 1
+                          ? '< 1 mnt'
+                          : lead.responseDelayMinutes < 60
+                          ? `${lead.responseDelayMinutes} mnt`
+                          : `${Math.round(lead.responseDelayMinutes / 60)} jam`}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-gray-600 bg-white border border-gray-200 rounded p-2 line-clamp-2 italic">
+                      "{lead.responseSnippet || 'Pesan balasan diterima'}"
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-gray-200/80 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-gray-500 block truncate" title={lead.campaignTitle}>
+                        Kampanye: <strong>{lead.campaignTitle}</strong>
+                      </span>
+                      <span className="text-[10px] font-mono text-gray-400">
+                        {new Date(lead.respondedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNavigate('conversations', lead.conversationId ? { conversationId: lead.conversationId } : undefined);
+                      }}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                    >
+                      <span>Buka Chat</span>
+                      <ArrowUpRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -2337,6 +2558,74 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           </div>
                         </div>
                       ))}
+                    </div>
+                  );
+                }
+
+                if (drilldown.kind === 'campaign_responses' || drilldown.filter === 'responded') {
+                  return (
+                    <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg">
+                      {visible.map((r: any, idx: number) => {
+                        const contactName = r.nama || r.contact?.nama_lengkap || r.name || r.nomor_whatsapp || r.phone;
+                        const phone = r.nomor_whatsapp || r.phone;
+                        const campaignTitle = r.campaign_title || r.campaignTitle || r.campaign?.title;
+                        const snippet = r.response_message || r.messageSnippet || r.body;
+                        const delayMins = r.response_delay_minutes ?? r.delayMinutes;
+                        const convId = r.conversation_id || r.conversationId;
+
+                        return (
+                          <div key={r.id || `${r.contact_id || r.contactId}-${idx}`} className="p-3 space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <span className="font-semibold text-gray-900">{contactName}</span>
+                                {phone && (
+                                  <span className="ml-2 font-mono text-[11px] text-gray-500">+{phone}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {delayMins !== undefined && delayMins !== null && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                                    Respon dalam {delayMins < 60 ? `${delayMins} mnt` : `${Math.round(delayMins / 60)} jam`}
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDrilldown(null);
+                                    onNavigate('conversations', convId ? { conversationId: convId } : undefined);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-[11px] font-medium cursor-pointer"
+                                >
+                                  <span>Buka Chat</span>
+                                  <ArrowUpRight className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {snippet && (
+                              <div className="text-[11px] text-gray-700 bg-gray-50 border border-gray-200 rounded p-2 italic">
+                                "{snippet}"
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-gray-500">
+                              {campaignTitle && (
+                                <span>Kampanye: <strong className="text-gray-700">{campaignTitle}</strong></span>
+                              )}
+                              <div className="flex items-center gap-2 font-mono">
+                                {r.sent_at || r.sentAt ? (
+                                  <span>Kirim: {new Date(r.sent_at || r.sentAt).toLocaleString('id-ID')}</span>
+                                ) : null}
+                                {r.responded_at || r.respondedAt ? (
+                                  <span className="text-purple-700 font-semibold">
+                                    • Balas: {new Date(r.responded_at || r.respondedAt).toLocaleString('id-ID')}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 }

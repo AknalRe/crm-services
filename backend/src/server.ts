@@ -31,7 +31,7 @@ import aiAgentRouter from './routes/aiAgent';
 import masterDataRouter from './routes/masterData';
 import { BirthdayService } from './services/birthday.service';
 import { PostService } from './services/post.service';
-import { startSlaMonitor } from './services/automation.service';
+import { startSlaMonitor, startInactivityAutoResolveMonitor } from './services/automation.service';
 import { startWahaBackgroundSyncMonitor } from './services/chatSync.service';
 import {
   evaluateDomainGuardRequest,
@@ -144,6 +144,7 @@ async function main() {
     await BirthdayService.initScheduler();
     await PostService.initPostScheduler();
     startSlaMonitor();
+    startInactivityAutoResolveMonitor();
     startWahaBackgroundSyncMonitor();
   } catch (err) {
     fastify.log.error('[BirthdayService] Failed to initialize scheduler: ' + err);

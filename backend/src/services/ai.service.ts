@@ -402,6 +402,7 @@ export const DEFAULT_AI_CONFIG: AiAgentConfig = {
     'crm_reply_to_message',
     'crm_update_customer_profile',
     'crm_escalate_to_human',
+    'crm_resolve_conversation',
   ],
   autoReplyDm: false,
   autoReplyComment: false,

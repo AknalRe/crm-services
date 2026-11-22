@@ -1,10 +1,11 @@
 import crypto from 'crypto';
 import axios from 'axios';
-import { asc, desc, eq, and, ne, isNull, isNotNull, sql } from 'drizzle-orm';
+import { asc, desc, eq, and, ne, isNull, isNotNull, sql, inArray, lt } from 'drizzle-orm';
 import { db } from '../db';
 import {
   autoReplyRules,
   chatMessages,
+  contacts,
   conversations,
   crmAgents,
   webhookDeliveries,
@@ -22,6 +23,7 @@ import { wahaService } from './waha.service';
 import { OmnichannelType, sendOutboundChannelMessage } from './channel.service';
 import { liveEvents } from './events.service';
 import { getActiveCompanyId, listActiveCompanyIds, runWithCompany, upsertCompanySetting } from './tenantContext';
+import { sendCsatCtaForConversation, recordConversationActivity } from './csatSender.service';
 
 const offHoursCooldown = new Map<string, number>();
 const slaAlertedAt = new Map<string, number>();
@@ -698,4 +700,127 @@ async function runSlaCheckForCompany(companyId: string): Promise<void> {
   } catch (err: any) {
     console.warn('[SlaMonitor] Check failed:', err.message);
   }
+}
+
+let inactivityTimer: NodeJS.Timeout | null = null;
+
+export function startInactivityAutoResolveMonitor(): void {
+  if (inactivityTimer) return;
+  // Periksa setiap 60 detik
+  inactivityTimer = setInterval(async () => {
+    try {
+      const companyIds = await listActiveCompanyIds();
+      for (const cid of companyIds) {
+        await runWithCompany(cid, () => runInactivityAutoResolveForCompany(cid));
+      }
+    } catch (err: any) {
+      console.warn('[InactivityAutoResolve] Check failed:', err.message);
+    }
+  }, 60_000);
+}
+
+export async function runInactivityAutoResolveForCompany(companyId: string): Promise<number> {
+  let resolvedCount = 0;
+  try {
+    const settings = await getSettingMap(companyId);
+    if (settings.auto_resolve_inactivity_enabled !== 'true') return 0;
+
+    const hoursRaw = Number.parseInt(settings.auto_resolve_inactivity_hours || '24', 10);
+    const inactivityHours = Number.isFinite(hoursRaw) && hoursRaw >= 1 ? Math.min(168, hoursRaw) : 24;
+    const cutoffDate = new Date(Date.now() - inactivityHours * 3600 * 1000);
+
+    const candidates = await db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.companyId, companyId),
+          inArray(conversations.status, ['OPEN', 'PENDING']),
+          eq(conversations.excludeFromMetrics, false),
+          eq(conversations.isGroup, false),
+          isNotNull(conversations.lastMessageAt),
+          lt(conversations.lastMessageAt, cutoffDate)
+        )
+      );
+
+    if (candidates.length === 0) return 0;
+
+    const shouldSendCsat = settings.auto_resolve_inactivity_send_csat !== 'false';
+
+    for (const conv of candidates) {
+      // Verifikasi pesan terakhir: hanya auto-resolve jika pesan terakhir dikirim oleh CS / Agent (OUTBOUND)
+      // Artinya kita sudah merespon dan menunggu pelanggan, namun pelanggan tidak kunjung membalas
+      const lastMessages = await db
+        .select({ direction: chatMessages.direction })
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, conv.id))
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(1);
+
+      if (lastMessages[0] && lastMessages[0].direction === 'INBOUND') {
+        // Pelanggan yang mengirim pesan terakhir dan belum dibalas oleh tim, jangan diselesaikan otomatis!
+        continue;
+      }
+
+      const now = new Date();
+      const durationSeconds = conv.sessionStartedAt
+        ? Math.max(0, Math.round((now.getTime() - new Date(conv.sessionStartedAt).getTime()) / 1000))
+        : conv.firstInboundAt
+        ? Math.max(0, Math.round((now.getTime() - new Date(conv.firstInboundAt).getTime()) / 1000))
+        : null;
+
+      await db
+        .update(conversations)
+        .set({
+          status: 'RESOLVED',
+          resolvedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(conversations.id, conv.id));
+
+      resolvedCount++;
+
+      // Kirim survei CSAT otomatis jika opsi diaktifkan
+      let csatOutcome = 'tanpa CSAT';
+      if (shouldSendCsat) {
+        const [contact] = await db
+          .select()
+          .from(contacts)
+          .where(and(eq(contacts.id, conv.contactId), eq(contacts.companyId, companyId)));
+
+        if (contact) {
+          try {
+            const refreshedConv = { ...conv, status: 'RESOLVED' as const, resolvedAt: now };
+            await sendCsatCtaForConversation(refreshedConv, contact, {
+              triggerType: 'AUTO_RESOLVE',
+            });
+            csatOutcome = 'survei CSAT terkirim';
+          } catch (csatErr: any) {
+            csatOutcome = `gagal kirim CSAT: ${csatErr.message}`;
+            console.warn('[InactivityAutoResolve] Failed to send CSAT for conv', conv.id, csatErr.message);
+          }
+        }
+      }
+
+      // Catat di linimasa percakapan
+      await recordConversationActivity({
+        companyId,
+        conversationId: conv.id,
+        contactId: conv.contactId,
+        wahaSession: conv.wahaSession,
+        channel: conv.channel,
+        actorName: 'Otomasi Sistem',
+        actorRole: 'System',
+        action: 'AUTO_RESOLVED_INACTIVITY',
+        summary: `Obrolan diselesaikan otomatis karena pelanggan tidak merespon selama ${inactivityHours} jam (${csatOutcome})`,
+        createdAt: now,
+      });
+
+      liveEvents.emit('conversations:update', { conversationId: conv.id }, companyId);
+      liveEvents.emit('tracking:update', { conversationId: conv.id }, companyId);
+    }
+  } catch (err: any) {
+    console.warn('[InactivityAutoResolve] Error processing auto-resolve:', err.message);
+  }
+  return resolvedCount;
 }

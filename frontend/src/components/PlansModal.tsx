@@ -189,6 +189,11 @@ export const PlansModal: React.FC<PlansModalProps> = ({
   const unitMonths = selectedPlan?.months || (selectedPlan?.period === 'annual' ? 12 : 1);
   const totalAddedMonths = unitMonths * clampedQty;
   const totalSubtotal = (selectedPlan?.priceAmount || 0) * clampedQty;
+  const totalOriginalSubtotal =
+    ((selectedPlan?.originalPriceAmount && selectedPlan.originalPriceAmount > selectedPlan.priceAmount)
+      ? selectedPlan.originalPriceAmount
+      : selectedPlan?.priceAmount || 0) * clampedQty;
+  const totalDiscountSavings = totalOriginalSubtotal - totalSubtotal;
 
   const estimatedNewExpiry = useMemo(() => {
     const now = new Date();
@@ -476,9 +481,19 @@ export const PlansModal: React.FC<PlansModalProps> = ({
           <span>
             <strong className="text-gray-900">{selectedPlan.name}</strong> &middot;{' '}
             <span className="font-mono font-semibold text-indigo-700">{totalAddedMonths} Bln</span> &middot;{' '}
+            {totalDiscountSavings > 0 && (
+              <span className="line-through text-gray-400 mr-1.5 tabular-nums">
+                Rp {totalOriginalSubtotal.toLocaleString('id-ID')}
+              </span>
+            )}
             <span className="font-mono font-semibold text-gray-900 tabular-nums">
               Rp {totalSubtotal.toLocaleString('id-ID')}
             </span>
+            {totalDiscountSavings > 0 && (
+              <span className="ml-1.5 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded">
+                Hemat Rp {totalDiscountSavings.toLocaleString('id-ID')}
+              </span>
+            )}
           </span>
         ) : (
           <span>Pilih paket untuk melanjutkan</span>
@@ -1182,11 +1197,31 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{p.tagline}</p>
                           </div>
 
-                          <div className="text-xl font-bold text-gray-900 tabular-nums">
-                            Rp {p.priceAmount.toLocaleString('id-ID')}
-                            <span className="text-xs font-normal text-gray-500">
-                              /{p.period === 'annual' ? 'thn' : 'bln'}
-                            </span>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {p.originalPriceAmount && p.originalPriceAmount > p.priceAmount && (
+                                <span className="line-through text-xs font-semibold text-gray-400 tabular-nums">
+                                  Rp {p.originalPriceAmount.toLocaleString('id-ID')}
+                                </span>
+                              )}
+                              {p.discountPercent && p.discountPercent > 0 && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                  Hemat {p.discountPercent}%
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xl font-bold text-gray-900 tabular-nums">
+                              Rp {p.priceAmount.toLocaleString('id-ID')}
+                              <span className="text-xs font-normal text-gray-500">
+                                /{p.period === 'annual' ? 'thn' : 'bln'}
+                              </span>
+                            </div>
+                            {p.promoValidUntil && (
+                              <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
+                                <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                <span>Promo s/d {p.promoValidUntil}</span>
+                              </div>
+                            )}
                           </div>
 
                           {(() => {
@@ -1200,12 +1235,12 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const hasMultiSess = Boolean(p.features?.multiSession ?? !isStarterPlan);
                             const maxSess =
                               p.features?.maxSessions ||
-                              (isEntPlan ? 25 : isBusinessPlan ? 10 : hasMultiSess ? 3 : 1);
+                              (isEntPlan ? 30 : isBusinessPlan ? 10 : hasMultiSess ? 3 : 1);
                             const hasMultiAg = Boolean(p.features?.multiAgent ?? !isStarterPlan);
                             const maxAg =
                               p.features?.maxAgents ||
                               p.features?.maxUsers ||
-                              (isEntPlan ? 30 : isBusinessPlan ? 12 : hasMultiAg ? 5 : 1);
+                              (isEntPlan ? 50 : isBusinessPlan ? 15 : hasMultiAg ? 5 : 1);
                             const hasOmni = Boolean(p.features?.omnichannel ?? !isStarterPlan);
                             const maxChan =
                               p.features?.maxChannels !== undefined
@@ -1228,15 +1263,15 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const storageMb =
                               Number(p.features?.maxStorageMb) ||
                               (isEntPlan
-                                ? 10240
+                                ? 35840
                                 : isBusinessPlan
-                                ? 3072
+                                ? 8192
                                 : isStarterPlan
                                 ? 250
                                 : 1024);
                             const fileLimitMb =
                               Number(p.features?.maxAttachmentSizeMb) ||
-                              (isEntPlan ? 35 : isBusinessPlan ? 20 : isStarterPlan ? 5 : 10);
+                              (isEntPlan ? 50 : isBusinessPlan ? 25 : isStarterPlan ? 5 : 10);
 
                             return (
                               <div className="border-t border-gray-200 pt-2.5 space-y-1.5 text-xs text-gray-700">
@@ -1271,7 +1306,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                     Batas Ganti Nomor:{' '}
                                     <strong>
                                       {Number(p.features?.maxSessionIdentitySwitches) ||
-                                        (isEntPlan ? 25 : isBusinessPlan ? 10 : isStarterPlan ? 2 : 5)}
+                                        (isEntPlan ? 50 : isBusinessPlan ? 15 : isStarterPlan ? 2 : 5)}
                                       x
                                     </strong>{' '}
                                     per sesi
@@ -1490,7 +1525,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-2.5 pt-2 border-t border-indigo-100">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 pt-2 border-t border-indigo-100">
                   <div className="px-2.5 sm:px-3 py-2 rounded-lg bg-white border border-gray-200">
                     <span className="text-[10px] text-gray-500 block">Durasi</span>
                     <strong className="text-xs font-semibold font-mono text-gray-900">
@@ -1503,13 +1538,32 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                       {formatDateId(estimatedNewExpiry.toISOString())}
                     </strong>
                   </div>
+                  <div className="px-2.5 sm:px-3 py-2 rounded-lg bg-white border border-gray-200">
+                    <span className="text-[10px] text-gray-500 block">Harga Normal</span>
+                    <strong className="text-xs font-semibold font-mono text-gray-400 line-through tabular-nums">
+                      Rp {totalOriginalSubtotal.toLocaleString('id-ID')}
+                    </strong>
+                  </div>
                   <div className="col-span-2 sm:col-span-1 px-2.5 sm:px-3 py-2 rounded-lg bg-white border border-gray-200 flex items-center justify-between sm:block">
-                    <span className="text-[10px] text-gray-500 block">Total Harga</span>
+                    <span className="text-[10px] text-gray-500 block">Total Promo</span>
                     <strong className="text-sm font-bold font-mono text-indigo-700 tabular-nums">
                       Rp {totalSubtotal.toLocaleString('id-ID')}
                     </strong>
                   </div>
                 </div>
+                {selectedPlan.promoValidUntil && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded-md px-2.5 py-1.5 font-medium">
+                    <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>
+                      Harga diskon promo berlaku hingga <strong>{selectedPlan.promoValidUntil}</strong>.
+                      {totalDiscountSavings > 0 && (
+                        <span className="ml-1 text-rose-700 font-semibold">
+                          (Hemat Rp {totalDiscountSavings.toLocaleString('id-ID')})
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 

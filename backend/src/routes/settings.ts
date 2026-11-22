@@ -56,6 +56,9 @@ export default async function settingsRouter(fastify: FastifyInstance) {
               slaTargetMinutes,
               csatBaseUrl: settingMap.csat_base_url || '',
               csatSurveyConfig: parseCsatSurveyConfig(settingMap.csat_survey_config),
+              autoResolveInactivityEnabled: settingMap.auto_resolve_inactivity_enabled === 'true',
+              autoResolveInactivityHours: Number.parseInt(settingMap.auto_resolve_inactivity_hours || '24', 10) || 24,
+              autoResolveInactivitySendCsat: settingMap.auto_resolve_inactivity_send_csat !== 'false',
             },
           },
         });
@@ -385,6 +388,9 @@ export default async function settingsRouter(fastify: FastifyInstance) {
         slaTargetMinutes?: number;
         csatBaseUrl?: string;
         csatSurveyConfig?: unknown;
+        autoResolveInactivityEnabled?: boolean;
+        autoResolveInactivityHours?: number;
+        autoResolveInactivitySendCsat?: boolean;
       };
       const pairs: Array<[string, string]> = [];
 
@@ -404,6 +410,20 @@ export default async function settingsRouter(fastify: FastifyInstance) {
 
       if (body.csatAutoOnResolve !== undefined) {
         pairs.push(['csat_auto_on_resolve', body.csatAutoOnResolve ? 'true' : 'false']);
+      }
+
+      if (body.autoResolveInactivityEnabled !== undefined) {
+        pairs.push(['auto_resolve_inactivity_enabled', body.autoResolveInactivityEnabled ? 'true' : 'false']);
+      }
+
+      if (body.autoResolveInactivityHours !== undefined) {
+        const hoursRaw = Number(body.autoResolveInactivityHours);
+        const hours = Number.isFinite(hoursRaw) ? Math.max(1, Math.min(168, Math.round(hoursRaw))) : 24;
+        pairs.push(['auto_resolve_inactivity_hours', String(hours)]);
+      }
+
+      if (body.autoResolveInactivitySendCsat !== undefined) {
+        pairs.push(['auto_resolve_inactivity_send_csat', body.autoResolveInactivitySendCsat ? 'true' : 'false']);
       }
 
       if (body.csatBaseUrl !== undefined) {
@@ -441,6 +461,9 @@ export default async function settingsRouter(fastify: FastifyInstance) {
           slaTargetMinutes,
           csatBaseUrl: map.csat_base_url || '',
           csatSurveyConfig: parseCsatSurveyConfig(map.csat_survey_config),
+          autoResolveInactivityEnabled: map.auto_resolve_inactivity_enabled === 'true',
+          autoResolveInactivityHours: Number.parseInt(map.auto_resolve_inactivity_hours || '24', 10) || 24,
+          autoResolveInactivitySendCsat: map.auto_resolve_inactivity_send_csat !== 'false',
         },
       });
     } catch (error: any) {

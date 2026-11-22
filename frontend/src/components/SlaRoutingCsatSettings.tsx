@@ -139,6 +139,9 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({
   // CSAT Survey state
   const [csatTemplate, setCsatTemplate] = useState(DEFAULT_CSAT_TEMPLATE);
   const [csatAutoOnResolve, setCsatAutoOnResolve] = useState(false);
+  const [autoResolveInactivityEnabled, setAutoResolveInactivityEnabled] = useState(false);
+  const [autoResolveInactivityHours, setAutoResolveInactivityHours] = useState(24);
+  const [autoResolveInactivitySendCsat, setAutoResolveInactivitySendCsat] = useState(true);
   const [csatBaseUrl, setCsatBaseUrl] = useState('');
   const [surveyConfig, setSurveyConfig] = useState<CsatSurveyConfig>(createDefaultSurveyConfig);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('default');
@@ -169,6 +172,9 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({
       if (crm) {
         setCsatTemplate(crm.csatTemplate);
         setCsatAutoOnResolve(Boolean(crm.csatAutoOnResolve));
+        setAutoResolveInactivityEnabled(Boolean(crm.autoResolveInactivityEnabled));
+        setAutoResolveInactivityHours(Number(crm.autoResolveInactivityHours) || 24);
+        setAutoResolveInactivitySendCsat(crm.autoResolveInactivitySendCsat !== false);
         setSlaTargetMinutes(crm.slaTargetMinutes || 15);
         setCsatBaseUrl(crm.csatBaseUrl || '');
         if (crm.csatSurveyConfig?.profiles?.length) {
@@ -259,9 +265,15 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({
         csatAutoOnResolve,
         csatBaseUrl,
         csatSurveyConfig: surveyConfig,
+        autoResolveInactivityEnabled,
+        autoResolveInactivityHours,
+        autoResolveInactivitySendCsat,
       });
       setCsatTemplate(saved.csatTemplate);
       setCsatAutoOnResolve(saved.csatAutoOnResolve);
+      setAutoResolveInactivityEnabled(Boolean(saved.autoResolveInactivityEnabled));
+      setAutoResolveInactivityHours(Number(saved.autoResolveInactivityHours) || 24);
+      setAutoResolveInactivitySendCsat(saved.autoResolveInactivitySendCsat !== false);
       setCsatBaseUrl(saved.csatBaseUrl || '');
       if (saved.csatSurveyConfig?.profiles?.length) {
         setSurveyConfig(saved.csatSurveyConfig);
@@ -620,6 +632,64 @@ export const SlaRoutingCsatSettings: React.FC<SlaRoutingCsatSettingsProps> = ({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Auto-Resolve Inactivity & CSAT automation */}
+          <div className="p-4 rounded-lg border border-gray-200 bg-gray-50/70 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-900 block">
+                  Otomasi Auto-Resolve Inaktivitas &amp; CSAT Otomatis
+                </label>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Secara otomatis menandai percakapan sebagai <strong>Resolved</strong> jika agen atau AI sudah mengirimkan pesan balasan terakhir namun pelanggan tidak merespon kembali dalam rentang waktu yang ditentukan.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={autoResolveInactivityEnabled}
+                onChange={(e) => setAutoResolveInactivityEnabled(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+            </div>
+
+            {autoResolveInactivityEnabled && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-3 border-t border-gray-200">
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-medium text-gray-700">
+                    Batas Waktu Pelanggan Tidak Merespon (Jam)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={720}
+                      value={autoResolveInactivityHours}
+                      onChange={(e) =>
+                        setAutoResolveInactivityHours(Math.max(1, Number(e.target.value) || 1))
+                      }
+                      className="w-24 h-8 px-2.5 bg-white border border-gray-200 rounded text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                    <span className="text-xs text-gray-500">Jam tanpa respon pelanggan</span>
+                  </div>
+                  <p className="text-[10px] text-gray-400">
+                    Standar: 24 jam. Minimal 1 jam, maksimal 720 jam (30 hari).
+                  </p>
+                </div>
+
+                <div className="flex items-center pt-2 sm:pt-4">
+                  <label className="inline-flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoResolveInactivitySendCsat}
+                      onChange={(e) => setAutoResolveInactivitySendCsat(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Kirim undangan survei CSAT otomatis saat di-auto-resolve</span>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Multi-Target & Multi-Criteria Designer */}

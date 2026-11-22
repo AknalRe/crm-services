@@ -22,6 +22,10 @@ import {
 } from '../routes/media';
 import { liveEvents } from './events.service';
 import { getActiveCompanyId } from './tenantContext';
+import {
+  sendCsatCtaForConversation,
+  recordConversationActivity,
+} from './csatSender.service';
 
 export interface McpToolDescriptor {
   name: string;
@@ -105,6 +109,11 @@ export interface AiToolSideEffects {
     queueTotal: number;
     slaTarget: number;
     executeHandoverNotes?: () => Promise<void>;
+  } | null;
+  resolved?: {
+    closingMessage?: string;
+    sendCsat: boolean;
+    resolutionNotes?: string;
   } | null;
 }
 
@@ -295,6 +304,32 @@ export const BUILTIN_CRM_TOOLS: BuiltinCrmToolMeta[] = [
         },
       },
       required: ['reason', 'summary'],
+    },
+  },
+  {
+    name: 'crm_resolve_conversation',
+    label: 'Selesaikan Obrolan & Kirim Penilaian CSAT',
+    description:
+      'Menyelesaikan obrolan / mengakhiri sesi percakapan secara profesional setelah kebutuhan atau pertanyaan pelanggan terjawab tuntas, dan secara otomatis mengirimkan tautan survei kepuasan pelanggan (CSAT) ke WhatsApp pelanggan agar pelanggan dapat memberikan penilaian (rating bintang 1-5 dan ulasan).',
+    parameters: {
+      type: 'object',
+      properties: {
+        closingMessage: {
+          type: 'string',
+          description:
+            'Pesan penutup yang ramah dan apresiatif sebelum mengakhiri sesi (mis. "Sama-sama Kak! Senang bisa membantu. Semoga harinya menyenangkan!").',
+        },
+        sendCsat: {
+          type: 'boolean',
+          description:
+            'Apakah mengirimkan tautan survei penilaian CSAT ke pelanggan (default: true).',
+        },
+        resolutionNotes: {
+          type: 'string',
+          description:
+            'Ringkasan singkat penyelesaian masalah atau kebutuhan pelanggan untuk catatan riwayat CRM.',
+        },
+      },
     },
   },
 ];
@@ -1532,6 +1567,96 @@ async function executeBuiltinCrmTool(
       output: chosenAgent
         ? `Percakapan berhasil dieskalasi dan ditugaskan ke agen aktif "${chosenAgent.name}". ${queueInfo} Sampaikan nomor antrean ini ke pelanggan dengan sopan.`
         : `Percakapan berhasil ditandai untuk agen manusia (saat ini semua agen sedang istirahat/offline). ${queueInfo} Sampaikan nomor antrean ini ke pelanggan dengan sopan.`,
+    };
+  }
+
+  if (toolName === 'crm_resolve_conversation') {
+    const closingMessage = String(args?.closingMessage || '').trim();
+    const sendCsat = args?.sendCsat !== false;
+    const resolutionNotes = String(args?.resolutionNotes || '').trim();
+
+    if (!ctx?.conversationId || ctx?.isSimulator) {
+      if (ctx?.sideEffects) {
+        ctx.sideEffects.resolved = { closingMessage, sendCsat, resolutionNotes };
+      }
+      return {
+        ok: true,
+        output: `Obrolan berhasil diselesaikan (simulasi RESOLVED). ${sendCsat ? 'Tautan survei kepuasan pelanggan (CSAT) dengan rating 1-5 bintang akan dikirimkan otomatis ke WhatsApp pelanggan.' : 'Tanpa pengiriman survei CSAT.'}`,
+      };
+    }
+
+    const [conv] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, ctx.conversationId));
+
+    if (!conv) {
+      return { ok: false, output: 'Percakapan tidak ditemukan untuk diselesaikan.' };
+    }
+
+    const now = new Date();
+    const convCompanyId = conv.companyId || companyId;
+    const durationSeconds = conv.sessionStartedAt
+      ? Math.max(0, Math.round((now.getTime() - new Date(conv.sessionStartedAt).getTime()) / 1000))
+      : conv.firstInboundAt
+      ? Math.max(0, Math.round((now.getTime() - new Date(conv.firstInboundAt).getTime()) / 1000))
+      : null;
+
+    await db
+      .update(conversations)
+      .set({
+        status: 'RESOLVED',
+        resolvedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(conversations.id, ctx.conversationId));
+
+    if (ctx?.sideEffects) {
+      ctx.sideEffects.resolved = { closingMessage, sendCsat, resolutionNotes };
+    }
+
+    // Kirim survei CSAT jika diinginkan
+    let csatOutcome = 'Survei CSAT tidak diminta';
+    if (sendCsat) {
+      const [contact] = await db
+        .select()
+        .from(contacts)
+        .where(and(eq(contacts.id, conv.contactId), eq(contacts.companyId, convCompanyId)));
+
+      if (contact) {
+        try {
+          const refreshedConv = { ...conv, status: 'RESOLVED' as const, resolvedAt: now };
+          await sendCsatCtaForConversation(refreshedConv, contact, {
+            triggerType: 'AUTO_RESOLVE',
+          });
+          csatOutcome = 'Survei CSAT otomatis terkirim ke WhatsApp pelanggan';
+        } catch (csatErr: any) {
+          csatOutcome = `Gagal mengirim CSAT: ${csatErr.message}`;
+          console.warn('[AI] crm_resolve_conversation CSAT error:', csatErr.message);
+        }
+      }
+    }
+
+    // Catat peristiwa di linimasa percakapan
+    await recordConversationActivity({
+      companyId: convCompanyId,
+      conversationId: conv.id,
+      contactId: conv.contactId,
+      wahaSession: conv.wahaSession,
+      channel: conv.channel,
+      actorName: 'Agent AI',
+      actorRole: 'AI Assistant',
+      action: 'CONVERSATION_RESOLVED',
+      summary: `Agent AI menyelesaikan obrolan (${csatOutcome})${resolutionNotes ? `: "${resolutionNotes}"` : ''}`,
+      createdAt: now,
+    });
+
+    liveEvents.emit('conversations:update', { conversationId: conv.id }, convCompanyId);
+    liveEvents.emit('tracking:update', { conversationId: conv.id }, convCompanyId);
+
+    return {
+      ok: true,
+      output: `Percakapan berhasil diselesaikan (status: RESOLVED) oleh Agent AI. ${csatOutcome}. Pelanggan dapat memberikan penilaian rating 1-5 bintang dan ulasan layanan.`,
     };
   }
 

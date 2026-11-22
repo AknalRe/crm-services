@@ -230,10 +230,13 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         conversationRows,
         csatRows,
         todayMsgRows,
+        inboundMsgRows,
       ] = await Promise.all([
         db
           .select({
             id: contacts.id,
+            namaLengkap: contacts.namaLengkap,
+            namaPanggilan: contacts.namaPanggilan,
             kategori: contacts.kategori,
             tanggalLahir: contacts.tanggalLahir,
             nomorWhatsapp: contacts.nomorWhatsapp,
@@ -246,6 +249,10 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           .where(eq(campaigns.companyId, companyId)),
         db
           .select({
+            id: campaignRecipients.id,
+            campaignId: campaignRecipients.campaignId,
+            contactId: campaignRecipients.contactId,
+            phone: campaignRecipients.phone,
             status: campaignRecipients.status,
             ackStatus: campaignRecipients.ackStatus,
             sentAt: campaignRecipients.sentAt,
@@ -260,7 +267,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           .from(campaigns)
           .where(eq(campaigns.companyId, companyId))
           .orderBy(desc(campaigns.createdAt))
-          .limit(5),
+          .limit(15),
         db
           .select({
             recipient: campaignRecipients,
@@ -293,6 +300,19 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           })
           .from(chatMessages)
           .where(and(eq(chatMessages.companyId, companyId), gte(chatMessages.createdAt, todayStartWib))),
+        db
+          .select({
+            id: chatMessages.id,
+            contactId: chatMessages.contactId,
+            conversationId: chatMessages.conversationId,
+            direction: chatMessages.direction,
+            body: chatMessages.body,
+            createdAt: chatMessages.createdAt,
+          })
+          .from(chatMessages)
+          .where(and(eq(chatMessages.companyId, companyId), eq(chatMessages.direction, 'INBOUND')))
+          .orderBy(desc(chatMessages.createdAt))
+          .limit(3000),
       ]);
 
       const customerContacts = allContactsList.filter(
@@ -373,6 +393,149 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       const readRate =
         totalDeliveredAndRead > 0
           ? Math.round((readRecipients / totalDeliveredAndRead) * 100)
+          : 0;
+
+      // Correlate campaign recipients with inbound chat messages:
+      // A contact is considered responded if they sent an inbound message at or after recipient.sentAt (within 30 days)
+      const contactMap = new Map<string, (typeof allContactsList)[number]>();
+      for (const c of allContactsList) {
+        contactMap.set(c.id, c);
+      }
+
+      const campaignTitleMap = new Map<string, string>();
+      for (const cmp of recentCampaignsList) {
+        campaignTitleMap.set(cmp.id, cmp.title);
+      }
+
+      // Group inbound chat messages by contactId
+      const inboundByContact = new Map<
+        string,
+        Array<{ id: string; conversationId: string; body: string; createdAt: Date }>
+      >();
+      for (const msg of inboundMsgRows) {
+        if (!msg.contactId || !msg.createdAt) continue;
+        const list = inboundByContact.get(msg.contactId) || [];
+        list.push({
+          id: msg.id,
+          conversationId: msg.conversationId,
+          body: msg.body || '',
+          createdAt: new Date(msg.createdAt),
+        });
+        inboundByContact.set(msg.contactId, list);
+      }
+      for (const [_, list] of inboundByContact.entries()) {
+        list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      }
+
+      const campaignRespondedLeadsMap = new Map<string, Set<string>>();
+      const totalRespondedContactsSet = new Set<string>();
+      const respondingLeadsDetailList: Array<{
+        recipientId: string;
+        campaignId: string;
+        campaignTitle: string;
+        contactId: string;
+        contactName: string;
+        phone: string;
+        contactCategory?: string;
+        sentAt: string | null;
+        respondedAt: string;
+        responseDelayMinutes: number;
+        responseSnippet: string;
+        conversationId?: string | null;
+      }> = [];
+
+      const seenCampaignContact = new Set<string>();
+
+      for (const r of filteredRecipientsRows) {
+        if (!r.contactId) continue;
+        const isSentOrDelivered =
+          r.status === 'SENT' ||
+          r.status === 'DELIVERED' ||
+          r.status === 'READ' ||
+          r.ackStatus >= 1;
+        if (!isSentOrDelivered) continue;
+
+        const sentDate = r.sentAt ? new Date(r.sentAt) : r.createdAt ? new Date(r.createdAt) : null;
+        if (!sentDate || Number.isNaN(sentDate.getTime())) continue;
+
+        const inbounds = inboundByContact.get(r.contactId);
+        if (!inbounds || inbounds.length === 0) continue;
+
+        const attributionEnd = sentDate.getTime() + 30 * 86_400_000;
+        const matchingReply = inbounds.find(
+          (m) => m.createdAt.getTime() >= sentDate.getTime() && m.createdAt.getTime() <= attributionEnd
+        );
+
+        if (matchingReply) {
+          const pairKey = `${r.campaignId}_${r.contactId}`;
+          if (!seenCampaignContact.has(pairKey)) {
+            seenCampaignContact.add(pairKey);
+
+            const set = campaignRespondedLeadsMap.get(r.campaignId) || new Set<string>();
+            set.add(r.contactId);
+            campaignRespondedLeadsMap.set(r.campaignId, set);
+
+            totalRespondedContactsSet.add(r.contactId);
+
+            const c = contactMap.get(r.contactId);
+            const contactName = c?.namaLengkap || c?.namaPanggilan || r.phone || 'Pelanggan';
+            const campTitle = campaignTitleMap.get(r.campaignId) || 'Kampanye Siaran';
+            const delayMinutes = Math.max(
+              0,
+              Math.round((matchingReply.createdAt.getTime() - sentDate.getTime()) / 60000)
+            );
+
+            respondingLeadsDetailList.push({
+              recipientId: r.id,
+              campaignId: r.campaignId,
+              campaignTitle: campTitle,
+              contactId: r.contactId,
+              contactName,
+              phone: r.phone,
+              contactCategory: c?.kategori || 'Pelanggan',
+              sentAt: sentDate.toISOString(),
+              respondedAt: matchingReply.createdAt.toISOString(),
+              responseDelayMinutes: delayMinutes,
+              responseSnippet: matchingReply.body.slice(0, 160),
+              conversationId: matchingReply.conversationId,
+            });
+          }
+        }
+      }
+
+      respondingLeadsDetailList.sort(
+        (a, b) => new Date(b.respondedAt).getTime() - new Date(a.respondedAt).getTime()
+      );
+
+      let topCampaignName: string | undefined;
+      let topCampaignResponseRate = 0;
+      let topCampaignRespondedCount = 0;
+
+      const enrichedRecentCampaigns = recentCampaignsList.map((camp) => {
+        const base = formatCampaign(camp);
+        const respondedCount = (campaignRespondedLeadsMap.get(camp.id) || new Set()).size;
+        const sentCount = camp.sentCount || 0;
+        const responseRate = sentCount > 0 ? Math.round((respondedCount / sentCount) * 100) : 0;
+        if (
+          respondedCount > topCampaignRespondedCount ||
+          (respondedCount === topCampaignRespondedCount && responseRate > topCampaignResponseRate)
+        ) {
+          topCampaignName = camp.title;
+          topCampaignResponseRate = responseRate;
+          topCampaignRespondedCount = respondedCount;
+        }
+        return {
+          ...base,
+          respondedCount,
+          responseRate,
+          unresponsiveCount: Math.max(0, sentCount - respondedCount),
+        };
+      });
+
+      const totalCampaignResponses = totalRespondedContactsSet.size;
+      const campaignResponseRate =
+        totalSentAndBeyond > 0
+          ? Math.round((totalCampaignResponses / totalSentAndBeyond) * 100)
           : 0;
 
       // Build 7-day trend buckets (always last 7 days ending today WIB)
@@ -959,15 +1122,21 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             failed: failedRecipients,
             deliveryRate,
             readRate,
+            totalCampaignResponses,
+            campaignResponseRate,
+            topCampaignName,
+            topCampaignResponseRate,
+            topCampaignRespondedCount,
             birthdayTodayCount,
             contactCategories,
             activityTrend7d: trendBuckets,
           },
           conversationAnalytics,
-          recentCampaigns: recentCampaignsList.map(formatCampaign),
+          recentCampaigns: enrichedRecentCampaigns,
           recentActivity: recentActivityList.map((r) =>
             formatRecipient(r.recipient, r.contact, r.campaign)
           ),
+          respondingLeads: respondingLeadsDetailList.slice(0, 30),
         },
       });
     } catch (error: any) {
@@ -1067,7 +1236,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         });
       }
 
-      if (kind === 'recipients') {
+      if (kind === 'recipients' || kind === 'campaign_responses') {
         const rows = await db
           .select({
             recipient: campaignRecipients,
@@ -1079,6 +1248,89 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           .leftJoin(campaigns, eq(campaignRecipients.campaignId, campaigns.id))
           .where(eq(campaignRecipients.companyId, companyId))
           .orderBy(desc(campaignRecipients.updatedAt));
+
+        if (kind === 'campaign_responses' || filter === 'responded' || filter === 'campaign_responded') {
+          const inbounds = await db
+            .select({
+              contactId: chatMessages.contactId,
+              conversationId: chatMessages.conversationId,
+              body: chatMessages.body,
+              createdAt: chatMessages.createdAt,
+            })
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                eq(chatMessages.direction, 'INBOUND')
+              )
+            )
+            .orderBy(desc(chatMessages.createdAt))
+            .limit(3000);
+
+          const inboundMap = new Map<string, Array<{ conversationId: string; body: string; createdAt: Date }>>();
+          for (const m of inbounds) {
+            if (!m.contactId || !m.createdAt) continue;
+            const l = inboundMap.get(m.contactId) || [];
+            l.push({ conversationId: m.conversationId, body: m.body || '', createdAt: new Date(m.createdAt) });
+            inboundMap.set(m.contactId, l);
+          }
+          for (const [_, l] of inboundMap.entries()) {
+            l.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+          }
+
+          const respondedList: any[] = [];
+          const seenPairs = new Set<string>();
+
+          for (const r of rows) {
+            if (value && r.recipient.campaignId !== value) continue;
+            const sentDate = r.recipient.sentAt ? new Date(r.recipient.sentAt) : r.recipient.createdAt ? new Date(r.recipient.createdAt) : null;
+            if (!sentDate || Number.isNaN(sentDate.getTime())) continue;
+
+            const msgs = inboundMap.get(r.recipient.contactId);
+            if (!msgs || msgs.length === 0) continue;
+
+            const matching = msgs.find(
+              (m) => m.createdAt.getTime() >= sentDate.getTime() && m.createdAt.getTime() <= sentDate.getTime() + 30 * 86_400_000
+            );
+
+            if (matching) {
+              const pairKey = `${r.recipient.campaignId}_${r.recipient.contactId}`;
+              if (!seenPairs.has(pairKey)) {
+                seenPairs.add(pairKey);
+                const base = formatRecipient(r.recipient, r.contact, r.campaign);
+                const delayMins = Math.max(0, Math.round((matching.createdAt.getTime() - sentDate.getTime()) / 60000));
+                respondedList.push({
+                  ...base,
+                  responseSnippet: matching.body.slice(0, 160),
+                  respondedAt: matching.createdAt.toISOString(),
+                  conversationId: matching.conversationId,
+                  responseDelayMinutes: delayMins,
+                });
+              }
+            }
+          }
+
+          let matchedResponded = respondedList;
+          if (q) {
+            matchedResponded = matchedResponded.filter(
+              (r) =>
+                (r.contact?.nama_lengkap || '').toLowerCase().includes(q) ||
+                (r.contact?.nama_panggilan || '').toLowerCase().includes(q) ||
+                (r.phone || '').includes(q) ||
+                (r.campaign?.title || '').toLowerCase().includes(q) ||
+                (r.responseSnippet || '').toLowerCase().includes(q)
+            );
+          }
+
+          return reply.send({
+            success: true,
+            data: {
+              kind: 'campaign_responses',
+              totalMatched: matchedResponded.length,
+              items: matchedResponded.slice(0, 200),
+            },
+          });
+        }
 
         let matched = rows;
         if (dateRange.start || dateRange.end) {
