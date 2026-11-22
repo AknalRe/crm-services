@@ -22,6 +22,7 @@ import { AuthStatus, MediaLibraryItem } from '../types';
 import { Button } from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, EmptyState } from '../components/ui/StateBlocks';
+import { resolveCrmMediaUrl } from '../components/ui/MediaLibraryPickerModal';
 import { hasPerm } from '../lib/permissions';
 
 interface MediaLibraryProps {
@@ -386,7 +387,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
                       </div>
                     ) : (
                       <img
-                        src={item.relativeUrl.startsWith('/') ? `.${item.relativeUrl}` : item.relativeUrl}
+                        src={resolveCrmMediaUrl(item.relativeUrl)}
                         alt={item.originalFileName || item.filename}
                         loading="lazy"
                         className="w-full h-full object-cover group-hover:scale-103 transition-transform duration-200"
@@ -495,9 +496,7 @@ export const MediaLibrary: React.FC<MediaLibraryProps> = ({ currentUser, onUseIn
 
       {/* Lightbox / Preview Modal */}
       {selectedPreview && (() => {
-        const previewSrc = selectedPreview.relativeUrl.startsWith('/')
-          ? `.${selectedPreview.relativeUrl}`
-          : selectedPreview.relativeUrl;
+        const previewSrc = resolveCrmMediaUrl(selectedPreview.relativeUrl);
         return (
         <div
           className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-[1px] flex items-center justify-center p-3 sm:p-6"

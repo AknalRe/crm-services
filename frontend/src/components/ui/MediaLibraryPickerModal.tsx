@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import api from '../../services/api';
+import { getApiBaseUrl } from '../../services/paths';
 import { MediaLibraryItem } from '../../types';
 import { Modal } from './Modal';
 import { Button } from './Button';
@@ -19,7 +20,11 @@ export function resolveCrmMediaUrl(url?: string | null): string {
   const raw = String(url || '').trim();
   if (!raw) return '';
   if (raw.startsWith('/api/media/')) {
-    return `.${raw}`;
+    const apiBase =
+      typeof window !== 'undefined'
+        ? getApiBaseUrl(window.location.pathname).replace(/\/+$/, '')
+        : '/api';
+    return `${apiBase}${raw.slice('/api'.length)}`;
   }
   return raw;
 }
