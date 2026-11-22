@@ -867,7 +867,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       }
 
       if (channel === 'INSTAGRAM' && oauthCreds.metaAppId && oauthCreds.instagramConfigId && oauthCreds.metaAppSecret) {
-        const target = `https://www.facebook.com/dialog/oauth?client_id=${encodeURIComponent(oauthCreds.metaAppId)}&config_id=${encodeURIComponent(oauthCreds.instagramConfigId)}&override_default_response_type=true&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&state=${encodeURIComponent(state)}`;
+        const target = `https://www.facebook.com/dialog/oauth?client_id=${encodeURIComponent(oauthCreds.metaAppId)}&config_id=${encodeURIComponent(oauthCreds.instagramConfigId)}&display=popup&override_default_response_type=true&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&state=${encodeURIComponent(state)}&prompt=login`;
         return reply.redirect(target);
       }
 
