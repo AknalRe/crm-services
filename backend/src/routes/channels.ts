@@ -6,7 +6,7 @@ import { config } from '../config';
 import { db } from '../db';
 import { channelAccounts, channelConnectLinks, DEFAULT_COMPANY_ID, socialComments } from '../db/schema';
 import { licenseService } from '../services/license.service';
-import { runWithCompany } from '../services/tenantContext';
+import { getSystemSettingMap, runWithCompany, upsertSystemSetting } from '../services/tenantContext';
 import { getRequestCompanyId, requirePermission } from './auth';
 import { applyCommentAutomations } from './comments';
 import {
@@ -185,7 +185,10 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     const challenge = req.query['hub.challenge'];
 
     if (mode === 'subscribe' && token) {
-      if (config.meta.webhookVerifyToken && token === config.meta.webhookVerifyToken) {
+      const sysMap = await getSystemSettingMap().catch(() => ({} as Record<string, string>));
+      const effectiveVerifyToken =
+        sysMap.meta_webhook_verify_token || config.meta.webhookVerifyToken || 'reneo_meta_verify_2026';
+      if (effectiveVerifyToken && token === effectiveVerifyToken) {
         return reply.code(200).send(challenge || 'OK');
       }
       const accounts = await db.select().from(channelAccounts);
@@ -450,13 +453,14 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       try {
         const companyId = getRequestCompanyId(req);
         await licenseService.assertQuota('channels', 1, companyId);
-        const channel = String(req.body?.channel || '').trim().toUpperCase() as OmnichannelType;
-        if (!ALLOWED_CHANNELS.has(channel)) {
+        const rawChannel = String(req.body?.channel || '').trim().toUpperCase();
+        if (!ALLOWED_CHANNELS.has(rawChannel as OmnichannelType) && rawChannel !== 'META') {
           return reply.status(400).send({
             success: false,
-            error: 'Channel harus INSTAGRAM, FACEBOOK, THREADS, atau TELEGRAM',
+            error: 'Channel harus META, INSTAGRAM, FACEBOOK, THREADS, WHATSAPP_CLOUD, atau TELEGRAM',
           });
         }
+        const channel = rawChannel;
         const hours = Math.max(1, Math.min(168, Number(req.body?.expiresHours) || 24));
         const now = new Date();
         const expiresAt = new Date(now.getTime() + hours * 3600 * 1000);
@@ -487,6 +491,33 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     }
   );
 
+  // OAuth helpers (Reneo OAuth Broker + Direct Meta/Threads OAuth with DB & env fallback)
+  const DEFAULT_RENEO_META_APP_ID = '2455041348580254';
+  const DEFAULT_RENEO_THREADS_APP_ID = '1742677016843989';
+
+  const resolveEffectiveOAuthCredentials = async () => {
+    const sysMap = await getSystemSettingMap().catch(() => ({} as Record<string, string>));
+    const metaAppId = (sysMap.meta_app_id || config.meta.appId || DEFAULT_RENEO_META_APP_ID).trim();
+    const metaAppSecret = (sysMap.meta_app_secret || config.meta.appSecret || '').trim();
+    const threadsAppId = (sysMap.threads_app_id || config.meta.threadsAppId || DEFAULT_RENEO_THREADS_APP_ID).trim();
+    const threadsAppSecret = (sysMap.threads_app_secret || config.meta.threadsAppSecret || '').trim();
+    const webhookVerifyToken = (
+      sysMap.meta_webhook_verify_token ||
+      config.meta.webhookVerifyToken ||
+      'reneo_meta_verify_2026'
+    ).trim();
+    return {
+      metaAppId,
+      metaAppSecret,
+      threadsAppId,
+      threadsAppSecret,
+      webhookVerifyToken,
+      reneoOAuthReady: Boolean(config.reneo.oauthUrl),
+      directMetaReady: Boolean(metaAppId && metaAppSecret),
+      directThreadsReady: Boolean(threadsAppId && threadsAppSecret),
+    };
+  };
+
   // Public Connect Link endpoints (no panel login required, validated by token)
   fastify.get<{ Params: { token: string } }>('/connect/:token', async (req, reply) => {
     try {
@@ -498,6 +529,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return reply.status(404).send({ success: false, error: 'Tautan koneksi tidak ditemukan' });
       }
       const isExpired = new Date(link.expiresAt).getTime() < Date.now();
+      const oauthCreds = await resolveEffectiveOAuthCredentials();
       return reply.send({
         success: true,
         data: {
@@ -506,6 +538,11 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           expiresAt: link.expiresAt,
           usedAt: link.usedAt,
           isExpired,
+          oauthConfig: {
+            reneoOAuthReady: oauthCreds.reneoOAuthReady,
+            directMetaReady: oauthCreds.directMetaReady,
+            directThreadsReady: oauthCreds.directThreadsReady,
+          },
         },
       });
     } catch (error: any) {
@@ -631,14 +668,64 @@ export default async function channelsRouter(fastify: FastifyInstance) {
   };
 
   fastify.get('/oauth/config', async (_req: FastifyRequest, reply: FastifyReply) => {
+    const creds = await resolveEffectiveOAuthCredentials();
     return reply.send({
       success: true,
       data: {
-        reneoOAuthReady: Boolean(config.reneo.oauthUrl),
-        directMetaReady: Boolean(config.meta.appId && config.meta.appSecret),
-        directThreadsReady: Boolean(config.meta.threadsAppId && config.meta.threadsAppSecret),
+        reneoOAuthReady: creds.reneoOAuthReady,
+        directMetaReady: creds.directMetaReady,
+        directThreadsReady: creds.directThreadsReady,
+        metaAppId: creds.metaAppId,
+        hasMetaAppSecret: Boolean(creds.metaAppSecret),
+        threadsAppId: creds.threadsAppId,
+        hasThreadsAppSecret: Boolean(creds.threadsAppSecret),
+        webhookVerifyToken: creds.webhookVerifyToken,
       },
     });
+  });
+
+  fastify.put<{
+    Body: {
+      metaAppId?: string;
+      metaAppSecret?: string;
+      threadsAppId?: string;
+      threadsAppSecret?: string;
+      webhookVerifyToken?: string;
+    };
+  }>('/oauth/config', { preHandler: requirePermission('settings.edit') }, async (req, reply) => {
+    try {
+      if (req.body?.metaAppId !== undefined) {
+        await upsertSystemSetting('meta_app_id', String(req.body.metaAppId).trim() || DEFAULT_RENEO_META_APP_ID);
+      }
+      if (req.body?.metaAppSecret !== undefined && String(req.body.metaAppSecret).trim() !== '') {
+        await upsertSystemSetting('meta_app_secret', String(req.body.metaAppSecret).trim());
+      }
+      if (req.body?.threadsAppId !== undefined) {
+        await upsertSystemSetting('threads_app_id', String(req.body.threadsAppId).trim() || DEFAULT_RENEO_THREADS_APP_ID);
+      }
+      if (req.body?.threadsAppSecret !== undefined && String(req.body.threadsAppSecret).trim() !== '') {
+        await upsertSystemSetting('threads_app_secret', String(req.body.threadsAppSecret).trim());
+      }
+      if (req.body?.webhookVerifyToken !== undefined && String(req.body.webhookVerifyToken).trim() !== '') {
+        await upsertSystemSetting('meta_webhook_verify_token', String(req.body.webhookVerifyToken).trim());
+      }
+      const creds = await resolveEffectiveOAuthCredentials();
+      return reply.send({
+        success: true,
+        data: {
+          reneoOAuthReady: creds.reneoOAuthReady,
+          directMetaReady: creds.directMetaReady,
+          directThreadsReady: creds.directThreadsReady,
+          metaAppId: creds.metaAppId,
+          hasMetaAppSecret: Boolean(creds.metaAppSecret),
+          threadsAppId: creds.threadsAppId,
+          hasThreadsAppSecret: Boolean(creds.threadsAppSecret),
+          webhookVerifyToken: creds.webhookVerifyToken,
+        },
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
   });
 
   fastify.get<{
@@ -657,7 +744,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           .select()
           .from(channelConnectLinks)
           .where(eq(channelConnectLinks.token, connectToken));
-        if (!link || link.usedAt || new Date(link.expiresAt).getTime() < Date.now()) {
+        if (!link || new Date(link.expiresAt).getTime() < Date.now()) {
           return reply.status(400).send({ success: false, error: 'Link koneksi tidak valid atau kedaluwarsa' });
         }
         targetCompanyId = link.companyId || DEFAULT_COMPANY_ID;
@@ -673,6 +760,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       }
 
       await licenseService.assertQuota('channels', 1, targetCompanyId);
+      const oauthCreds = await resolveEffectiveOAuthCredentials();
 
       const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
       const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost:5000').split(',')[0].trim();
@@ -701,23 +789,23 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return reply.redirect(target);
       }
 
-      if (channel === 'THREADS' && config.meta.threadsAppId) {
-        const target = `https://threads.net/oauth/authorize?client_id=${encodeURIComponent(config.meta.threadsAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent('threads_basic,threads_content_publish,threads_manage_replies,threads_keyword_search')}&response_type=code&state=${encodeURIComponent(state)}`;
+      if (channel === 'THREADS' && oauthCreds.threadsAppId && oauthCreds.threadsAppSecret) {
+        const target = `https://threads.net/oauth/authorize?client_id=${encodeURIComponent(oauthCreds.threadsAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent('threads_basic,threads_content_publish,threads_manage_replies,threads_keyword_search')}&response_type=code&state=${encodeURIComponent(state)}`;
         return reply.redirect(target);
       }
 
-      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK' || channel === 'META' || channel === 'WHATSAPP_CLOUD') && config.meta.appId) {
+      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK' || channel === 'META' || channel === 'WHATSAPP_CLOUD') && oauthCreds.metaAppId && oauthCreds.metaAppSecret) {
         const scope =
           channel === 'WHATSAPP_CLOUD'
             ? 'whatsapp_business_management,whatsapp_business_messaging,business_management'
             : 'pages_show_list,pages_messaging,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish';
-        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(config.meta.appId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&response_type=code&auth_type=rerequest&state=${encodeURIComponent(state)}`;
+        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(oauthCreds.metaAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&response_type=code&auth_type=rerequest&state=${encodeURIComponent(state)}`;
         return reply.redirect(target);
       }
 
       return reply.status(400).send({
         success: false,
-        error: 'OAuth Reneo belum dikonfigurasi di server (RENEO_OAUTH_URL atau META_APP_ID belum diisi).',
+        error: 'Kredensial OAuth Meta/Threads belum lengkap. Isi App Secret di Pengaturan → Omnichannel → Konfigurasi OAuth.',
       });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -771,13 +859,14 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           }
         }
       } else if (req.query?.code) {
+        const oauthCreds = await resolveEffectiveOAuthCredentials();
         const callbackUrl = `${returnBase}/api/channels/oauth/callback`;
-        if (parsedState.channel === 'THREADS' && config.meta.threadsAppId && config.meta.threadsAppSecret) {
+        if (parsedState.channel === 'THREADS' && oauthCreds.threadsAppId && oauthCreds.threadsAppSecret) {
           const tokenRes = await axios.post(
             'https://graph.threads.net/oauth/access_token',
             new URLSearchParams({
-              client_id: config.meta.threadsAppId,
-              client_secret: config.meta.threadsAppSecret,
+              client_id: oauthCreds.threadsAppId,
+              client_secret: oauthCreds.threadsAppSecret,
               grant_type: 'authorization_code',
               redirect_uri: callbackUrl,
               code: req.query.code,
@@ -791,7 +880,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
               const longRes = await axios.get('https://graph.threads.net/access_token', {
                 params: {
                   grant_type: 'th_exchange_token',
-                  client_secret: config.meta.threadsAppSecret,
+                  client_secret: oauthCreds.threadsAppSecret,
                   access_token: shortToken,
                 },
                 timeout: 10000,
@@ -813,11 +902,11 @@ export default async function channelsRouter(fastify: FastifyInstance) {
               accessToken: finalThreadsToken,
             });
           }
-        } else if (config.meta.appId && config.meta.appSecret) {
+        } else if (oauthCreds.metaAppId && oauthCreds.metaAppSecret) {
           const tokenRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
             params: {
-              client_id: config.meta.appId,
-              client_secret: config.meta.appSecret,
+              client_id: oauthCreds.metaAppId,
+              client_secret: oauthCreds.metaAppSecret,
               redirect_uri: callbackUrl,
               code: req.query.code,
             },
@@ -831,8 +920,8 @@ export default async function channelsRouter(fastify: FastifyInstance) {
               const longUserRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
                 params: {
                   grant_type: 'fb_exchange_token',
-                  client_id: config.meta.appId,
-                  client_secret: config.meta.appSecret,
+                  client_id: oauthCreds.metaAppId,
+                  client_secret: oauthCreds.metaAppSecret,
                   fb_exchange_token: shortUserToken,
                 },
                 timeout: 15000,
@@ -967,7 +1056,9 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           .update(channelConnectLinks)
           .set({ usedAt: now, createdChannelAccountId: firstCreatedId })
           .where(eq(channelConnectLinks.token, parsedState.connectToken));
-        return reply.redirect(`${returnBase}/connect-channel?token=${encodeURIComponent(parsedState.connectToken)}&oauth=success`);
+        return reply.redirect(
+          `${returnBase}/connect-channel?token=${encodeURIComponent(parsedState.connectToken)}&oauth=success&count=${savedCount}&channel=${encodeURIComponent(String(parsedState.channel || ''))}`
+        );
       }
 
       return reply.redirect(`${returnBase}/settings/omnichannel?oauth=success&count=${savedCount}`);

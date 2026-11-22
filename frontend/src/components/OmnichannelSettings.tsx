@@ -66,12 +66,24 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
     };
   }, [deleteTarget]);
   const [linkLabel, setLinkLabel] = useState('');
+  const [linkChannel, setLinkChannel] = useState<OmnichannelType | 'META'>('META');
   const [creatingLink, setCreatingLink] = useState(false);
   const [oauthCfg, setOauthCfg] = useState<{
     reneoOAuthReady: boolean;
     directMetaReady: boolean;
     directThreadsReady: boolean;
+    metaAppId?: string;
+    hasMetaAppSecret?: boolean;
+    threadsAppId?: string;
+    hasThreadsAppSecret?: boolean;
+    webhookVerifyToken?: string;
   } | null>(null);
+  const [showOauthSetup, setShowOauthSetup] = useState(false);
+  const [metaAppIdInput, setMetaAppIdInput] = useState('2455041348580254');
+  const [metaAppSecretInput, setMetaAppSecretInput] = useState('');
+  const [threadsAppIdInput, setThreadsAppIdInput] = useState('1742677016843989');
+  const [threadsAppSecretInput, setThreadsAppSecretInput] = useState('');
+  const [savingOauthCfg, setSavingOauthCfg] = useState(false);
 
   useEffect(() => {
     api
@@ -84,7 +96,14 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
       .catch(() => {});
     api
       .getOAuthConfig()
-      .then((cfg) => setOauthCfg(cfg))
+      .then((cfg) => {
+        setOauthCfg(cfg);
+        if (cfg.metaAppId) setMetaAppIdInput(cfg.metaAppId);
+        if (cfg.threadsAppId) setThreadsAppIdInput(cfg.threadsAppId);
+        if (!cfg.reneoOAuthReady && !cfg.directMetaReady) {
+          setShowOauthSetup(true);
+        }
+      })
       .catch(() => {});
 
     if (typeof window !== 'undefined') {
@@ -111,18 +130,40 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
   const apiBasePath =
     typeof window !== 'undefined' ? getApiBaseUrl(window.location.pathname).replace(/\/+$/, '') : '/api';
 
+  const handleSaveOauthCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingOauthCfg(true);
+    try {
+      const updated = await api.saveOAuthConfig({
+        metaAppId: metaAppIdInput.trim() || '2455041348580254',
+        metaAppSecret: metaAppSecretInput.trim() || undefined,
+        threadsAppId: threadsAppIdInput.trim() || '1742677016843989',
+        threadsAppSecret: threadsAppSecretInput.trim() || undefined,
+      });
+      setOauthCfg(updated);
+      setMetaAppSecretInput('');
+      setThreadsAppSecretInput('');
+      setShowOauthSetup(false);
+      toast.success('Kredensial OAuth Meta & Threads berhasil disimpan dan siap digunakan.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal menyimpan kredensial OAuth');
+    } finally {
+      setSavingOauthCfg(false);
+    }
+  };
+
   const handleCreateConnectLink = async () => {
     setCreatingLink(true);
     try {
       const created = await api.createChannelConnectLink({
-        channel,
+        channel: linkChannel,
         label: linkLabel.trim() || undefined,
       });
       setConnectLinks((prev) => [created, ...prev]);
       setLinkLabel('');
       const url = `${appRootOrigin}/connect-channel?token=${created.token}`;
       navigator.clipboard?.writeText(url);
-      toast.success('Connect Link dibuat & disalin ke clipboard');
+      toast.success('Connect Link OAuth Klien dibuat & disalin ke clipboard');
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Gagal membuat Connect Link');
     } finally {
@@ -205,15 +246,26 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
         </div>
       </div>
 
-      <div className="p-3.5 rounded-md bg-gray-50 border border-gray-200 space-y-2">
+      <div className="p-3.5 rounded-md bg-gray-50 border border-gray-200 space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <div className="text-xs font-semibold text-gray-900">
-              Login 1-Klik via Reneo OAuth (Multi Akun)
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-gray-900">
+                Login 1-Klik via Reneo OAuth (Multi Akun)
+              </span>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setShowOauthSetup((v) => !v)}
+                  className="text-[11px] font-medium text-indigo-600 hover:underline"
+                >
+                  {showOauthSetup ? 'Tutup Konfigurasi App Secret' : 'Konfigurasi App Secret'}
+                </button>
+              )}
             </div>
             <div className="text-[11px] text-gray-500">
               {oauthCfg && !oauthCfg.reneoOAuthReady && !oauthCfg.directMetaReady && !oauthCfg.directThreadsReady
-                ? 'Menunggu konfigurasi META_APP_ID / THREADS_APP_ID di server. Sementara gunakan form manual di bawah.'
+                ? 'Masukkan Kunci Rahasia Aplikasi (App Secret) di bawah sekali saja untuk mengaktifkan tombol Login OAuth.'
                 : 'Cukup login akun Facebook, Instagram, atau Threads. Klik lagi kapan saja untuk menambah akun lainnya.'}
             </div>
           </div>
@@ -243,6 +295,69 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
             ))}
           </div>
         </div>
+
+        {showOauthSetup && canEdit && (
+          <form
+            onSubmit={handleSaveOauthCredentials}
+            className="pt-2.5 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs"
+          >
+            <div className="sm:col-span-3">
+              <label className="block text-[11px] font-medium text-gray-700 mb-1">Meta App ID (FB &amp; IG)</label>
+              <input
+                type="text"
+                value={metaAppIdInput}
+                onChange={(e) => setMetaAppIdInput(e.target.value)}
+                placeholder="2455041348580254"
+                className="w-full h-8 px-2.5 bg-white border border-gray-200 rounded-md font-mono text-xs"
+              />
+            </div>
+            <div className="sm:col-span-3">
+              <label className="block text-[11px] font-medium text-gray-700 mb-1">
+                Meta App Secret{' '}
+                {oauthCfg?.hasMetaAppSecret && (
+                  <span className="text-emerald-600 font-semibold">(Tersimpan)</span>
+                )}
+              </label>
+              <input
+                type="password"
+                value={metaAppSecretInput}
+                onChange={(e) => setMetaAppSecretInput(e.target.value)}
+                placeholder={oauthCfg?.hasMetaAppSecret ? '•••••••• (kosongkan jika tetap)' : 'Tempel Kunci Rahasia Aplikasi'}
+                className="w-full h-8 px-2.5 bg-white border border-gray-200 rounded-md font-mono text-xs"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-[11px] font-medium text-gray-700 mb-1">Threads App ID</label>
+              <input
+                type="text"
+                value={threadsAppIdInput}
+                onChange={(e) => setThreadsAppIdInput(e.target.value)}
+                placeholder="1742677016843989"
+                className="w-full h-8 px-2.5 bg-white border border-gray-200 rounded-md font-mono text-xs"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-[11px] font-medium text-gray-700 mb-1">
+                Threads App Secret{' '}
+                {oauthCfg?.hasThreadsAppSecret && (
+                  <span className="text-emerald-600 font-semibold">(Tersimpan)</span>
+                )}
+              </label>
+              <input
+                type="password"
+                value={threadsAppSecretInput}
+                onChange={(e) => setThreadsAppSecretInput(e.target.value)}
+                placeholder={oauthCfg?.hasThreadsAppSecret ? '•••••••• (kosongkan jika tetap)' : 'Tempel Rahasia Threads'}
+                className="w-full h-8 px-2.5 bg-white border border-gray-200 rounded-md font-mono text-xs"
+              />
+            </div>
+            <div className="sm:col-span-2 flex items-end">
+              <Button type="submit" variant="secondary" size="sm" isLoading={savingOauthCfg} className="w-full h-8">
+                Simpan Secret
+              </Button>
+            </div>
+          </form>
+        )}
       </div>
 
       <div className="p-3 rounded-md bg-gray-50 border border-gray-200 text-xs space-y-1.5">
@@ -383,16 +498,28 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h3 className="text-xs font-semibold text-gray-900">
-              Connect Link Klien (Tanpa Login CRM)
+              Link OAuth Klien (Hubungkan Akun Tanpa Login CRM)
             </h3>
             <p className="text-[11px] text-gray-500">
-              Bagikan tautan aman sekali pakai agar klien bisa menghubungkan akun {channel} mereka sendiri.
+              Bagikan tautan ini ke klien agar mereka cukup klik Login Facebook, Instagram, atau Threads sendiri (mendukung multi akun).
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 shrink-0 w-full sm:w-auto">
+            <select
+              value={linkChannel}
+              onChange={(e) => setLinkChannel(e.target.value as OmnichannelType | 'META')}
+              className="h-8 px-2 bg-gray-50 border border-gray-200 rounded-md text-xs"
+            >
+              <option value="META">Semua Kanal (FB, IG &amp; Threads)</option>
+              <option value="INSTAGRAM">Khusus Instagram</option>
+              <option value="FACEBOOK">Khusus Facebook</option>
+              <option value="THREADS">Khusus Threads</option>
+              <option value="WHATSAPP_CLOUD">Khusus WA Cloud API</option>
+              <option value="TELEGRAM">Khusus Telegram Bot</option>
+            </select>
             <input
               type="text"
-              placeholder="Label klien (opsional)"
+              placeholder="Nama klien / toko (opsional)"
               value={linkLabel}
               onChange={(e) => setLinkLabel(e.target.value)}
               className="h-8 px-2.5 bg-gray-50 border border-gray-200 rounded-md text-xs w-full sm:w-44"
@@ -405,7 +532,7 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
               disabled={!canEdit}
               onClick={() => void handleCreateConnectLink()}
             >
-              Buat Link
+              Buat Link OAuth Klien
             </Button>
           </div>
         </div>

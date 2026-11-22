@@ -1046,7 +1046,7 @@ export const api = {
     return res.data.data || [];
   },
   createChannelConnectLink: async (data: {
-    channel: import('../types').OmnichannelType;
+    channel: import('../types').OmnichannelType | 'META';
     label?: string;
     expiresHours?: number;
   }): Promise<import('../types').ChannelConnectLink> => {
@@ -1054,11 +1054,16 @@ export const api = {
     return res.data.data;
   },
   getPublicConnectLink: async (token: string): Promise<{
-    channel: import('../types').OmnichannelType;
+    channel: import('../types').OmnichannelType | 'META';
     label?: string | null;
     expiresAt: string;
     usedAt?: string | null;
     isExpired: boolean;
+    oauthConfig?: {
+      reneoOAuthReady: boolean;
+      directMetaReady: boolean;
+      directThreadsReady: boolean;
+    };
   }> => {
     const res = await client.get(`/channels/connect/${encodeURIComponent(token)}`);
     return res.data.data;
@@ -1644,8 +1649,32 @@ export const api = {
     reneoOAuthReady: boolean;
     directMetaReady: boolean;
     directThreadsReady: boolean;
+    metaAppId?: string;
+    hasMetaAppSecret?: boolean;
+    threadsAppId?: string;
+    hasThreadsAppSecret?: boolean;
+    webhookVerifyToken?: string;
   }> => {
     const res = await client.get('/channels/oauth/config');
+    return res.data.data;
+  },
+  saveOAuthConfig: async (data: {
+    metaAppId?: string;
+    metaAppSecret?: string;
+    threadsAppId?: string;
+    threadsAppSecret?: string;
+    webhookVerifyToken?: string;
+  }): Promise<{
+    reneoOAuthReady: boolean;
+    directMetaReady: boolean;
+    directThreadsReady: boolean;
+    metaAppId?: string;
+    hasMetaAppSecret?: boolean;
+    threadsAppId?: string;
+    hasThreadsAppSecret?: boolean;
+    webhookVerifyToken?: string;
+  }> => {
+    const res = await client.put('/channels/oauth/config', data);
     return res.data.data;
   },
 
