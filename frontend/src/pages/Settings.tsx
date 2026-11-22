@@ -13,6 +13,10 @@ import {
   ChevronRight,
   Eye,
   AlertTriangle,
+  RotateCcw,
+  History,
+  Smartphone,
+  CheckCircle2,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -168,6 +172,27 @@ export const Settings: React.FC<SettingsProps> = ({
   const webhookDirtyRef = useRef(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
   const [syncingWebhook, setSyncingWebhook] = useState(false);
+
+  // Session Identity Quota & Switch Limit
+  const [sessionIdentityData, setSessionIdentityData] = useState<{
+    sessionName: string;
+    currentIdentity?: string;
+    lastIdentity?: string;
+    switchCount: number;
+    maxAllowedSwitches: number;
+    isLimitReached: boolean;
+    identityHistory?: Array<{
+      identity: string;
+      pushName?: string;
+      connectedAt: string;
+      disconnectedAt?: string;
+    }>;
+    remainingSwitches: number;
+  } | null>(null);
+  const [loadingIdentityData, setLoadingIdentityData] = useState(false);
+  const [simPhoneInput, setSimPhoneInput] = useState('');
+  const [simActionLoading, setSimActionLoading] = useState(false);
+  const [showIdentityHistory, setShowIdentityHistory] = useState(false);
 
   // Multi-Agent & Role state (ADMIN or settings.agents)
   const isFullAdmin = !currentUser || currentUser.role === 'ADMIN';
@@ -1020,6 +1045,93 @@ export const Settings: React.FC<SettingsProps> = ({
       isMounted = false;
     };
   }, [confirmAction, confirmDeleteSession, inspectedSession, connectedPhone, sessions]);
+
+  const fetchSessionIdentityInfo = useCallback(async (sessionName?: string) => {
+    const target = sessionName || inspectedSession;
+    if (!target) return;
+    setLoadingIdentityData(true);
+    try {
+      const data = await api.getSessionIdentityInfo(target);
+      setSessionIdentityData(data);
+    } catch {
+      setSessionIdentityData(null);
+    } finally {
+      setLoadingIdentityData(false);
+    }
+  }, [inspectedSession]);
+
+  useEffect(() => {
+    if (settingsTab === 'whatsapp' && inspectedSession) {
+      void fetchSessionIdentityInfo(inspectedSession);
+    }
+  }, [settingsTab, inspectedSession, fetchSessionIdentityInfo]);
+
+  const handleSimulateSwitchIdentity = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanNumber = simPhoneInput.trim().replace(/\D/g, '');
+    if (!cleanNumber) {
+      toast.error('Masukkan nomor WhatsApp simulasi baru (contoh: 6281234567890)');
+      return;
+    }
+    setSimActionLoading(true);
+    try {
+      const res = await api.simulateSessionIdentitySwitch(inspectedSession, cleanNumber);
+      toast.success(res.message || 'Simulasi pergantian identitas sesi berhasil.');
+      setSimPhoneInput('');
+      await Promise.all([
+        fetchSessionIdentityInfo(inspectedSession),
+        fetchSessions(),
+        Promise.resolve(onRefreshStatus()),
+      ]);
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.error ||
+          err?.message ||
+          'Gagal mengganti identitas sesi. Batas pergantian mungkin telah tercapai.'
+      );
+      await fetchSessionIdentityInfo(inspectedSession);
+    } finally {
+      setSimActionLoading(false);
+    }
+  };
+
+  const handleSimulateRestoreIdentity = async () => {
+    if (!sessionIdentityData?.lastIdentity) return;
+    setSimActionLoading(true);
+    try {
+      const res = await api.simulateSessionIdentityRestore(inspectedSession);
+      toast.success(res.message || 'Identitas sesi berhasil dipulihkan ke nomor terakhir.');
+      await Promise.all([
+        fetchSessionIdentityInfo(inspectedSession),
+        fetchSessions(),
+        Promise.resolve(onRefreshStatus()),
+      ]);
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.error ||
+          err?.message ||
+          'Gagal memulihkan ke identitas terakhir.'
+      );
+    } finally {
+      setSimActionLoading(false);
+    }
+  };
+
+  const handleSimulateResetIdentity = async () => {
+    setSimActionLoading(true);
+    try {
+      const res = await api.simulateSessionIdentityReset(inspectedSession);
+      toast.info(res.message || 'Riwayat pergantian identitas sesi di-reset.');
+      await Promise.all([
+        fetchSessionIdentityInfo(inspectedSession),
+        fetchSessions(),
+      ]);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Gagal mereset identitas sesi.');
+    } finally {
+      setSimActionLoading(false);
+    }
+  };
 
   const getSessionStatusMeta = (raw?: string | null) => {
     const st = String(raw || 'STOPPED').toUpperCase();
@@ -1950,6 +2062,245 @@ export const Settings: React.FC<SettingsProps> = ({
               >
                 Logout Sesi WhatsApp
               </Button>
+            </div>
+          </div>
+
+          {/* Batas & Identitas Sesi WhatsApp */}
+          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 text-xs space-y-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-indigo-600 shrink-0" />
+                <h3 className="text-gray-900 font-semibold text-sm">Batas &amp; Identitas Sesi</h3>
+              </div>
+              <span
+                className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                  sessionIdentityData?.isLimitReached
+                    ? 'bg-red-50 text-red-700 border-red-200'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}
+              >
+                {sessionIdentityData?.isLimitReached ? 'Batas Tercapai' : 'Tersedia'}
+              </span>
+            </div>
+
+            <p className="text-gray-500 text-[11px] leading-relaxed">
+              Setiap sesi/channel memiliki kuota batas frekuensi pergantian identitas nomor WhatsApp sesuai paket lisensi (
+              <strong className="text-gray-700">
+                {sessionIdentityData?.maxAllowedSwitches ?? licenseInfo?.features?.maxSessionIdentitySwitches ?? 2}x pergantian
+              </strong>
+              ). Jika batas tercapai, sistem menolak nomor baru dan hanya mengizinkan pemulihan ke nomor terakhir.
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-gray-500 block">Nomor Aktif</span>
+                <span className="text-xs font-mono font-semibold text-gray-900 truncate block">
+                  {sessionIdentityData?.currentIdentity
+                    ? `+${sessionIdentityData.currentIdentity}`
+                    : connectedPhone
+                    ? `+${connectedPhone}`
+                    : 'Belum Terhubung'}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-gray-500 block">Nomor Terakhir</span>
+                <span className="text-xs font-mono font-semibold text-gray-700 truncate block">
+                  {sessionIdentityData?.lastIdentity ? `+${sessionIdentityData.lastIdentity}` : '-'}
+                </span>
+              </div>
+              <div className="pt-2 border-t border-gray-200">
+                <span className="text-[10px] uppercase font-bold text-gray-500 block">Pergantian Terpakai</span>
+                <span className="text-xs font-mono font-bold text-indigo-700">
+                  {sessionIdentityData?.switchCount || 0} /{' '}
+                  {sessionIdentityData?.maxAllowedSwitches ?? licenseInfo?.features?.maxSessionIdentitySwitches ?? 2}x
+                </span>
+              </div>
+              <div className="pt-2 border-t border-gray-200">
+                <span className="text-[10px] uppercase font-bold text-gray-500 block">Sisa Kuota Ganti</span>
+                <span
+                  className={`text-xs font-mono font-bold ${
+                    (sessionIdentityData?.remainingSwitches ?? 2) === 0 ? 'text-red-600' : 'text-emerald-700'
+                  }`}
+                >
+                  {sessionIdentityData?.remainingSwitches ?? 2}x
+                </span>
+              </div>
+            </div>
+
+            {/* Switch Progress Bar */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[11px] text-gray-500">
+                <span>Penggunaan Kuota Pergantian</span>
+                <span className="font-mono font-medium">
+                  {Math.min(
+                    100,
+                    Math.round(
+                      ((sessionIdentityData?.switchCount || 0) /
+                        (sessionIdentityData?.maxAllowedSwitches || 2)) *
+                        100
+                    )
+                  )}
+                  %
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                <div
+                  className={`h-2 transition-all ${
+                    sessionIdentityData?.isLimitReached
+                      ? 'bg-red-600'
+                      : (sessionIdentityData?.switchCount || 0) > 0
+                      ? 'bg-amber-500'
+                      : 'bg-indigo-600'
+                  }`}
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round(
+                        ((sessionIdentityData?.switchCount || 0) /
+                          (sessionIdentityData?.maxAllowedSwitches || 2)) *
+                          100
+                      )
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {sessionIdentityData?.isLimitReached && (
+              <div className="p-3 rounded-md bg-red-50 border border-red-200 text-xs text-red-800 space-y-1.5">
+                <div className="flex items-center gap-1.5 font-semibold text-red-900">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>Batas Pergantian Sesi Telah Tercapai!</span>
+                </div>
+                <p className="leading-relaxed text-[11px]">
+                  Sesi ini telah mencapai batas maksimal pergantian (
+                  {sessionIdentityData.switchCount}/{sessionIdentityData.maxAllowedSwitches}x). Nomor WhatsApp baru{' '}
+                  <strong>tidak dapat dihubungkan</strong> ke sesi ini.
+                </p>
+                {sessionIdentityData.lastIdentity && (
+                  <div className="leading-relaxed text-[11px] font-medium text-emerald-900 bg-emerald-50/80 p-2 rounded border border-emerald-200">
+                    Sistem hanya akan mengizinkan jika dikembalikan ke nomor identitas terakhir:{' '}
+                    <strong className="font-mono font-bold">+{sessionIdentityData.lastIdentity}</strong>.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Simulasi Pergantian & Pemulihan (Logout & Login Test) */}
+            <div className="p-3 bg-gray-50/90 rounded-lg border border-gray-200 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="font-semibold text-gray-900 text-xs flex items-center gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
+                  Simulasi Logout &amp; Pergantian Sesi
+                </h4>
+                {onOpenPlans && (
+                  <button
+                    type="button"
+                    onClick={onOpenPlans}
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    Info Lisensi
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500 leading-relaxed">
+                Uji coba alur logout dan ganti identitas sesi untuk memverifikasi proteksi batas lisensi saat sesi berpindah nomor.
+              </p>
+
+              <form onSubmit={handleSimulateSwitchIdentity} className="space-y-2">
+                <div className="flex flex-col sm:flex-row gap-1.5">
+                  <input
+                    type="text"
+                    value={simPhoneInput}
+                    onChange={(e) => setSimPhoneInput(e.target.value)}
+                    placeholder="Nomor baru (misal: 6281234567890)"
+                    disabled={!canEditSettings || simActionLoading}
+                    className="w-full flex-none sm:flex-1 h-8 px-2.5 bg-white border border-gray-200 rounded-md text-[11px] font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    disabled={!canEditSettings || !simPhoneInput.trim() || simActionLoading}
+                    isLoading={simActionLoading}
+                    className="shrink-0"
+                  >
+                    Simulasi Ganti Nomor
+                  </Button>
+                </div>
+              </form>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {sessionIdentityData?.lastIdentity && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={
+                      !canEditSettings ||
+                      simActionLoading ||
+                      sessionIdentityData.currentIdentity === sessionIdentityData.lastIdentity
+                    }
+                    onClick={() => void handleSimulateRestoreIdentity()}
+                    className="inline-flex items-center gap-1 text-[11px]"
+                  >
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>Pulihkan ke Nomor Terakhir (+{sessionIdentityData.lastIdentity})</span>
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!canEditSettings || simActionLoading}
+                  onClick={() => void handleSimulateResetIdentity()}
+                  className="text-gray-500 hover:text-gray-700 text-[11px]"
+                >
+                  Reset Riwayat Uji
+                </Button>
+              </div>
+            </div>
+
+            {/* Riwayat Identitas */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setShowIdentityHistory((v) => !v)}
+                className="w-full flex items-center justify-between text-[11px] font-medium text-gray-600 hover:text-gray-900"
+              >
+                <span className="flex items-center gap-1">
+                  <History className="w-3.5 h-3.5 text-gray-500" />
+                  <span>Riwayat Pergantian Identitas ({sessionIdentityData?.identityHistory?.length || 0})</span>
+                </span>
+                <span>{showIdentityHistory ? 'Tutup' : 'Lihat'}</span>
+              </button>
+
+              {showIdentityHistory && (
+                <div className="mt-2 space-y-1.5 border border-gray-200 rounded-md p-2 bg-gray-50">
+                  {!sessionIdentityData?.identityHistory || sessionIdentityData.identityHistory.length === 0 ? (
+                    <div className="text-[11px] text-gray-500 text-center py-1">
+                      Belum ada riwayat pergantian nomor pada sesi ini.
+                    </div>
+                  ) : (
+                    sessionIdentityData.identityHistory.map((h, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between text-[11px] py-1 border-b border-gray-200 last:border-b-0"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-mono font-semibold text-gray-900">+{h.identity}</span>
+                          {h.pushName && <span className="text-gray-500 truncate">({h.pushName})</span>}
+                        </div>
+                        <span className="text-[10px] text-gray-500 font-mono shrink-0">
+                          {h.disconnectedAt
+                            ? `Terputus: ${new Date(h.disconnectedAt).toLocaleTimeString()}`
+                            : 'Aktif'}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

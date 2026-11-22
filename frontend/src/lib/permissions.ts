@@ -1,4 +1,4 @@
-import { PermissionCatalogItem } from '../types';
+import { PermissionCatalogItem, LicenseInfo } from '../types';
 
 export const ALL_PERMISSION_KEYS = [
   'dashboard',
@@ -196,4 +196,90 @@ export function groupPermissionCatalog(
 export function summarizePermissions(permissions: string[]): string[] {
   const catalogMap = new Map(PERMISSION_CATALOG_UI.map((item) => [item.id, item.label]));
   return permissions.map((id) => catalogMap.get(id) || id);
+}
+
+export function isMenuUnlockedByLicense(
+  menuId: string,
+  licenseInfo?: LicenseInfo | null
+): boolean {
+  if (!licenseInfo) return true;
+  const isLicenseActive =
+    !licenseInfo.isExpired &&
+    licenseInfo.status !== 'UNLICENSED' &&
+    licenseInfo.status !== 'SUSPENDED';
+  if (!isLicenseActive) return menuId === 'dashboard';
+  const feats = licenseInfo.features;
+  if (Array.isArray(feats?.allowedMenus) && feats.allowedMenus.length > 0) {
+    return feats.allowedMenus.includes(menuId);
+  }
+  switch (menuId) {
+    case 'conversations':
+      return Boolean(feats?.liveChatCrm);
+    case 'comments':
+    case 'feed':
+      return Boolean(feats?.omnichannel);
+    case 'birthday':
+      return Boolean(feats?.birthdayAutomation);
+    case 'tracking':
+    case 'posts':
+    case 'ideas':
+      return Boolean(feats?.scheduledPosts);
+    case 'automations':
+      return feats?.autoReply !== undefined ? Boolean(feats.autoReply) : true;
+    case 'ai-agent':
+      return Boolean(feats?.aiAgent);
+    default:
+      return true;
+  }
+}
+
+export function getMenuLockReason(
+  menuId: string,
+  planName?: string
+): { title: string; description: string } {
+  const plan = planName || 'Saat Ini';
+  switch (menuId) {
+    case 'tracking':
+      return {
+        title: 'Menu Pelacakan Status Siaran Terkunci',
+        description: `Paket lisensi Anda (${plan}) tidak menyertakan fitur Pelacakan Status & Centang Siaran. Upgrade paket lisensi Anda ke Pro Bulanan atau Enterprise Tahunan untuk membuka analitik dan riwayat pengiriman detail per nomor.`,
+      };
+    case 'conversations':
+      return {
+        title: 'Menu Live Chat CRM Terkunci',
+        description: `Paket lisensi Anda (${plan}) tidak menyertakan fitur Live Chat CRM. Upgrade ke paket Pro Bulanan atau Enterprise Tahunan untuk membuka kotak masuk percakapan dan multi-agent.`,
+      };
+    case 'comments':
+    case 'feed':
+      return {
+        title: 'Fitur Media Sosial Omnichannel Terkunci',
+        description: `Paket lisensi Anda (${plan}) tidak menyertakan integrasi komentar & feed media sosial. Upgrade paket lisensi Anda untuk membuka akses omnichannel.`,
+      };
+    case 'posts':
+    case 'ideas':
+      return {
+        title: 'Menu Jadwal Post & Ide Konten Terkunci',
+        description: `Paket lisensi Anda (${plan}) tidak menyertakan fitur Jadwal Post & Story WhatsApp. Upgrade paket lisensi Anda untuk membuka kalender posting otomatis.`,
+      };
+    case 'birthday':
+      return {
+        title: 'Menu Otomasi Ulang Tahun Terkunci',
+        description: `Paket lisensi Anda (${plan}) tidak menyertakan fitur ucapan otomatis ulang tahun pelanggan. Upgrade paket lisensi Anda untuk mengaktifkan fitur ini.`,
+      };
+    case 'automations':
+      return {
+        title: 'Menu Otomasi Terkunci',
+        description: `Paket lisensi Anda (${plan}) tidak menyertakan fitur otomasi lanjutan. Upgrade paket lisensi Anda untuk mengaktifkannya.`,
+      };
+    case 'ai-agent':
+      return {
+        title: 'Menu Agent AI & Knowledge Book Terkunci',
+        description: `Paket lisensi Anda (${plan}) tidak menyertakan fitur Agent AI & Knowledge Book. Upgrade ke paket Business AI atau Enterprise Tahunan untuk mengaktifkannya.`,
+      };
+    default:
+      return {
+        title: `Menu "${menuId}" Terkunci oleh Lisensi`,
+        description: `Paket lisensi Anda (${plan}) belum memiliki akses ke menu ini. Silakan upgrade paket lisensi Anda.`,
+      };
+  }
 }

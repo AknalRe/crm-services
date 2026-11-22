@@ -34,18 +34,25 @@ export class BroadcastService {
   public static personalizeMessage(
     template: string,
     contact: {
-      namaLengkap: string;
+      namaLengkap?: string | null;
       namaPanggilan?: string | null;
       alamat?: string | null;
-      nomorWhatsapp: string;
+      nomorWhatsapp?: string | null;
     }
   ): string {
-    const panggilan = contact.namaPanggilan || contact.namaLengkap.split(' ')[0];
+    const namaLengkap = (contact.namaLengkap || '').trim();
+    const panggilan =
+      (contact.namaPanggilan || '').trim() ||
+      (namaLengkap ? namaLengkap.split(' ')[0] : '') ||
+      'Kak';
+    const phone = (contact.nomorWhatsapp || '').trim();
+    const alamat = (contact.alamat || '').trim();
+
     return template
-      .replace(/{nama_lengkap}/gi, contact.namaLengkap)
+      .replace(/{nama_lengkap}/gi, namaLengkap || panggilan)
       .replace(/{nama_panggilan}/gi, panggilan)
-      .replace(/{alamat}/gi, contact.alamat || '')
-      .replace(/{nomor_whatsapp}/gi, contact.nomorWhatsapp);
+      .replace(/{alamat}/gi, alamat)
+      .replace(/{nomor_whatsapp}/gi, phone);
   }
 
   /**

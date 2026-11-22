@@ -45,7 +45,7 @@ import {
 import { ReneoCrmLogo } from './ReneoCrmLogo';
 import { CompanyProfileModal } from './CompanyProfileModal';
 import { ConfirmModal } from './ui/ConfirmModal';
-import { hasPerm } from '../lib/permissions';
+import { hasPerm, isMenuUnlockedByLicense } from '../lib/permissions';
 import api from '../services/api';
 import { useToast } from './ui/ToastProvider';
 
@@ -86,30 +86,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const feats = licenseInfo?.features;
 
   const isMenuUnlocked = (menuId: string): boolean => {
-    if (!licenseInfo) return true;
-    if (!isLicenseActive) return menuId === 'dashboard';
-    if (Array.isArray(feats?.allowedMenus) && feats.allowedMenus.length > 0) {
-      return feats.allowedMenus.includes(menuId);
-    }
-    switch (menuId) {
-      case 'conversations':
-        return Boolean(feats?.liveChatCrm);
-      case 'comments':
-      case 'feed':
-        return Boolean(feats?.omnichannel);
-      case 'birthday':
-        return Boolean(feats?.birthdayAutomation);
-      case 'tracking':
-      case 'posts':
-      case 'ideas':
-        return Boolean(feats?.scheduledPosts);
-      case 'automations':
-        return feats?.autoReply !== undefined ? Boolean(feats.autoReply) : true;
-      case 'ai-agent':
-        return Boolean(feats?.aiAgent);
-      default:
-        return true;
-    }
+    return isMenuUnlockedByLicense(menuId, licenseInfo);
   };
 
   const isAdmin = !user || user.role === 'ADMIN';

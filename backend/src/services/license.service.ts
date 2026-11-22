@@ -69,6 +69,7 @@ export interface LicenseInfo {
     liveChatCrm: boolean;
     multiSession: boolean;
     maxSessions: number;
+    maxSessionIdentitySwitches: number;
     maxTemplates: number;
     maxUsers: number;
     multiAgent: boolean;
@@ -132,6 +133,7 @@ export function buildLockedFeatures(): LicenseInfo['features'] {
     liveChatCrm: false,
     multiSession: false,
     maxSessions: 0,
+    maxSessionIdentitySwitches: 0,
     maxTemplates: 0,
     maxUsers: 0,
     multiAgent: false,
@@ -175,6 +177,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         liveChat: false,
         multiSession: false,
         maxSessions: 1,
+        maxSessionIdentitySwitches: 2,
         multiAgent: false,
         maxAgents: 1,
         maxUsers: 1,
@@ -215,6 +218,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         liveChat: true,
         multiSession: true,
         maxSessions: 3,
+        maxSessionIdentitySwitches: 5,
         multiAgent: true,
         maxAgents: 5,
         maxUsers: 5,
@@ -269,6 +273,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         liveChat: true,
         multiSession: true,
         maxSessions: 3,
+        maxSessionIdentitySwitches: 5,
         multiAgent: true,
         maxAgents: 5,
         maxUsers: 5,
@@ -323,6 +328,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         liveChat: true,
         multiSession: true,
         maxSessions: 10,
+        maxSessionIdentitySwitches: 10,
         multiAgent: true,
         maxAgents: 12,
         maxUsers: 12,
@@ -378,6 +384,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         liveChat: true,
         multiSession: true,
         maxSessions: 25,
+        maxSessionIdentitySwitches: 25,
         multiAgent: true,
         maxAgents: 30,
         maxUsers: 30,
@@ -484,6 +491,17 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
         ? 10
         : 3
       : 1;
+
+  const maxSessionIdentitySwitches =
+    typeof src.maxSessionIdentitySwitches === 'number' && src.maxSessionIdentitySwitches >= 0
+      ? src.maxSessionIdentitySwitches
+      : isStarter
+      ? 2
+      : isBusiness
+      ? 10
+      : isEnterprise
+      ? 25
+      : 5;
 
   const multiAgent =
     src.multiAgent !== undefined ? Boolean(src.multiAgent) : !isStarter;
@@ -599,6 +617,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     liveChatCrm,
     multiSession,
     maxSessions,
+    maxSessionIdentitySwitches,
     maxTemplates,
     maxUsers,
     multiAgent,

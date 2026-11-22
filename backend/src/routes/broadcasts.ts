@@ -3,6 +3,7 @@ import { and, eq, desc, sql, or, ilike } from 'drizzle-orm';
 import { db } from '../db';
 import { campaigns, campaignRecipients, contacts } from '../db/schema';
 import { BroadcastService } from '../services/broadcast.service';
+import { licenseService } from '../services/license.service';
 import { getRequestCompanyId, requirePermission } from './auth';
 
 export function formatCampaign(c: any) {
@@ -339,6 +340,7 @@ export default async function broadcastsRouter(fastify: FastifyInstance) {
   }>, reply: FastifyReply) => {
     try {
       const companyId = getRequestCompanyId(req);
+      await licenseService.assertFeature('scheduledPosts', undefined, companyId);
       const { status, search, page = '1', limit = '50' } = req.query;
       const pageNum = Math.max(1, parseInt(page, 10) || 1);
       const limitNum = Math.max(1, Math.min(500, parseInt(limit, 10) || 50));

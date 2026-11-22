@@ -1234,6 +1234,34 @@ export const Conversations: React.FC<ConversationsProps> = ({
     el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
   }, [inputText, selectedConversation?.id, composerMode]);
 
+  const interpolateMessageVariables = useCallback(
+    (rawText: string): string => {
+      if (!rawText || !selectedConversation || isCurrentConversationGroup) return rawText;
+      const contact = selectedConversation.contact;
+      const fullName =
+        contact?.nama_lengkap?.trim() ||
+        selectedConversation.channelDisplayName?.trim() ||
+        selectedConversation.pushName?.trim() ||
+        '';
+      const nickName =
+        contact?.nama_panggilan?.trim() ||
+        (fullName ? fullName.split(' ')[0] : '') ||
+        'Kak';
+      const phone =
+        contact?.nomor_whatsapp?.trim() ||
+        selectedConversation.externalThreadId?.replace(/@.*$/, '') ||
+        '';
+      const address = contact?.alamat?.trim() || '';
+
+      return rawText
+        .replace(/\{nama_lengkap\}/gi, fullName || nickName)
+        .replace(/\{nama_panggilan\}/gi, nickName)
+        .replace(/\{nomor_whatsapp\}/gi, phone)
+        .replace(/\{alamat\}/gi, address);
+    },
+    [selectedConversation, isCurrentConversationGroup]
+  );
+
   const applyTextFormat = (
     type: 'bold' | 'italic' | 'strike' | 'code' | 'codeblock' | 'quote' | 'bullet' | 'variable',
     extraValue?: string
@@ -3059,7 +3087,11 @@ export const Conversations: React.FC<ConversationsProps> = ({
           url: cleanUrl,
           title: linkTitle.trim() || undefined,
           description: linkDesc.trim() || undefined,
-          caption: linkCaption.trim() || undefined,
+          caption: linkCaption.trim()
+            ? isCurrentConversationGroup
+              ? linkCaption.trim()
+              : interpolateMessageVariables(linkCaption.trim())
+            : undefined,
           imageUrl: linkImageUrl.trim() || undefined,
           highQuality: true,
         },
@@ -3113,7 +3145,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
           },
         });
       } else {
-        const cleanBody = btnBody.trim();
+        const rawBody = btnBody.trim();
+        const cleanBody = isCurrentConversationGroup ? rawBody : interpolateMessageVariables(rawBody);
         const validBtns = btnItems
           .filter((b) => b.text.trim())
           .map((b) => ({
@@ -3171,13 +3204,14 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isLiveChatUnlocked || !selectedConversation || sending) return;
-    const text = inputText.trim();
+    const rawText = inputText.trim();
 
     if (composerMode === 'NOTE') {
-      if (!text) return;
+      if (!rawText) return;
+      const noteText = isCurrentConversationGroup ? rawText : interpolateMessageVariables(rawText);
       setSending(true);
       try {
-        const noteMsg = await api.addConversationNote(selectedConversation.id, text);
+        const noteMsg = await api.addConversationNote(selectedConversation.id, noteText);
         setInputText('');
         setMessages((prev) => [...prev, noteMsg]);
         toast.success('Catatan internal disimpan');
@@ -3189,7 +3223,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
       return;
     }
 
-    if (!text && pendingAttachments.length === 0) return;
+    if (!rawText && pendingAttachments.length === 0) return;
+    const text = isCurrentConversationGroup ? rawText : interpolateMessageVariables(rawText);
     stopOutboundTyping(selectedConversation.id);
     setSending(true);
     try {
@@ -4016,14 +4051,8 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [savingCanned, setSavingCanned] = useState(false);
 
   const applyCannedVariables = (raw: string): string => {
-    const fullName = selectedConversation?.contact?.nama_lengkap || '';
-    const nickName =
-      selectedConversation?.contact?.nama_panggilan ||
-      (fullName ? fullName.split(' ')[0] : '') ||
-      'Kak';
-    return raw
-      .replace(/\{nama_panggilan\}/gi, nickName)
-      .replace(/\{nama_lengkap\}/gi, fullName || nickName);
+    if (isCurrentConversationGroup) return raw;
+    return interpolateMessageVariables(raw);
   };
 
   const fetchAgentsAndCanned = useCallback(async () => {
@@ -9637,36 +9666,48 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       <List className="w-3.5 h-3.5" />
                     </button>
 
-                    <div className="h-3.5 w-px bg-gray-300 mx-1 shrink-0" />
+                    {!isCurrentConversationGroup && (
+                      <>
+                        <div className="h-3.5 w-px bg-gray-300 mx-1 shrink-0" />
 
-                    {/* Quick Variable Pills */}
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-gray-400 font-medium hidden sm:inline">Variabel:</span>
-                      <button
-                        type="button"
-                        onClick={() => applyTextFormat('variable', ' {nama_panggilan} ')}
-                        title="Sisipkan {nama_panggilan}"
-                        className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
-                      >
-                        {'{nama_panggilan}'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => applyTextFormat('variable', ' {nama_lengkap} ')}
-                        title="Sisipkan {nama_lengkap}"
-                        className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
-                      >
-                        {'{nama_lengkap}'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => applyTextFormat('variable', ' {nomor_whatsapp} ')}
-                        title="Sisipkan {nomor_whatsapp}"
-                        className="hidden md:inline px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
-                      >
-                        {'{nomor_whatsapp}'}
-                      </button>
-                    </div>
+                        {/* Quick Variable Pills */}
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-gray-400 font-medium hidden sm:inline">Variabel:</span>
+                          <button
+                            type="button"
+                            onClick={() => applyTextFormat('variable', ' {nama_panggilan} ')}
+                            title="Sisipkan {nama_panggilan}"
+                            className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
+                          >
+                            {'{nama_panggilan}'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyTextFormat('variable', ' {nama_lengkap} ')}
+                            title="Sisipkan {nama_lengkap}"
+                            className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
+                          >
+                            {'{nama_lengkap}'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyTextFormat('variable', ' {nomor_whatsapp} ')}
+                            title="Sisipkan {nomor_whatsapp}"
+                            className="hidden md:inline px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
+                          >
+                            {'{nomor_whatsapp}'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyTextFormat('variable', ' {alamat} ')}
+                            title="Sisipkan {alamat}"
+                            className="hidden lg:inline px-1.5 py-0.5 text-[10px] font-mono rounded bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 shadow-xs"
+                          >
+                            {'{alamat}'}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="shrink-0 text-[10px] text-gray-400 font-medium pl-1 hidden lg:inline">

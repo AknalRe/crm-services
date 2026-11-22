@@ -9,12 +9,20 @@ import {
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { CampaignRecipient } from '../types';
+import { CampaignRecipient, LicenseInfo } from '../types';
 import { Button } from '../components/ui/Button';
 import { LoadingState, EmptyState, ErrorState } from '../components/ui/StateBlocks';
 import { TablePagination } from '../components/ui/Pagination';
+import { isMenuUnlockedByLicense, getMenuLockReason } from '../lib/permissions';
+import { LockedFeatureCard } from '../components/ui/LockedFeatureCard';
 
-export const Tracking: React.FC = () => {
+interface TrackingProps {
+  licenseInfo?: LicenseInfo | null;
+  onOpenPlans?: () => void;
+}
+
+export const Tracking: React.FC<TrackingProps> = ({ licenseInfo, onOpenPlans }) => {
+  const isUnlocked = isMenuUnlockedByLicense('tracking', licenseInfo);
   const [items, setItems] = useState<CampaignRecipient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,21 +59,34 @@ export const Tracking: React.FC = () => {
   }, [statusFilter, search, page, limit]);
 
   useEffect(() => {
+    if (!isUnlocked) return;
     fetchTracking();
     const unsub = subscribeLiveEvent('tracking:update', () => {
       void fetchTracking();
     });
     return unsub;
-  }, [fetchTracking]);
+  }, [fetchTracking, isUnlocked]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isUnlocked) return;
     if (page !== 1) {
       setPage(1);
     } else {
       fetchTracking();
     }
   };
+
+  if (!isUnlocked) {
+    const lockMeta = getMenuLockReason('tracking', licenseInfo?.plan);
+    return (
+      <LockedFeatureCard
+        title={lockMeta.title}
+        description={lockMeta.description}
+        onOpenPlans={onOpenPlans}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">

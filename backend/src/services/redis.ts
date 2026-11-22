@@ -4,7 +4,9 @@ import { config } from '../config';
 export const redisConnection = new Redis(config.redisUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
+  lazyConnect: process.env.NODE_ENV === 'test',
   retryStrategy(times) {
+    if (process.env.NODE_ENV === 'test') return null;
     const delay = Math.min(times * 500, 3000);
     return delay;
   },

@@ -6,7 +6,7 @@ import QRCodeModal from './components/QRCodeModal';
 import { PlansModal, PlansModalView } from './components/PlansModal';
 import { SetupLoginGate } from './components/SetupLoginGate';
 import { LicenseActivationScreen } from './components/LicenseActivationScreen';
-import { ToastProvider } from './components/ui/ToastProvider';
+import { ToastProvider, useToast } from './components/ui/ToastProvider';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Broadcasts from './pages/Broadcasts';
@@ -26,7 +26,8 @@ import PublicChannelConnectPage from './pages/PublicChannelConnectPage';
 import LandingPage from './pages/LandingPage';
 import GuidePage from './pages/GuidePage';
 import api from './services/api';
-import { hasAnyPerm, hasPerm } from './lib/permissions';
+import { hasAnyPerm, hasPerm, isMenuUnlockedByLicense, getMenuLockReason } from './lib/permissions';
+import { LockedFeatureCard } from './components/ui/LockedFeatureCard';
 import { subscribeLiveEvent } from './services/liveEvents';
 import {
   buildGuidePath,
@@ -138,6 +139,7 @@ function getInitialLocation(): { tab: string; settingsSection: SettingsSection }
 }
 
 function AppShell() {
+  const toast = useToast();
   const initialLoc = getInitialLocation();
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -838,90 +840,111 @@ function AppShell() {
             {currentTab === 'dashboard' && (
               <Dashboard
                 currentUser={authStatus?.user}
+                licenseInfo={licenseInfo}
+                onOpenPlans={() => openPlansModal('plans')}
                 onNavigate={(tab, target) => {
+                  if (!isMenuUnlockedByLicense(tab, licenseInfo)) {
+                    toast.info(getMenuLockReason(tab, licenseInfo?.plan).description);
+                    openPlansModal('plans');
+                    return;
+                  }
                   setTargetConversation(target || null);
                   setCurrentTab(tab);
                 }}
               />
             )}
-            {currentTab === 'contacts' && (
-              <Contacts
-                currentUser={authStatus?.user}
-                onStartBroadcastWithContacts={handleStartBroadcastWithContacts}
-                licenseInfo={licenseInfo}
-                targetContact={targetContact}
-                onTargetContactHandled={() => setTargetContact(null)}
-              />
-            )}
-            {currentTab === 'broadcasts' && (
-              <Broadcasts
-                currentUser={authStatus?.user}
-                initialContactIds={preselectedContactIds}
-                licenseInfo={licenseInfo}
-              />
-            )}
-            {currentTab === 'posts' && (
-              <ScheduledPosts
-                currentUser={authStatus?.user}
-                prefill={prefillPost}
-                onClearPrefill={() => setPrefillPost(null)}
-              />
-            )}
-            {currentTab === 'ideas' && (
-              <ContentIdeas
-                currentUser={authStatus?.user}
-                onConvertToPost={(p) => {
-                  setPrefillPost(p);
-                  setCurrentTab('posts');
-                }}
-              />
-            )}
-            {currentTab === 'media' && (
-              <MediaLibrary
-                currentUser={authStatus?.user}
-                onUseInPost={(url) => {
-                  setPrefillPost({ mediaUrl: url });
-                  setCurrentTab('posts');
-                }}
-              />
-            )}
-            {currentTab === 'comments' && <Comments />}
-            {currentTab === 'feed' && <SocialFeed />}
-            {currentTab === 'automations' && <Automations currentUser={authStatus?.user} />}
-            {currentTab === 'ai-agent' && <AiAgent currentUser={authStatus?.user} />}
-            {currentTab === 'birthday' && <BirthdayAutomation />}
-            {currentTab === 'tracking' && <Tracking />}
-            {currentTab === 'conversations' && (
-              <Conversations
-                licenseInfo={licenseInfo}
-                currentUser={authStatus?.user}
-                targetConversation={targetConversation}
-                onTargetHandled={() => setTargetConversation(null)}
-                onOpenContact={(target) => {
-                  setTargetContact(target);
-                  setCurrentTab('contacts');
-                }}
+            {!isMenuUnlockedByLicense(currentTab, licenseInfo) && currentTab !== 'dashboard' ? (
+              <LockedFeatureCard
+                {...getMenuLockReason(currentTab, licenseInfo?.plan)}
                 onOpenPlans={() => openPlansModal('plans')}
-                onOpenSettings={(sec) => {
-                  setSettingsSection(sec);
-                  setCurrentTab('settings', sec);
-                }}
               />
-            )}
-            {currentTab === 'settings' && (
-              <Settings
-                wahaStatus={wahaStatus}
-                licenseInfo={licenseInfo}
-                currentUser={authStatus?.user}
-                activeSection={settingsSection}
-                onSectionChange={setSettingsSection}
-                onOpenPlans={() => openPlansModal('plans')}
-                onRefreshStatus={fetchWahaStatus}
-                onOpenQr={(sessionName?: string) => {
-                  setQrSessionName(sessionName);
-                  setIsQrModalOpen(true);
-                }}
-              />
+            ) : (
+              <>
+                {currentTab === 'contacts' && (
+                  <Contacts
+                    currentUser={authStatus?.user}
+                    onStartBroadcastWithContacts={handleStartBroadcastWithContacts}
+                    licenseInfo={licenseInfo}
+                    targetContact={targetContact}
+                    onTargetContactHandled={() => setTargetContact(null)}
+                  />
+                )}
+                {currentTab === 'broadcasts' && (
+                  <Broadcasts
+                    currentUser={authStatus?.user}
+                    initialContactIds={preselectedContactIds}
+                    licenseInfo={licenseInfo}
+                  />
+                )}
+                {currentTab === 'posts' && (
+                  <ScheduledPosts
+                    currentUser={authStatus?.user}
+                    prefill={prefillPost}
+                    onClearPrefill={() => setPrefillPost(null)}
+                  />
+                )}
+                {currentTab === 'ideas' && (
+                  <ContentIdeas
+                    currentUser={authStatus?.user}
+                    onConvertToPost={(p) => {
+                      setPrefillPost(p);
+                      setCurrentTab('posts');
+                    }}
+                  />
+                )}
+                {currentTab === 'media' && (
+                  <MediaLibrary
+                    currentUser={authStatus?.user}
+                    onUseInPost={(url) => {
+                      setPrefillPost({ mediaUrl: url });
+                      setCurrentTab('posts');
+                    }}
+                  />
+                )}
+                {currentTab === 'comments' && <Comments />}
+                {currentTab === 'feed' && <SocialFeed />}
+                {currentTab === 'automations' && <Automations currentUser={authStatus?.user} />}
+                {currentTab === 'ai-agent' && <AiAgent currentUser={authStatus?.user} />}
+                {currentTab === 'birthday' && <BirthdayAutomation />}
+                {currentTab === 'tracking' && (
+                  <Tracking
+                    licenseInfo={licenseInfo}
+                    onOpenPlans={() => openPlansModal('plans')}
+                  />
+                )}
+                {currentTab === 'conversations' && (
+                  <Conversations
+                    licenseInfo={licenseInfo}
+                    currentUser={authStatus?.user}
+                    targetConversation={targetConversation}
+                    onTargetHandled={() => setTargetConversation(null)}
+                    onOpenContact={(target) => {
+                      setTargetContact(target);
+                      setCurrentTab('contacts');
+                    }}
+                    onOpenPlans={() => openPlansModal('plans')}
+                    onOpenSettings={(sec) => {
+                      setSettingsSection(sec);
+                      setCurrentTab('settings', sec);
+                    }}
+                  />
+                )}
+                {currentTab === 'settings' && (
+                  <Settings
+                    wahaStatus={wahaStatus}
+                    licenseInfo={licenseInfo}
+                    currentUser={authStatus?.user}
+                    activeSection={settingsSection}
+                    onSectionChange={setSettingsSection}
+                    onOpenPlans={() => openPlansModal('plans')}
+                    onRefreshStatus={fetchWahaStatus}
+                    onOpenQr={(sessionName?: string) => {
+                      setQrSessionName(sessionName);
+                      setIsQrModalOpen(true);
+                    }}
+                  />
+                )}
+              </>
             )}
           </div>
         </main>

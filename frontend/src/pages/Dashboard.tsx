@@ -25,6 +25,7 @@ import {
   ArrowUpDown,
   Filter,
   SlidersHorizontal,
+  Lock,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { Button } from '../components/ui/Button';
@@ -32,12 +33,13 @@ import { useToast } from '../components/ui/ToastProvider';
 import { LoadingState, ErrorState, EmptyState } from '../components/ui/StateBlocks';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
-import { hasPerm } from '../lib/permissions';
+import { hasPerm, isMenuUnlockedByLicense, getMenuLockReason } from '../lib/permissions';
 import {
   AuthStatus,
   ConversationNavigationTarget,
   DashboardDrilldownKind,
   DashboardStats,
+  LicenseInfo,
 } from '../types';
 
 interface DrilldownModalState {
@@ -57,6 +59,8 @@ interface DrilldownModalState {
 
 interface DashboardProps {
   currentUser?: AuthStatus['user'] | null;
+  licenseInfo?: LicenseInfo | null;
+  onOpenPlans?: () => void;
   onNavigate: (tab: string, target?: ConversationNavigationTarget) => void;
 }
 
@@ -71,7 +75,12 @@ function formatDurationShort(seconds: number | null | undefined): string {
   return remMin > 0 ? `${hours}j ${remMin}m` : `${hours} jam`;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate }) => {
+export const Dashboard: React.FC<DashboardProps> = ({
+  currentUser,
+  licenseInfo,
+  onOpenPlans,
+  onNavigate,
+}) => {
   const canExportCsv = hasPerm(currentUser, 'dashboard.export');
   const canAccessContacts = hasPerm(currentUser, 'contacts');
   const canSendBroadcast = hasPerm(currentUser, 'broadcasts') && hasPerm(currentUser, 'broadcasts.send');
@@ -2040,10 +2049,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
             </button>
             <button
               type="button"
-              onClick={() => onNavigate('tracking')}
-              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium shrink-0"
+              onClick={() => {
+                if (!isMenuUnlockedByLicense('tracking', licenseInfo)) {
+                  toast.info(getMenuLockReason('tracking', licenseInfo?.plan).description);
+                  onOpenPlans?.();
+                  return;
+                }
+                onNavigate('tracking');
+              }}
+              className="text-xs text-indigo-600 hover:text-indigo-700 font-medium shrink-0 inline-flex items-center gap-1"
             >
-              Lihat Detail
+              {!isMenuUnlockedByLicense('tracking', licenseInfo) && (
+                <Lock className="w-3 h-3 text-amber-500 shrink-0" />
+              )}
+              <span>Lihat Detail</span>
             </button>
           </div>
 
@@ -2161,11 +2180,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentUser, onNavigate })
                     type="button"
                     onClick={() => {
                       const tab = drilldown.shortcutTab!;
+                      if (!isMenuUnlockedByLicense(tab, licenseInfo)) {
+                        toast.info(getMenuLockReason(tab, licenseInfo?.plan).description);
+                        onOpenPlans?.();
+                        return;
+                      }
                       setDrilldown(null);
                       onNavigate(tab);
                     }}
                     className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-[11px] sm:text-xs font-medium whitespace-nowrap"
                   >
+                    {!isMenuUnlockedByLicense(drilldown.shortcutTab, licenseInfo) && (
+                      <Lock className="w-3 h-3 text-amber-600 shrink-0" />
+                    )}
                     <span>{drilldown.shortcutLabel || 'Buka Menu'}</span>
                     <ExternalLink className="w-3 h-3 shrink-0" />
                   </button>

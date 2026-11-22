@@ -654,6 +654,24 @@ export const api = {
     const res = await client.post('/waha/session/logout', session ? { session } : undefined);
     return res.data.data;
   },
+  getSessionIdentityInfo: async (session?: string): Promise<any> => {
+    const res = await client.get('/waha/session/identity-info', {
+      params: session ? { session } : undefined,
+    });
+    return res.data.data;
+  },
+  simulateSessionIdentitySwitch: async (session: string, newPhone: string): Promise<any> => {
+    const res = await client.post('/waha/session/simulate-switch', { session, newPhone });
+    return res.data;
+  },
+  simulateSessionIdentityRestore: async (session: string): Promise<any> => {
+    const res = await client.post('/waha/session/simulate-restore', { session });
+    return res.data;
+  },
+  simulateSessionIdentityReset: async (session: string): Promise<any> => {
+    const res = await client.post('/waha/session/simulate-reset', { session });
+    return res.data;
+  },
   updateWahaSettings: async (data: {
     mode?: 'INTERNAL' | 'EXTERNAL';
     baseUrl?: string;

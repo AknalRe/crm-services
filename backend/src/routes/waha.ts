@@ -31,6 +31,7 @@ import { handleInboundAutomation } from '../services/automation.service';
 import { getRequestCompanyId, requirePermission } from './auth';
 import { saveBase64MediaFile, saveMediaBufferFile } from './media';
 import { syncWhatsAppProfile } from '../services/profile.service';
+import { SessionIdentityService } from '../services/sessionIdentity.service';
 import crypto from 'crypto';
 
 const webhookKeyLocks = new Map<string, Promise<void>>();
@@ -1792,8 +1793,26 @@ export default async function wahaRouter(fastify: FastifyInstance) {
   // GET all WAHA sessions
   fastify.get('/sessions', { preHandler: requireWahaRead }, async (req: FastifyRequest, reply: FastifyReply) => {
     try {
+      const companyId = getRequestCompanyId(req);
+      const lic = await licenseService.getLicense(companyId, false);
+      const maxLimit = lic.features.maxSessionIdentitySwitches || 2;
       const data = await wahaService.listSessions(resolveRequestPublicBase(req));
-      return reply.send({ success: true, data });
+      const sessionsWithIdentity = await Promise.all(
+        data.sessions.map(async (s) => {
+          const ident = await SessionIdentityService.getIdentityInfo(companyId, s.name, maxLimit);
+          return {
+            ...s,
+            identityInfo: ident,
+          };
+        })
+      );
+      return reply.send({
+        success: true,
+        data: {
+          ...data,
+          sessions: sessionsWithIdentity,
+        },
+      });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
@@ -1924,9 +1943,90 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     Body: { session?: string } | undefined;
   }>('/session/logout', { preHandler: requireWahaManage }, async (req, reply) => {
     try {
-      const result = await wahaService.logoutSession(req.body?.session);
-      liveEvents.emit('waha:status', { action: 'logout', session: req.body?.session });
+      const companyId = getRequestCompanyId(req);
+      const session = req.body?.session || 'default';
+      const result = await wahaService.logoutSession(session);
+      await SessionIdentityService.recordSessionLogout(companyId, session);
+      liveEvents.emit('waha:status', { action: 'logout', session });
       return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+    }
+  });
+
+  // GET session identity info & quota limit
+  fastify.get<{
+    Querystring: { session?: string };
+  }>('/session/identity-info', { preHandler: requireWahaRead }, async (req, reply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const session = req.query?.session || 'default';
+      const lic = await licenseService.getLicense(companyId, false);
+      const maxLimit = lic.features.maxSessionIdentitySwitches || 2;
+      const data = await SessionIdentityService.getIdentityInfo(companyId, session, maxLimit);
+      return reply.send({ success: true, data });
+    } catch (error: any) {
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST simulate identity switch (logout & login with new phone)
+  fastify.post<{
+    Body: { session?: string; newPhone: string };
+  }>('/session/simulate-switch', { preHandler: requireWahaManage }, async (req, reply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const session = req.body?.session || 'default';
+      const newPhone = (req.body?.newPhone || '').trim();
+      if (!newPhone) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Nomor WhatsApp baru wajib diisi untuk simulasi pergantian identitas sesi',
+        });
+      }
+      const lic = await licenseService.getLicense(companyId, false);
+      const maxLimit = lic.features.maxSessionIdentitySwitches || 2;
+      const result = await SessionIdentityService.simulateSwitchIdentity(
+        companyId,
+        session,
+        newPhone,
+        maxLimit
+      );
+      if (!result.allowed) {
+        return reply.status(403).send({ success: false, error: result.error, data: result });
+      }
+      liveEvents.emit('waha:status', { action: 'identity-switch', session, result }, companyId);
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST simulate restore last allowed identity
+  fastify.post<{
+    Body: { session?: string };
+  }>('/session/simulate-restore', { preHandler: requireWahaManage }, async (req, reply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const session = req.body?.session || 'default';
+      const result = await SessionIdentityService.simulateRestoreLastIdentity(companyId, session);
+      liveEvents.emit('waha:status', { action: 'identity-restore', session, result }, companyId);
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST simulate reset identity history (for testing)
+  fastify.post<{
+    Body: { session?: string };
+  }>('/session/simulate-reset', { preHandler: requireWahaManage }, async (req, reply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const session = req.body?.session || 'default';
+      await SessionIdentityService.resetIdentityHistory(companyId, session);
+      liveEvents.emit('waha:status', { action: 'identity-reset', session }, companyId);
+      return reply.send({ success: true });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
     }
@@ -1990,17 +2090,44 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       }
 
       if (event === 'session.status') {
+        const sessName = webhookSession || payload?.name || 'default';
+        if (payload?.status === 'WORKING' && payload?.me?.id) {
+          try {
+            const lic = await licenseService.getLicense(companyId, false);
+            const maxLimit = lic.features.maxSessionIdentitySwitches || 2;
+            const evalRes = await SessionIdentityService.evaluateSessionIdentity(
+              companyId,
+              sessName,
+              payload.me.id,
+              maxLimit
+            );
+            if (!evalRes.allowed) {
+              console.warn(`[WAHA] Session "${sessName}" melebihi batas pergantian identitas: ${evalRes.error}`);
+              liveEvents.emit('waha:status', {
+                action: 'identity-blocked',
+                session: sessName,
+                error: evalRes.error,
+                lastIdentity: evalRes.lastIdentity,
+              }, companyId);
+            }
+          } catch {
+            // ignore
+          }
+        } else if (payload?.status === 'STOPPED' || payload?.status === 'FAILED') {
+          void SessionIdentityService.recordSessionLogout(companyId, sessName).catch(() => {});
+        }
+
         wahaService.recordWebhookEvent({
           receivedAt: new Date().toISOString(),
           event,
-          session: webhookSession || payload?.name || null,
+          session: sessName,
           from: null,
           outcome: 'PROCESSED',
           note: `Status sesi: ${payload?.status || '-'}`,
         }, companyId);
         liveEvents.emit('waha:status', {
           action: 'webhook',
-          session: webhookSession || payload?.name,
+          session: sessName,
           status: payload?.status,
         }, companyId);
       }

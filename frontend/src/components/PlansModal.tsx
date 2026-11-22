@@ -966,6 +966,11 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                       unlocked: Boolean(currentLicense.features?.multiSession),
                     },
                     {
+                      label: 'Batas Ganti Nomor / Identitas',
+                      value: `Maks ${currentLicense.features?.maxSessionIdentitySwitches ?? 2}x per Sesi`,
+                      unlocked: true,
+                    },
+                    {
                       label: 'Komentar, Feed & Omnichannel',
                       value: currentLicense.features?.omnichannel
                         ? currentLicense.features?.maxChannels === 0
@@ -1258,6 +1263,18 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                   <span>
                                     {hasMultiSess ? `${maxSess} Sesi WA` : '1 Sesi WA'} &middot;{' '}
                                     {hasMultiAg ? `${maxAg} Akun CS` : '1 Akun Admin'}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>
+                                    Batas Ganti Nomor:{' '}
+                                    <strong>
+                                      {Number(p.features?.maxSessionIdentitySwitches) ||
+                                        (isEntPlan ? 25 : isBusinessPlan ? 10 : isStarterPlan ? 2 : 5)}
+                                      x
+                                    </strong>{' '}
+                                    per sesi
                                   </span>
                                 </div>
 

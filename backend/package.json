@@ -1,14 +1,14 @@
 {
   "name": "crm-backend",
   "private": true,
-  "version": "1.6.111",
+  "version": "1.6.112",
   "description": "Reneo CRM Omnichannel Backend API (Fastify & Drizzle ORM)",
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --watch src --exec ts-node src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "node -r ts-node/register --test src/db/index.test.ts src/services/ai.service.test.ts src/services/chatSync.service.test.ts src/services/csat.service.test.ts src/services/domainGuard.test.ts src/services/mcpClient.service.test.ts src/services/waha.service.test.ts src/routes/auth.test.ts src/routes/conversations.test.ts src/routes/media.test.ts src/routes/publicSeo.test.ts",
+    "test": "node -r ts-node/register --test src/db/index.test.ts src/services/ai.service.test.ts src/services/chatSync.service.test.ts src/services/csat.service.test.ts src/services/domainGuard.test.ts src/services/mcpClient.service.test.ts src/services/sessionIdentity.service.test.ts src/services/waha.service.test.ts src/routes/auth.test.ts src/routes/conversations.test.ts src/routes/media.test.ts src/routes/publicSeo.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

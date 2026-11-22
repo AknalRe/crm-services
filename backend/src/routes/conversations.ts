@@ -50,6 +50,7 @@ import { extractInboundWahaMediaMeta, pickBestContactDisplayName, isGenericDispl
 import { syncWhatsAppProfile } from '../services/profile.service';
 import { syncRecentWhatsAppChatMessages } from '../services/chatSync.service';
 import { getEscalationQueue } from '../services/mcpClient.service';
+import { BroadcastService } from '../services/broadcast.service';
 import crypto from 'crypto';
 
 const VALID_STATUSES = new Set(['OPEN', 'PENDING', 'RESOLVED']);
@@ -3354,6 +3355,36 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
               ) || 'Pelanggan';
           }
           quotedWahaId = quotedRows[0].wahaMessageId || undefined;
+        }
+      }
+
+      const isGroupConversation = Boolean(
+        conversation.conv.isGroup ||
+        conversation.conv.externalThreadId?.toLowerCase().endsWith('@g.us')
+      );
+
+      // Interpolate contact variables ({nama_panggilan}, {nama_lengkap}, {nomor_whatsapp}, {alamat}) for 1-on-1 chats
+      if (!isGroupConversation && conversation.contact) {
+        const contactObj = {
+          namaLengkap: conversation.contact.namaLengkap || conversation.conv.pushName || '',
+          namaPanggilan: conversation.contact.namaPanggilan || undefined,
+          alamat: conversation.contact.alamat || undefined,
+          nomorWhatsapp: conversation.contact.nomorWhatsapp || conversation.conv.externalThreadId?.replace(/@.*$/, '') || '',
+        };
+        if (bodyText) {
+          bodyText = BroadcastService.personalizeMessage(bodyText, contactObj);
+        }
+        if (linkPreview?.title) {
+          linkPreview.title = BroadcastService.personalizeMessage(linkPreview.title, contactObj);
+        }
+        if (linkPreview?.description) {
+          linkPreview.description = BroadcastService.personalizeMessage(linkPreview.description, contactObj);
+        }
+        if (linkPreview?.caption) {
+          linkPreview.caption = BroadcastService.personalizeMessage(linkPreview.caption, contactObj);
+        }
+        if (interactiveButtons?.body) {
+          interactiveButtons.body = BroadcastService.personalizeMessage(interactiveButtons.body, contactObj);
         }
       }
 

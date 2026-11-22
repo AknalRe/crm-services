@@ -804,6 +804,7 @@ export interface LicenseInfo {
     liveChatCrm: boolean;
     multiSession: boolean;
     maxSessions: number;
+    maxSessionIdentitySwitches?: number;
     maxContacts: number;
     maxTemplates?: number;
     maxUsers?: number;
@@ -843,6 +844,7 @@ export interface LicensePlan {
     liveChat?: boolean;
     multiSession?: boolean;
     maxSessions?: number;
+    maxSessionIdentitySwitches?: number;
     wahaSync?: boolean;
     [key: string]: any;
   };
