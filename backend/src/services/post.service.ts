@@ -395,34 +395,81 @@ export class PostService {
           partialWarning = `${sentIds.length}/${targets.length} terkirim. Gagal: ${failedTargets.slice(0, 2).join('; ')}`;
         }
       } else if (ch === 'INSTAGRAM' && account) {
+        const isStory = (post.postType || '').toUpperCase() === 'STORY';
         if (!post.mediaUrl) {
-          throw new Error('Postingan Instagram Feed memerlukan URL gambar/media publik.');
+          throw new Error(
+            isStory
+              ? 'Instagram Story memerlukan gambar atau video.'
+              : 'Postingan Instagram Feed memerlukan URL gambar/media publik.'
+          );
         }
         const fetchableMediaUrl = await createSignedMediaFetchUrl(post.mediaUrl, 900);
+        const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(post.mediaUrl);
+        const token = String(account.accessToken || '').trim();
+        const isDirectIgToken = /^(IGAA|IGQV|IGQ)/i.test(token);
+        const graphBase = isDirectIgToken
+          ? 'https://graph.instagram.com/v21.0'
+          : 'https://graph.facebook.com/v21.0';
+        const containerParams: Record<string, string> = {
+          access_token: token,
+        };
+        if (isStory) {
+          containerParams.media_type = 'STORIES';
+          if (isVideo) {
+            containerParams.video_url = fetchableMediaUrl;
+          } else {
+            containerParams.image_url = fetchableMediaUrl;
+          }
+        } else if (isVideo) {
+          containerParams.media_type = 'REELS';
+          containerParams.video_url = fetchableMediaUrl;
+          if (post.caption) containerParams.caption = post.caption;
+        } else {
+          containerParams.image_url = fetchableMediaUrl;
+          if (post.caption) containerParams.caption = post.caption;
+        }
+
         const containerRes = await axios.post(
-          `https://graph.instagram.com/v21.0/${account.accountId}/media`,
+          `${graphBase}/${account.accountId}/media`,
           null,
           {
-            params: {
-              image_url: fetchableMediaUrl,
-              caption: post.caption,
-              access_token: account.accessToken,
-            },
-            timeout: 15_000,
+            params: containerParams,
+            timeout: 20_000,
           }
         );
         const creationId = containerRes.data?.id;
         if (!creationId) throw new Error('Instagram Graph API tidak mengembalikan creation_id');
 
+        // For video / story containers, wait briefly until Meta finishes processing media
+        if (isVideo || isStory) {
+          for (let attempt = 0; attempt < 6; attempt += 1) {
+            await new Promise((r) => setTimeout(r, isVideo ? 2500 : 1200));
+            try {
+              const statusRes = await axios.get(`${graphBase}/${creationId}`, {
+                params: { fields: 'status_code', access_token: token },
+                timeout: 8000,
+              });
+              const code = String(statusRes.data?.status_code || '').toUpperCase();
+              if (code === 'FINISHED' || code === 'PUBLISHED') break;
+              if (code === 'ERROR' || code === 'EXPIRED') {
+                throw new Error(`Instagram gagal memproses media (${code}). Pastikan rasio dan format file valid.`);
+              }
+            } catch (statusErr: any) {
+              if (statusErr?.message?.includes('Instagram gagal memproses')) throw statusErr;
+              break;
+            }
+          }
+        }
+
         const publishRes = await axios.post(
-          `https://graph.instagram.com/v21.0/${account.accountId}/media_publish`,
+          `${graphBase}/${account.accountId}/media_publish`,
           null,
           {
             params: {
               creation_id: creationId,
-              access_token: account.accessToken,
+              access_token: token,
             },
-            timeout: 15_000,
+            timeout: 20_000,
           }
         );
         externalPostId = publishRes.data?.id ? String(publishRes.data.id) : String(creationId);

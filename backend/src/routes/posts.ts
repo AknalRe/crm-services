@@ -75,9 +75,13 @@ function resolveScheduledPostType(
   requestedPostType?: string | null,
   mediaUrl?: string | null
 ): string {
-  if (channel === 'WHATSAPP') return 'WA_POST';
-  if (channel !== 'WHATSAPP_STATUS') return 'FEED';
   const reqType = String(requestedPostType || '').toUpperCase().trim();
+  if (channel === 'WHATSAPP') return 'WA_POST';
+  if (channel === 'INSTAGRAM') {
+    if (reqType === 'STORY' || reqType === 'IG_STORY') return 'STORY';
+    return 'FEED';
+  }
+  if (channel !== 'WHATSAPP_STATUS') return 'FEED';
   if (['STATUS_TEXT', 'STATUS_IMAGE', 'STATUS_VIDEO', 'STATUS_VOICE'].includes(reqType)) {
     return reqType;
   }
@@ -195,18 +199,25 @@ export default async function postsRouter(fastify: FastifyInstance) {
         return reply.status(400).send({ success: false, error: 'Channel wajib dipilih.' });
       }
 
+      const resolvedPostType = resolveScheduledPostType(channel, req.body?.postType, mediaUrl);
+
       if (!isWaChannel) {
         await licenseService.assertFeature('omnichannel', undefined, companyId);
-        if (!channelAccountId || !caption) {
+        const isIgStory = channel === 'INSTAGRAM' && resolvedPostType === 'STORY';
+        if (!channelAccountId || (!caption && !isIgStory)) {
           return reply.status(400).send({
             success: false,
-            error: 'Channel, akun kanal, dan caption wajib diisi.',
+            error: isIgStory
+              ? 'Akun Instagram wajib dipilih untuk Instagram Story.'
+              : 'Channel, akun kanal, dan caption wajib diisi.',
           });
         }
         if (channel === 'INSTAGRAM' && !mediaUrl) {
           return reply.status(400).send({
             success: false,
-            error: 'Postingan Instagram memerlukan URL gambar/media publik.',
+            error: isIgStory
+              ? 'Instagram Story memerlukan gambar atau video (rasio 9:16).'
+              : 'Postingan Instagram Feed memerlukan URL gambar/media publik.',
           });
         }
         if (channel === 'TELEGRAM' && !targetChatId) {
@@ -246,7 +257,6 @@ export default async function postsRouter(fastify: FastifyInstance) {
         });
       }
 
-      const resolvedPostType = resolveScheduledPostType(channel, req.body?.postType, mediaUrl);
       if (channel === 'WHATSAPP_STATUS') {
         if (resolvedPostType !== 'STATUS_TEXT' && !mediaUrl) {
           return reply.status(400).send({

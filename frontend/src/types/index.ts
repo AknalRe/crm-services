@@ -1009,6 +1009,7 @@ export type ScheduledPostChannel =
 
 export type ScheduledPostType =
   | 'FEED'
+  | 'STORY'
   | 'WA_POST'
   | 'STATUS_TEXT'
   | 'STATUS_IMAGE'

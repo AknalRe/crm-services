@@ -21,6 +21,7 @@ import {
   Type as TypeIcon,
   Plus,
   FolderOpen,
+  Paintbrush,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -29,6 +30,10 @@ import {
   MediaLibraryPickerModal,
   resolveCrmMediaUrl,
 } from '../components/ui/MediaLibraryPickerModal';
+import {
+  PostMediaEditorModal,
+  CanvasAspectPreset,
+} from '../components/ui/PostMediaEditorModal';
 import {
   AuthStatus,
   ChannelAccount,
@@ -57,7 +62,7 @@ interface ScheduledPostsProps {
 }
 
 const POST_CHANNEL_META: Record<PostChannel, { label: string; badgeCls: string }> = {
-  INSTAGRAM: { label: 'Instagram Feed', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
+  INSTAGRAM: { label: 'Instagram', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
   FACEBOOK: { label: 'Facebook Page', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
   THREADS: { label: 'Threads', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
   TELEGRAM: { label: 'Telegram Channel', badgeCls: 'bg-slate-50 text-slate-700 border-slate-200' },
@@ -77,6 +82,7 @@ const STORY_BG_COLORS = [
 
 const STORY_TYPE_LABELS: Record<ScheduledPostType, string> = {
   FEED: 'Feed',
+  STORY: 'Instagram Story',
   WA_POST: 'Post WA',
   STATUS_TEXT: 'Story Teks',
   STATUS_IMAGE: 'Story Gambar',
@@ -108,6 +114,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const [channel, setChannel] = useState<PostChannel>('INSTAGRAM');
+  const [instagramPostType, setInstagramPostType] = useState<'FEED' | 'STORY'>('FEED');
   const [channelAccountId, setChannelAccountId] = useState('');
   const [wahaSession, setWahaSession] = useState('');
   const [statusPostType, setStatusPostType] = useState<'STATUS_TEXT' | 'STATUS_IMAGE' | 'STATUS_VIDEO' | 'STATUS_VOICE'>('STATUS_TEXT');
@@ -118,6 +125,8 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
   const [contactSearch, setContactSearch] = useState('');
   const [caption, setCaption] = useState('');
   const [mediaUrl, setMediaUrl] = useState('');
+  const [mediaDims, setMediaDims] = useState<{ width: number; height: number } | null>(null);
+  const [showMediaEditor, setShowMediaEditor] = useState(false);
   const [targetChatId, setTargetChatId] = useState('');
   const [publishMode, setPublishMode] = useState<'SCHEDULED' | 'NOW'>('SCHEDULED');
   const [scheduledAt, setScheduledAt] = useState('');
@@ -320,16 +329,21 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
         }
       }
     } else {
+      const isIgStory = channel === 'INSTAGRAM' && instagramPostType === 'STORY';
       if (!channelAccountId) {
         toast.error(`Pilih akun ${POST_CHANNEL_META[channel].label} terlebih dahulu`);
         return;
       }
-      if (!caption.trim()) {
+      if (!caption.trim() && !isIgStory) {
         toast.error('Caption / teks postingan wajib diisi');
         return;
       }
       if (channel === 'INSTAGRAM' && !mediaUrl.trim()) {
-        toast.error('Postingan Instagram Feed memerlukan URL gambar publik');
+        toast.error(
+          isIgStory
+            ? 'Instagram Story memerlukan gambar atau video (rasio 9:16)'
+            : 'Postingan Instagram Feed memerlukan URL gambar publik'
+        );
         return;
       }
       if (channel === 'TELEGRAM' && !targetChatId.trim()) {
@@ -353,7 +367,9 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
         channelAccountId: isWaChannel ? null : channelAccountId,
         wahaSession: isWaChannel ? wahaSession : null,
         postType:
-          channel === 'WHATSAPP_STATUS'
+          channel === 'INSTAGRAM'
+            ? instagramPostType
+            : channel === 'WHATSAPP_STATUS'
             ? statusPostType
             : channel === 'WHATSAPP'
             ? 'WA_POST'
@@ -571,6 +587,43 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                   ))}
                 </select>
               )}
+            </div>
+          )}
+
+          {channel === 'INSTAGRAM' && (
+            <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-slate-700">Format Postingan Instagram</span>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {instagramPostType === 'STORY' ? 'Rasio 9:16 (1080×1920)' : 'Rasio 4:5 · 1:1 · 1.91:1'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setInstagramPostType('FEED')}
+                  className={`px-2.5 py-2 rounded-md border text-xs font-medium transition-colors text-left ${
+                    instagramPostType === 'FEED'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-900'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <div>Instagram Feed</div>
+                  <div className="text-[10px] font-normal text-slate-500">Foto / Reels dengan caption</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInstagramPostType('STORY')}
+                  className={`px-2.5 py-2 rounded-md border text-xs font-medium transition-colors text-left ${
+                    instagramPostType === 'STORY'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-900'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <div>Instagram Story</div>
+                  <div className="text-[10px] font-normal text-slate-500">Vertikal 9:16 · tayang 24 jam</div>
+                </button>
+              </div>
             </div>
           )}
 
@@ -824,14 +877,22 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                   onChange={handleUploadImage}
                   className="hidden"
                 />
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setShowMediaEditor(true)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 cursor-pointer"
+                  >
+                    <Paintbrush className="w-3 h-3" />
+                    <span>Desain / Edit Visual</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setShowMediaPickerModal(true)}
                     className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer"
                   >
                     <FolderOpen className="w-3 h-3" />
-                    <span>Pilih dari Galeri</span>
+                    <span>Galeri</span>
                   </button>
                   <button
                     type="button"
@@ -840,7 +901,7 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                     className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-700 cursor-pointer"
                   >
                     <Upload className="w-3 h-3" />
-                    <span>{uploadingMedia ? 'Mengunggah...' : 'Upload Media'}</span>
+                    <span>{uploadingMedia ? 'Mengunggah...' : 'Upload'}</span>
                   </button>
                 </div>
               </div>
@@ -848,33 +909,165 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                 <ImageIcon className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
                 <input
                   type="url"
-                  placeholder="https://domain.com/media.jpg, Upload Media, atau Pilih dari Galeri"
+                  placeholder="https://domain.com/media.jpg, Upload, Galeri, atau Desain Visual"
                   value={mediaUrl}
-                  onChange={(e) => setMediaUrl(e.target.value)}
+                  onChange={(e) => {
+                    setMediaUrl(e.target.value);
+                    setMediaDims(null);
+                  }}
                   className="w-full h-9 pl-8 pr-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
                 />
               </div>
-              {mediaUrl.trim() && isVideoMediaUrl(mediaUrl.trim()) ? (
-                <video
-                  src={resolveCrmMediaUrl(mediaUrl.trim())}
-                  controls
-                  className="mt-2 w-full max-h-44 rounded-md border border-gray-200 bg-black"
-                />
-              ) : mediaUrl.trim() && isAudioMediaUrl(mediaUrl.trim()) ? (
-                <audio src={resolveCrmMediaUrl(mediaUrl.trim())} controls className="mt-2 w-full" />
-              ) : (
-                mediaUrl.trim() &&
-                (/^https?:\/\//i.test(mediaUrl.trim()) || mediaUrl.trim().startsWith('/')) && (
-                  <img
-                    src={resolveCrmMediaUrl(mediaUrl.trim())}
-                    alt="Pratinjau media"
-                    className="mt-2 w-full max-h-40 object-cover rounded-md border border-gray-200"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                )
-              )}
+
+              {/* Aspect ratio validation & realistic live preview */}
+              {(() => {
+                const trimmed = mediaUrl.trim();
+                const isVid = Boolean(trimmed) && isVideoMediaUrl(trimmed);
+                const isAud = Boolean(trimmed) && isAudioMediaUrl(trimmed);
+                const isImg =
+                  Boolean(trimmed) &&
+                  !isVid &&
+                  !isAud &&
+                  (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('/'));
+                const isStoryFrame =
+                  (channel === 'INSTAGRAM' && instagramPostType === 'STORY') ||
+                  channel === 'WHATSAPP_STATUS';
+                const ratio = mediaDims && mediaDims.height > 0 ? mediaDims.width / mediaDims.height : null;
+                const igFeedInvalid =
+                  channel === 'INSTAGRAM' &&
+                  instagramPostType === 'FEED' &&
+                  ratio !== null &&
+                  (ratio < 0.79 || ratio > 1.92);
+                const igStoryNonVertical =
+                  channel === 'INSTAGRAM' &&
+                  instagramPostType === 'STORY' &&
+                  ratio !== null &&
+                  ratio > 0.72;
+                const selectedAcc = matchingAccounts.find((a) => a.id === channelAccountId);
+
+                if (isVid) {
+                  return (
+                    <video
+                      src={resolveCrmMediaUrl(trimmed)}
+                      controls
+                      className="mt-2.5 w-full max-h-56 rounded-lg border border-slate-200 bg-black"
+                    />
+                  );
+                }
+                if (isAud) {
+                  return <audio src={resolveCrmMediaUrl(trimmed)} controls className="mt-2.5 w-full" />;
+                }
+
+                return (
+                  <div className="mt-2.5 space-y-2">
+                    {(igFeedInvalid || igStoryNonVertical) && mediaDims && ratio !== null && (
+                      <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 flex items-start justify-between gap-2">
+                        <div className="text-[11px] text-amber-900 leading-relaxed">
+                          <div className="font-semibold flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>
+                              {igFeedInvalid
+                                ? 'Rasio gambar di luar batas Instagram Feed (4:5 s/d 1.91:1)'
+                                : 'Rasio gambar belum vertikal (disarankan 9:16 untuk Story)'}
+                            </span>
+                          </div>
+                          <div className="font-mono text-[10px] text-amber-800 mt-0.5">
+                            Ukuran saat ini: {mediaDims.width}×{mediaDims.height} px (rasio {ratio.toFixed(2)})
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowMediaEditor(true)}
+                          className="shrink-0 px-2.5 py-1.5 rounded-md bg-amber-600 text-white text-[11px] font-semibold hover:bg-amber-700"
+                        >
+                          Sesuaikan Rasio
+                        </button>
+                      </div>
+                    )}
+
+                    {isImg ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
+                        <div className="px-3 py-2 bg-white border-b border-slate-100 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                              {(selectedAcc?.name || POST_CHANNEL_META[channel].label).slice(0, 2).toUpperCase()}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-900 truncate">
+                                {selectedAcc?.name || POST_CHANNEL_META[channel].label}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                Pratinjau {channel === 'INSTAGRAM' && instagramPostType === 'STORY' ? 'Instagram Story (9:16)' : POST_CHANNEL_META[channel].label}
+                                {mediaDims ? ` · ${mediaDims.width}×${mediaDims.height} px` : ''}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowMediaEditor(true)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white text-[11px] font-medium text-slate-700 hover:bg-slate-50 shrink-0"
+                          >
+                            <Paintbrush className="w-3 h-3 text-indigo-600" />
+                            Edit / Teks / Kuas
+                          </button>
+                        </div>
+
+                        <div className="p-3 flex items-center justify-center bg-slate-900/5">
+                          <div
+                            className={`relative overflow-hidden rounded-md border border-slate-200 bg-slate-950 flex items-center justify-center ${
+                              isStoryFrame ? 'w-44 aspect-[9/16]' : 'w-full max-w-[320px] max-h-72'
+                            }`}
+                          >
+                            <img
+                              src={resolveCrmMediaUrl(trimmed)}
+                              alt="Pratinjau media"
+                              onLoad={(e) => {
+                                const el = e.currentTarget;
+                                if (el.naturalWidth && el.naturalHeight) {
+                                  setMediaDims({ width: el.naturalWidth, height: el.naturalHeight });
+                                }
+                              }}
+                              className={
+                                isStoryFrame
+                                  ? 'w-full h-full object-contain'
+                                  : 'w-full max-h-72 object-contain'
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        {caption.trim() && !isStoryFrame && (
+                          <div className="px-3 py-2 bg-white border-t border-slate-100 text-xs text-slate-700 whitespace-pre-wrap line-clamp-3">
+                            <span className="font-semibold text-slate-900 mr-1.5">
+                              {selectedAcc?.name || 'Akun'}
+                            </span>
+                            {caption.trim()}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-3 flex items-center justify-between gap-3">
+                        <div className="text-[11px] text-slate-600">
+                          <div className="font-medium text-slate-800">
+                            Belum ada gambar — buat langsung atau pilih dari galeri
+                          </div>
+                          <div>
+                            Bisa gambar bebas, tambah &amp; geser posisi teks seperti IG/WA Story.
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowMediaEditor(true)}
+                          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white border border-slate-300 text-xs font-medium text-slate-800 hover:bg-slate-100"
+                        >
+                          <Paintbrush className="w-3.5 h-3.5 text-indigo-600" />
+                          Buka Studio Desain
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -884,10 +1077,13 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
                 ? 'Teks WhatsApp Story'
                 : channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_VOICE'
                 ? 'Label / Catatan Internal Story (opsional)'
+                : channel === 'INSTAGRAM' && instagramPostType === 'STORY'
+                ? 'Catatan Internal Story (opsional)'
                 : 'Caption / Isi Postingan'}{' '}
-              {!(isWaChannel && (mediaUrl.trim() || statusPostType === 'STATUS_VOICE')) && (
-                <span className="text-red-500">*</span>
-              )}
+              {!(
+                (isWaChannel && (mediaUrl.trim() || statusPostType === 'STATUS_VOICE')) ||
+                (channel === 'INSTAGRAM' && instagramPostType === 'STORY')
+              ) && <span className="text-red-500">*</span>}
             </label>
             <textarea
               rows={4}
@@ -1718,6 +1914,29 @@ export const ScheduledPosts: React.FC<ScheduledPostsProps> = ({
         onConfirm={(picked) => {
           if (picked[0]) {
             setMediaUrl(picked[0].url || picked[0].relativeUrl);
+            setMediaDims(null);
+          }
+        }}
+      />
+
+      <PostMediaEditorModal
+        open={showMediaEditor}
+        initialImageUrl={
+          mediaUrl.trim() && !isVideoMediaUrl(mediaUrl.trim()) && !isAudioMediaUrl(mediaUrl.trim())
+            ? mediaUrl.trim()
+            : undefined
+        }
+        defaultPreset={
+          (channel === 'INSTAGRAM' && instagramPostType === 'STORY') || channel === 'WHATSAPP_STATUS'
+            ? '9:16'
+            : ('4:5' as CanvasAspectPreset)
+        }
+        onClose={() => setShowMediaEditor(false)}
+        onApply={(uploadedUrl) => {
+          setMediaUrl(uploadedUrl);
+          setMediaDims(null);
+          if (channel === 'WHATSAPP_STATUS' && statusPostType === 'STATUS_TEXT') {
+            setStatusPostType('STATUS_IMAGE');
           }
         }}
       />
