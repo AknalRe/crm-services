@@ -947,10 +947,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   const maxSessions = Number(f.maxSessions || 1);
                   const hasMultiAgents = Boolean(f.multiAgent);
                   const maxAgents = Number(f.maxAgents || f.maxUsers || 1);
-                  const maxStorageMb = Number(f.maxStorageMb || 500);
+                  const maxStorageMb = Number(f.maxStorageMb || 250);
                   const maxBroadcast = Number(f.maxBroadcastPerMonth || 0);
                   const hasOmnichannel = Boolean(f.omnichannel);
-                  const hasLiveChat = Boolean(f.liveChat ?? f.liveChatCrm ?? true);
+                  const hasLiveChat = Boolean(f.liveChat ?? f.liveChatCrm ?? false);
                   const hasScheduled = Boolean(f.scheduledPosts);
                   const hasAi = Boolean(f.aiAgent);
 

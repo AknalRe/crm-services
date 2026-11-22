@@ -1207,7 +1207,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const promoDate = p.promoValidUntil;
 
                             const maxContacts = Number(f.maxContacts || 0);
-                            const hasLiveChat = Boolean(f.liveChat ?? f.liveChatCrm ?? true);
+                            const hasLiveChat = Boolean(f.liveChat ?? f.liveChatCrm ?? false);
                             const hasMultiSess = Boolean(f.multiSession);
                             const maxSess = Number(f.maxSessions || 1);
                             const hasMultiAg = Boolean(f.multiAgent);
@@ -1218,7 +1218,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const hasAi = Boolean(f.aiAgent);
                             const hasMcp = Boolean(f.mcpTools);
                             const hasExport = Boolean(f.exportReports);
-                            const storageMb = Number(f.maxStorageMb || 500);
+                            const storageMb = Number(f.maxStorageMb || 250);
                             const fileLimitMb = Number(f.maxAttachmentSizeMb || 10);
                             const maxBroadcast = Number(f.maxBroadcastPerMonth || 0);
                             const maxSwitches = Number(f.maxSessionIdentitySwitches || 2);
