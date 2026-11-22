@@ -137,9 +137,9 @@ export function enrichPlanWithDiscount<T extends { priceAmount: number; [key: st
     } else if (plan.slug === 'business-annual') {
       originalPrice = 5988000;
     } else if (plan.slug === 'enterprise-monthly') {
-      originalPrice = 799000;
+      originalPrice = 1299000;
     } else if (plan.slug === 'enterprise-annual') {
-      originalPrice = 9588000;
+      originalPrice = 15588000;
     } else if (plan.period === 'annual') {
       originalPrice = Math.round((plan.priceAmount * 1.35) / 10000) * 10000;
     } else {
@@ -478,26 +478,26 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       id: 6,
       catalogId: 'reneo-crm',
       slug: 'enterprise-monthly',
-      name: 'Enterprise Bulanan',
-      tagline: 'Skala korporasi fleksibel bulanan: 30 Sesi WA, 50 CS, Kontak & Siaran Tanpa Batas, AI Agent, 25 GB dokumen & VIP.',
+      name: 'Enterprise AI Bulanan',
+      tagline: 'Skala korporasi fleksibel bulanan: 20 Sesi WA Dedicated, 30 CS, 100.000 kontak, AI Agent, 20 GB dokumen & VIP.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
-      priceAmount: 499000,
+      priceAmount: 699000,
       highlighted: false,
       features: {
         unlimitedBroadcast: true,
         maxBroadcastPerMonth: 0,
-        unlimitedContacts: true,
-        maxContacts: 0,
+        unlimitedContacts: false,
+        maxContacts: 100000,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
-        maxSessions: 30,
-        maxSessionIdentitySwitches: 50,
+        maxSessions: 20,
+        maxSessionIdentitySwitches: 25,
         multiAgent: true,
-        maxAgents: 50,
-        maxUsers: 50,
+        maxAgents: 30,
+        maxUsers: 30,
         maxTemplates: 0,
         customRoles: true,
         omnichannel: true,
@@ -510,8 +510,8 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'vip',
-        maxStorageMb: 25600,
-        maxAttachmentSizeMb: 50,
+        maxStorageMb: 20480,
+        maxAttachmentSizeMb: 35,
         allowedMenus: [
           'dashboard',
           'conversations',
@@ -534,26 +534,26 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       id: 7,
       catalogId: 'reneo-crm',
       slug: 'enterprise-annual',
-      name: 'Enterprise Tahunan',
-      tagline: 'Paket korporasi hemat 25% (gratis 3 bln): 30 Sesi WA, 50 CS, Kontak Tanpa Batas, AI Agent, 35 GB dokumen & VIP.',
+      name: 'Enterprise AI Tahunan',
+      tagline: 'Paket korporasi hemat 17% (gratis 2 bln): 25 Sesi WA Dedicated, 35 CS, 150.000 kontak, AI Agent, 35 GB dokumen & VIP.',
       period: 'annual',
       months: 12,
       trialDays: 7,
-      priceAmount: 4490000,
+      priceAmount: 6990000,
       highlighted: false,
       features: {
         unlimitedBroadcast: true,
         maxBroadcastPerMonth: 0,
-        unlimitedContacts: true,
-        maxContacts: 0,
+        unlimitedContacts: false,
+        maxContacts: 150000,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
-        maxSessions: 30,
-        maxSessionIdentitySwitches: 50,
+        maxSessions: 25,
+        maxSessionIdentitySwitches: 35,
         multiAgent: true,
-        maxAgents: 50,
-        maxUsers: 50,
+        maxAgents: 35,
+        maxUsers: 35,
         maxTemplates: 0,
         customRoles: true,
         omnichannel: true,
@@ -615,7 +615,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
   const unlimitedContacts =
     src.unlimitedContacts !== undefined
       ? Boolean(src.unlimitedContacts)
-      : isEnterprise && (src.maxContacts === undefined || src.maxContacts === 0);
+      : false;
 
   const maxContacts = unlimitedContacts
     ? 0
@@ -628,7 +628,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     : isBusiness
     ? 50000
     : isEnterprise
-    ? 0
+    ? 150000
     : 10000;
 
   const birthdayAutomation =
@@ -653,7 +653,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       ? src.maxSessions
       : multiSession
       ? isEnterprise
-        ? 30
+        ? 25
         : isBusiness
         ? 10
         : 3
@@ -667,7 +667,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       : isBusiness
       ? 15
       : isEnterprise
-      ? 50
+      ? 35
       : 5;
 
   const multiAgent =
@@ -680,7 +680,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       ? src.maxUsers
       : multiAgent
       ? isEnterprise
-        ? 50
+        ? 35
         : isBusiness
         ? 15
         : 5

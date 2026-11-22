@@ -1235,12 +1235,12 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const hasMultiSess = Boolean(p.features?.multiSession ?? !isStarterPlan);
                             const maxSess =
                               p.features?.maxSessions ||
-                              (isEntPlan ? 30 : isBusinessPlan ? 10 : hasMultiSess ? 3 : 1);
+                              (isEntPlan ? (p.period === 'annual' ? 25 : 20) : isBusinessPlan ? 10 : hasMultiSess ? 3 : 1);
                             const hasMultiAg = Boolean(p.features?.multiAgent ?? !isStarterPlan);
                             const maxAg =
                               p.features?.maxAgents ||
                               p.features?.maxUsers ||
-                              (isEntPlan ? 50 : isBusinessPlan ? 15 : hasMultiAg ? 5 : 1);
+                              (isEntPlan ? (p.period === 'annual' ? 35 : 30) : isBusinessPlan ? 15 : hasMultiAg ? 5 : 1);
                             const hasOmni = Boolean(p.features?.omnichannel ?? !isStarterPlan);
                             const maxChan =
                               p.features?.maxChannels !== undefined
@@ -1290,7 +1290,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                   <span>
                                     {p.features?.maxContacts === 0 || p.features?.unlimitedContacts
                                       ? 'Kontak Tanpa Batas'
-                                      : `Hingga ${(p.features?.maxContacts || 10000).toLocaleString('id-ID')} Kontak`}
+                                      : `Hingga ${(Number(p.features?.maxContacts) || (isEntPlan ? (p.period === 'annual' ? 150000 : 100000) : isBusinessPlan ? 50000 : 10000)).toLocaleString('id-ID')} Kontak`}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1306,7 +1306,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                     Batas Ganti Nomor:{' '}
                                     <strong>
                                       {Number(p.features?.maxSessionIdentitySwitches) ||
-                                        (isEntPlan ? 50 : isBusinessPlan ? 15 : isStarterPlan ? 2 : 5)}
+                                        (isEntPlan ? (p.period === 'annual' ? 35 : 25) : isBusinessPlan ? 15 : isStarterPlan ? 2 : 5)}
                                       x
                                     </strong>{' '}
                                     per sesi
