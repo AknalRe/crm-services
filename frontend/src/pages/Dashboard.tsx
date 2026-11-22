@@ -281,22 +281,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
   }, [loadData]);
 
-  if (loading && !stats) {
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 p-8">
-        <LoadingState message="Memuat ringkasan analitik CRM..." />
-      </div>
-    );
-  }
-
-  if (error && !stats) {
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 p-8">
-        <ErrorState message={error} onRetry={loadData} />
-      </div>
-    );
-  }
-
   const summary = stats?.summary || {
     totalContacts: 0,
     totalCampaigns: 0,
@@ -355,6 +339,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
       shortLabel: getChannelInfo(k).shortLabel,
     }));
   }, [availableChannels, stats?.summary?.connectedChannels]);
+
+  if (loading && !stats) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-8">
+        <LoadingState message="Memuat ringkasan analitik CRM..." />
+      </div>
+    );
+  }
+
+  if (error && !stats) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-8">
+        <ErrorState message={error} onRetry={loadData} />
+      </div>
+    );
+  }
 
   const periodLabelMap: Record<string, string> = {
     all: 'Semua Waktu',
