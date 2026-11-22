@@ -103,7 +103,7 @@ function parseLocationTab(pathname: string, hash: string): { tab: string; settin
     }
     return { tab: parsedPath.tab, settingsSection: savedSub };
   }
-  const rawHash = (hash || '').replace(/^#\/?/, '').trim();
+  const rawHash = (hash || '').replace(/^#\/?/, '').split('?')[0].trim();
   if (rawHash.startsWith('settings/')) {
     return {
       tab: 'settings',

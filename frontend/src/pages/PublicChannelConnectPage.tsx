@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
+import { getApiBaseUrl } from '../services/paths';
 import { ChannelAccount, OmnichannelType } from '../types';
 import { Button } from '../components/ui/Button';
 
@@ -132,10 +133,8 @@ export const PublicChannelConnectPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      const base = window.location.pathname
-                        .replace(/\/connect-channel\/?$/i, '')
-                        .replace(/\/+$/, '');
-                      window.location.href = `${base}/api/channels/oauth/start?channel=${linkMeta.channel}&connectToken=${encodeURIComponent(token)}`;
+                      const apiBase = getApiBaseUrl(window.location.pathname).replace(/\/+$/, '');
+                      window.location.href = `${apiBase}/channels/oauth/start?channel=${linkMeta.channel}&connectToken=${encodeURIComponent(token)}`;
                     }}
                     className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-medium whitespace-nowrap"
                   >

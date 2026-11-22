@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Globe2, Trash2, Copy, Check, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
+import { getApiBaseUrl, getAppRootPath } from '../services/paths';
 import { ChannelAccount, ChannelConnectLink, OmnichannelType } from '../types';
 import { Button } from './ui/Button';
 import { ConfirmModal } from './ui/ConfirmModal';
@@ -88,20 +89,27 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
 
     if (typeof window !== 'undefined') {
       const hashQuery = window.location.hash.split('?')[1] || '';
-      const params = new URLSearchParams(hashQuery || window.location.search);
+      const params = new URLSearchParams(window.location.search || hashQuery);
       const oauthStatus = params.get('oauth');
       if (oauthStatus === 'success') {
         const count = params.get('count');
         toast.success(
           count ? `${count} akun omnichannel berhasil dihubungkan via OAuth.` : 'Akun omnichannel berhasil dihubungkan.'
         );
-        window.history.replaceState(null, '', '#settings/omnichannel');
+        window.history.replaceState(null, '', window.location.pathname);
       } else if (oauthStatus === 'error') {
         toast.error(params.get('msg') || 'Gagal menghubungkan akun melalui OAuth.');
-        window.history.replaceState(null, '', '#settings/omnichannel');
+        window.history.replaceState(null, '', window.location.pathname);
       }
     }
   }, [toast]);
+
+  const appRootOrigin =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${getAppRootPath(window.location.pathname).replace(/\/+$/, '')}`
+      : '';
+  const apiBasePath =
+    typeof window !== 'undefined' ? getApiBaseUrl(window.location.pathname).replace(/\/+$/, '') : '/api';
 
   const handleCreateConnectLink = async () => {
     setCreatingLink(true);
@@ -112,7 +120,7 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
       });
       setConnectLinks((prev) => [created, ...prev]);
       setLinkLabel('');
-      const url = `${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}/connect-channel?token=${created.token}`;
+      const url = `${appRootOrigin}/connect-channel?token=${created.token}`;
       navigator.clipboard?.writeText(url);
       toast.success('Connect Link dibuat & disalin ke clipboard');
     } catch (err: any) {
@@ -124,7 +132,7 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
 
   const metaWebhookUrl =
     typeof window !== 'undefined'
-      ? `${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}/api/channels/webhook/meta`
+      ? `${window.location.origin}${apiBasePath}/channels/webhook/meta`
       : '/api/channels/webhook/meta';
 
   const handleCopy = (val: string, key: string) => {
@@ -201,42 +209,38 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <div className="text-xs font-semibold text-gray-900">
-              Login 1-Klik via Reneo OAuth
+              Login 1-Klik via Reneo OAuth (Multi Akun)
             </div>
             <div className="text-[11px] text-gray-500">
               {oauthCfg && !oauthCfg.reneoOAuthReady && !oauthCfg.directMetaReady && !oauthCfg.directThreadsReady
-                ? 'Menunggu konfigurasi RENEO_OAUTH_URL di server. Sementara gunakan form manual di bawah.'
-                : 'Client cukup login akun Meta/Threads melalui aplikasi resmi Reneo yang terdaftar.'}
+                ? 'Menunggu konfigurasi META_APP_ID / THREADS_APP_ID di server. Sementara gunakan form manual di bawah.'
+                : 'Cukup login akun Facebook, Instagram, atau Threads. Klik lagi kapan saja untuk menambah akun lainnya.'}
             </div>
           </div>
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 w-full sm:w-auto">
-            {(['WHATSAPP_CLOUD', 'INSTAGRAM', 'FACEBOOK', 'THREADS'] as OmnichannelType[]).map((ch) => {
-              const ready =
-                oauthCfg?.reneoOAuthReady ||
-                (ch === 'THREADS' ? oauthCfg?.directThreadsReady : oauthCfg?.directMetaReady);
-              const label =
-                ch === 'WHATSAPP_CLOUD'
-                  ? 'WA Business'
-                  : ch === 'INSTAGRAM'
-                    ? 'Instagram'
-                    : ch === 'FACEBOOK'
-                      ? 'Facebook'
-                      : 'Threads';
-              return (
-                <button
-                  key={ch}
-                  type="button"
-                  disabled={!canEdit || !ready}
-                  onClick={() => {
-                    const base = window.location.pathname.replace(/\/+$/, '');
-                    window.location.href = `${base}/api/channels/oauth/start?channel=${ch}`;
-                  }}
-                  className="h-8 px-3 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed whitespace-nowrap transition-colors"
-                >
-                  Login {label}
-                </button>
-              );
-            })}
+            {([
+              { ch: 'META', label: 'FB + IG Sekaligus', ready: Boolean(oauthCfg?.reneoOAuthReady || oauthCfg?.directMetaReady), primary: true },
+              { ch: 'FACEBOOK', label: 'Facebook', ready: Boolean(oauthCfg?.reneoOAuthReady || oauthCfg?.directMetaReady), primary: false },
+              { ch: 'INSTAGRAM', label: 'Instagram', ready: Boolean(oauthCfg?.reneoOAuthReady || oauthCfg?.directMetaReady), primary: false },
+              { ch: 'THREADS', label: 'Threads', ready: Boolean(oauthCfg?.reneoOAuthReady || oauthCfg?.directThreadsReady), primary: false },
+              { ch: 'WHATSAPP_CLOUD', label: 'WA Business', ready: Boolean(oauthCfg?.reneoOAuthReady || oauthCfg?.directMetaReady), primary: false },
+            ] as Array<{ ch: string; label: string; ready: boolean; primary: boolean }>).map((item) => (
+              <button
+                key={item.ch}
+                type="button"
+                disabled={!canEdit || !item.ready}
+                onClick={() => {
+                  window.location.href = `${apiBasePath}/channels/oauth/start?channel=${item.ch}`;
+                }}
+                className={`h-8 px-3 rounded-md text-xs font-medium whitespace-nowrap transition-colors disabled:bg-gray-200 disabled:text-gray-500 disabled:border-gray-200 disabled:cursor-not-allowed ${
+                  item.primary
+                    ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                    : 'bg-white text-gray-800 border border-gray-300 hover:bg-gray-100'
+                }`}
+              >
+                Login {item.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -411,7 +415,7 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
             {connectLinks.slice(0, 5).map((lk) => {
               const url =
                 typeof window !== 'undefined'
-                  ? `${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}/connect-channel?token=${lk.token}`
+                  ? `${appRootOrigin}/connect-channel?token=${lk.token}`
                   : `/connect-channel?token=${lk.token}`;
               const expired = new Date(lk.expiresAt).getTime() < Date.now();
               return (

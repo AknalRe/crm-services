@@ -42,6 +42,7 @@ export const config = {
     appSecret: process.env.META_APP_SECRET || '',
     threadsAppId: process.env.THREADS_APP_ID || '',
     threadsAppSecret: process.env.THREADS_APP_SECRET || '',
+    webhookVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || '',
     publicBaseUrl: process.env.PUBLIC_BASE_URL || '',
   },
 };

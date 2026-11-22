@@ -185,6 +185,9 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     const challenge = req.query['hub.challenge'];
 
     if (mode === 'subscribe' && token) {
+      if (config.meta.webhookVerifyToken && token === config.meta.webhookVerifyToken) {
+        return reply.code(200).send(challenge || 'OK');
+      }
       const accounts = await db.select().from(channelAccounts);
       const matched = accounts.find((a) => a.isActive && a.verifyToken === token);
       if (matched) {
@@ -644,7 +647,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     try {
       const channel = String(req.query?.channel || '').trim().toUpperCase();
       const connectToken = String(req.query?.connectToken || '').trim();
-      if (!['INSTAGRAM', 'FACEBOOK', 'THREADS', 'WHATSAPP_CLOUD'].includes(channel)) {
+      if (!['INSTAGRAM', 'FACEBOOK', 'META', 'THREADS', 'WHATSAPP_CLOUD'].includes(channel)) {
         return reply.status(400).send({ success: false, error: 'Channel OAuth tidak valid' });
       }
 
@@ -703,12 +706,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return reply.redirect(target);
       }
 
-      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK' || channel === 'WHATSAPP_CLOUD') && config.meta.appId) {
+      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK' || channel === 'META' || channel === 'WHATSAPP_CLOUD') && config.meta.appId) {
         const scope =
           channel === 'WHATSAPP_CLOUD'
             ? 'whatsapp_business_management,whatsapp_business_messaging,business_management'
             : 'pages_show_list,pages_messaging,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish';
-        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(config.meta.appId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${encodeURIComponent(state)}`;
+        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(config.meta.appId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&response_type=code&auth_type=rerequest&state=${encodeURIComponent(state)}`;
         return reply.redirect(target);
       }
 
@@ -729,7 +732,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     const failRedirect = (msg: string) => {
       const dest = parsedState?.connectToken
         ? `${returnBase}/connect-channel?token=${encodeURIComponent(parsedState.connectToken)}&oauth=error&msg=${encodeURIComponent(msg)}`
-        : `${returnBase}/#settings/omnichannel?oauth=error&msg=${encodeURIComponent(msg)}`;
+        : `${returnBase}/settings/omnichannel?oauth=error&msg=${encodeURIComponent(msg)}`;
       return reply.redirect(dest);
     };
 
@@ -741,7 +744,14 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return failRedirect('Sesi OAuth tidak valid atau kedaluwarsa.');
       }
 
-      const accountsToSave: Array<{ channel: string; name: string; accountId: string; accessToken: string }> = [];
+      const accountsToSave: Array<{
+        channel: string;
+        name: string;
+        accountId: string;
+        accessToken: string;
+        subscribePageId?: string;
+        subscribePageToken?: string;
+      }> = [];
 
       if (req.query?.grant_code && config.reneo.oauthUrl) {
         const exchangeRes = await axios.post(
@@ -776,15 +786,31 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           );
           const shortToken = tokenRes.data?.access_token;
           if (shortToken) {
+            let finalThreadsToken = shortToken;
+            try {
+              const longRes = await axios.get('https://graph.threads.net/access_token', {
+                params: {
+                  grant_type: 'th_exchange_token',
+                  client_secret: config.meta.threadsAppSecret,
+                  access_token: shortToken,
+                },
+                timeout: 10000,
+              });
+              if (longRes.data?.access_token) {
+                finalThreadsToken = longRes.data.access_token;
+              }
+            } catch {
+              // fallback to short token if exchange fails
+            }
             const meRes = await axios.get('https://graph.threads.net/v1.0/me', {
-              params: { fields: 'id,username,name', access_token: shortToken },
+              params: { fields: 'id,username,name', access_token: finalThreadsToken },
               timeout: 10000,
             });
             accountsToSave.push({
               channel: 'THREADS',
               name: meRes.data?.username ? `@${meRes.data.username}` : meRes.data?.name || 'Threads',
               accountId: String(meRes.data?.id || tokenRes.data?.user_id),
-              accessToken: shortToken,
+              accessToken: finalThreadsToken,
             });
           }
         } else if (config.meta.appId && config.meta.appSecret) {
@@ -797,34 +823,60 @@ export default async function channelsRouter(fastify: FastifyInstance) {
             },
             timeout: 15000,
           });
-          const userToken = tokenRes.data?.access_token;
-          if (userToken) {
+          const shortUserToken = tokenRes.data?.access_token;
+          if (shortUserToken) {
+            // Exchange to 60-day Long-Lived User Token so /me/accounts returns never-expiring Page Access Tokens
+            let userToken = shortUserToken;
+            try {
+              const longUserRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
+                params: {
+                  grant_type: 'fb_exchange_token',
+                  client_id: config.meta.appId,
+                  client_secret: config.meta.appSecret,
+                  fb_exchange_token: shortUserToken,
+                },
+                timeout: 15000,
+              });
+              if (longUserRes.data?.access_token) {
+                userToken = longUserRes.data.access_token;
+              }
+            } catch {
+              // fallback to short-lived user token
+            }
+
             const pagesRes = await axios.get('https://graph.facebook.com/v20.0/me/accounts', {
               params: {
+                limit: 100,
                 fields: 'id,name,access_token,instagram_business_account{id,username,name}',
                 access_token: userToken,
               },
               timeout: 15000,
             });
             for (const page of pagesRes.data?.data || []) {
-              if (parsedState.channel === 'FACEBOOK' || parsedState.channel === 'INSTAGRAM') {
-                if (parsedState.channel === 'FACEBOOK') {
-                  accountsToSave.push({
-                    channel: 'FACEBOOK',
-                    name: String(page.name || page.id),
-                    accountId: String(page.id),
-                    accessToken: String(page.access_token || userToken),
-                  });
-                }
-                if (parsedState.channel === 'INSTAGRAM' && page.instagram_business_account?.id) {
-                  const ig = page.instagram_business_account;
-                  accountsToSave.push({
-                    channel: 'INSTAGRAM',
-                    name: ig.username ? `@${ig.username}` : ig.name || page.name,
-                    accountId: String(ig.id),
-                    accessToken: String(page.access_token || userToken),
-                  });
-                }
+              const pageToken = String(page.access_token || userToken);
+              const wantFacebook = parsedState.channel === 'FACEBOOK' || parsedState.channel === 'META';
+              const wantInstagram = parsedState.channel === 'INSTAGRAM' || parsedState.channel === 'META';
+
+              if (wantFacebook) {
+                accountsToSave.push({
+                  channel: 'FACEBOOK',
+                  name: String(page.name || page.id),
+                  accountId: String(page.id),
+                  accessToken: pageToken,
+                  subscribePageId: String(page.id),
+                  subscribePageToken: pageToken,
+                });
+              }
+              if (wantInstagram && page.instagram_business_account?.id) {
+                const ig = page.instagram_business_account;
+                accountsToSave.push({
+                  channel: 'INSTAGRAM',
+                  name: ig.username ? `@${ig.username}` : ig.name || page.name,
+                  accountId: String(ig.id),
+                  accessToken: pageToken,
+                  subscribePageId: String(page.id),
+                  subscribePageToken: pageToken,
+                });
               }
             }
           }
@@ -832,12 +884,19 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       }
 
       if (accountsToSave.length === 0) {
-        return failRedirect('Tidak ada akun kanal yang berhasil diambil dari OAuth.');
+        const emptyHint =
+          parsedState.channel === 'INSTAGRAM'
+            ? 'Tidak ditemukan akun Instagram Business yang terhubung ke Facebook Page Anda.'
+            : 'Tidak ada akun kanal yang berhasil diambil dari OAuth.';
+        return failRedirect(emptyHint);
       }
 
       const targetCompanyId = String(parsedState.companyId || '').trim() || DEFAULT_COMPANY_ID;
       const now = new Date();
       let firstCreatedId = '';
+      let savedCount = 0;
+      const subscribedPages = new Set<string>();
+
       for (const acc of accountsToSave) {
         const existing = await db
           .select()
@@ -855,7 +914,14 @@ export default async function channelsRouter(fastify: FastifyInstance) {
             .set({ name: acc.name, accessToken: acc.accessToken, isActive: true, updatedAt: now })
             .where(eq(channelAccounts.id, existing[0].id));
           if (!firstCreatedId) firstCreatedId = existing[0].id;
+          savedCount += 1;
         } else {
+          try {
+            await licenseService.assertQuota('channels', 1, targetCompanyId);
+          } catch {
+            // Stop adding more new accounts once license channel quota is reached
+            break;
+          }
           const newId = crypto.randomUUID();
           await db.insert(channelAccounts).values({
             id: newId,
@@ -870,7 +936,30 @@ export default async function channelsRouter(fastify: FastifyInstance) {
             updatedAt: now,
           });
           if (!firstCreatedId) firstCreatedId = newId;
+          savedCount += 1;
         }
+
+        // Best-effort auto-subscribe Facebook Page webhook so DMs & comments flow automatically
+        if (acc.subscribePageId && acc.subscribePageToken && !subscribedPages.has(acc.subscribePageId)) {
+          subscribedPages.add(acc.subscribePageId);
+          axios
+            .post(
+              `https://graph.facebook.com/v20.0/${encodeURIComponent(acc.subscribePageId)}/subscribed_apps`,
+              null,
+              {
+                params: {
+                  subscribed_fields: 'messages,messaging_postbacks,feed',
+                  access_token: acc.subscribePageToken,
+                },
+                timeout: 8000,
+              }
+            )
+            .catch(() => {});
+        }
+      }
+
+      if (savedCount === 0) {
+        return failRedirect('Kuota channel paket lisensi sudah penuh.');
       }
 
       if (parsedState.connectToken && firstCreatedId) {
@@ -881,7 +970,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return reply.redirect(`${returnBase}/connect-channel?token=${encodeURIComponent(parsedState.connectToken)}&oauth=success`);
       }
 
-      return reply.redirect(`${returnBase}/#settings/omnichannel?oauth=success&count=${accountsToSave.length}`);
+      return reply.redirect(`${returnBase}/settings/omnichannel?oauth=success&count=${savedCount}`);
     } catch (error: any) {
       return failRedirect(error.response?.data?.error?.message || error.message || 'OAuth gagal');
     }
