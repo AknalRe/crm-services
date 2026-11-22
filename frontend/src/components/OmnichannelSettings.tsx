@@ -49,64 +49,94 @@ export const PlatformBrandIcon: React.FC<{ channel: string; size?: 'sm' | 'md' }
   channel,
   size = 'md',
 }) => {
-  const boxCls = size === 'sm' ? 'w-8 h-8 rounded-lg' : 'w-11 h-11 rounded-xl';
-  const iconCls = size === 'sm' ? 'w-4 h-4' : 'w-5 h-5';
+  const dimCls = size === 'sm' ? 'w-7 h-7' : 'w-9 h-9';
 
   if (channel === 'INSTAGRAM') {
+    const gradId = `ig-grad-${size}`;
+    const glowId = `ig-glow-${size}`;
     return (
-      <div
-        className={`${boxCls} bg-pink-600 text-white flex items-center justify-center shrink-0 shadow-2xs`}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={iconCls}>
-          <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
-          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
-          <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" />
-        </svg>
-      </div>
+      <svg viewBox="0 0 48 48" className={`${dimCls} shrink-0`} aria-hidden="true">
+        <defs>
+          <radialGradient id={gradId} cx="30%" cy="107%" r="150%">
+            <stop offset="0%" stopColor="#fdf497" />
+            <stop offset="5%" stopColor="#fdf497" />
+            <stop offset="45%" stopColor="#fd5949" />
+            <stop offset="60%" stopColor="#d6249f" />
+            <stop offset="90%" stopColor="#285AEB" />
+          </radialGradient>
+          <radialGradient id={glowId} cx="15%" cy="100%" r="110%">
+            <stop offset="0%" stopColor="#ffdd55" />
+            <stop offset="30%" stopColor="#ff543e" />
+            <stop offset="65%" stopColor="#c837ab" />
+            <stop offset="100%" stopColor="#5851db" />
+          </radialGradient>
+        </defs>
+        <rect x="2" y="2" width="44" height="44" rx="11" fill={`url(#${gradId})`} />
+        <rect x="2" y="2" width="44" height="44" rx="11" fill={`url(#${glowId})`} opacity="0.85" />
+        <rect
+          x="10.5"
+          y="10.5"
+          width="27"
+          height="27"
+          rx="7.5"
+          fill="none"
+          stroke="#ffffff"
+          strokeWidth="3.2"
+        />
+        <circle cx="24" cy="24" r="6.6" fill="none" stroke="#ffffff" strokeWidth="3.2" />
+        <circle cx="32.2" cy="15.8" r="2" fill="#ffffff" />
+      </svg>
     );
   }
   if (channel === 'THREADS') {
     return (
-      <div
-        className={`${boxCls} bg-gray-900 text-white flex items-center justify-center shrink-0 shadow-2xs`}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={iconCls}>
-          <path d="M19 12a7 7 0 1 0-7 7c3.5 0 6-2 6-5.5 0-3-2-5-4.5-5-2.2 0-3.5 1.5-3.5 3.5 0 1.8 1.2 3 2.8 3 1.8 0 2.7-1.3 2.7-3.2V8" />
-        </svg>
-      </div>
+      <svg viewBox="0 0 192 192" className={`${dimCls} shrink-0`} aria-hidden="true">
+        <rect x="8" y="8" width="176" height="176" rx="44" fill="#000000" />
+        <path
+          fill="#ffffff"
+          d="M129.5 89.2c-.6-.3-1.3-.6-1.9-.9-1.1-20.5-12.3-32.2-31.1-32.4h-.3c-11.2 0-20.5 4.8-26.2 13.5l10.3 7.1c4.3-6.5 10.9-8.1 15.9-8.1h.2c6.2 0 10.9 1.8 13.9 5.3 2.2 2.6 3.7 6.2 4.4 10.9-5.5-.9-11.4-1.2-17.8-.8-17.9 1-29.4 11.4-28.7 25.8.4 7.3 4 13.6 10.2 17.7 5.2 3.5 12 5.2 19.1 4.8 9.3-.5 16.6-4.1 21.7-10.6 3.9-4.9 6.3-11.3 7.4-19.3 4.4 2.7 7.7 6.2 9.5 10.4 3.1 7.2 3.3 19.1-6.4 28.8-8.5 8.5-18.8 12.2-34.3 12.3-17.2-.1-30.2-5.7-38.6-16.5-7.9-10.1-12-24.7-12.2-43.4.2-18.7 4.3-33.3 12.2-43.4 8.4-10.8 21.4-16.4 38.6-16.5 17.3.1 30.5 5.7 39.2 16.6 4.3 5.4 7.5 12.2 9.6 20.1l12.1-3.2c-2.5-9.6-6.5-17.9-11.9-24.7-11.1-14-27.6-21.2-49-21.3h-.1c-21.3.1-37.7 7.3-48.6 21.3C36.6 54.4 31.8 71.7 31.6 93.4v.2c.2 21.7 5 39 15.1 52 10.9 14 27.3 21.2 48.6 21.3h.1c19 0 32.4-5.1 43.4-16.1 14.4-14.4 13.9-32.4 9.2-43.4-3.4-7.9-9.9-14.3-18.5-18.2Zm-27.9 30.2c-7.8.4-15.9-3.1-16.3-10.6-.3-5.6 4-11.8 16.9-12.6 1.5-.1 3-.1 4.4-.1 4.7 0 9.1.5 13.1 1.4-1.5 18.6-10.2 21.5-18.1 21.9Z"
+        />
+      </svg>
     );
   }
   if (channel === 'FACEBOOK') {
     return (
-      <div
-        className={`${boxCls} bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-2xs`}
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" className={iconCls}>
-          <path d="M14 13.5h2.5l1-4H14v-2c0-1.03 0-2 2-2h1.5V2.14c-.326-.043-1.557-.14-2.857-.14C11.928 2 10 3.657 10 6.7v2.8H7v4h3V22h4v-8.5Z" />
-        </svg>
-      </div>
+      <svg viewBox="0 0 48 48" className={`${dimCls} shrink-0`} aria-hidden="true">
+        <circle cx="24" cy="24" r="22" fill="#1877F2" />
+        <path
+          fill="#ffffff"
+          d="M32.6 30.9l1.1-7h-6.7v-4.5c0-1.9.9-3.8 4-3.8h3.1v-6s-2.8-.5-5.5-.5c-5.6 0-9.3 3.4-9.3 9.6v5.2H13v7h6.3V46a22.4 22.4 0 0 0 7.7 0V30.9h5.6Z"
+        />
+      </svg>
     );
   }
   if (channel === 'TELEGRAM') {
+    const tgGradId = `tg-grad-${size}`;
     return (
-      <div
-        className={`${boxCls} bg-sky-500 text-white flex items-center justify-center shrink-0 shadow-2xs`}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={iconCls}>
-          <path d="m22 2-7 20-4-9-9-4Z" />
-          <path d="M22 2 11 13" />
-        </svg>
-      </div>
+      <svg viewBox="0 0 48 48" className={`${dimCls} shrink-0`} aria-hidden="true">
+        <defs>
+          <linearGradient id={tgGradId} x1="50%" y1="0%" x2="50%" y2="100%">
+            <stop offset="0%" stopColor="#2AABEE" />
+            <stop offset="100%" stopColor="#229ED9" />
+          </linearGradient>
+        </defs>
+        <circle cx="24" cy="24" r="22" fill={`url(#${tgGradId})`} />
+        <path
+          fill="#ffffff"
+          d="M11.6 23.6c6.9-3 11.5-5 13.8-6 6.6-2.7 7.9-3.2 8.8-3.2.2 0 .6 0 .9.3.2.2.3.5.3.7 0 .2 0 .6-.1.9-1.1 11.4-5.8 39.1-5.8 39.1s-.3 1.7-1.5 1.8c-.8.1-1.9-.5-2.1-.7-1.6-1.1-6.1-4-8.1-5.8-.6-.5-1.3-1.5.1-2.7 2.9-2.7 6.4-6 8.5-8.1 1-1 2-3.2-2.1-.5-5.7 3.9-11.3 7.6-11.3 7.6s-1.3.8-3.7.1c-2.4-.7-5.2-1.7-5.2-1.7s-1.9-1.2 1.3-2.5l5.2-2.3Z"
+          transform="scale(0.75) translate(6.5, 6.5)"
+        />
+      </svg>
     );
   }
   return (
-    <div
-      className={`${boxCls} bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs`}
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={iconCls}>
-        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-      </svg>
-    </div>
+    <svg viewBox="0 0 48 48" className={`${dimCls} shrink-0`} aria-hidden="true">
+      <circle cx="24" cy="24" r="22" fill="#25D366" />
+      <path
+        fill="#ffffff"
+        d="M24 11a12.9 12.9 0 0 0-11 19.7L11.5 36l5.5-1.4A12.9 12.9 0 1 0 24 11Zm7.5 18.2c-.3.9-1.8 1.7-2.5 1.8-.7.1-1.5.2-2.5-.1-.6-.2-1.4-.5-2.4-.9-4.2-1.8-6.9-6-7.1-6.3-.2-.3-1.7-2.3-1.7-4.3 0-2.1 1.1-3.1 1.5-3.5.4-.4.8-.5 1.1-.5h.8c.3 0 .6-.1.9.7.3.8 1.1 2.7 1.2 2.9.1.2.2.4 0 .7-.1.3-.2.4-.4.7-.2.2-.4.5-.6.7-.2.2-.4.4-.2.8.2.4 1.1 1.8 2.3 2.9 1.6 1.4 2.9 1.8 3.3 2 .4.2.6.2.9-.1.2-.3 1-1.2 1.3-1.6.3-.4.5-.3.9-.2.4.1 2.4 1.1 2.8 1.3.4.2.7.3.8.5.1.2.1 1-.2 1.9Z"
+      />
+    </svg>
   );
 };
 
