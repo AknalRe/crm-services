@@ -1135,6 +1135,18 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                   </div>
                 )}
 
+                {/* Promo validity notice shown once cleanly above plan cards */}
+                {(() => {
+                  const promoUntil = plans.find((p) => p.promoValidUntil)?.promoValidUntil;
+                  if (!promoUntil) return null;
+                  return (
+                    <div className="flex items-center justify-between text-[11px] text-gray-500 font-mono px-0.5">
+                      <span>Harga promo berlaku hingga {promoUntil}</span>
+                      <span>Pilih paket untuk melihat rincian tagihan</span>
+                    </div>
+                  );
+                })()}
+
                 {/* Horizontal Scrollable Plan Cards (Single Row, no visible scrollbar) */}
                 <div className="relative">
                   <div
@@ -1158,32 +1170,33 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             setSelectedPlanSlug(p.slug);
                             setQuantity(1);
                           }}
-                          className={`w-[236px] sm:w-[244px] shrink-0 snap-start cursor-pointer rounded-xl p-3.5 sm:p-4 border transition-all flex flex-col justify-between relative ${
-                          isSelected
-                            ? 'border-indigo-600 bg-indigo-50/40 ring-1 ring-indigo-600'
-                            : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="space-y-2.5">
+                          className={`w-[240px] sm:w-[252px] shrink-0 snap-start cursor-pointer rounded-lg p-4 border transition-colors flex flex-col justify-between relative bg-white ${
+                            isSelected
+                              ? 'border-[#2563EB] ring-1 ring-[#2563EB]/25'
+                              : p.highlighted
+                                ? 'border-gray-300 border-t-2 border-t-[#2563EB] hover:border-gray-400'
+                                : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                        <div className="space-y-3">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                            <span className="text-[11px] font-mono text-gray-500">
                               {p.period === 'annual' ? '12 Bulan' : `${p.months || 1} Bulan`}
                             </span>
-                            <div className="flex items-center gap-1.5">
-                              {isCurrentTier && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  Paket Anda
+                            <div className="flex items-center gap-2">
+                              {isCurrentTier ? (
+                                <span className="text-[11px] font-medium text-emerald-700">
+                                  Aktif
                                 </span>
-                              )}
-                              {p.highlighted && !isCurrentTier && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-0.5">
-                                  Populer
+                              ) : p.highlighted ? (
+                                <span className="text-[11px] font-medium text-[#2563EB]">
+                                  Rekomendasi
                                 </span>
-                              )}
+                              ) : null}
                               <div
                                 className={`w-4 h-4 rounded-full border flex items-center justify-center ${
                                   isSelected
-                                    ? 'border-indigo-600 bg-indigo-600 text-white'
+                                    ? 'border-[#2563EB] bg-[#2563EB] text-white'
                                     : 'border-gray-300 bg-white'
                                 }`}
                               >
@@ -1192,9 +1205,9 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             </div>
                           </div>
 
-                          <div>
-                            <h3 className="font-semibold text-sm text-gray-900">{p.name}</h3>
-                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{p.tagline}</p>
+                          <div className="min-h-[54px]">
+                            <h3 className="font-semibold text-sm text-gray-900 truncate">{p.name}</h3>
+                            <p className="text-[11px] text-gray-500 mt-1 line-clamp-2 leading-relaxed">{p.tagline}</p>
                           </div>
 
                           {(() => {
@@ -1204,7 +1217,6 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const discPercent = Number(
                               p.discountPercent || (origPrice > displayPrice ? Math.round(((origPrice - displayPrice) / origPrice) * 100) : 0)
                             );
-                            const promoDate = p.promoValidUntil;
 
                             const maxContacts = Number(f.maxContacts || 0);
                             const hasLiveChat = Boolean(f.liveChat ?? f.liveChatCrm ?? false);
@@ -1225,92 +1237,77 @@ export const PlansModal: React.FC<PlansModalProps> = ({
 
                             return (
                               <>
-                                <div className="space-y-1">
-                                  {origPrice > displayPrice && (
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="line-through text-xs font-semibold text-gray-400 tabular-nums">
-                                        Rp {origPrice.toLocaleString('id-ID')}
-                                      </span>
-                                      {discPercent > 0 && (
-                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                          Hemat {discPercent}%
+                                <div className="pb-3 border-b border-gray-200 min-h-[52px] flex flex-col justify-end">
+                                  <div className="h-4 flex items-center gap-1.5 mb-0.5">
+                                    {origPrice > displayPrice && (
+                                      <>
+                                        <span className="line-through font-mono text-[11px] text-gray-400 tabular-nums">
+                                          Rp {origPrice.toLocaleString('id-ID')}
                                         </span>
-                                      )}
-                                    </div>
-                                  )}
-                                  <div className="text-xl font-bold text-gray-900 tabular-nums">
+                                        {discPercent > 0 && (
+                                          <span className="px-1 py-0.2 rounded font-mono text-[10px] font-medium bg-gray-100 text-gray-700 tabular-nums">
+                                            -{discPercent}%
+                                          </span>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                  <div className="font-mono text-xl font-bold text-gray-900 tracking-tight tabular-nums">
                                     Rp {displayPrice.toLocaleString('id-ID')}
-                                    <span className="text-xs font-normal text-gray-500">
+                                    <span className="text-xs font-sans font-normal text-gray-500">
                                       /{p.period === 'annual' ? 'thn' : 'bln'}
                                     </span>
                                   </div>
-                                  {promoDate && (
-                                    <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
-                                      <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                                      <span>Promo s/d {promoDate}</span>
-                                    </div>
-                                  )}
                                 </div>
 
-                                <div className="border-t border-gray-200 pt-2.5 space-y-1.5 text-xs text-gray-700">
-                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                                    Ringkasan Kuota
-                                  </div>
+                                <div className="space-y-1.5 text-xs text-gray-700">
                                   <div className="flex items-center gap-2">
-                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                    <span>
-                                      Penyimpanan: <strong>{formatStorageQuota(storageMb)}</strong>{' '}
-                                      (maks {fileLimitMb} MB/file)
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <Check className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                                     <span>
                                       {maxContacts === 0 || f.unlimitedContacts
-                                        ? 'Kontak Tanpa Batas'
-                                        : `Hingga ${maxContacts.toLocaleString('id-ID')} Kontak`}
+                                        ? 'Kontak tanpa batas'
+                                        : `Hingga ${maxContacts.toLocaleString('id-ID')} kontak`}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <Check className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                                     <span>
                                       {hasMultiSess && maxSess > 1 ? `${maxSess} Sesi WA` : '1 Sesi WA'} &middot;{' '}
                                       {hasMultiAg && maxAg > 1 ? `${maxAg} Akun CS` : '1 Akun Admin'}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <Check className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                                     <span>
-                                      Siaran Promo:{' '}
-                                      <strong>
+                                      Siaran:{' '}
+                                      <strong className="font-mono font-semibold text-gray-900">
                                         {f.unlimitedBroadcast || maxBroadcast === 0
-                                          ? 'Tanpa Batas Prioritas'
-                                          : `${maxBroadcast.toLocaleString('id-ID')} pesan/bln`}
+                                          ? 'Tanpa Batas'
+                                          : `${maxBroadcast.toLocaleString('id-ID')}/bln`}
                                       </strong>
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <Check className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                                     <span>
-                                      Batas Ganti Nomor: <strong>{maxSwitches}x</strong> per sesi
+                                      Media: <strong className="font-mono font-semibold text-gray-900">{formatStorageQuota(storageMb)}</strong>{' '}
+                                      <span className="text-[11px] text-gray-500">({fileLimitMb} MB/file)</span>
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Check className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                    <span>
+                                      Ganti nomor: <strong className="font-mono font-semibold text-gray-900">{maxSwitches}x</strong>/sesi
                                     </span>
                                   </div>
 
                                 {isExpanded && (
-                                  <div className="pt-1.5 space-y-1.5 border-t border-gray-100">
-                                    <div className="flex items-center gap-2">
-                                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                      <span>
-                                        {p.features?.unlimitedBroadcast
-                                          ? 'Siaran & Kampanye WA Tanpa Batas'
-                                          : `Siaran WA (${(p.features?.maxBroadcastPerMonth || 1500).toLocaleString('id-ID')} pesan/bln)`}
-                                      </span>
-                                    </div>
-                                    <div className="pt-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                                      Akses Menu Aplikasi
+                                  <div className="pt-2 space-y-1.5 border-t border-gray-100">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                                      Akses Modul
                                     </div>
                                     <div className="flex items-center gap-2">
-                                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                      <Check className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                                       <span>Dashboard, Kontak, Siaran, Galeri &amp; Ultah</span>
                                     </div>
                                     <div

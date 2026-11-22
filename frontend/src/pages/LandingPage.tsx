@@ -890,6 +890,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
                   Daftar akun, coba gratis 7 hari, lalu pilih paket langganan sesuai ukuran tim dan jumlah bisnis Anda.
                 </p>
+                {(() => {
+                  const promoUntil = visiblePlans.find((p) => p.promoValidUntil)?.promoValidUntil;
+                  if (!promoUntil) return null;
+                  return (
+                    <p className="text-xs text-slate-500 font-mono">
+                      Harga promo berlaku hingga {promoUntil} &middot; Semua paket termasuk uji coba gratis 7 hari
+                    </p>
+                  );
+                })()}
               </div>
 
               {hasAnnualPlans && (
@@ -940,7 +949,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     plan.discountPercent ||
                       (origPrice > displayPrice ? Math.round(((origPrice - displayPrice) / origPrice) * 100) : 0)
                   );
-                  const promoDate = plan.promoValidUntil;
 
                   const maxContacts = Number(f.maxContacts || 0);
                   const hasMultiSessions = Boolean(f.multiSession);
@@ -959,6 +967,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       ? `${Math.round((maxStorageMb / 1024) * 10) / 10} GB penyimpanan media`
                       : `${maxStorageMb} MB penyimpanan media`;
 
+                  const slugLow = (plan.slug || '').toLowerCase();
+                  const cleanBusinessTagline = slugLow.includes('starter')
+                    ? 'Untuk pemilik usaha mandiri yang mulai merapikan kontak dan siaran pelanggan.'
+                    : slugLow.includes('pro')
+                      ? 'Untuk tim layanan pelanggan yang butuh kotak masuk bersama dan kanal sosial.'
+                      : slugLow.includes('business')
+                        ? 'Untuk bisnis berkembang dengan asisten otomatis berbasis katalog produk.'
+                        : slugLow.includes('enterprise')
+                          ? 'Untuk operasional skala besar lintas cabang dengan dukungan prioritas.'
+                          : plan.tagline;
+
                   const highlights: string[] = [
                     maxContacts === 0
                       ? 'Kontak pelanggan tanpa batas'
@@ -974,10 +993,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       : `${maxBroadcast.toLocaleString('id-ID')} pesan siaran / bulan`,
                     storageLabel,
                   ];
-                  if (hasLiveChat) highlights.push('Kotak Masuk Live Chat & CSAT rating');
+                  if (hasLiveChat) highlights.push('Kotak Masuk Live Chat & penilaian pelanggan');
                   if (hasOmnichannel) highlights.push('Instagram, Facebook, Threads & Telegram');
                   if (hasScheduled) highlights.push('Kalender jadwal konten & Story WA');
-                  if (hasAi) highlights.push('Asisten otomatis AI berbasis katalog usaha');
+                  if (hasAi) highlights.push('Asisten otomatis berbasis katalog usaha');
 
                   const unitLabel =
                     plan.period === 'annual' || (plan.months && plan.months >= 12)
@@ -989,65 +1008,59 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   return (
                     <div
                       key={plan.slug}
-                      className={`rounded-xl border p-5 flex flex-col justify-between gap-5 ${plan.highlighted
-                          ? 'border-[#2563EB] bg-blue-50/20 ring-1 ring-[#2563EB]/20'
-                          : 'border-slate-200 bg-white'
-                        }`}
+                      className={`rounded-lg border p-5 flex flex-col justify-between gap-6 bg-white ${
+                        plan.highlighted
+                          ? 'border-slate-300 border-t-2 border-t-[#2563EB] shadow-xs'
+                          : 'border-slate-200'
+                      }`}
                     >
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
+                      <div className="space-y-5">
+                        <div className="space-y-1.5 min-h-[76px]">
                           <div className="flex items-center justify-between gap-2">
-                            <h3 className="text-base font-bold text-slate-900">{plan.name}</h3>
+                            <h3 className="text-[15px] font-semibold text-slate-900 truncate">
+                              {plan.name.replace(/\s+(Bulanan|Tahunan)$/i, '')}
+                            </h3>
                             {plan.highlighted && (
-                              <span className="px-2 py-0.5 rounded bg-[#2563EB] text-white text-[10px] font-semibold">
-                                Populer
+                              <span className="text-[11px] font-medium text-[#2563EB] shrink-0">
+                                Rekomendasi
                               </span>
                             )}
                           </div>
-                          {plan.tagline && (
-                            <p className="text-xs text-slate-600 leading-relaxed">{plan.tagline}</p>
-                          )}
-                        </div>
-
-                        <div className="pb-4 border-b border-slate-200">
-                          {origPrice > displayPrice && (
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <span className="line-through text-xs font-semibold text-slate-400 tabular-nums">
-                                Rp {origPrice.toLocaleString('id-ID')}
-                              </span>
-                              {discPercent > 0 && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                  Hemat {discPercent}%
-                                </span>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="flex items-baseline gap-1.5">
-                            <span className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
-                              Rp {displayPrice.toLocaleString('id-ID')}
-                            </span>
-                            <span className="text-xs text-slate-500">{unitLabel}</span>
-                          </div>
-
-                          {promoDate && (
-                            <div className="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
-                              <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                              <span>Promo s/d {promoDate}</span>
-                            </div>
-                          )}
-
-                          {(plan.trialDays ?? 0) > 0 && (
-                            <p className="mt-1 text-[11px] font-medium text-emerald-700">
-                              Termasuk uji coba gratis {plan.trialDays} hari
+                          {cleanBusinessTagline && (
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              {cleanBusinessTagline}
                             </p>
                           )}
                         </div>
 
-                        <ul className="space-y-2 text-xs text-slate-700">
+                        <div className="pb-5 border-b border-slate-200 min-h-[68px] flex flex-col justify-end">
+                          <div className="h-5 flex items-center gap-2 mb-1">
+                            {origPrice > displayPrice && (
+                              <>
+                                <span className="line-through font-mono text-xs text-slate-400 tabular-nums">
+                                  Rp {origPrice.toLocaleString('id-ID')}
+                                </span>
+                                {discPercent > 0 && (
+                                  <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-medium bg-slate-100 text-slate-700 tabular-nums">
+                                    -{discPercent}%
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
+
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="font-mono text-2xl font-bold text-slate-900 tracking-tight tabular-nums">
+                              Rp {displayPrice.toLocaleString('id-ID')}
+                            </span>
+                            <span className="text-xs text-slate-500">{unitLabel}</span>
+                          </div>
+                        </div>
+
+                        <ul className="space-y-2.5 text-[13px] text-slate-700">
                           {highlights.map((line) => (
-                            <li key={line} className="flex items-start gap-2">
-                              <Check className="w-3.5 h-3.5 text-[#2563EB] shrink-0 mt-0.5" strokeWidth={2.25} />
+                            <li key={line} className="flex items-start gap-2.5">
+                              <Check className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" strokeWidth={2} />
                               <span className="leading-snug">{line}</span>
                             </li>
                           ))}
@@ -1057,13 +1070,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       <button
                         type="button"
                         onClick={authenticated ? onEnterLogin : handleRegister}
-                        className={`w-full h-10 px-4 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${FOCUS_RING} ${plan.highlighted
+                        className={`w-full h-10 px-4 rounded-md text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${FOCUS_RING} ${
+                          plan.highlighted
                             ? 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white'
-                            : 'bg-slate-900 hover:bg-slate-800 text-white'
-                          }`}
+                            : 'bg-white hover:bg-slate-50 text-slate-900 border border-slate-300'
+                        }`}
                       >
-                        <span>{authenticated ? 'Pilih di Workspace' : 'Langganan Paket Ini'}</span>
-                        <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
+                        <span>{authenticated ? 'Pilih di Workspace' : 'Mulai Coba Gratis'}</span>
+                        <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
                       </button>
                     </div>
                   );
