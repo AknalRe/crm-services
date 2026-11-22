@@ -8,6 +8,7 @@ import { generateAiAgentReply, getAiAgentConfig, isAiAllowedForComment } from '.
 import { licenseService } from '../services/license.service';
 import { getActiveCompanyId, runWithCompany } from '../services/tenantContext';
 import { getRequestCompanyId, requirePermission } from './auth';
+import { getInstagramGraphBaseUrl } from '../services/omnichannelSync.service';
 
 async function sendCommentReplyApi(
   acc: typeof channelAccounts.$inferSelect,
@@ -16,8 +17,9 @@ async function sendCommentReplyApi(
 ): Promise<void> {
   if (!acc.accessToken || !comment.externalCommentId) return;
   if (comment.channel === 'INSTAGRAM') {
+    const igBase = getInstagramGraphBaseUrl(acc.accessToken);
     await axios.post(
-      `https://graph.facebook.com/v20.0/${comment.externalCommentId}/replies`,
+      `${igBase}/${comment.externalCommentId}/replies`,
       { message: replyText },
       { headers: { Authorization: `Bearer ${acc.accessToken}` }, timeout: 10000 }
     );
@@ -130,8 +132,9 @@ export async function applyCommentAutomations(
         (comment.channel === 'INSTAGRAM' || comment.channel === 'FACEBOOK')
       ) {
         try {
+          const igBase = comment.channel === 'INSTAGRAM' ? getInstagramGraphBaseUrl(acc.accessToken) : 'https://graph.facebook.com/v21.0';
           await axios.post(
-            `https://graph.facebook.com/v20.0/${acc.accountId}/messages`,
+            `${igBase}/${acc.accountId}/messages`,
             {
               recipient: { comment_id: comment.externalCommentId },
               message: { text: matched.dmText },
@@ -221,11 +224,15 @@ export default async function commentsRouter(fastify: FastifyInstance) {
         if (!acc.accessToken) continue;
         try {
           if (acc.channel === 'INSTAGRAM') {
+            const igBase = getInstagramGraphBaseUrl(acc.accessToken);
             const mediaRes = await axios.get(
-              `https://graph.facebook.com/v20.0/${acc.accountId}/media`,
+              `${igBase}/${acc.accountId}/media`,
               {
-                params: { fields: 'id,caption,comments{id,text,username,timestamp}', limit: 10 },
-                headers: { Authorization: `Bearer ${acc.accessToken}` },
+                params: {
+                  fields: 'id,caption,comments{id,text,username,timestamp}',
+                  limit: 10,
+                  access_token: acc.accessToken,
+                },
                 timeout: 10000,
               }
             );

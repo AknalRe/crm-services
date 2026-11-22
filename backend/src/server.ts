@@ -33,6 +33,7 @@ import { BirthdayService } from './services/birthday.service';
 import { PostService } from './services/post.service';
 import { startSlaMonitor, startInactivityAutoResolveMonitor } from './services/automation.service';
 import { startWahaBackgroundSyncMonitor } from './services/chatSync.service';
+import { startOmnichannelBackgroundSyncMonitor } from './services/omnichannelSync.service';
 import {
   evaluateDomainGuardRequest,
   verifyReneoRuntimeEnvironment,
@@ -146,6 +147,7 @@ async function main() {
     startSlaMonitor();
     startInactivityAutoResolveMonitor();
     startWahaBackgroundSyncMonitor();
+    startOmnichannelBackgroundSyncMonitor();
   } catch (err) {
     fastify.log.error('[BirthdayService] Failed to initialize scheduler: ' + err);
   }

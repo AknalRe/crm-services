@@ -33,6 +33,8 @@ export async function upsertInboundChannelMessage(params: {
   body: string;
   mediaUrl?: string | null;
   mediaType?: string | null;
+  createdAt?: Date | null;
+  skipAutomation?: boolean;
 }): Promise<{ conversationId: string; contactId: string }> {
   const {
     channel,
@@ -46,9 +48,11 @@ export async function upsertInboundChannelMessage(params: {
     body,
     mediaUrl,
     mediaType,
+    createdAt,
+    skipAutomation,
   } = params;
 
-  const now = new Date();
+  const now = createdAt instanceof Date && !Number.isNaN(createdAt.getTime()) ? createdAt : new Date();
 
   // Resolve companyId from channelAccounts row
   const [accountRow] = await db
@@ -251,7 +255,7 @@ export async function upsertInboundChannelMessage(params: {
 
   liveEvents.emit('conversations:update', { conversationId, channel, companyId });
 
-  if (body) {
+  if (body && !skipAutomation) {
     const contactRows = await db.select().from(contacts).where(and(eq(contacts.companyId, companyId), eq(contacts.id, contactId)));
     const contactRecord = contactRows[0] || { id: contactId, namaLengkap: senderName || 'Pelanggan' };
     void handleInboundAutomation({
@@ -346,9 +350,16 @@ export async function sendOutboundChannelMessage(params: {
   }
 
   if (channel === 'FACEBOOK' || channel === 'INSTAGRAM') {
+    const isIgDirect =
+      channel === 'INSTAGRAM' &&
+      (account.accessToken.startsWith('IGAA') ||
+        account.accessToken.startsWith('IGQV') ||
+        account.accessToken.startsWith('IGQ'));
     const endpoint =
       channel === 'INSTAGRAM'
-        ? `https://graph.instagram.com/v21.0/${account.accountId}/messages`
+        ? isIgDirect
+          ? `https://graph.instagram.com/v21.0/me/messages`
+          : `https://graph.facebook.com/v21.0/${account.accountId}/messages`
         : `https://graph.facebook.com/v21.0/${account.accountId}/messages`;
 
     const res = await axios.post(

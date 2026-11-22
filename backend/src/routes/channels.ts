@@ -13,6 +13,7 @@ import {
   OmnichannelType,
   upsertInboundChannelMessage,
 } from '../services/channel.service';
+import { syncCompanyOmnichannelMessages } from '../services/omnichannelSync.service';
 
 const ALLOWED_CHANNELS = new Set<OmnichannelType>([
   'WHATSAPP_CLOUD',
@@ -50,6 +51,21 @@ export default async function channelsRouter(fastify: FastifyInstance) {
           .where(eq(channelAccounts.companyId, companyId))
           .orderBy(asc(channelAccounts.channel), asc(channelAccounts.createdAt));
         return reply.send({ success: true, data: rows.map(maskChannelAccount) });
+      } catch (error: any) {
+        return reply.status(500).send({ success: false, error: error.message });
+      }
+    }
+  );
+
+  // Manual trigger to sync Instagram DMs, Facebook Messenger, and Threads replies into Inbox CRM
+  fastify.post(
+    '/sync',
+    { preHandler: requirePermission('settings', 'conversations') },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const companyId = getRequestCompanyId(req);
+        const data = await runWithCompany(companyId, () => syncCompanyOmnichannelMessages(companyId));
+        return reply.send({ success: true, data });
       } catch (error: any) {
         return reply.status(500).send({ success: false, error: error.message });
       }
@@ -821,7 +837,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       }
 
       if (channel === 'THREADS' && oauthCreds.threadsAppId) {
-        const target = `https://threads.net/oauth/authorize?client_id=${encodeURIComponent(oauthCreds.threadsAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent('threads_basic,threads_content_publish,threads_manage_replies,threads_keyword_search')}&response_type=code&state=${encodeURIComponent(state)}`;
+        const target = `https://threads.net/oauth/authorize?client_id=${encodeURIComponent(oauthCreds.threadsAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent('threads_basic,threads_content_publish,threads_manage_replies,threads_read_replies,threads_keyword_search')}&response_type=code&state=${encodeURIComponent(state)}`;
         return reply.redirect(target);
       }
 
@@ -1230,6 +1246,9 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       if (savedCount === 0) {
         return failRedirect('Kuota channel paket lisensi sudah penuh.');
       }
+
+      // Trigger immediate omnichannel inbox sync in background right after connecting accounts
+      void runWithCompany(targetCompanyId, () => syncCompanyOmnichannelMessages(targetCompanyId)).catch(() => null);
 
       if (parsedState.connectToken && firstCreatedId) {
         await db
