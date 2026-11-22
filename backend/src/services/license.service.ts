@@ -137,9 +137,9 @@ export function enrichPlanWithDiscount<T extends { priceAmount: number; [key: st
     } else if (plan.slug === 'business-annual') {
       originalPrice = 5988000;
     } else if (plan.slug === 'enterprise-monthly') {
-      originalPrice = 1299000;
+      originalPrice = 999000;
     } else if (plan.slug === 'enterprise-annual') {
-      originalPrice = 15588000;
+      originalPrice = 11988000;
     } else if (plan.period === 'annual') {
       originalPrice = Math.round((plan.priceAmount * 1.35) / 10000) * 10000;
     } else {
@@ -216,7 +216,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'starter-monthly',
       name: 'Starter Bulanan',
-      tagline: 'Untuk usaha rintisan: kontak terpusat, siaran promo terjadwal, auto-reply, & bot ulang tahun.',
+      tagline: 'Paket dasar solopreneur: 1 Sesi WA, 1 CS, Live Chat CRM, 2.500 kontak, 2.500 siaran & auto-reply.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
@@ -224,18 +224,18 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
-        maxBroadcastPerMonth: 1500,
+        maxBroadcastPerMonth: 2500,
         unlimitedContacts: false,
-        maxContacts: 1500,
+        maxContacts: 2500,
         birthdayBot: true,
-        liveChat: false,
+        liveChat: true,
         multiSession: false,
         maxSessions: 1,
         maxSessionIdentitySwitches: 2,
         multiAgent: false,
         maxAgents: 1,
         maxUsers: 1,
-        maxTemplates: 10,
+        maxTemplates: 15,
         customRoles: false,
         omnichannel: false,
         maxChannels: 0,
@@ -247,9 +247,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: false,
         supportPriority: 'standard',
-        maxStorageMb: 250,
-        maxAttachmentSizeMb: 5,
-        allowedMenus: ['dashboard', 'contacts', 'broadcasts', 'birthday', 'media', 'automations', 'settings'],
+        maxStorageMb: 500,
+        maxAttachmentSizeMb: 10,
+        allowedMenus: ['dashboard', 'conversations', 'contacts', 'broadcasts', 'birthday', 'media', 'automations', 'settings'],
       },
     },
     {
@@ -257,70 +257,15 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'pro-monthly',
       name: 'Growth Pro Bulanan',
-      tagline: 'Terlaris untuk tim CS: Inbox Live Chat CRM, Multi-Nomor WA, Omnichannel Sosial, Jadwal Post/Story & CSAT.',
+      tagline: 'Untuk tim CS kecil: Multi-nomor 3 Sesi WA, 5 CS, 10.000 kontak, 25.000 siaran/bln, omnichannel sosial & CSAT.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
       priceAmount: 99000,
       highlighted: true,
       features: {
-        unlimitedBroadcast: true,
-        maxBroadcastPerMonth: 0,
-        unlimitedContacts: false,
-        maxContacts: 10000,
-        birthdayBot: true,
-        liveChat: true,
-        multiSession: true,
-        maxSessions: 3,
-        maxSessionIdentitySwitches: 5,
-        multiAgent: true,
-        maxAgents: 5,
-        maxUsers: 5,
-        maxTemplates: 50,
-        customRoles: true,
-        omnichannel: true,
-        maxChannels: 4,
-        scheduledPosts: true,
-        autoReply: true,
-        aiAgent: false,
-        mcpTools: false,
-        exportReports: true,
-        wahaSync: true,
-        apiAccess: false,
-        supportPriority: 'fast',
-        maxStorageMb: 1024,
-        maxAttachmentSizeMb: 10,
-        allowedMenus: [
-          'dashboard',
-          'conversations',
-          'comments',
-          'feed',
-          'contacts',
-          'broadcasts',
-          'birthday',
-          'tracking',
-          'posts',
-          'ideas',
-          'media',
-          'automations',
-          'settings',
-        ],
-      },
-    },
-    {
-      id: 3,
-      catalogId: 'reneo-crm',
-      slug: 'pro-annual',
-      name: 'Growth Pro Tahunan',
-      tagline: 'Paket tahunan hemat 17% (gratis 2 bln) untuk tim CS: Live Chat CRM, 3 Sesi WA, Omnichannel & CSAT.',
-      period: 'annual',
-      months: 12,
-      trialDays: 7,
-      priceAmount: 990000,
-      highlighted: false,
-      features: {
-        unlimitedBroadcast: true,
-        maxBroadcastPerMonth: 0,
+        unlimitedBroadcast: false,
+        maxBroadcastPerMonth: 25000,
         unlimitedContacts: false,
         maxContacts: 10000,
         birthdayBot: true,
@@ -344,7 +289,62 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         apiAccess: false,
         supportPriority: 'fast',
         maxStorageMb: 1536,
-        maxAttachmentSizeMb: 10,
+        maxAttachmentSizeMb: 15,
+        allowedMenus: [
+          'dashboard',
+          'conversations',
+          'comments',
+          'feed',
+          'contacts',
+          'broadcasts',
+          'birthday',
+          'tracking',
+          'posts',
+          'ideas',
+          'media',
+          'automations',
+          'settings',
+        ],
+      },
+    },
+    {
+      id: 3,
+      catalogId: 'reneo-crm',
+      slug: 'pro-annual',
+      name: 'Growth Pro Tahunan',
+      tagline: 'Paket tahunan tim CS hemat 17% (gratis 2 bln): 3 Sesi WA, 5 CS, 10.000 kontak, 25.000 siaran/bln & omnichannel.',
+      period: 'annual',
+      months: 12,
+      trialDays: 7,
+      priceAmount: 990000,
+      highlighted: false,
+      features: {
+        unlimitedBroadcast: false,
+        maxBroadcastPerMonth: 25000,
+        unlimitedContacts: false,
+        maxContacts: 10000,
+        birthdayBot: true,
+        liveChat: true,
+        multiSession: true,
+        maxSessions: 3,
+        maxSessionIdentitySwitches: 5,
+        multiAgent: true,
+        maxAgents: 5,
+        maxUsers: 5,
+        maxTemplates: 50,
+        customRoles: true,
+        omnichannel: true,
+        maxChannels: 4,
+        scheduledPosts: true,
+        autoReply: true,
+        aiAgent: false,
+        mcpTools: false,
+        exportReports: true,
+        wahaSync: true,
+        apiAccess: false,
+        supportPriority: 'fast',
+        maxStorageMb: 2048,
+        maxAttachmentSizeMb: 15,
         allowedMenus: [
           'dashboard',
           'conversations',
@@ -367,15 +367,15 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'business-monthly',
       name: 'Business AI Bulanan',
-      tagline: 'Skala bisnis penuh: Semua menu terbuka termasuk Agent AI & Knowledge Book, MCP Tools, 5 GB dokumen & API.',
+      tagline: 'Skala bisnis berkembang: 10 Sesi WA, 15 CS, 50.000 kontak, 100.000 siaran/bln, AI Agent, MCP Tools & API.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
       priceAmount: 299000,
       highlighted: false,
       features: {
-        unlimitedBroadcast: true,
-        maxBroadcastPerMonth: 0,
+        unlimitedBroadcast: false,
+        maxBroadcastPerMonth: 100000,
         unlimitedContacts: false,
         maxContacts: 50000,
         birthdayBot: true,
@@ -398,7 +398,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'priority',
-        maxStorageMb: 5120,
+        maxStorageMb: 6144,
         maxAttachmentSizeMb: 25,
         allowedMenus: [
           'dashboard',
@@ -423,15 +423,15 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'business-annual',
       name: 'Business AI Tahunan',
-      tagline: 'Paket tahunan hemat 17% (gratis 2 bln): Semua menu + AI Agent, 10 Sesi WA, 15 CS, 50.000 kontak, 8 GB dokumen & API.',
+      tagline: 'Paket tahunan bisnis hemat 17% (gratis 2 bln): 10 Sesi WA, 15 CS, 50.000 kontak, 100.000 siaran & AI Agent.',
       period: 'annual',
       months: 12,
       trialDays: 7,
       priceAmount: 2990000,
       highlighted: false,
       features: {
-        unlimitedBroadcast: true,
-        maxBroadcastPerMonth: 0,
+        unlimitedBroadcast: false,
+        maxBroadcastPerMonth: 100000,
         unlimitedContacts: false,
         maxContacts: 50000,
         birthdayBot: true,
@@ -454,7 +454,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'priority',
-        maxStorageMb: 8192,
+        maxStorageMb: 10240,
         maxAttachmentSizeMb: 25,
         allowedMenus: [
           'dashboard',
@@ -479,25 +479,25 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'enterprise-monthly',
       name: 'Enterprise AI Bulanan',
-      tagline: 'Skala korporasi fleksibel bulanan: 20 Sesi WA Dedicated, 30 CS, 100.000 kontak, AI Agent, 20 GB dokumen & VIP.',
+      tagline: 'Skala korporasi fleksibel: 25 Sesi WA Dedicated, 35 CS, 150.000 kontak, siaran tanpa batas, AI Agent & VIP.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
-      priceAmount: 699000,
+      priceAmount: 599000,
       highlighted: false,
       features: {
         unlimitedBroadcast: true,
         maxBroadcastPerMonth: 0,
         unlimitedContacts: false,
-        maxContacts: 100000,
+        maxContacts: 150000,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
-        maxSessions: 20,
-        maxSessionIdentitySwitches: 25,
+        maxSessions: 25,
+        maxSessionIdentitySwitches: 30,
         multiAgent: true,
-        maxAgents: 30,
-        maxUsers: 30,
+        maxAgents: 35,
+        maxUsers: 35,
         maxTemplates: 0,
         customRoles: true,
         omnichannel: true,
@@ -510,8 +510,8 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'vip',
-        maxStorageMb: 20480,
-        maxAttachmentSizeMb: 35,
+        maxStorageMb: 25600,
+        maxAttachmentSizeMb: 40,
         allowedMenus: [
           'dashboard',
           'conversations',
@@ -535,22 +535,22 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'enterprise-annual',
       name: 'Enterprise AI Tahunan',
-      tagline: 'Paket korporasi hemat 17% (gratis 2 bln): 25 Sesi WA Dedicated, 35 CS, 150.000 kontak, AI Agent, 35 GB dokumen & VIP.',
+      tagline: 'Paket korporasi hemat 17% (gratis 2 bln): 25 Sesi WA Dedicated, 35 CS, 200.000 kontak, siaran tanpa batas & VIP.',
       period: 'annual',
       months: 12,
       trialDays: 7,
-      priceAmount: 6990000,
+      priceAmount: 5990000,
       highlighted: false,
       features: {
         unlimitedBroadcast: true,
         maxBroadcastPerMonth: 0,
         unlimitedContacts: false,
-        maxContacts: 150000,
+        maxContacts: 200000,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
         maxSessions: 25,
-        maxSessionIdentitySwitches: 35,
+        maxSessionIdentitySwitches: 45,
         multiAgent: true,
         maxAgents: 35,
         maxUsers: 35,
@@ -566,7 +566,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'vip',
-        maxStorageMb: 35840,
+        maxStorageMb: 40960,
         maxAttachmentSizeMb: 50,
         allowedMenus: [
           'dashboard',
@@ -604,13 +604,17 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       ? Boolean(src.unlimitedBroadcast)
       : src.broadcast !== undefined
       ? Boolean(src.broadcast)
-      : !isStarter;
+      : isEnterprise;
 
   const maxBroadcastPerMonth = unlimitedBroadcast
     ? 0
     : typeof src.maxBroadcastPerMonth === 'number' && src.maxBroadcastPerMonth >= 0
     ? src.maxBroadcastPerMonth
-    : 1500;
+    : isStarter
+    ? 2500
+    : isBusiness
+    ? 100000
+    : 25000;
 
   const unlimitedContacts =
     src.unlimitedContacts !== undefined
@@ -624,7 +628,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     : typeof src.maxContacts === 'number' && src.maxContacts === 0 && src.unlimitedContacts === true
     ? 0
     : isStarter
-    ? 1500
+    ? 2500
     : isBusiness
     ? 50000
     : isEnterprise
@@ -643,7 +647,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       ? Boolean(src.liveChat)
       : src.liveChatCrm !== undefined
       ? Boolean(src.liveChatCrm)
-      : !isStarter;
+      : true;
 
   const multiSession =
     src.multiSession !== undefined ? Boolean(src.multiSession) : !isStarter;
@@ -667,7 +671,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       : isBusiness
       ? 15
       : isEnterprise
-      ? 35
+      ? 30
       : 5;
 
   const multiAgent =

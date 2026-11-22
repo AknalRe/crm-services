@@ -1235,12 +1235,12 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const hasMultiSess = Boolean(p.features?.multiSession ?? !isStarterPlan);
                             const maxSess =
                               p.features?.maxSessions ||
-                              (isEntPlan ? (p.period === 'annual' ? 25 : 20) : isBusinessPlan ? 10 : hasMultiSess ? 3 : 1);
+                              (isEntPlan ? 25 : isBusinessPlan ? 10 : hasMultiSess ? 3 : 1);
                             const hasMultiAg = Boolean(p.features?.multiAgent ?? !isStarterPlan);
                             const maxAg =
                               p.features?.maxAgents ||
                               p.features?.maxUsers ||
-                              (isEntPlan ? (p.period === 'annual' ? 35 : 30) : isBusinessPlan ? 15 : hasMultiAg ? 5 : 1);
+                              (isEntPlan ? 35 : isBusinessPlan ? 15 : hasMultiAg ? 5 : 1);
                             const hasOmni = Boolean(p.features?.omnichannel ?? !isStarterPlan);
                             const maxChan =
                               p.features?.maxChannels !== undefined
@@ -1263,15 +1263,15 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             const storageMb =
                               Number(p.features?.maxStorageMb) ||
                               (isEntPlan
-                                ? 35840
+                                ? (p.period === 'annual' ? 40960 : 25600)
                                 : isBusinessPlan
-                                ? 8192
+                                ? (p.period === 'annual' ? 10240 : 6144)
                                 : isStarterPlan
-                                ? 250
-                                : 1024);
+                                ? 500
+                                : (p.period === 'annual' ? 2048 : 1536));
                             const fileLimitMb =
                               Number(p.features?.maxAttachmentSizeMb) ||
-                              (isEntPlan ? 50 : isBusinessPlan ? 25 : isStarterPlan ? 5 : 10);
+                              (isEntPlan ? (p.period === 'annual' ? 50 : 40) : isBusinessPlan ? 25 : isStarterPlan ? 10 : 15);
 
                             return (
                               <div className="border-t border-gray-200 pt-2.5 space-y-1.5 text-xs text-gray-700">
@@ -1290,7 +1290,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                   <span>
                                     {p.features?.maxContacts === 0 || p.features?.unlimitedContacts
                                       ? 'Kontak Tanpa Batas'
-                                      : `Hingga ${(Number(p.features?.maxContacts) || (isEntPlan ? (p.period === 'annual' ? 150000 : 100000) : isBusinessPlan ? 50000 : 10000)).toLocaleString('id-ID')} Kontak`}
+                                      : `Hingga ${(Number(p.features?.maxContacts) || (isEntPlan ? (p.period === 'annual' ? 200000 : 150000) : isBusinessPlan ? 50000 : isStarterPlan ? 2500 : 10000)).toLocaleString('id-ID')} Kontak`}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1303,10 +1303,21 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                 <div className="flex items-center gap-2">
                                   <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                   <span>
+                                    Siaran Promo:{' '}
+                                    <strong>
+                                      {p.features?.unlimitedBroadcast || p.features?.maxBroadcastPerMonth === 0
+                                        ? 'Tanpa Batas Prioritas'
+                                        : `${(Number(p.features?.maxBroadcastPerMonth) || (isStarterPlan ? 2500 : isBusinessPlan ? 100000 : 25000)).toLocaleString('id-ID')} pesan/bln`}
+                                    </strong>
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>
                                     Batas Ganti Nomor:{' '}
                                     <strong>
                                       {Number(p.features?.maxSessionIdentitySwitches) ||
-                                        (isEntPlan ? (p.period === 'annual' ? 35 : 25) : isBusinessPlan ? 15 : isStarterPlan ? 2 : 5)}
+                                        (isEntPlan ? (p.period === 'annual' ? 45 : 30) : isBusinessPlan ? 15 : isStarterPlan ? 2 : 5)}
                                       x
                                     </strong>{' '}
                                     per sesi
