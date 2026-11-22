@@ -1758,11 +1758,18 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET recent WAHA webhook & background sync logs
-  fastify.get('/logs', { preHandler: requireWahaRead }, async (req: FastifyRequest, reply: FastifyReply) => {
+  // GET recent WAHA webhook & background sync logs (strictly scoped to registered sessions of this company)
+  fastify.get<{
+    Querystring: { session?: string };
+  }>('/logs', { preHandler: requireWahaRead }, async (req, reply) => {
     try {
       const companyId = getRequestCompanyId(req);
-      const logs = wahaService.getWebhookEventLog(companyId, 100);
+      const sessionFilter = req.query?.session ? String(req.query.session).trim() : null;
+      const allowedSessions = await wahaService.getRegisteredSessionsForCompany(companyId);
+      const logs = wahaService.getWebhookEventLog(companyId, 100, {
+        session: sessionFilter,
+        allowedSessions,
+      });
       return reply.send({ success: true, data: logs });
     } catch (error: any) {
       return reply.status(500).send({ success: false, error: error.message });
@@ -2061,10 +2068,32 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       : payload?.name
       ? String(payload.name).trim()
       : null;
-    const companyId = queryCompanyId || (await wahaService.resolveCompanyIdForWebhookSession(sessionHint));
+    const resolvedCompanyId =
+      queryCompanyId || (await wahaService.resolveCompanyIdForWebhookSession(sessionHint));
+
+    if (!resolvedCompanyId) {
+      return reply.status(200).send({
+        success: true,
+        ignored: true,
+        reason: 'unregistered_session',
+      });
+    }
+
+    const companyId = resolvedCompanyId;
 
     return await runWithCompany(companyId, async () => {
     try {
+      if (sessionHint) {
+        const isRegistered = await wahaService.isSessionRegisteredForCompany(sessionHint, companyId);
+        if (!isRegistered) {
+          return reply.status(200).send({
+            success: true,
+            ignored: true,
+            reason: 'session_not_registered_for_company',
+          });
+        }
+      }
+
       console.log(`[WAHA Webhook][${companyId}] Received event: ${event}`);
 
       if (sessionHint && (event === 'message' || event === 'session.status')) {

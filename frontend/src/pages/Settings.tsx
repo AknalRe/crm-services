@@ -597,6 +597,7 @@ export const Settings: React.FC<SettingsProps> = ({
   >([]);
   const [wahaLogsLoading, setWahaLogsLoading] = useState(false);
   const [wahaLogFilter, setWahaLogFilter] = useState<'ALL' | 'MESSAGE' | 'SYNC' | 'ISSUE'>('ALL');
+  const [wahaLogSessionFilter, setWahaLogSessionFilter] = useState<string>('ALL');
   const [expandedWahaLogKey, setExpandedWahaLogKey] = useState<string | null>(null);
 
   const fetchWahaLogs = useCallback(async (silent = false) => {
@@ -1789,6 +1790,21 @@ export const Settings: React.FC<SettingsProps> = ({
                     {tab.label}
                   </button>
                 ))}
+                {sessions.length > 1 && (
+                  <select
+                    value={wahaLogSessionFilter}
+                    onChange={(e) => setWahaLogSessionFilter(e.target.value)}
+                    aria-label="Filter log berdasarkan sesi WAHA"
+                    className="h-7 px-2 rounded text-[11px] font-mono border border-gray-200 bg-white text-gray-700 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="ALL">Semua Sesi Terdaftar</option>
+                    {sessions.map((s) => (
+                      <option key={s.name} value={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button
                   type="button"
                   onClick={() => void fetchWahaLogs()}
@@ -1811,6 +1827,12 @@ export const Settings: React.FC<SettingsProps> = ({
             <div className="max-h-[680px] overflow-y-auto divide-y divide-gray-100">
               {(() => {
                 const visibleLogs = wahaLogs.filter((item) => {
+                  if (
+                    wahaLogSessionFilter !== 'ALL' &&
+                    String(item.session || '').trim().toLowerCase() !== wahaLogSessionFilter.toLowerCase()
+                  ) {
+                    return false;
+                  }
                   if (wahaLogFilter === 'MESSAGE') {
                     return item.event === 'message' || item.event === 'message.any';
                   }

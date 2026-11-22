@@ -785,6 +785,8 @@ export class WahaService {
   private lastWebhookEventByCompany = new Map<string, WahaWebhookTelemetry>();
   private webhookEventLogByCompany = new Map<string, WahaWebhookTelemetry[]>();
   private detectedPublicUrlByCompany = new Map<string, string>();
+  private registeredSessionsCache = new Map<string, { sessions: Set<string>; checkedAt: number }>();
+  private readonly REGISTERED_SESSIONS_CACHE_MS = 30_000;
 
   private constructor() { }
 
@@ -821,10 +823,157 @@ export class WahaService {
     return this.lastWebhookEventByCompany.get(cid) || null;
   }
 
-  public getWebhookEventLog(companyId?: string, limit = 80): WahaWebhookTelemetry[] {
+  public getWebhookEventLog(
+    companyId?: string,
+    limit = 80,
+    opts?: { session?: string | null; allowedSessions?: Set<string> | null }
+  ): WahaWebhookTelemetry[] {
     const cid = getActiveCompanyId(companyId);
     const items = this.webhookEventLogByCompany.get(cid) || [];
-    return items.slice(0, Math.max(1, limit));
+    const sessionFilter = String(opts?.session || '').trim().toLowerCase();
+    const allowed = opts?.allowedSessions && opts.allowedSessions.size > 0
+      ? new Set(Array.from(opts.allowedSessions).map((s) => s.trim().toLowerCase()).filter(Boolean))
+      : null;
+
+    const filtered = items.filter((item) => {
+      const itemSession = String(item.session || '').trim().toLowerCase();
+      if (sessionFilter && sessionFilter !== 'all' && itemSession !== sessionFilter) {
+        return false;
+      }
+      if (allowed && itemSession && !allowed.has(itemSession)) {
+        return false;
+      }
+      return true;
+    });
+    return filtered.slice(0, Math.max(1, limit));
+  }
+
+  public invalidateRegisteredSessionsCache(companyId?: string): void {
+    if (companyId) {
+      this.registeredSessionsCache.delete(getActiveCompanyId(companyId));
+    } else {
+      this.registeredSessionsCache.clear();
+    }
+  }
+
+  /**
+   * Returns the set of WAHA session names registered/owned by a specific company.
+   * Cached briefly so high-throughput webhooks never hammer the WAHA API or DB.
+   */
+  public async getRegisteredSessionsForCompany(companyId?: string): Promise<Set<string>> {
+    const cid = getActiveCompanyId(companyId);
+    const cached = this.registeredSessionsCache.get(cid);
+    if (cached && Date.now() - cached.checkedAt < this.REGISTERED_SESSIONS_CACHE_MS) {
+      return cached.sessions;
+    }
+
+    const sessions = new Set<string>();
+    try {
+      const conf = await this.getConfig();
+      const ownerPrefix = this.getOwnerPrefix(conf.mode, cid);
+      if (conf.session && conf.session.trim()) {
+        const cleanSaved = conf.session.trim();
+        if (!ownerPrefix || this.isOwnedSession(cleanSaved, ownerPrefix)) {
+          sessions.add(cleanSaved.toLowerCase());
+        }
+      }
+
+      // Include sessions recorded in session_identity_history for this company
+      const idHistRows = await db
+        .select({ value: companySettings.value })
+        .from(companySettings)
+        .where(and(eq(companySettings.companyId, cid), eq(companySettings.key, 'session_identity_history')))
+        .limit(1);
+      if (idHistRows[0]?.value) {
+        try {
+          const parsed = JSON.parse(idHistRows[0].value);
+          if (parsed && typeof parsed === 'object') {
+            for (const key of Object.keys(parsed)) {
+              const cleanKey = key.trim();
+              if (cleanKey && (!ownerPrefix || this.isOwnedSession(cleanKey, ownerPrefix))) {
+                sessions.add(cleanKey.toLowerCase());
+              }
+            }
+          }
+        } catch {
+          // ignore malformed JSON
+        }
+      }
+
+      // Include live sessions owned by this company in WAHA
+      try {
+        const { client } = await this.getClient();
+        const rawList = await this.fetchRawSessionList(client);
+        const otherPrefixes = new Set<string>();
+        if (conf.mode === 'INTERNAL' && !ownerPrefix) {
+          const allCompanyIds = await listActiveCompanyIds().catch(() => []);
+          for (const otherId of allCompanyIds) {
+            if (otherId === cid) continue;
+            const p = this.getOwnerPrefix('INTERNAL', otherId);
+            if (p) otherPrefixes.add(p);
+          }
+        }
+        for (const item of rawList) {
+          const name = String(item?.name || '').trim();
+          if (!name) continue;
+          if (ownerPrefix) {
+            if (this.isOwnedSession(name, ownerPrefix)) {
+              sessions.add(name.toLowerCase());
+            }
+          } else if (conf.mode === 'INTERNAL') {
+            // Default company in INTERNAL mode: exclude sessions owned by other tenants
+            let ownedByOther = false;
+            for (const op of otherPrefixes) {
+              if (this.isOwnedSession(name, op)) {
+                ownedByOther = true;
+                break;
+              }
+            }
+            if (!ownedByOther) {
+              sessions.add(name.toLowerCase());
+            }
+          } else {
+            // EXTERNAL mode: only treat sessions explicitly configured/tracked as registered
+            // (already added via conf.session and session_identity_history above)
+          }
+        }
+      } catch {
+        // WAHA server may be temporarily unreachable; rely on DB-registered sessions
+      }
+    } catch {
+      // ignore lookup errors cleanly
+    }
+
+    this.registeredSessionsCache.set(cid, { sessions, checkedAt: Date.now() });
+    return sessions;
+  }
+
+  /**
+   * Strictly checks whether an incoming webhook session belongs to and is registered for `companyId`.
+   */
+  public async isSessionRegisteredForCompany(
+    sessionName?: string | null,
+    companyId?: string
+  ): Promise<boolean> {
+    const clean = String(sessionName || '').trim();
+    if (!clean) return false;
+    const cid = getActiveCompanyId(companyId);
+
+    try {
+      const conf = await this.getConfig();
+      const ownerPrefix = this.getOwnerPrefix(conf.mode, cid);
+      if (ownerPrefix) {
+        return this.isOwnedSession(clean, ownerPrefix);
+      }
+
+      const registered = await this.getRegisteredSessionsForCompany(cid);
+      if (registered.size === 0) {
+        return false;
+      }
+      return registered.has(clean.toLowerCase());
+    } catch {
+      return false;
+    }
   }
 
   public clearWebhookEventLog(companyId?: string): void {
@@ -859,9 +1008,9 @@ export class WahaService {
     return base && base !== 'default' ? `${base}-${shortId}` : `t_${shortId}`;
   }
 
-  public async resolveCompanyIdForWebhookSession(sessionName?: string | null): Promise<string> {
+  public async resolveCompanyIdForWebhookSession(sessionName?: string | null): Promise<string | null> {
     const clean = String(sessionName || '').trim();
-    if (!clean) return DEFAULT_COMPANY_ID;
+    if (!clean) return null;
     try {
       const matched = await db
         .select({ companyId: companySettings.companyId })
@@ -871,6 +1020,7 @@ export class WahaService {
       if (matched[0]?.companyId) {
         return matched[0].companyId;
       }
+
       const companyIds = await listActiveCompanyIds();
       for (const cid of companyIds) {
         if (cid === DEFAULT_COMPANY_ID) continue;
@@ -879,10 +1029,36 @@ export class WahaService {
           return cid;
         }
       }
+
+      // Check session_identity_history across companies (supports multi-session per company)
+      const histRows = await db
+        .select({ companyId: companySettings.companyId, value: companySettings.value })
+        .from(companySettings)
+        .where(eq(companySettings.key, 'session_identity_history'));
+      const cleanLower = clean.toLowerCase();
+      for (const row of histRows) {
+        if (!row.value) continue;
+        try {
+          const parsed = JSON.parse(row.value);
+          if (parsed && typeof parsed === 'object') {
+            if (Object.keys(parsed).some((k) => k.trim().toLowerCase() === cleanLower)) {
+              return row.companyId;
+            }
+          }
+        } catch {
+          // ignore malformed JSON
+        }
+      }
+
+      // Check default company's registered sessions explicitly (never blindly accept foreign sessions)
+      const defaultRegistered = await this.getRegisteredSessionsForCompany(DEFAULT_COMPANY_ID);
+      if (defaultRegistered.has(cleanLower)) {
+        return DEFAULT_COMPANY_ID;
+      }
     } catch {
       // ignore lookup errors cleanly
     }
-    return DEFAULT_COMPANY_ID;
+    return null;
   }
 
   private isOwnedSession(sessionName: string, ownerPrefix: string | null): boolean {
@@ -2047,6 +2223,7 @@ export class WahaService {
     const ownerPrefix = this.getOwnerPrefix(conf.mode);
     this.assertOwnedSession(clean, ownerPrefix);
     await upsertCompanySetting('waha_session', clean);
+    this.invalidateRegisteredSessionsCache();
     return clean;
   }
 

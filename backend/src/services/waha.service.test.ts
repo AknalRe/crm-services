@@ -2792,3 +2792,44 @@ test('extractWahaPresence and normalizeWahaAck/extractWahaMessageIds handle GOWS
 
 
 
+
+test('getWebhookEventLog strictly isolates per company and filters by registered sessions', () => {
+  const companyA = 'cmp_webhook_iso_a';
+  const companyB = 'cmp_webhook_iso_b';
+  wahaService.clearWebhookEventLog(companyA);
+  wahaService.clearWebhookEventLog(companyB);
+
+  wahaService.recordWebhookEvent(
+    { receivedAt: '2026-11-22T01:00:00Z', event: 'message', session: 'sales-a', from: '628111', outcome: 'PROCESSED' },
+    companyA
+  );
+  wahaService.recordWebhookEvent(
+    { receivedAt: '2026-11-22T01:01:00Z', event: 'message', session: 'foreign-session', from: '628222', outcome: 'PROCESSED' },
+    companyA
+  );
+  wahaService.recordWebhookEvent(
+    { receivedAt: '2026-11-22T01:02:00Z', event: 'message', session: 'sales-b', from: '628333', outcome: 'PROCESSED' },
+    companyB
+  );
+
+  const filteredA = wahaService.getWebhookEventLog(companyA, 50, {
+    allowedSessions: new Set(['sales-a']),
+  });
+  assert.equal(filteredA.length, 1);
+  assert.equal(filteredA[0].session, 'sales-a');
+
+  const filteredBySession = wahaService.getWebhookEventLog(companyA, 50, {
+    session: 'sales-a',
+  });
+  assert.equal(filteredBySession.length, 1);
+  assert.equal(filteredBySession[0].from, '628111');
+
+  const logsB = wahaService.getWebhookEventLog(companyB, 50, {
+    allowedSessions: new Set(['sales-b']),
+  });
+  assert.equal(logsB.length, 1);
+  assert.equal(logsB[0].session, 'sales-b');
+
+  wahaService.clearWebhookEventLog(companyA);
+  wahaService.clearWebhookEventLog(companyB);
+});
