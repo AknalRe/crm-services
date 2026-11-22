@@ -273,7 +273,7 @@ const FAQS = [
   },
   {
     q: 'Apakah bisa mengelola lebih dari satu merek atau cabang usaha?',
-    a: 'Bisa. Satu akun dapat memiliki beberapa ruang kerja perusahaan dengan URL, daftar kontak, saluran komunikasi, dan tim masing-masing yang terpisah.',
+    a: 'Bisa. Satu akun dapat memiliki beberapa ruang kerja perusahaan dengan alamat ruang kerja, daftar kontak, saluran komunikasi, dan tim masing-masing yang terpisah.',
   },
   {
     q: 'Apakah riwayat pelanggan aman jika ada staf yang berganti atau keluar?',
@@ -740,11 +740,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <div
               key={activeModule.id}
               role="tabpanel"
-              className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 items-start"
+              className="bg-white border border-slate-200 rounded-lg p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 items-start"
             >
               <div className="lg:col-span-5 space-y-3">
-                <div className="w-10 h-10 rounded-lg bg-slate-900 text-white flex items-center justify-center">
-                  <ActiveModuleIcon className="w-5 h-5" strokeWidth={1.75} />
+                <div className="w-9 h-9 rounded-md bg-slate-100 border border-slate-200 text-slate-800 flex items-center justify-center">
+                  <ActiveModuleIcon className="w-4 h-4" strokeWidth={1.75} />
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 tracking-tight leading-snug">
                   {activeModule.title}
@@ -852,7 +852,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Desktop Table */}
-            <div className="hidden md:block border border-slate-200 rounded-xl overflow-x-auto">
+            <div className="hidden md:block border border-slate-200 rounded-lg overflow-x-auto">
               <table className="w-full min-w-[700px] text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-xs font-mono uppercase tracking-wider text-slate-600">
@@ -1095,10 +1095,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <section id="faq" className="bg-[#FAFAFA] border-b border-slate-200">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-14 sm:py-20 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
             {/* FAQ */}
-            <div className="lg:col-span-6 space-y-5">
-              <div className="space-y-1.5">
-                <h2 className="text-2xl font-bold text-slate-900 tracking-[-0.02em]">Pertanyaan umum</h2>
-                <p className="text-sm text-slate-600">Jawaban singkat sebelum mulai mencoba ruang kerja.</p>
+            <div className="lg:col-span-6 space-y-6">
+              <div className="space-y-1.5 lg:min-h-[60px]">
+                <h2 className="text-2xl font-bold text-slate-900 tracking-[-0.02em] leading-tight">
+                  Pertanyaan umum
+                </h2>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Jawaban singkat sebelum mulai mencoba ruang kerja.
+                </p>
               </div>
 
               <div className="divide-y divide-slate-200 border-y border-slate-200">
@@ -1110,16 +1114,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                         type="button"
                         aria-expanded={isOpen}
                         onClick={() => setOpenFaq(isOpen ? null : idx)}
-                        className="w-full py-4 text-left flex items-center justify-between gap-4 hover:text-[#2563EB] transition-colors"
+                        className={`w-full py-4 text-left flex items-center justify-between gap-4 hover:text-[#2563EB] transition-colors cursor-pointer rounded-sm ${FOCUS_RING}`}
                       >
-                        <span className="text-sm sm:text-[15px] font-semibold text-slate-900">{item.q}</span>
+                        <span className="text-sm sm:text-[15px] font-semibold text-slate-900">
+                          {item.q}
+                        </span>
                         <ChevronDown
-                          className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''
-                            }`}
+                          className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${
+                            isOpen ? 'rotate-180 text-slate-700' : ''
+                          }`}
                         />
                       </button>
                       {isOpen && (
-                        <div className="pb-4 text-sm text-slate-600 leading-relaxed">{item.a}</div>
+                        <div className="pb-4 pr-6 text-sm text-slate-600 leading-relaxed">
+                          {item.a}
+                        </div>
                       )}
                     </div>
                   );
@@ -1128,46 +1137,58 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
 
             {/* Custom Feature / Program Asset Inquiry */}
-            <div id="hubungi-kami" className="lg:col-span-6 space-y-5">
-              <div className="space-y-1.5">
-                <h2 className="text-2xl font-bold text-slate-900 tracking-[-0.02em]">
+            <div id="hubungi-kami" className="lg:col-span-6 space-y-6">
+              <div className="space-y-1.5 lg:min-h-[60px]">
+                <h2 className="text-2xl font-bold text-slate-900 tracking-[-0.02em] leading-tight">
                   Kebutuhan khusus atau beli aset program
                 </h2>
-                <p className="text-sm text-slate-600">
-                  Kirim detail kebutuhan Anda — tim kami akan membalas langsung melalui WhatsApp.
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Kirim detail kebutuhan Anda — tim kami membalas langsung melalui WhatsApp.
                 </p>
               </div>
 
               <form
                 onSubmit={handleInquirySubmit}
-                className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6 space-y-4"
+                className="rounded-lg border border-slate-200 bg-white p-5 sm:p-6 space-y-4"
               >
-                <div className="flex flex-wrap gap-1.5">
-                  {(
-                    ['Tambah Fitur Khusus', 'Beli Aset Program', 'Konsultasi & Implementasi'] as const
-                  ).map((opt) => {
-                    const selected = inquiryType === opt;
-                    return (
-                      <button
-                        key={opt}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => setInquiryType(opt)}
-                        className={`h-9 px-3 rounded-lg text-xs font-semibold border transition-colors ${selected
-                            ? 'bg-slate-900 text-white border-slate-900'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-medium text-slate-700">Topik Permintaan</span>
+                  <div
+                    role="group"
+                    aria-label="Topik Permintaan"
+                    className="grid grid-cols-1 sm:grid-cols-3 gap-1 p-1 rounded-md bg-slate-100 border border-slate-200"
+                  >
+                    {(
+                      [
+                        { value: 'Tambah Fitur Khusus', label: 'Fitur Khusus' },
+                        { value: 'Beli Aset Program', label: 'Aset Program' },
+                        { value: 'Konsultasi & Implementasi', label: 'Konsultasi' },
+                      ] as const
+                    ).map((opt) => {
+                      const selected = inquiryType === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => setInquiryType(opt.value)}
+                          className={`h-8 px-2.5 rounded text-xs font-semibold transition-colors cursor-pointer ${FOCUS_RING} ${
+                            selected
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
                           }`}
-                      >
-                        {opt}
-                      </button>
-                    );
-                  })}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label htmlFor="inquiry-name" className="block text-xs font-semibold text-slate-700">
-                      Nama Lengkap *
+                    <label htmlFor="inquiry-name" className="block text-xs font-medium text-slate-700">
+                      Nama Lengkap <span className="text-slate-400">*</span>
                     </label>
                     <input
                       id="inquiry-name"
@@ -1176,12 +1197,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       value={inquiryName}
                       onChange={(e) => setInquiryName(e.target.value)}
                       placeholder="Budi Santoso"
-                      className="w-full h-10 px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563EB]"
+                      className="w-full h-9 px-3 rounded-md border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-600/15 transition-colors"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label htmlFor="inquiry-phone" className="block text-xs font-semibold text-slate-700">
-                      WhatsApp Aktif *
+                    <label htmlFor="inquiry-phone" className="block text-xs font-medium text-slate-700">
+                      WhatsApp Aktif <span className="text-slate-400">*</span>
                     </label>
                     <input
                       id="inquiry-phone"
@@ -1190,14 +1211,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       value={inquiryPhone}
                       onChange={(e) => setInquiryPhone(e.target.value)}
                       placeholder="081234567890"
-                      className="w-full h-10 px-3 rounded-lg border border-slate-300 bg-white text-sm font-mono text-slate-900 focus:outline-none focus:border-[#2563EB]"
+                      className="w-full h-9 px-3 rounded-md border border-slate-300 bg-white text-sm font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-600/15 transition-colors"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <label htmlFor="inquiry-business" className="block text-xs font-semibold text-slate-700">
-                    Nama Usaha (opsional)
+                  <label htmlFor="inquiry-business" className="block text-xs font-medium text-slate-700">
+                    Nama Usaha <span className="text-slate-400 font-normal">(opsional)</span>
                   </label>
                   <input
                     id="inquiry-business"
@@ -1205,13 +1226,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     value={inquiryBusiness}
                     onChange={(e) => setInquiryBusiness(e.target.value)}
                     placeholder="Contoh: PT Maju Bersama"
-                    className="w-full h-10 px-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563EB]"
+                    className="w-full h-9 px-3 rounded-md border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-600/15 transition-colors"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label htmlFor="inquiry-message" className="block text-xs font-semibold text-slate-700">
-                    Detail Kebutuhan *
+                  <label htmlFor="inquiry-message" className="block text-xs font-medium text-slate-700">
+                    Detail Kebutuhan <span className="text-slate-400">*</span>
                   </label>
                   <textarea
                     id="inquiry-message"
@@ -1219,17 +1240,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     required
                     value={inquiryMessage}
                     onChange={(e) => setInquiryMessage(e.target.value)}
-                    placeholder="Jelaskan alur kerja, integrasi, atau kebutuhan aset program yang diinginkan..."
-                    className="w-full p-3 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:border-[#2563EB]"
+                    placeholder="Jelaskan alur kerja, jumlah cabang, atau kebutuhan khusus usaha Anda..."
+                    className="w-full p-3 rounded-md border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-600/15 transition-colors"
                   />
                 </div>
 
                 {inquiryStatus && (
                   <div
-                    className={`p-3 rounded-lg border text-xs font-medium flex items-start gap-2 ${inquiryStatus.ok
+                    className={`p-3 rounded-md border text-xs font-medium flex items-start gap-2 ${
+                      inquiryStatus.ok
                         ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                         : 'bg-rose-50 border-rose-200 text-rose-800'
-                      }`}
+                    }`}
                   >
                     {inquiryStatus.ok ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
@@ -1243,10 +1265,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <button
                   type="submit"
                   disabled={inquirySubmitting}
-                  className={`w-full h-10 px-4 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-colors ${FOCUS_RING}`}
+                  className={`w-full h-10 px-4 rounded-md bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${FOCUS_RING}`}
                 >
                   <span>{inquirySubmitting ? 'Mengirim...' : 'Kirim Permintaan via WhatsApp'}</span>
-                  <ArrowRight className="w-4 h-4" strokeWidth={2} />
+                  <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
                 </button>
               </form>
             </div>
