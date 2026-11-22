@@ -1,6 +1,6 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { eq, and, ne, sql } from 'drizzle-orm';
-import { redisConnection } from './redis';
+import { redisConnection, isTestRuntime } from './redis';
 import { db, waitForDbInitialized } from '../db';
 import {
   campaigns,
@@ -359,6 +359,7 @@ export const broadcastWorker = new Worker<SendMessageJobData>(
   {
     connection: redisConnection,
     concurrency: 1, // Sequential execution for anti-ban rate limiting
+    autorun: !isTestRuntime,
   }
 );
 

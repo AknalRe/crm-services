@@ -380,7 +380,9 @@ const VALID_TONES = new Set(['PROFESSIONAL', 'FRIENDLY', 'FORMAL', 'CASUAL', 'EM
 const VALID_LANGUAGES = new Set(['INDONESIAN', 'ENGLISH', 'BILINGUAL', 'MATCH_USER']);
 const VALID_LENGTHS = new Set(['CONCISE', 'BALANCED', 'DETAILED']);
 const VALID_EMOJI = new Set(['NONE', 'MINIMAL', 'MODERATE']);
-const VALID_BUILTIN_TOOL_NAMES = new Set(BUILTIN_CRM_TOOLS.map((t) => t.name));
+function getValidBuiltinToolNames(): Set<string> {
+  return new Set((BUILTIN_CRM_TOOLS || []).map((t) => t.name));
+}
 
 export const DEFAULT_AI_CONFIG: AiAgentConfig = {
   enabled: false,
@@ -519,7 +521,7 @@ function sanitizeBuiltinTools(raw: unknown, fallback: string[]): string[] {
     new Set(
       raw
         .map((x) => String(x || '').trim())
-        .filter((x) => VALID_BUILTIN_TOOL_NAMES.has(x))
+        .filter((x) => getValidBuiltinToolNames().has(x))
     )
   );
 }

@@ -63,7 +63,6 @@ import {
   PinOff,
   Shield,
   Image as ImageIcon,
-  Sparkles,
   FolderOpen,
   BookmarkPlus,
   Play,
@@ -6712,7 +6711,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             return (
                               <div className="flex items-center justify-end gap-1 pb-1 border-b border-slate-200/70">
                                 <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-700">
-                                  <Sparkles className="w-2.5 h-2.5 shrink-0" />
+                                  <Bot className="w-2.5 h-2.5 shrink-0" />
                                   <span>{msgMeta?.sentViaLabel || msg.senderName || 'Bot AI'}</span>
                                 </span>
                               </div>
@@ -8088,7 +8087,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
                         }`}
                       >
-                        <Sparkles className="w-3 h-3" />
+                        <ImageIcon className="w-3 h-3" />
                         <span>HD</span>
                         <span className="text-[9px] font-normal opacity-90">
                           {isHdMode ? 'Aktif' : 'Standar'}
@@ -8227,7 +8226,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             : 'text-gray-600 hover:text-gray-900'
                         }`}
                       >
-                        <Sparkles className="w-3.5 h-3.5" />
+                        <Sticker className="w-3.5 h-3.5" />
                         <span>
                           Stiker ({whatsappStickers.length + savedStickers.length + PRESET_STICKER_TEMPLATES.length})
                         </span>
@@ -9377,7 +9376,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                       onClick={() => openComposerPicker('STICKER')}
                       className="flex flex-col items-center justify-center gap-1 p-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 cursor-pointer"
                     >
-                      <Sparkles className="w-4 h-4 text-violet-600" />
+                      <Sticker className="w-4 h-4 text-violet-600" />
                       <span>Stiker</span>
                     </button>
                   )}

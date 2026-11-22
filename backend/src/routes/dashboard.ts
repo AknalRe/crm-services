@@ -1840,20 +1840,70 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           list = list.filter((c) => isDateInRange(c.createdAt, dateRange.start, dateRange.end));
         }
 
+        const [recRows, inbRows] = await Promise.all([
+          db
+            .select({
+              campaignId: campaignRecipients.campaignId,
+              contactId: campaignRecipients.contactId,
+              sentAt: campaignRecipients.sentAt,
+            })
+            .from(campaignRecipients)
+            .where(eq(campaignRecipients.companyId, companyId)),
+          db
+            .select({
+              contactId: chatMessages.contactId,
+              createdAt: chatMessages.createdAt,
+            })
+            .from(chatMessages)
+            .where(and(eq(chatMessages.companyId, companyId), eq(chatMessages.direction, 'INBOUND'))),
+        ]);
+
+        const inboundByContact = new Map<string, number[]>();
+        for (const m of inbRows) {
+          if (!m.contactId || !m.createdAt) continue;
+          const ms = new Date(m.createdAt).getTime();
+          if (Number.isNaN(ms)) continue;
+          const arr = inboundByContact.get(m.contactId) || [];
+          arr.push(ms);
+          inboundByContact.set(m.contactId, arr);
+        }
+
+        const respondedMap = new Map<string, Set<string>>();
+        const thirtyDaysMs = 30 * 86_400_000;
+        for (const r of recRows) {
+          if (!r.sentAt || !r.contactId) continue;
+          const sentMs = new Date(r.sentAt).getTime();
+          if (Number.isNaN(sentMs)) continue;
+          const msgs = inboundByContact.get(r.contactId);
+          if (!msgs) continue;
+          if (msgs.some((ms) => ms >= sentMs && ms <= sentMs + thirtyDaysMs)) {
+            const set = respondedMap.get(r.campaignId) || new Set<string>();
+            set.add(r.contactId);
+            respondedMap.set(r.campaignId, set);
+          }
+        }
+
         const csv = toCsv(
-          ['ID', 'Judul', 'Tipe', 'Status', 'Total', 'Terkirim', 'Sampai', 'Dibaca', 'Gagal', 'Dibuat'],
-          list.map((c) => [
-            c.id,
-            c.title,
-            c.type,
-            c.status,
-            c.totalCount,
-            c.sentCount,
-            c.deliveredCount,
-            c.readCount,
-            c.failedCount,
-            c.createdAt ? new Date(c.createdAt).toISOString() : '',
-          ])
+          ['ID', 'Judul', 'Tipe', 'Status', 'Total', 'Terkirim', 'Sampai', 'Dibaca', 'Merespon', 'Response Rate (%)', 'Gagal', 'Dibuat'],
+          list.map((c) => {
+            const respondedCount = (respondedMap.get(c.id) || new Set()).size;
+            const sentCount = Number(c.sentCount || 0);
+            const responseRate = sentCount > 0 ? Math.round((respondedCount / sentCount) * 100) : 0;
+            return [
+              c.id,
+              c.title,
+              c.type,
+              c.status,
+              c.totalCount,
+              c.sentCount,
+              c.deliveredCount,
+              c.readCount,
+              respondedCount,
+              responseRate,
+              c.failedCount,
+              c.createdAt ? new Date(c.createdAt).toISOString() : '',
+            ];
+          })
         );
         reply.header('Content-Type', 'text/csv; charset=utf-8');
         reply.header('Content-Disposition', 'attachment; filename="laporan-broadcast-crm.csv"');

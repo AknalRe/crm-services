@@ -1581,7 +1581,7 @@ async function executeBuiltinCrmTool(
       }
       return {
         ok: true,
-        output: `Obrolan berhasil diselesaikan (simulasi RESOLVED). ${sendCsat ? 'Tautan survei kepuasan pelanggan (CSAT) dengan rating 1-5 bintang akan dikirimkan otomatis ke WhatsApp pelanggan.' : 'Tanpa pengiriman survei CSAT.'}`,
+        output: `Obrolan berhasil diselesaikan (simulasi RESOLVED). ${sendCsat ? 'Tautan survei kepuasan pelanggan (CSAT) dengan rating 1-5 bintang akan dikirimkan otomatis ke kanal pelanggan.' : 'Tanpa pengiriman survei CSAT.'}`,
       };
     }
 
@@ -1594,13 +1594,12 @@ async function executeBuiltinCrmTool(
       return { ok: false, output: 'Percakapan tidak ditemukan untuk diselesaikan.' };
     }
 
+    if (conv.status === 'RESOLVED') {
+      return { ok: true, output: 'Obrolan sudah berstatus RESOLVED sebelumnya.' };
+    }
+
     const now = new Date();
     const convCompanyId = conv.companyId || companyId;
-    const durationSeconds = conv.sessionStartedAt
-      ? Math.max(0, Math.round((now.getTime() - new Date(conv.sessionStartedAt).getTime()) / 1000))
-      : conv.firstInboundAt
-      ? Math.max(0, Math.round((now.getTime() - new Date(conv.firstInboundAt).getTime()) / 1000))
-      : null;
 
     await db
       .update(conversations)
@@ -1615,9 +1614,10 @@ async function executeBuiltinCrmTool(
       ctx.sideEffects.resolved = { closingMessage, sendCsat, resolutionNotes };
     }
 
-    // Kirim survei CSAT jika diinginkan
-    let csatOutcome = 'Survei CSAT tidak diminta';
-    if (sendCsat) {
+    // Kirim survei CSAT jika diinginkan dan percakapan memenuhi syarat penilaian
+    const isExcluded = Boolean(conv.excludeFromMetrics || conv.isGroup);
+    let csatOutcome = isExcluded ? 'Obrolan non-penilaian/grup, tanpa CSAT' : 'Survei CSAT tidak diminta';
+    if (sendCsat && !isExcluded) {
       const [contact] = await db
         .select()
         .from(contacts)
@@ -1629,7 +1629,7 @@ async function executeBuiltinCrmTool(
           await sendCsatCtaForConversation(refreshedConv, contact, {
             triggerType: 'AUTO_RESOLVE',
           });
-          csatOutcome = 'Survei CSAT otomatis terkirim ke WhatsApp pelanggan';
+          csatOutcome = `Survei CSAT otomatis terkirim ke kanal ${conv.channel || 'pelanggan'}`;
         } catch (csatErr: any) {
           csatOutcome = `Gagal mengirim CSAT: ${csatErr.message}`;
           console.warn('[AI] crm_resolve_conversation CSAT error:', csatErr.message);

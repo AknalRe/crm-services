@@ -8,6 +8,7 @@ import {
   contacts,
   conversations,
   crmAgents,
+  csatResponses,
   webhookDeliveries,
 } from '../db/schema';
 import { getSettingMap } from '../routes/auth';
@@ -719,6 +720,27 @@ export function startInactivityAutoResolveMonitor(): void {
   }, 60_000);
 }
 
+export function shouldAutoResolveByLastDirection(
+  lastChatDirection: string | null | undefined
+): boolean {
+  return String(lastChatDirection || '').toUpperCase() === 'OUTBOUND';
+}
+
+export function shouldSendCsatOnAutoResolve(params: {
+  settingEnabled: boolean;
+  csatSentAt?: Date | string | null;
+  lastInboundAt?: Date | string | null;
+}): boolean {
+  if (!params.settingEnabled) return false;
+  if (!params.csatSentAt) return true;
+  const sentMs = new Date(params.csatSentAt).getTime();
+  if (Number.isNaN(sentMs)) return true;
+  if (!params.lastInboundAt) return false;
+  const inbMs = new Date(params.lastInboundAt).getTime();
+  if (Number.isNaN(inbMs)) return false;
+  return sentMs < inbMs;
+}
+
 export async function runInactivityAutoResolveForCompany(companyId: string): Promise<number> {
   let resolvedCount = 0;
   try {
@@ -745,29 +767,27 @@ export async function runInactivityAutoResolveForCompany(companyId: string): Pro
 
     if (candidates.length === 0) return 0;
 
-    const shouldSendCsat = settings.auto_resolve_inactivity_send_csat !== 'false';
+    const shouldSendCsatSetting = settings.auto_resolve_inactivity_send_csat !== 'false';
 
     for (const conv of candidates) {
-      // Verifikasi pesan terakhir: hanya auto-resolve jika pesan terakhir dikirim oleh CS / Agent (OUTBOUND)
-      // Artinya kita sudah merespon dan menunggu pelanggan, namun pelanggan tidak kunjung membalas
+      // Verifikasi pesan chat terakhir (abaikan log SYSTEM agar tidak salah resolve chat pelanggan yang belum dibalas)
       const lastMessages = await db
         .select({ direction: chatMessages.direction })
         .from(chatMessages)
-        .where(eq(chatMessages.conversationId, conv.id))
+        .where(
+          and(
+            eq(chatMessages.conversationId, conv.id),
+            inArray(chatMessages.direction, ['INBOUND', 'OUTBOUND'])
+          )
+        )
         .orderBy(desc(chatMessages.createdAt))
         .limit(1);
 
-      if (lastMessages[0] && lastMessages[0].direction === 'INBOUND') {
-        // Pelanggan yang mengirim pesan terakhir dan belum dibalas oleh tim, jangan diselesaikan otomatis!
+      if (!shouldAutoResolveByLastDirection(lastMessages[0]?.direction)) {
         continue;
       }
 
       const now = new Date();
-      const durationSeconds = conv.sessionStartedAt
-        ? Math.max(0, Math.round((now.getTime() - new Date(conv.sessionStartedAt).getTime()) / 1000))
-        : conv.firstInboundAt
-        ? Math.max(0, Math.round((now.getTime() - new Date(conv.firstInboundAt).getTime()) / 1000))
-        : null;
 
       await db
         .update(conversations)
@@ -780,8 +800,23 @@ export async function runInactivityAutoResolveForCompany(companyId: string): Pro
 
       resolvedCount++;
 
-      // Kirim survei CSAT otomatis jika opsi diaktifkan
+      // Kirim survei CSAT otomatis jika opsi diaktifkan dan belum terkirim pada siklus ini
       let csatOutcome = 'tanpa CSAT';
+      let lastCsatSentAt: Date | null = null;
+      if (shouldSendCsatSetting) {
+        const [latestCsat] = await db
+          .select({ sentAt: csatResponses.sentAt })
+          .from(csatResponses)
+          .where(eq(csatResponses.conversationId, conv.id))
+          .orderBy(desc(csatResponses.sentAt))
+          .limit(1);
+        lastCsatSentAt = latestCsat?.sentAt ?? null;
+      }
+      const shouldSendCsat = shouldSendCsatOnAutoResolve({
+        settingEnabled: shouldSendCsatSetting,
+        csatSentAt: lastCsatSentAt,
+        lastInboundAt: conv.lastInboundAt,
+      });
       if (shouldSendCsat) {
         const [contact] = await db
           .select()
