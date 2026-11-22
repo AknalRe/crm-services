@@ -491,14 +491,25 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     }
   );
 
-  // OAuth helpers (Reneo OAuth Broker + Direct Meta/Threads OAuth with DB & env fallback)
+  // OAuth helpers (Reneo OAuth Broker + Direct Meta/Instagram/Threads OAuth with DB & env fallback)
   const DEFAULT_RENEO_META_APP_ID = '2455041348580254';
+  const DEFAULT_RENEO_INSTAGRAM_APP_ID = '1906731137407082';
   const DEFAULT_RENEO_THREADS_APP_ID = '1742677016843989';
 
   const resolveEffectiveOAuthCredentials = async () => {
     const sysMap = await getSystemSettingMap().catch(() => ({} as Record<string, string>));
     const metaAppId = (sysMap.meta_app_id || config.meta.appId || DEFAULT_RENEO_META_APP_ID).trim();
     const metaAppSecret = (sysMap.meta_app_secret || config.meta.appSecret || '').trim();
+    const instagramAppId = (
+      sysMap.instagram_app_id ||
+      process.env.INSTAGRAM_APP_ID ||
+      DEFAULT_RENEO_INSTAGRAM_APP_ID
+    ).trim();
+    const instagramAppSecret = (
+      sysMap.instagram_app_secret ||
+      process.env.INSTAGRAM_APP_SECRET ||
+      ''
+    ).trim();
     const threadsAppId = (sysMap.threads_app_id || config.meta.threadsAppId || DEFAULT_RENEO_THREADS_APP_ID).trim();
     const threadsAppSecret = (sysMap.threads_app_secret || config.meta.threadsAppSecret || '').trim();
     const webhookVerifyToken = (
@@ -509,11 +520,14 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     return {
       metaAppId,
       metaAppSecret,
+      instagramAppId,
+      instagramAppSecret,
       threadsAppId,
       threadsAppSecret,
       webhookVerifyToken,
       reneoOAuthReady: Boolean(config.reneo.oauthUrl),
       directMetaReady: Boolean(metaAppId),
+      directInstagramReady: Boolean(instagramAppId && instagramAppSecret),
       directThreadsReady: Boolean(threadsAppId),
     };
   };
@@ -674,9 +688,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       data: {
         reneoOAuthReady: creds.reneoOAuthReady,
         directMetaReady: creds.directMetaReady,
+        directInstagramReady: creds.directInstagramReady,
         directThreadsReady: creds.directThreadsReady,
         metaAppId: creds.metaAppId,
         hasMetaAppSecret: Boolean(creds.metaAppSecret),
+        instagramAppId: creds.instagramAppId,
+        hasInstagramAppSecret: Boolean(creds.instagramAppSecret),
         threadsAppId: creds.threadsAppId,
         hasThreadsAppSecret: Boolean(creds.threadsAppSecret),
         webhookVerifyToken: creds.webhookVerifyToken,
@@ -688,6 +705,8 @@ export default async function channelsRouter(fastify: FastifyInstance) {
     Body: {
       metaAppId?: string;
       metaAppSecret?: string;
+      instagramAppId?: string;
+      instagramAppSecret?: string;
       threadsAppId?: string;
       threadsAppSecret?: string;
       webhookVerifyToken?: string;
@@ -699,6 +718,15 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       }
       if (req.body?.metaAppSecret !== undefined && String(req.body.metaAppSecret).trim() !== '') {
         await upsertSystemSetting('meta_app_secret', String(req.body.metaAppSecret).trim());
+      }
+      if (req.body?.instagramAppId !== undefined) {
+        await upsertSystemSetting(
+          'instagram_app_id',
+          String(req.body.instagramAppId).trim() || DEFAULT_RENEO_INSTAGRAM_APP_ID
+        );
+      }
+      if (req.body?.instagramAppSecret !== undefined && String(req.body.instagramAppSecret).trim() !== '') {
+        await upsertSystemSetting('instagram_app_secret', String(req.body.instagramAppSecret).trim());
       }
       if (req.body?.threadsAppId !== undefined) {
         await upsertSystemSetting('threads_app_id', String(req.body.threadsAppId).trim() || DEFAULT_RENEO_THREADS_APP_ID);
@@ -715,9 +743,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         data: {
           reneoOAuthReady: creds.reneoOAuthReady,
           directMetaReady: creds.directMetaReady,
+          directInstagramReady: creds.directInstagramReady,
           directThreadsReady: creds.directThreadsReady,
           metaAppId: creds.metaAppId,
           hasMetaAppSecret: Boolean(creds.metaAppSecret),
+          instagramAppId: creds.instagramAppId,
+          hasInstagramAppSecret: Boolean(creds.instagramAppSecret),
           threadsAppId: creds.threadsAppId,
           hasThreadsAppSecret: Boolean(creds.threadsAppSecret),
           webhookVerifyToken: creds.webhookVerifyToken,
@@ -794,11 +825,25 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return reply.redirect(target);
       }
 
+      if (channel === 'INSTAGRAM' && oauthCreds.directInstagramReady) {
+        const igState = signOAuthState({
+          channel: 'INSTAGRAM',
+          igDirect: true,
+          connectToken: connectToken || null,
+          companyId: targetCompanyId,
+          returnBase: baseUrl,
+        });
+        const igScope =
+          'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights';
+        const target = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${encodeURIComponent(oauthCreds.instagramAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=${encodeURIComponent(igScope)}&state=${encodeURIComponent(igState)}`;
+        return reply.redirect(target);
+      }
+
       if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK' || channel === 'META' || channel === 'WHATSAPP_CLOUD') && oauthCreds.metaAppId) {
         const scope =
           channel === 'WHATSAPP_CLOUD'
             ? 'whatsapp_business_management,whatsapp_business_messaging,business_management'
-            : 'pages_show_list,pages_messaging,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish';
+            : 'pages_show_list,pages_messaging,pages_manage_posts,pages_read_engagement,business_management,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish';
         // When metaAppSecret is configured, use code flow; otherwise use zero-secret Client OAuth token flow (response_type=token)
         const responseType = oauthCreds.metaAppSecret ? 'code' : 'token';
         const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(oauthCreds.metaAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&response_type=${responseType}&auth_type=rerequest&state=${encodeURIComponent(state)}`;
@@ -895,7 +940,57 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       } else if (req.query?.code || req.query?.access_token) {
         const oauthCreds = await resolveEffectiveOAuthCredentials();
         const callbackUrl = `${returnBase}/api/channels/oauth/callback`;
-        if (parsedState.channel === 'THREADS' && oauthCreds.threadsAppId) {
+        if (parsedState.channel === 'INSTAGRAM' && parsedState.igDirect && req.query?.code && oauthCreds.instagramAppId && oauthCreds.instagramAppSecret) {
+          const cleanCode = String(req.query.code).replace(/#_$/, '').trim();
+          const tokenRes = await axios.post(
+            'https://api.instagram.com/oauth/access_token',
+            new URLSearchParams({
+              client_id: oauthCreds.instagramAppId,
+              client_secret: oauthCreds.instagramAppSecret,
+              grant_type: 'authorization_code',
+              redirect_uri: callbackUrl,
+              code: cleanCode,
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
+          );
+          const firstEntry = Array.isArray(tokenRes.data?.data) ? tokenRes.data.data[0] : tokenRes.data;
+          let igToken = String(firstEntry?.access_token || '').trim();
+          const fallbackIgId = String(firstEntry?.user_id || '').trim();
+          if (igToken) {
+            try {
+              const longIgRes = await axios.get('https://graph.instagram.com/access_token', {
+                params: {
+                  grant_type: 'ig_exchange_token',
+                  client_secret: oauthCreds.instagramAppSecret,
+                  access_token: igToken,
+                },
+                timeout: 10000,
+              });
+              if (longIgRes.data?.access_token) {
+                igToken = String(longIgRes.data.access_token).trim();
+              }
+            } catch {
+              // fallback to short-lived IG token
+            }
+            const meRes = await axios.get('https://graph.instagram.com/v21.0/me', {
+              params: {
+                fields: 'id,user_id,username,name,account_type',
+                access_token: igToken,
+              },
+              timeout: 10000,
+            });
+            const igUserId = String(meRes.data?.user_id || meRes.data?.id || fallbackIgId);
+            const igDisplay = meRes.data?.username
+              ? `@${meRes.data.username}`
+              : meRes.data?.name || 'Instagram';
+            accountsToSave.push({
+              channel: 'INSTAGRAM',
+              name: igDisplay,
+              accountId: igUserId,
+              accessToken: igToken,
+            });
+          }
+        } else if (parsedState.channel === 'THREADS' && oauthCreds.threadsAppId) {
           let shortToken = String(req.query?.access_token || '').trim();
           let fallbackUserId = '';
           if (!shortToken && req.query?.code && oauthCreds.threadsAppSecret) {
@@ -982,11 +1077,13 @@ export default async function channelsRouter(fastify: FastifyInstance) {
             const pagesRes = await axios.get('https://graph.facebook.com/v20.0/me/accounts', {
               params: {
                 limit: 100,
-                fields: 'id,name,access_token,instagram_business_account{id,username,name}',
+                fields:
+                  'id,name,access_token,instagram_business_account{id,username,name},connected_instagram_account{id,username,name}',
                 access_token: userToken,
               },
               timeout: 15000,
             });
+            const seenIgIds = new Set<string>();
             for (const page of pagesRes.data?.data || []) {
               const pageToken = String(page.access_token || userToken);
               const wantFacebook = parsedState.channel === 'FACEBOOK' || parsedState.channel === 'META';
@@ -1002,8 +1099,9 @@ export default async function channelsRouter(fastify: FastifyInstance) {
                   subscribePageToken: pageToken,
                 });
               }
-              if (wantInstagram && page.instagram_business_account?.id) {
-                const ig = page.instagram_business_account;
+              const ig = page.instagram_business_account || page.connected_instagram_account;
+              if (wantInstagram && ig?.id && !seenIgIds.has(String(ig.id))) {
+                seenIgIds.add(String(ig.id));
                 accountsToSave.push({
                   channel: 'INSTAGRAM',
                   name: ig.username ? `@${ig.username}` : ig.name || page.name,
@@ -1012,6 +1110,42 @@ export default async function channelsRouter(fastify: FastifyInstance) {
                   subscribePageId: String(page.id),
                   subscribePageToken: pageToken,
                 });
+              }
+            }
+
+            // Fallback: also inspect Meta Business Portfolios (/me/businesses) for Instagram Business accounts not linked to a classic Facebook Page
+            if (
+              (parsedState.channel === 'INSTAGRAM' || parsedState.channel === 'META') &&
+              seenIgIds.size === 0
+            ) {
+              try {
+                const bizRes = await axios.get('https://graph.facebook.com/v20.0/me/businesses', {
+                  params: {
+                    fields:
+                      'id,name,instagram_business_accounts{id,username,name},owned_instagram_accounts{id,username,name}',
+                    access_token: userToken,
+                  },
+                  timeout: 12000,
+                });
+                for (const biz of bizRes.data?.data || []) {
+                  const igList = [
+                    ...(biz.instagram_business_accounts?.data || []),
+                    ...(biz.owned_instagram_accounts?.data || []),
+                  ];
+                  for (const ig of igList) {
+                    if (ig?.id && !seenIgIds.has(String(ig.id))) {
+                      seenIgIds.add(String(ig.id));
+                      accountsToSave.push({
+                        channel: 'INSTAGRAM',
+                        name: ig.username ? `@${ig.username}` : ig.name || biz.name || 'Instagram',
+                        accountId: String(ig.id),
+                        accessToken: userToken,
+                      });
+                    }
+                  }
+                }
+              } catch {
+                // ignore if business_management not granted
               }
             }
           }
