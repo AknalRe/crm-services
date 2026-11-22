@@ -27,6 +27,9 @@ import {
   SlidersHorizontal,
   Lock,
   Globe2,
+  Bot,
+  Award,
+  UserCheck,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { Button } from '../components/ui/Button';
@@ -887,17 +890,36 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-2.5 sm:mb-3 gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
-                <Cake className="w-3.5 h-3.5 text-slate-500" />
-                Otomasi Ulang Tahun
-              </span>
+        <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 flex flex-col justify-between space-y-4">
+          <div className="space-y-3.5">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-1.5 flex-wrap">
+                  <Cake className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>Otomasi Ulang Tahun</span>
+                  <span
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                      summary.birthdayEnabled
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-gray-50 text-gray-600 border-gray-200'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        summary.birthdayEnabled ? 'bg-emerald-500' : 'bg-gray-400'
+                      }`}
+                    />
+                    {summary.birthdayEnabled ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Ucapan personal terjadwal &amp; analitik cakupan tanggal lahir pelanggan
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => onNavigate('birthday')}
-                className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-0.5"
+                className="text-xs text-indigo-600 hover:text-indigo-700 font-medium inline-flex items-center gap-0.5 shrink-0 cursor-pointer"
               >
                 Pengaturan <ArrowUpRight className="w-3.5 h-3.5" />
               </button>
@@ -914,29 +936,81 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   shortcutLabel: 'Kelola Ucapan Ultah',
                 })
               }
-              className="text-left group block w-full cursor-pointer"
+              className="w-full text-left group rounded-md p-2.5 bg-gray-50/80 hover:bg-indigo-50/50 border border-gray-200/90 transition-colors cursor-pointer"
             >
-              <h4 className="text-base font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors inline-flex items-center gap-1">
-                <span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs sm:text-sm font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">
                   {summary.birthdayTodayCount > 0
                     ? `${summary.birthdayTodayCount} Pelanggan Berulang Tahun Hari Ini`
                     : 'Belum Ada Pelanggan Ulang Tahun Hari Ini'}
                 </span>
-                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-indigo-600" />
-              </h4>
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-indigo-600 shrink-0" />
+              </div>
+              <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">
+                Sistem memeriksa tanggal lahir setiap pagi dan mengirim ucapan personal otomatis dengan jeda aman.
+              </p>
             </button>
-            <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-              Sistem memeriksa tanggal lahir pelanggan setiap pagi dan mengirimkan ucapan personal dengan jeda pengiriman teratur.
-            </p>
+
+            <div>
+              <div className="flex justify-between text-xs font-medium mb-1.5">
+                <span className="text-gray-600">Kelengkapan Tanggal Lahir Pelanggan</span>
+                <span className="text-indigo-700 font-semibold tabular-nums">
+                  {summary.birthdayCoverageRate ?? 0}% ({summary.birthdayWithDateCount ?? 0}/{summary.totalContacts})
+                </span>
+              </div>
+              <div className="w-full bg-gray-100 rounded h-2 overflow-hidden">
+                <div
+                  className="bg-indigo-600 h-2 rounded transition-all duration-300"
+                  style={{ width: `${Math.min(100, summary.birthdayCoverageRate ?? 0)}%` }}
+                />
+              </div>
+            </div>
           </div>
 
-          <div className="mt-5 pt-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2.5">
-            <span className="text-xs text-gray-500">
-              Jadwal Harian: <strong className="text-gray-900 font-mono">08:00 WIB</strong>
-            </span>
-            <Button variant="secondary" size="sm" onClick={() => onNavigate('birthday')}>
-              Lihat Daftar Ulang Tahun
-            </Button>
+          <div className="pt-3 border-t border-gray-200 space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+              <div className="bg-gray-50 border border-gray-200 p-2 rounded-md min-w-0">
+                <span className="block text-gray-500 text-[10px] truncate">Terdata Tgl Lahir</span>
+                <span className="font-bold text-gray-900 font-mono tabular-nums">
+                  {summary.birthdayWithDateCount ?? 0}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void openDrilldown({
+                    title: 'Daftar Pelanggan Berulang Tahun Hari Ini',
+                    kind: 'contacts',
+                    filter: 'birthday_today',
+                    shortcutTab: 'birthday',
+                    shortcutLabel: 'Kelola Ucapan Ultah',
+                  })
+                }
+                className="bg-gray-50 hover:bg-indigo-50/50 border border-gray-200 p-2 rounded-md min-w-0 transition-colors cursor-pointer"
+              >
+                <span className="block text-gray-500 text-[10px] truncate">Ultah Hari Ini</span>
+                <span className="font-bold text-indigo-700 font-mono tabular-nums">
+                  {summary.birthdayTodayCount}
+                </span>
+              </button>
+              <div className="bg-gray-50 border border-gray-200 p-2 rounded-md min-w-0">
+                <span className="block text-gray-500 text-[10px] truncate">Ultah Bulan Ini</span>
+                <span className="font-bold text-gray-900 font-mono tabular-nums">
+                  {summary.birthdayThisMonthCount ?? 0}
+                </span>
+              </div>
+              <div className="bg-gray-50 border border-gray-200 p-2 rounded-md min-w-0">
+                <span className="block text-gray-500 text-[10px] truncate">Jadwal Harian</span>
+                <span className="font-bold text-gray-900 font-mono tabular-nums">
+                  {summary.birthdaySendTime || '08:00'} WIB
+                </span>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button variant="secondary" size="sm" onClick={() => onNavigate('birthday')}>
+                Lihat Daftar Ulang Tahun
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -1758,298 +1832,456 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       </div>
 
-      {/* Per-Agent Performance Breakdown */}
-      {convAnalytics.byAgent && convAnalytics.byAgent.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5">
-          <div className="flex items-center justify-between gap-2 sm:mb-3">
-            <button
-              type="button"
-              onClick={() => toggleMobileSection('agents')}
-              className="sm:pointer-events-none w-full text-left flex items-center justify-between gap-2"
-            >
-              <div className="min-w-0">
-                <h3 className="font-semibold text-gray-900 text-sm inline-flex items-center gap-1.5">
-                  <span>Performa Percakapan per Agent</span>
-                  <span className="sm:hidden px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono">
-                    {convAnalytics.byAgent.length}
-                  </span>
-                </h3>
-                <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">
-                  Ringkasan obrolan, kepatuhan SLA, dan rata-rata CSAT. Klik agent atau nilai CSAT untuk melihat rincian per kriteria.
-                </p>
-              </div>
-              <span className="sm:hidden text-[11px] text-indigo-600 font-medium inline-flex items-center gap-0.5 shrink-0">
-                <span>{isMobileSectionOpen('agents') ? 'Tutup' : 'Detail'}</span>
-                {isMobileSectionOpen('agents') ? (
-                  <ChevronDown className="w-3.5 h-3.5" />
-                ) : (
-                  <ChevronRight className="w-3.5 h-3.5" />
-                )}
-              </span>
-            </button>
-          </div>
-          <div className={`${isMobileSectionOpen('agents') ? 'mt-3' : 'hidden'} sm:hidden divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden`}>
-            {sortedAgents.map((ag) => {
-              const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
-              const isOpen = expandedAgentName === ag.agentName;
-              return (
-                <div key={ag.agentName} className="p-3 bg-white space-y-2 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-gray-900 truncate">{ag.agentName}</span>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void openDrilldown({
-                            title: `Percakapan Agen: ${ag.agentName}`,
-                            subtitle: `${ag.count} obrolan dinilai • SLA ${ag.slaRate !== null ? `${ag.slaRate}%` : '-'}`,
-                            kind: 'conversations',
-                            filter: 'agent',
-                            value: ag.agentName,
-                            shortcutTab: 'conversations',
-                            shortcutLabel: 'Buka Live Chat',
-                          })
-                        }
-                        className="text-[11px] font-medium text-indigo-600 hover:underline"
-                      >
-                        Detail Chat
-                      </button>
-                      {hasCrit && (
-                        <button
-                          type="button"
-                          onClick={() => setExpandedAgentName(isOpen ? null : ag.agentName)}
-                          className="text-[11px] font-medium text-amber-700 inline-flex items-center gap-0.5"
-                        >
-                          CSAT
-                          {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-1.5 text-[11px]">
-                    <div className="flex flex-col bg-gray-50 p-1.5 rounded">
-                      <span className="text-gray-500 text-[10px]">Obrolan</span>
-                      <span className="font-mono font-semibold text-gray-900 tabular-nums">{ag.count}</span>
-                    </div>
-                    <div className="flex flex-col bg-emerald-50/70 p-1.5 rounded">
-                      <span className="text-emerald-700 text-[10px]">Selesai</span>
-                      <span className="font-mono font-semibold text-emerald-800 tabular-nums">{ag.resolvedCount}</span>
-                    </div>
-                    <div className="flex flex-col bg-gray-50 p-1.5 rounded">
-                      <span className="text-gray-500 text-[10px]">SLA</span>
-                      <span className="font-mono font-semibold text-gray-900 tabular-nums">
-                        {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
-                      </span>
-                    </div>
-                    <div className="flex flex-col bg-gray-50 p-1.5 rounded">
-                      <span className="text-gray-500 text-[10px]">Respon (FRT)</span>
-                      <span className="font-mono font-semibold text-gray-900 tabular-nums">
-                        {ag.avgFrtSeconds !== null && ag.avgFrtSeconds !== undefined
-                          ? formatDurationShort(ag.avgFrtSeconds)
-                          : '-'}
-                      </span>
-                    </div>
-                    <div className="flex flex-col bg-gray-50 p-1.5 rounded">
-                      <span className="text-gray-500 text-[10px]">Resolusi</span>
-                      <span className="font-mono font-semibold text-gray-900 tabular-nums">
-                        {ag.avgResolutionSeconds !== null && ag.avgResolutionSeconds !== undefined
-                          ? formatDurationShort(ag.avgResolutionSeconds)
-                          : '-'}
-                      </span>
-                    </div>
-                    <div
-                      onClick={() => hasCrit && setExpandedAgentName(isOpen ? null : ag.agentName)}
-                      className={`flex flex-col bg-amber-50/70 p-1.5 rounded ${
-                        hasCrit ? 'cursor-pointer' : ''
-                      }`}
-                    >
-                      <span className="text-amber-800 text-[10px]">CSAT</span>
-                      <span className="font-mono font-semibold text-amber-900 tabular-nums">
-                        {ag.avgCsat !== null ? `${ag.avgCsat}/5` : '-'}
-                      </span>
-                    </div>
-                  </div>
-                  {isOpen && hasCrit && (
-                    <div className="p-2 rounded bg-amber-50/50 border border-amber-200 space-y-1 text-[11px]">
-                      {ag.csatCriteria!.map((crit) => (
-                        <div key={crit.key} className="flex items-center justify-between gap-2">
-                          <span className="text-gray-700">{crit.label}</span>
-                          <span className="font-mono font-semibold text-amber-900">
-                            {crit.average.toFixed(2)}/5 ({crit.count})
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+      {/* Per-Agent & AI Automation Analytics */}
+      {(() => {
+        const agentsList = sortedAgents;
+        const assignedAgents = agentsList.filter((a) => a.agentName !== 'Belum Ditugaskan');
+        const totalAgentChats = agentsList.reduce((acc, a) => acc + (a.count || 0), 0);
+        const totalAgentResolved = agentsList.reduce((acc, a) => acc + (a.resolvedCount || 0), 0);
+        const totalAgentActiveQueue = agentsList.reduce(
+          (acc, a) => acc + (a.openCount || 0) + (a.pendingCount || 0),
+          0
+        );
+        const teamResolutionRate =
+          totalAgentChats > 0 ? Math.round((totalAgentResolved / totalAgentChats) * 100) : 0;
+        const topPerformer = [...assignedAgents].sort(
+          (a, b) =>
+            (b.resolvedCount || 0) - (a.resolvedCount || 0) ||
+            (b.avgCsat ?? 0) - (a.avgCsat ?? 0) ||
+            (a.avgFrtSeconds ?? 999999) - (b.avgFrtSeconds ?? 999999)
+        )[0];
+        const aiStats = convAnalytics.aiAnalytics || {
+          aiRepliesCount: 0,
+          aiResolvedCount: 0,
+          autoResolvedInactivityCount: 0,
+          escalatedCount: 0,
+        };
+        const totalAutoResolved = (aiStats.aiResolvedCount || 0) + (aiStats.autoResolvedInactivityCount || 0);
+
+        return (
+          <div className="bg-white rounded-lg border border-gray-200 p-3.5 sm:p-5 space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => toggleMobileSection('agents')}
+                className="sm:pointer-events-none w-full text-left flex items-center justify-between gap-2"
+              >
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-gray-900 text-sm inline-flex items-center gap-1.5">
+                    <UserCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>Analitik Performa Agent &amp; Otomasi AI</span>
+                    <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono">
+                      {assignedAgents.length} agent
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5 hidden sm:block">
+                    Beban kerja, tingkat penyelesaian, kecepatan respon (FRT), kepatuhan SLA, kontribusi AI Agent, dan CSAT per agent.
+                  </p>
                 </div>
-              );
-            })}
-          </div>
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
-                  <th className="py-2 pr-3 font-medium">Agent</th>
-                  <th className="py-2 px-3 font-medium">
-                    <button
-                      type="button"
-                      onClick={() => handleAgentSort('count')}
-                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
-                    >
-                      <span>Total Obrolan</span>
-                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
-                    </button>
-                  </th>
-                  <th className="py-2 px-3 font-medium">
-                    <button
-                      type="button"
-                      onClick={() => handleAgentSort('resolved')}
-                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
-                    >
-                      <span>Selesai</span>
-                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
-                    </button>
-                  </th>
-                  <th className="py-2 px-3 font-medium">
-                    <button
-                      type="button"
-                      onClick={() => handleAgentSort('frt')}
-                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
-                      title="Rata-rata kecepatan respon awal agen"
-                    >
-                      <span>Respon Awal (FRT)</span>
-                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
-                    </button>
-                  </th>
-                  <th className="py-2 px-3 font-medium">
-                    <button
-                      type="button"
-                      onClick={() => handleAgentSort('res')}
-                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
-                      title="Rata-rata waktu penyelesaian percakapan"
-                    >
-                      <span>Resolusi</span>
-                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
-                    </button>
-                  </th>
-                  <th className="py-2 px-3 font-medium">
-                    <button
-                      type="button"
-                      onClick={() => handleAgentSort('sla')}
-                      className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
-                    >
-                      <span>Kepatuhan SLA</span>
-                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
-                    </button>
-                  </th>
-                  <th className="py-2 pl-3 font-medium text-right">
-                    <button
-                      type="button"
-                      onClick={() => handleAgentSort('csat')}
-                      className="inline-flex items-center justify-end gap-1 hover:text-gray-900 cursor-pointer w-full"
-                    >
-                      <span>Rata-rata CSAT</span>
-                      <ArrowUpDown className="w-3 h-3 text-gray-400" />
-                    </button>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {sortedAgents.map((ag) => {
-                  const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
-                  const isOpen = expandedAgentName === ag.agentName;
-                  return (
-                    <React.Fragment key={ag.agentName}>
-                      <tr
-                        onClick={() => hasCrit && setExpandedAgentName(isOpen ? null : ag.agentName)}
-                        className={hasCrit ? 'hover:bg-amber-50/40 cursor-pointer' : 'hover:bg-gray-50/70'}
-                      >
-                        <td className="py-2 pr-3 font-medium text-gray-900">
-                          <span className="inline-flex items-center gap-1">
-                            {hasCrit &&
-                              (isOpen ? (
-                                <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                              ) : (
-                                <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
-                              ))}
-                            <span>{ag.agentName}</span>
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 font-mono">
+                <span className="sm:hidden text-[11px] text-indigo-600 font-medium inline-flex items-center gap-0.5 shrink-0">
+                  <span>{isMobileSectionOpen('agents') ? 'Tutup' : 'Detail'}</span>
+                  {isMobileSectionOpen('agents') ? (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  )}
+                </span>
+              </button>
+            </div>
+
+            {/* 4-Card Agent & AI Analytics Summary Strip */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+              <div className="rounded-md border border-gray-200 bg-gray-50/70 p-2.5 sm:p-3">
+                <div className="flex items-center justify-between text-[11px] text-gray-500">
+                  <span>Agent Aktif</span>
+                  <Users className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                </div>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-lg font-bold text-gray-900 font-mono tabular-nums">
+                    {assignedAgents.length}
+                  </span>
+                  <span className="text-[11px] text-gray-500">
+                    ({totalAgentChats} chat ditangani)
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-gray-200 bg-gray-50/70 p-2.5 sm:p-3">
+                <div className="flex items-center justify-between text-[11px] text-gray-500">
+                  <span>Penyelesaian Tim</span>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                </div>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <span className="text-lg font-bold text-emerald-700 font-mono tabular-nums">
+                    {teamResolutionRate}%
+                  </span>
+                  <span className="text-[11px] text-gray-500">
+                    ({totalAgentResolved} selesai · {totalAgentActiveQueue} antrean)
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-gray-200 bg-gray-50/70 p-2.5 sm:p-3">
+                <div className="flex items-center justify-between text-[11px] text-gray-500">
+                  <span>Otomasi AI &amp; Sistem</span>
+                  <Bot className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                </div>
+                <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
+                  <span className="text-lg font-bold text-gray-900 font-mono tabular-nums">
+                    {aiStats.aiRepliesCount}
+                  </span>
+                  <span className="text-[11px] text-gray-500">
+                    balasan AI · {totalAutoResolved} auto-resolve · {aiStats.escalatedCount} eskalasi
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-gray-200 bg-gray-50/70 p-2.5 sm:p-3">
+                <div className="flex items-center justify-between text-[11px] text-gray-500">
+                  <span>Top Performer</span>
+                  <Award className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                </div>
+                <div className="mt-1 min-w-0">
+                  <div className="text-sm font-bold text-gray-900 truncate">
+                    {topPerformer ? topPerformer.agentName : '-'}
+                  </div>
+                  <div className="text-[11px] text-gray-500 font-mono truncate">
+                    {topPerformer
+                      ? `${topPerformer.resolvedCount} selesai${
+                          topPerformer.avgCsat !== null ? ` · CSAT ${topPerformer.avgCsat}/5` : ''
+                        }`
+                      : 'Belum ada data agent'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {agentsList.length === 0 ? (
+              <EmptyState
+                title="Belum ada analitik agent pada periode ini"
+                description="Setelah tim CS atau Agent AI mulai menangani dan menyelesaikan percakapan pelanggan, metrik beban kerja, FRT, SLA, dan CSAT per agent akan tampil otomatis di sini."
+              />
+            ) : (
+              <>
+                <div className={`${isMobileSectionOpen('agents') ? 'mt-2' : 'hidden'} sm:hidden divide-y divide-gray-100 border border-gray-200 rounded-md overflow-hidden`}>
+                  {agentsList.map((ag) => {
+                    const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
+                    const isOpen = expandedAgentName === ag.agentName;
+                    const resPct = ag.resolutionRate ?? (ag.count > 0 ? Math.round((ag.resolvedCount / ag.count) * 100) : 0);
+                    const activeQ = (ag.openCount || 0) + (ag.pendingCount || 0);
+                    return (
+                      <div key={ag.agentName} className="p-3 bg-white space-y-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className="font-semibold text-gray-900 truncate block">{ag.agentName}</span>
+                            {activeQ > 0 && (
+                              <span className="text-[10px] text-amber-700 font-mono">{activeQ} antrean aktif</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void openDrilldown({
+                                  title: `Percakapan Agen: ${ag.agentName}`,
+                                  subtitle: `${ag.count} obrolan dinilai • SLA ${ag.slaRate !== null ? `${ag.slaRate}%` : '-'}`,
+                                  kind: 'conversations',
+                                  filter: 'agent',
+                                  value: ag.agentName,
+                                  shortcutTab: 'conversations',
+                                  shortcutLabel: 'Buka Live Chat',
+                                })
+                              }
+                              className="text-[11px] font-medium text-indigo-600 hover:underline"
+                            >
+                              Detail Chat
+                            </button>
+                            {hasCrit && (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedAgentName(isOpen ? null : ag.agentName)}
+                                className="text-[11px] font-medium text-amber-700 inline-flex items-center gap-0.5"
+                              >
+                                CSAT
+                                {isOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                          <div className="flex flex-col bg-gray-50 p-1.5 rounded">
+                            <span className="text-gray-500 text-[10px]">Obrolan</span>
+                            <span className="font-mono font-semibold text-gray-900 tabular-nums">{ag.count}</span>
+                          </div>
+                          <div className="flex flex-col bg-emerald-50/70 p-1.5 rounded">
+                            <span className="text-emerald-700 text-[10px]">Selesai</span>
+                            <span className="font-mono font-semibold text-emerald-800 tabular-nums">
+                              {ag.resolvedCount} ({resPct}%)
+                            </span>
+                          </div>
+                          <div className="flex flex-col bg-gray-50 p-1.5 rounded">
+                            <span className="text-gray-500 text-[10px]">SLA</span>
+                            <span className="font-mono font-semibold text-gray-900 tabular-nums">
+                              {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
+                            </span>
+                          </div>
+                          <div className="flex flex-col bg-gray-50 p-1.5 rounded">
+                            <span className="text-gray-500 text-[10px]">Respon (FRT)</span>
+                            <span className="font-mono font-semibold text-gray-900 tabular-nums">
+                              {ag.avgFrtSeconds !== null && ag.avgFrtSeconds !== undefined
+                                ? formatDurationShort(ag.avgFrtSeconds)
+                                : '-'}
+                            </span>
+                          </div>
+                          <div className="flex flex-col bg-gray-50 p-1.5 rounded">
+                            <span className="text-gray-500 text-[10px]">Resolusi</span>
+                            <span className="font-mono font-semibold text-gray-900 tabular-nums">
+                              {ag.avgResolutionSeconds !== null && ag.avgResolutionSeconds !== undefined
+                                ? formatDurationShort(ag.avgResolutionSeconds)
+                                : '-'}
+                            </span>
+                          </div>
+                          <div
+                            onClick={() => hasCrit && setExpandedAgentName(isOpen ? null : ag.agentName)}
+                            className={`flex flex-col bg-amber-50/70 p-1.5 rounded ${
+                              hasCrit ? 'cursor-pointer' : ''
+                            }`}
+                          >
+                            <span className="text-amber-800 text-[10px]">CSAT</span>
+                            <span className="font-mono font-semibold text-amber-900 tabular-nums">
+                              {ag.avgCsat !== null ? `${ag.avgCsat}/5` : '-'}
+                            </span>
+                          </div>
+                        </div>
+                        {isOpen && hasCrit && (
+                          <div className="p-2 rounded bg-amber-50/50 border border-amber-200 space-y-1 text-[11px]">
+                            {ag.csatCriteria!.map((crit) => (
+                              <div key={crit.key} className="flex items-center justify-between gap-2">
+                                <span className="text-gray-700">{crit.label}</span>
+                                <span className="font-mono font-semibold text-amber-900">
+                                  {crit.average.toFixed(2)}/5 ({crit.count})
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-[11px] uppercase text-gray-500">
+                        <th className="py-2 pr-3 font-medium">Agent</th>
+                        <th className="py-2 px-3 font-medium">
                           <button
                             type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void openDrilldown({
-                                title: `Percakapan Agen: ${ag.agentName}`,
-                                subtitle: `${ag.count} obrolan dinilai • SLA ${ag.slaRate !== null ? `${ag.slaRate}%` : '-'}`,
-                                kind: 'conversations',
-                                filter: 'agent',
-                                value: ag.agentName,
-                                shortcutTab: 'conversations',
-                                shortcutLabel: 'Buka Live Chat',
-                              });
-                            }}
-                            className="inline-flex items-center gap-1 text-indigo-700 font-semibold hover:underline cursor-pointer"
-                            title="Lihat daftar obrolan agen ini"
+                            onClick={() => handleAgentSort('count')}
+                            className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
                           >
-                            <span>{ag.count}</span>
-                            <ChevronRight className="w-3 h-3" />
+                            <span>Beban Kerja</span>
+                            <ArrowUpDown className="w-3 h-3 text-gray-400" />
                           </button>
-                        </td>
-                        <td className="py-2 px-3 font-mono text-emerald-700">{ag.resolvedCount}</td>
-                        <td className="py-2 px-3 font-mono text-gray-700">
-                          {ag.avgFrtSeconds !== null && ag.avgFrtSeconds !== undefined
-                            ? formatDurationShort(ag.avgFrtSeconds)
-                            : '-'}
-                        </td>
-                        <td className="py-2 px-3 font-mono text-gray-700">
-                          {ag.avgResolutionSeconds !== null && ag.avgResolutionSeconds !== undefined
-                            ? formatDurationShort(ag.avgResolutionSeconds)
-                            : '-'}
-                        </td>
-                        <td className="py-2 px-3 font-mono">
-                          {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
-                        </td>
-                        <td className="py-2 pl-3 font-mono text-right">
-                          {ag.avgCsat !== null ? (
-                            <span className={hasCrit ? 'text-indigo-700 font-semibold underline decoration-dotted' : ''}>
-                              {ag.avgCsat}/5{ag.csatCount ? ` (${ag.csatCount})` : ''}
-                            </span>
-                          ) : (
-                            '-'
-                          )}
-                        </td>
+                        </th>
+                        <th className="py-2 px-3 font-medium">
+                          <button
+                            type="button"
+                            onClick={() => handleAgentSort('resolved')}
+                            className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                          >
+                            <span>Selesai</span>
+                            <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                          </button>
+                        </th>
+                        <th className="py-2 px-3 font-medium">
+                          <button
+                            type="button"
+                            onClick={() => handleAgentSort('frt')}
+                            className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                            title="Rata-rata kecepatan respon awal agen"
+                          >
+                            <span>Respon Awal (FRT)</span>
+                            <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                          </button>
+                        </th>
+                        <th className="py-2 px-3 font-medium">
+                          <button
+                            type="button"
+                            onClick={() => handleAgentSort('res')}
+                            className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                            title="Rata-rata waktu penyelesaian percakapan"
+                          >
+                            <span>Resolusi</span>
+                            <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                          </button>
+                        </th>
+                        <th className="py-2 px-3 font-medium">
+                          <button
+                            type="button"
+                            onClick={() => handleAgentSort('sla')}
+                            className="inline-flex items-center gap-1 hover:text-gray-900 cursor-pointer"
+                          >
+                            <span>Kepatuhan SLA</span>
+                            <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                          </button>
+                        </th>
+                        <th className="py-2 pl-3 font-medium text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleAgentSort('csat')}
+                            className="inline-flex items-center justify-end gap-1 hover:text-gray-900 cursor-pointer w-full"
+                          >
+                            <span>Rata-rata CSAT</span>
+                            <ArrowUpDown className="w-3 h-3 text-gray-400" />
+                          </button>
+                        </th>
                       </tr>
-                      {isOpen && hasCrit && (
-                        <tr className="bg-amber-50/40">
-                          <td colSpan={7} className="px-4 py-2.5">
-                            <div className="flex flex-wrap gap-2">
-                              {ag.csatCriteria!.map((crit) => (
-                                <div
-                                  key={crit.key}
-                                  className="px-2.5 py-1 rounded bg-white border border-amber-200 text-[11px] flex items-center gap-2"
-                                >
-                                  <span className="text-gray-700 font-medium">{crit.label}:</span>
-                                  <span className="font-mono font-bold text-amber-800 inline-flex items-center gap-0.5">
-                                    <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
-                                    {crit.average.toFixed(2)}/5
-                                  </span>
-                                  <span className="text-[10px] text-gray-400">({crit.count})</span>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {agentsList.map((ag) => {
+                        const hasCrit = Boolean(ag.csatCriteria && ag.csatCriteria.length > 0);
+                        const isOpen = expandedAgentName === ag.agentName;
+                        const sharePct =
+                          ag.workloadShare ??
+                          (totalAgentChats > 0 ? Math.round((ag.count / totalAgentChats) * 100) : 0);
+                        const resPct =
+                          ag.resolutionRate ??
+                          (ag.count > 0 ? Math.round((ag.resolvedCount / ag.count) * 100) : 0);
+                        const activeQueue = (ag.openCount || 0) + (ag.pendingCount || 0);
+                        const slaBadgeCls =
+                          ag.slaRate === null
+                            ? 'bg-gray-50 text-gray-500 border-gray-200'
+                            : ag.slaRate >= 85
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : ag.slaRate >= 60
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200';
+                        return (
+                          <React.Fragment key={ag.agentName}>
+                            <tr
+                              onClick={() => hasCrit && setExpandedAgentName(isOpen ? null : ag.agentName)}
+                              className={hasCrit ? 'hover:bg-amber-50/40 cursor-pointer' : 'hover:bg-gray-50/70'}
+                            >
+                              <td className="py-2.5 pr-3 font-medium text-gray-900">
+                                <div className="flex items-center gap-1.5">
+                                  {hasCrit &&
+                                    (isOpen ? (
+                                      <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                    ) : (
+                                      <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                    ))}
+                                  <span className="truncate">{ag.agentName}</span>
+                                  {activeQueue > 0 && (
+                                    <span
+                                      className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-mono shrink-0"
+                                      title={`${ag.openCount || 0} open · ${ag.pendingCount || 0} pending`}
+                                    >
+                                      {activeQueue} aktif
+                                    </span>
+                                  )}
                                 </div>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+                              </td>
+                              <td className="py-2.5 px-3 font-mono">
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void openDrilldown({
+                                        title: `Percakapan Agen: ${ag.agentName}`,
+                                        subtitle: `${ag.count} obrolan dinilai • SLA ${ag.slaRate !== null ? `${ag.slaRate}%` : '-'}`,
+                                        kind: 'conversations',
+                                        filter: 'agent',
+                                        value: ag.agentName,
+                                        shortcutTab: 'conversations',
+                                        shortcutLabel: 'Buka Live Chat',
+                                      });
+                                    }}
+                                    className="inline-flex items-center gap-1 text-indigo-700 font-semibold hover:underline cursor-pointer tabular-nums"
+                                    title="Lihat daftar obrolan agen ini"
+                                  >
+                                    <span>{ag.count}</span>
+                                    <ChevronRight className="w-3 h-3" />
+                                  </button>
+                                  <div className="w-14 bg-gray-100 rounded h-1.5 overflow-hidden hidden md:block">
+                                    <div
+                                      className="bg-indigo-500 h-1.5 rounded"
+                                      style={{ width: `${Math.min(100, sharePct)}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] text-gray-400 tabular-nums hidden md:inline">
+                                    {sharePct}%
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-emerald-700 tabular-nums">
+                                <span className="font-semibold">{ag.resolvedCount}</span>
+                                <span className="text-[10px] text-gray-400 ml-1">({resPct}%)</span>
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-gray-700 tabular-nums">
+                                {ag.avgFrtSeconds !== null && ag.avgFrtSeconds !== undefined
+                                  ? formatDurationShort(ag.avgFrtSeconds)
+                                  : '-'}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-gray-700 tabular-nums">
+                                {ag.avgResolutionSeconds !== null && ag.avgResolutionSeconds !== undefined
+                                  ? formatDurationShort(ag.avgResolutionSeconds)
+                                  : '-'}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono tabular-nums">
+                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold border ${slaBadgeCls}`}>
+                                  {ag.slaRate !== null ? `${ag.slaRate}%` : '-'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 pl-3 font-mono text-right tabular-nums">
+                                {ag.avgCsat !== null ? (
+                                  <span
+                                    className={`inline-flex items-center justify-end gap-1 ${
+                                      hasCrit ? 'text-indigo-700 font-semibold underline decoration-dotted' : 'text-gray-900 font-semibold'
+                                    }`}
+                                  >
+                                    <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                                    {ag.avgCsat}/5{ag.csatCount ? ` (${ag.csatCount})` : ''}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                            {isOpen && hasCrit && (
+                              <tr className="bg-amber-50/40">
+                                <td colSpan={7} className="px-4 py-2.5">
+                                  <div className="flex flex-wrap gap-2">
+                                    {ag.csatCriteria!.map((crit) => (
+                                      <div
+                                        key={crit.key}
+                                        className="px-2.5 py-1 rounded bg-white border border-amber-200 text-[11px] flex items-center gap-2"
+                                      >
+                                        <span className="text-gray-700 font-medium">{crit.label}:</span>
+                                        <span className="font-mono font-bold text-amber-800 inline-flex items-center gap-0.5">
+                                          <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                                          {crit.average.toFixed(2)}/5
+                                        </span>
+                                        <span className="text-[10px] text-gray-400">({crit.count})</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Campaigns & Activity Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-5">

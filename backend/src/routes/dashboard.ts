@@ -361,7 +361,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         .map(([category, count]) => ({ category, count }))
         .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
 
-      // Birthday count for today in Asia/Jakarta (WIB)
+      // Birthday analytics for today & current month in Asia/Jakarta (WIB)
       const wibParts = Object.fromEntries(
         new Intl.DateTimeFormat('en-CA', {
           timeZone: 'Asia/Jakarta',
@@ -373,9 +373,36 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       );
       const currentMonth = Number.parseInt(wibParts.month, 10);
       const currentDay = Number.parseInt(wibParts.day, 10);
-      const birthdayTodayCount = customerContacts.filter((c) =>
-        isBirthdayToday(c.tanggalLahir, currentMonth, currentDay)
-      ).length;
+      let birthdayTodayCount = 0;
+      let birthdayThisMonthCount = 0;
+      let birthdayWithDateCount = 0;
+      for (const c of customerContacts) {
+        if (!c.tanggalLahir) continue;
+        const dt = c.tanggalLahir instanceof Date ? c.tanggalLahir : new Date(c.tanggalLahir);
+        if (Number.isNaN(dt.getTime())) continue;
+        birthdayWithDateCount++;
+        const dtParts = Object.fromEntries(
+          new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Jakarta',
+            month: '2-digit',
+            day: '2-digit',
+          })
+            .formatToParts(dt)
+            .map((p) => [p.type, p.value])
+        );
+        const m = Number.parseInt(dtParts.month, 10);
+        const d = Number.parseInt(dtParts.day, 10);
+        if (m === currentMonth || dt.getUTCMonth() + 1 === currentMonth) {
+          birthdayThisMonthCount++;
+        }
+        if ((m === currentMonth && d === currentDay) || (dt.getUTCMonth() + 1 === currentMonth && dt.getUTCDate() === currentDay)) {
+          birthdayTodayCount++;
+        }
+      }
+      const birthdayCoverageRate =
+        totalContacts > 0 ? Math.round((birthdayWithDateCount / totalContacts) * 100) : 0;
+      const birthdayEnabled = settings.birthday_enabled === 'true';
+      const birthdaySendTime = (settings.birthday_send_time || '08:00').trim() || '08:00';
 
       // Filter recipients by active date range (broadcasts are not session-filtered)
       const filteredRecipientsRows = allRecipientsRows.filter((r) =>
@@ -1093,6 +1120,58 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         return tb - ta;
       });
 
+      // AI Agent & Automation resolution analytics scoped to company & period
+      const aiActivityRows = await db
+        .select({
+          direction: chatMessages.direction,
+          messageType: chatMessages.messageType,
+          senderName: chatMessages.senderName,
+          metadataJson: chatMessages.metadataJson,
+          createdAt: chatMessages.createdAt,
+        })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.companyId, companyId),
+            or(
+              eq(chatMessages.direction, 'SYSTEM'),
+              eq(chatMessages.direction, 'OUTBOUND')
+            )
+          )
+        );
+
+      let aiRepliesCount = 0;
+      let aiResolvedCount = 0;
+      let autoResolvedInactivityCount = 0;
+      for (const m of aiActivityRows) {
+        if ((dateRange.start || dateRange.end) && !isDateInRange(m.createdAt, dateRange.start, dateRange.end)) {
+          continue;
+        }
+        const meta = m.metadataJson || '';
+        if (m.direction === 'OUTBOUND') {
+          if (
+            meta.includes('"isAi":true') ||
+            meta.includes('"sentByAi":true') ||
+            meta.includes('"source":"AI_AGENT"') ||
+            (m.senderName || '').toLowerCase().includes('bot ai') ||
+            (m.senderName || '').toLowerCase().includes('agent ai')
+          ) {
+            aiRepliesCount++;
+          }
+        } else if (m.direction === 'SYSTEM' && m.messageType === 'ACTIVITY') {
+          if (meta.includes('"AUTO_RESOLVED_INACTIVITY"')) {
+            autoResolvedInactivityCount++;
+          } else if (
+            meta.includes('"CONVERSATION_RESOLVED"') &&
+            (meta.includes('"AI Assistant"') || (m.senderName || '').toLowerCase().includes('agent ai'))
+          ) {
+            aiResolvedCount++;
+          }
+        }
+      }
+      const escalatedCount = assessedRows.filter((r) => Boolean(r.conv.escalatedAt)).length;
+      const totalAssessedForShare = assessedRows.length;
+
       const conversationAnalytics = {
         totalConversations: assessedRows.length,
         allConversationsCount: filteredConversationRows.length,
@@ -1125,6 +1204,12 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           criteria: serializeCriteriaSummary(p.criteriaMap),
         })),
         recentCsat: recentCsatList.slice(0, 12),
+        aiAnalytics: {
+          aiRepliesCount,
+          aiResolvedCount,
+          autoResolvedInactivityCount,
+          escalatedCount,
+        },
         bySession: Array.from(sessionMap.values()).map((s) => ({
           session: s.session,
           count: s.count,
@@ -1154,6 +1239,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           openCount: a.openCount,
           pendingCount: a.pendingCount,
           resolvedCount: a.resolvedCount,
+          resolutionRate: a.count > 0 ? Math.round((a.resolvedCount / a.count) * 100) : 0,
+          workloadShare: totalAssessedForShare > 0 ? Math.round((a.count / totalAssessedForShare) * 100) : 0,
           avgFrtSeconds: a.frtCount > 0 ? Math.round(a.frtSum / a.frtCount) : null,
           avgResolutionSeconds: a.resCount > 0 ? Math.round(a.resSum / a.resCount) : null,
           slaRate: a.slaMeasuredCount > 0 ? Math.round((a.slaMetCount / a.slaMeasuredCount) * 100) : null,
@@ -1189,6 +1276,11 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             topCampaignResponseRate,
             topCampaignRespondedCount,
             birthdayTodayCount,
+            birthdayThisMonthCount,
+            birthdayWithDateCount,
+            birthdayCoverageRate,
+            birthdayEnabled,
+            birthdaySendTime,
             connectedChannels: Array.from(connectedChannelsMap.values()),
             contactCategories,
             activityTrend7d: trendBuckets,

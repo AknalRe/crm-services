@@ -524,6 +524,12 @@ export interface ConversationAnalytics {
     avgCsat: number | null;
     csatCriteria?: CsatCriterionAggregate[];
   }>;
+  aiAnalytics?: {
+    aiRepliesCount: number;
+    aiResolvedCount: number;
+    autoResolvedInactivityCount: number;
+    escalatedCount: number;
+  };
   byAgent?: Array<{
     agentId?: string | null;
     agentName: string;
@@ -531,6 +537,8 @@ export interface ConversationAnalytics {
     openCount?: number;
     pendingCount?: number;
     resolvedCount: number;
+    resolutionRate?: number;
+    workloadShare?: number;
     avgFrtSeconds?: number | null;
     avgResolutionSeconds?: number | null;
     slaRate: number | null;
@@ -618,6 +626,11 @@ export interface DashboardStats {
     topCampaignResponseRate?: number;
     topCampaignRespondedCount?: number;
     birthdayTodayCount: number;
+    birthdayThisMonthCount?: number;
+    birthdayWithDateCount?: number;
+    birthdayCoverageRate?: number;
+    birthdayEnabled?: boolean;
+    birthdaySendTime?: string;
     connectedChannels?: Array<{
       channel: string;
       accountCount: number;
