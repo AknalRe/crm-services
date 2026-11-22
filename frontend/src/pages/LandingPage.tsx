@@ -564,11 +564,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                         role="tab"
                         aria-selected={active}
                         onClick={() => setActiveHeroChannelId(ch.id)}
-                        className={`h-7 px-2.5 rounded-md text-[11px] font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors ${
-                          active
+                        className={`h-7 px-2.5 rounded-md text-[11px] font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors ${active
                             ? 'bg-[#1E2438] text-white'
                             : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-                        }`}
+                          }`}
                       >
                         <span className={`w-1.5 h-1.5 rounded-full ${ch.dotClass}`} />
                         <span>{ch.label}</span>
@@ -596,9 +595,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                         key={ch.id}
                         type="button"
                         onClick={() => setActiveHeroChannelId(ch.id)}
-                        className={`w-full text-left px-4 py-3 transition-colors space-y-1 ${
-                          active ? 'bg-white border-l-2 border-l-[#2563EB]' : 'hover:bg-white/70'
-                        }`}
+                        className={`w-full text-left px-4 py-3 transition-colors space-y-1 ${active ? 'bg-white border-l-2 border-l-[#2563EB]' : 'hover:bg-white/70'
+                          }`}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-semibold text-slate-900 truncate">{ch.customerName}</span>
@@ -726,11 +724,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     role="tab"
                     aria-selected={active}
                     onClick={() => setActiveModuleId(tab.id)}
-                    className={`shrink-0 h-11 px-4 text-[13px] font-semibold inline-flex items-center gap-2 border-b-2 -mb-px transition-colors ${
-                      active
+                    className={`shrink-0 h-11 px-4 text-[13px] font-semibold inline-flex items-center gap-2 border-b-2 -mb-px transition-colors ${active
                         ? 'border-[#2563EB] text-slate-900'
                         : 'border-transparent text-slate-500 hover:text-slate-800'
-                    }`}
+                      }`}
                   >
                     <Icon className="w-4 h-4 shrink-0" strokeWidth={1.75} />
                     <span>{tab.shortLabel}</span>
@@ -900,22 +897,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <button
                     type="button"
                     onClick={() => setBillingPeriod('monthly')}
-                    className={`h-8 px-3 rounded-md text-xs font-semibold transition-colors ${
-                      billingPeriod === 'monthly'
+                    className={`h-8 px-3 rounded-md text-xs font-semibold transition-colors ${billingPeriod === 'monthly'
                         ? 'bg-white text-slate-900 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                      }`}
                   >
                     Bulanan
                   </button>
                   <button
                     type="button"
                     onClick={() => setBillingPeriod('annual')}
-                    className={`h-8 px-3 rounded-md text-xs font-semibold transition-colors ${
-                      billingPeriod === 'annual'
+                    className={`h-8 px-3 rounded-md text-xs font-semibold transition-colors ${billingPeriod === 'annual'
                         ? 'bg-white text-slate-900 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                      }`}
                   >
                     Tahunan
                   </button>
@@ -934,64 +929,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
             ) : visiblePlans.length > 0 ? (
               <div
-                className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${
-                  visiblePlans.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
-                }`}
+                className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${visiblePlans.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
+                  }`}
               >
                 {visiblePlans.map((plan) => {
                   const f = plan.features || {};
-                  const slugLow = (plan.slug || '').toLowerCase();
-                  const isStarter = slugLow.includes('starter');
-                  const isPro = slugLow.includes('pro');
-                  const isBusiness = slugLow.includes('business');
-                  const isEnterprise = slugLow.includes('enterprise');
-                  const isAnnual = plan.period === 'annual' || (plan.months && plan.months >= 12);
-
-                  // Always enforce charm-pricing ladder (Starter: 49k, Pro: 99k/990k, Business: 199k/1.99m, Enterprise: 399k/3.99m)
-                  const displayPrice = isStarter
-                    ? 49000
-                    : isPro
-                    ? (isAnnual ? 990000 : 99000)
-                    : isBusiness
-                    ? (isAnnual ? 1990000 : 199000)
-                    : isEnterprise
-                    ? (isAnnual ? 3990000 : 399000)
-                    : Number(plan.priceAmount || 0);
-
-                  const origPrice = Number(
-                    plan.originalPriceAmount && plan.originalPriceAmount > displayPrice
-                      ? plan.originalPriceAmount
-                      : isStarter
-                      ? 99000
-                      : isPro
-                      ? (isAnnual ? 2388000 : 199000)
-                      : isBusiness
-                      ? (isAnnual ? 4788000 : 399000)
-                      : isEnterprise
-                      ? (isAnnual ? 9588000 : 799000)
-                      : Math.round((displayPrice * 1.5) / 1000) * 1000
-                  );
-
+                  const displayPrice = Number(plan.priceAmount || 0);
+                  const origPrice = Number(plan.originalPriceAmount || 0);
                   const discPercent = Number(
-                    plan.discountPercent && plan.discountPercent > 0
-                      ? plan.discountPercent
-                      : Math.max(10, Math.min(75, Math.round(((origPrice - displayPrice) / origPrice) * 100)))
+                    plan.discountPercent ||
+                      (origPrice > displayPrice ? Math.round(((origPrice - displayPrice) / origPrice) * 100) : 0)
                   );
+                  const promoDate = plan.promoValidUntil;
 
-                  const promoDate = plan.promoValidUntil || '30 November 2026';
-
-                  // Calibrated proportional quotas (~2x to ~2.5x step-ups)
-                  const maxContacts: number = isEnterprise ? (isAnnual ? 40000 : 30000) : isBusiness ? (isAnnual ? 15000 : 12500) : isPro ? 5000 : 2500;
-                  const hasMultiSessions = !isStarter;
-                  const maxSessions: number = isEnterprise ? (isAnnual ? 12 : 10) : isBusiness ? 5 : isPro ? 2 : 1;
-                  const hasMultiAgents = !isStarter;
-                  const maxAgents: number = isEnterprise ? (isAnnual ? 18 : 15) : isBusiness ? 7 : isPro ? 3 : 1;
-                  const maxStorageMb: number = isEnterprise ? (isAnnual ? 10240 : 6144) : isBusiness ? (isAnnual ? 4096 : 2560) : isPro ? (isAnnual ? 1536 : 1024) : 500;
-                  const maxBroadcast: number = isEnterprise ? (isAnnual ? 45000 : 35000) : isBusiness ? 15000 : isPro ? 5000 : 2500;
-                  const hasOmnichannel = !isStarter;
-                  const hasLiveChat = true;
-                  const hasScheduled = !isStarter;
-                  const hasAi = isBusiness || isEnterprise;
+                  const maxContacts = Number(f.maxContacts || 0);
+                  const hasMultiSessions = Boolean(f.multiSession);
+                  const maxSessions = Number(f.maxSessions || 1);
+                  const hasMultiAgents = Boolean(f.multiAgent);
+                  const maxAgents = Number(f.maxAgents || f.maxUsers || 1);
+                  const maxStorageMb = Number(f.maxStorageMb || 500);
+                  const maxBroadcast = Number(f.maxBroadcastPerMonth || 0);
+                  const hasOmnichannel = Boolean(f.omnichannel);
+                  const hasLiveChat = Boolean(f.liveChat ?? f.liveChatCrm ?? true);
+                  const hasScheduled = Boolean(f.scheduledPosts);
+                  const hasAi = Boolean(f.aiAgent);
 
                   const storageLabel =
                     maxStorageMb >= 1024
@@ -999,14 +960,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       : `${maxStorageMb} MB penyimpanan media`;
 
                   const highlights: string[] = [
-                    `Hingga ${maxContacts.toLocaleString('id-ID')} kontak pelanggan`,
+                    maxContacts === 0
+                      ? 'Kontak pelanggan tanpa batas'
+                      : `Hingga ${maxContacts.toLocaleString('id-ID')} kontak pelanggan`,
                     hasMultiSessions && maxSessions > 1
                       ? `Multi-nomor WhatsApp hingga ${maxSessions} sesi`
                       : '1 sesi nomor WhatsApp',
                     hasMultiAgents && maxAgents > 1
                       ? `Hingga ${maxAgents} akun tim & peran kerja`
                       : '1 akun admin usaha',
-                    `${maxBroadcast.toLocaleString('id-ID')} pesan siaran / bulan`,
+                    f.unlimitedBroadcast || maxBroadcast === 0
+                      ? 'Pesan siaran tanpa batas prioritas'
+                      : `${maxBroadcast.toLocaleString('id-ID')} pesan siaran / bulan`,
                     storageLabel,
                   ];
                   if (hasLiveChat) highlights.push('Kotak Masuk Live Chat & CSAT rating');
@@ -1015,20 +980,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   if (hasAi) highlights.push('Asisten otomatis AI berbasis katalog usaha');
 
                   const unitLabel =
-                    plan.period === 'annual' || plan.months >= 12
+                    plan.period === 'annual' || (plan.months && plan.months >= 12)
                       ? '/ tahun'
-                      : plan.months > 1
-                      ? `/ ${plan.months} bln`
-                      : '/ bulan';
+                      : plan.months && plan.months > 1
+                        ? `/ ${plan.months} bln`
+                        : '/ bulan';
 
                   return (
                     <div
                       key={plan.slug}
-                      className={`rounded-xl border p-5 flex flex-col justify-between gap-5 ${
-                        plan.highlighted
+                      className={`rounded-xl border p-5 flex flex-col justify-between gap-5 ${plan.highlighted
                           ? 'border-[#2563EB] bg-blue-50/20 ring-1 ring-[#2563EB]/20'
                           : 'border-slate-200 bg-white'
-                      }`}
+                        }`}
                     >
                       <div className="space-y-4">
                         <div className="space-y-1.5">
@@ -1046,14 +1010,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                         </div>
 
                         <div className="pb-4 border-b border-slate-200">
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="line-through text-xs font-semibold text-slate-400 tabular-nums">
-                              Rp {origPrice.toLocaleString('id-ID')}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                              Hemat {discPercent}%
-                            </span>
-                          </div>
+                          {origPrice > displayPrice && (
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="line-through text-xs font-semibold text-slate-400 tabular-nums">
+                                Rp {origPrice.toLocaleString('id-ID')}
+                              </span>
+                              {discPercent > 0 && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                  Hemat {discPercent}%
+                                </span>
+                              )}
+                            </div>
+                          )}
 
                           <div className="flex items-baseline gap-1.5">
                             <span className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
@@ -1062,10 +1030,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                             <span className="text-xs text-slate-500">{unitLabel}</span>
                           </div>
 
-                          <div className="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
-                            <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                            <span>Promo s/d {promoDate}</span>
-                          </div>
+                          {promoDate && (
+                            <div className="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
+                              <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                              <span>Promo s/d {promoDate}</span>
+                            </div>
+                          )}
 
                           {(plan.trialDays ?? 0) > 0 && (
                             <p className="mt-1 text-[11px] font-medium text-emerald-700">
@@ -1087,11 +1057,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       <button
                         type="button"
                         onClick={authenticated ? onEnterLogin : handleRegister}
-                        className={`w-full h-10 px-4 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${FOCUS_RING} ${
-                          plan.highlighted
+                        className={`w-full h-10 px-4 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${FOCUS_RING} ${plan.highlighted
                             ? 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white'
                             : 'bg-slate-900 hover:bg-slate-800 text-white'
-                        }`}
+                          }`}
                       >
                         <span>{authenticated ? 'Pilih di Workspace' : 'Langganan Paket Ini'}</span>
                         <ArrowRight className="w-3.5 h-3.5" strokeWidth={2} />
@@ -1131,9 +1100,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       >
                         <span className="text-sm sm:text-[15px] font-semibold text-slate-900">{item.q}</span>
                         <ChevronDown
-                          className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${
-                            isOpen ? 'rotate-180' : ''
-                          }`}
+                          className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''
+                            }`}
                         />
                       </button>
                       {isOpen && (
@@ -1171,11 +1139,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                         type="button"
                         aria-pressed={selected}
                         onClick={() => setInquiryType(opt)}
-                        className={`h-9 px-3 rounded-lg text-xs font-semibold border transition-colors ${
-                          selected
+                        className={`h-9 px-3 rounded-lg text-xs font-semibold border transition-colors ${selected
                             ? 'bg-slate-900 text-white border-slate-900'
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         {opt}
                       </button>
@@ -1245,11 +1212,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
                 {inquiryStatus && (
                   <div
-                    className={`p-3 rounded-lg border text-xs font-medium flex items-start gap-2 ${
-                      inquiryStatus.ok
+                    className={`p-3 rounded-lg border text-xs font-medium flex items-start gap-2 ${inquiryStatus.ok
                         ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                         : 'bg-rose-50 border-rose-200 text-rose-800'
-                    }`}
+                      }`}
                   >
                     {inquiryStatus.ok ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />

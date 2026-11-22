@@ -1198,138 +1198,103 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                           </div>
 
                           {(() => {
-                            const slugLow = (p.slug || '').toLowerCase();
-                            const isStarterPlan = slugLow.includes('starter');
-                            const isProPlan = slugLow.includes('pro');
-                            const isBusinessPlan = slugLow.includes('business');
-                            const isEntPlan = slugLow.includes('enterprise');
-                            const isAnnual = p.period === 'annual' || (p.months && p.months >= 12);
-
-                            const displayPrice = isStarterPlan
-                              ? 49000
-                              : isProPlan
-                              ? (isAnnual ? 990000 : 99000)
-                              : isBusinessPlan
-                              ? (isAnnual ? 1990000 : 199000)
-                              : isEntPlan
-                              ? (isAnnual ? 3990000 : 399000)
-                              : Number(p.priceAmount || 0);
-
-                            const origPrice = Number(
-                              p.originalPriceAmount && p.originalPriceAmount > displayPrice
-                                ? p.originalPriceAmount
-                                : isStarterPlan
-                                ? 99000
-                                : isProPlan
-                                ? (isAnnual ? 2388000 : 199000)
-                                : isBusinessPlan
-                                ? (isAnnual ? 4788000 : 399000)
-                                : isEntPlan
-                                ? (isAnnual ? 9588000 : 799000)
-                                : Math.round((displayPrice * 1.5) / 1000) * 1000
-                            );
-
+                            const f = p.features || {};
+                            const displayPrice = Number(p.priceAmount || 0);
+                            const origPrice = Number(p.originalPriceAmount || 0);
                             const discPercent = Number(
-                              p.discountPercent && p.discountPercent > 0
-                                ? p.discountPercent
-                                : Math.max(10, Math.min(75, Math.round(((origPrice - displayPrice) / origPrice) * 100)))
+                              p.discountPercent || (origPrice > displayPrice ? Math.round(((origPrice - displayPrice) / origPrice) * 100) : 0)
                             );
+                            const promoDate = p.promoValidUntil;
 
-                            const promoDate = p.promoValidUntil || '30 November 2026';
-
-                            const hasLiveChat = true;
-                            const hasMultiSess = !isStarterPlan;
-                            const maxSess = isEntPlan ? (isAnnual ? 12 : 10) : isBusinessPlan ? 5 : isProPlan ? 2 : 1;
-                            const hasMultiAg = !isStarterPlan;
-                            const maxAg = isEntPlan ? (isAnnual ? 18 : 15) : isBusinessPlan ? 7 : isProPlan ? 3 : 1;
-                            const hasOmni = !isStarterPlan;
-                            const maxChan = isEntPlan ? 12 : isBusinessPlan ? 6 : hasOmni ? 3 : 0;
-                            const hasSched = !isStarterPlan;
-                            const hasAi = isBusinessPlan || isEntPlan;
-                            const hasMcp = isBusinessPlan || isEntPlan;
-                            const hasExport = !isStarterPlan;
-                            const storageMb = isEntPlan
-                              ? (isAnnual ? 10240 : 6144)
-                              : isBusinessPlan
-                              ? (isAnnual ? 4096 : 2560)
-                              : isStarterPlan
-                              ? 500
-                              : (isAnnual ? 1536 : 1024);
-                            const fileLimitMb = isEntPlan ? (isAnnual ? 50 : 40) : isBusinessPlan ? 25 : isStarterPlan ? 10 : 15;
+                            const maxContacts = Number(f.maxContacts || 0);
+                            const hasLiveChat = Boolean(f.liveChat ?? f.liveChatCrm ?? true);
+                            const hasMultiSess = Boolean(f.multiSession);
+                            const maxSess = Number(f.maxSessions || 1);
+                            const hasMultiAg = Boolean(f.multiAgent);
+                            const maxAg = Number(f.maxAgents || f.maxUsers || 1);
+                            const hasOmni = Boolean(f.omnichannel);
+                            const maxChan = Number(f.maxChannels || 0);
+                            const hasSched = Boolean(f.scheduledPosts);
+                            const hasAi = Boolean(f.aiAgent);
+                            const hasMcp = Boolean(f.mcpTools);
+                            const hasExport = Boolean(f.exportReports);
+                            const storageMb = Number(f.maxStorageMb || 500);
+                            const fileLimitMb = Number(f.maxAttachmentSizeMb || 10);
+                            const maxBroadcast = Number(f.maxBroadcastPerMonth || 0);
+                            const maxSwitches = Number(f.maxSessionIdentitySwitches || 2);
 
                             return (
                               <>
                                 <div className="space-y-1">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="line-through text-xs font-semibold text-gray-400 tabular-nums">
-                                      Rp {origPrice.toLocaleString('id-ID')}
-                                    </span>
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                      Hemat {discPercent}%
-                                    </span>
-                                  </div>
+                                  {origPrice > displayPrice && (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="line-through text-xs font-semibold text-gray-400 tabular-nums">
+                                        Rp {origPrice.toLocaleString('id-ID')}
+                                      </span>
+                                      {discPercent > 0 && (
+                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                          Hemat {discPercent}%
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                   <div className="text-xl font-bold text-gray-900 tabular-nums">
                                     Rp {displayPrice.toLocaleString('id-ID')}
                                     <span className="text-xs font-normal text-gray-500">
                                       /{p.period === 'annual' ? 'thn' : 'bln'}
                                     </span>
                                   </div>
-                                  <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
-                                    <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                                    <span>Promo s/d {promoDate}</span>
-                                  </div>
+                                  {promoDate && (
+                                    <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
+                                      <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                      <span>Promo s/d {promoDate}</span>
+                                    </div>
+                                  )}
                                 </div>
 
-                            return (
-                              <div className="border-t border-gray-200 pt-2.5 space-y-1.5 text-xs text-gray-700">
-                                <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                                  Ringkasan Kuota
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                  <span>
-                                    Penyimpanan: <strong>{formatStorageQuota(storageMb)}</strong>{' '}
-                                    (maks {fileLimitMb} MB/file)
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                  <span>
-                                    {p.features?.maxContacts === 0 || p.features?.unlimitedContacts
-                                      ? 'Kontak Tanpa Batas'
-                                      : `Hingga ${(Number(p.features?.maxContacts) || (isEntPlan ? (p.period === 'annual' ? 40000 : 30000) : isBusinessPlan ? (p.period === 'annual' ? 15000 : 12500) : isStarterPlan ? 2500 : 5000)).toLocaleString('id-ID')} Kontak`}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                  <span>
-                                    {hasMultiSess ? `${maxSess} Sesi WA` : '1 Sesi WA'} &middot;{' '}
-                                    {hasMultiAg ? `${maxAg} Akun CS` : '1 Akun Admin'}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                  <span>
-                                    Siaran Promo:{' '}
-                                    <strong>
-                                      {p.features?.unlimitedBroadcast || p.features?.maxBroadcastPerMonth === 0
-                                        ? 'Tanpa Batas Prioritas'
-                                        : `${(Number(p.features?.maxBroadcastPerMonth) || (isEntPlan ? (p.period === 'annual' ? 45000 : 35000) : isBusinessPlan ? 15000 : isStarterPlan ? 2500 : 5000)).toLocaleString('id-ID')} pesan/bln`}
-                                    </strong>
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                  <span>
-                                    Batas Ganti Nomor:{' '}
-                                    <strong>
-                                      {Number(p.features?.maxSessionIdentitySwitches) ||
-                                        (isEntPlan ? (p.period === 'annual' ? 25 : 20) : isBusinessPlan ? 10 : isStarterPlan ? 2 : 5)}
-                                      x
-                                    </strong>{' '}
-                                    per sesi
-                                  </span>
-                                </div>
+                                <div className="border-t border-gray-200 pt-2.5 space-y-1.5 text-xs text-gray-700">
+                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                                    Ringkasan Kuota
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>
+                                      Penyimpanan: <strong>{formatStorageQuota(storageMb)}</strong>{' '}
+                                      (maks {fileLimitMb} MB/file)
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>
+                                      {maxContacts === 0 || f.unlimitedContacts
+                                        ? 'Kontak Tanpa Batas'
+                                        : `Hingga ${maxContacts.toLocaleString('id-ID')} Kontak`}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>
+                                      {hasMultiSess && maxSess > 1 ? `${maxSess} Sesi WA` : '1 Sesi WA'} &middot;{' '}
+                                      {hasMultiAg && maxAg > 1 ? `${maxAg} Akun CS` : '1 Akun Admin'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>
+                                      Siaran Promo:{' '}
+                                      <strong>
+                                        {f.unlimitedBroadcast || maxBroadcast === 0
+                                          ? 'Tanpa Batas Prioritas'
+                                          : `${maxBroadcast.toLocaleString('id-ID')} pesan/bln`}
+                                      </strong>
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                    <span>
+                                      Batas Ganti Nomor: <strong>{maxSwitches}x</strong> per sesi
+                                    </span>
+                                  </div>
 
                                 {isExpanded && (
                                   <div className="pt-1.5 space-y-1.5 border-t border-gray-100">

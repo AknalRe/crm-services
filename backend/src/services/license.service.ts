@@ -121,88 +121,20 @@ export function getPromoValidUntilString(): string {
 }
 
 export function enrichPlanWithDiscount<T extends { priceAmount: number; [key: string]: any }>(plan: T): T {
-  const slug = String(plan.slug || '').toLowerCase();
-  const isAnnual = plan.period === 'annual' || (plan.months && plan.months >= 12);
-  const isStarter = slug.includes('starter');
-  const isPro = slug.includes('pro');
-  const isBusiness = slug.includes('business');
-  const isEnterprise = slug.includes('enterprise');
-
-  // Enforce calibrated charm-pricing ladder even if outdated DB row is received
-  let calibratedPrice = plan.priceAmount;
-  if (slug === 'starter-monthly') {
-    calibratedPrice = 49000;
-  } else if (slug === 'pro-monthly') {
-    calibratedPrice = 99000;
-  } else if (slug === 'pro-annual') {
-    calibratedPrice = 990000;
-  } else if (slug === 'business-monthly') {
-    calibratedPrice = 199000;
-  } else if (slug === 'business-annual') {
-    calibratedPrice = 1990000;
-  } else if (slug === 'enterprise-monthly') {
-    calibratedPrice = 399000;
-  } else if (slug === 'enterprise-annual') {
-    calibratedPrice = 3990000;
+  const currentPrice = Number(plan.priceAmount || 0);
+  const originalPrice = Number(plan.originalPriceAmount || plan.originalPrice || 0);
+  let discountPercent = Number(plan.discountPercent || 0);
+  if (originalPrice > currentPrice && (!discountPercent || discountPercent <= 0)) {
+    discountPercent = Math.round(((originalPrice - currentPrice) / originalPrice) * 100);
   }
-
   const promoValidUntil = plan.promoValidUntil || getPromoValidUntilString();
-  let originalPrice = plan.originalPriceAmount;
-  let discountPercent = plan.discountPercent;
-
-  if (!originalPrice || originalPrice <= calibratedPrice) {
-    if (isStarter) {
-      originalPrice = 99000;
-    } else if (slug === 'pro-monthly') {
-      originalPrice = 199000;
-    } else if (slug === 'pro-annual') {
-      originalPrice = 2388000;
-    } else if (slug === 'business-monthly') {
-      originalPrice = 399000;
-    } else if (slug === 'business-annual') {
-      originalPrice = 4788000;
-    } else if (slug === 'enterprise-monthly') {
-      originalPrice = 799000;
-    } else if (slug === 'enterprise-annual') {
-      originalPrice = 9588000;
-    } else if (isAnnual) {
-      originalPrice = Math.round((calibratedPrice * 1.5) / 10000) * 10000;
-    } else {
-      originalPrice = Math.round((calibratedPrice * 1.5) / 1000) * 1000;
-    }
-  }
-
-  if (!discountPercent || discountPercent <= 0) {
-    discountPercent = Math.max(10, Math.min(75, Math.round(((originalPrice - calibratedPrice) / originalPrice) * 100)));
-  }
-
-  // Enforce proportional ~2x-2.5x quotas even if database has stale schema
-  const rawFeat = plan.features || {};
-  const calibratedFeatures = {
-    ...rawFeat,
-    maxContacts: isEnterprise ? (isAnnual ? 40000 : 30000) : isBusiness ? (isAnnual ? 15000 : 12500) : isPro ? 5000 : 2500,
-    maxBroadcastPerMonth: isEnterprise ? (isAnnual ? 45000 : 35000) : isBusiness ? 15000 : isPro ? 5000 : 2500,
-    maxSessions: isEnterprise ? (isAnnual ? 12 : 10) : isBusiness ? 5 : isPro ? 2 : 1,
-    maxAgents: isEnterprise ? (isAnnual ? 18 : 15) : isBusiness ? 7 : isPro ? 3 : 1,
-    maxUsers: isEnterprise ? (isAnnual ? 18 : 15) : isBusiness ? 7 : isPro ? 3 : 1,
-    maxStorageMb: isEnterprise ? (isAnnual ? 10240 : 6144) : isBusiness ? (isAnnual ? 4096 : 2560) : isPro ? (isAnnual ? 1536 : 1024) : 500,
-    maxSessionIdentitySwitches: isEnterprise ? (isAnnual ? 25 : 20) : isBusiness ? 10 : isPro ? 5 : 2,
-    multiSession: !isStarter,
-    multiAgent: !isStarter,
-    omnichannel: !isStarter,
-    scheduledPosts: !isStarter,
-    aiAgent: isBusiness || isEnterprise,
-    mcpTools: isBusiness || isEnterprise,
-    apiAccess: isBusiness || isEnterprise,
-  };
 
   return {
     ...plan,
-    priceAmount: calibratedPrice,
+    priceAmount: currentPrice,
     originalPriceAmount: originalPrice,
     discountPercent,
     promoValidUntil,
-    features: calibratedFeatures,
   };
 }
 
@@ -268,6 +200,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       months: 1,
       trialDays: 7,
       priceAmount: 49000,
+      originalPriceAmount: 99000,
+      discountPercent: 51,
+      promoValidUntil: '30 November 2026',
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
@@ -309,6 +244,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       months: 1,
       trialDays: 7,
       priceAmount: 99000,
+      originalPriceAmount: 199000,
+      discountPercent: 50,
+      promoValidUntil: '30 November 2026',
       highlighted: true,
       features: {
         unlimitedBroadcast: false,
@@ -364,6 +302,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       months: 12,
       trialDays: 7,
       priceAmount: 990000,
+      originalPriceAmount: 2388000,
+      discountPercent: 59,
+      promoValidUntil: '30 November 2026',
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
@@ -419,6 +360,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       months: 1,
       trialDays: 7,
       priceAmount: 199000,
+      originalPriceAmount: 399000,
+      discountPercent: 50,
+      promoValidUntil: '30 November 2026',
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
@@ -475,6 +419,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       months: 12,
       trialDays: 7,
       priceAmount: 1990000,
+      originalPriceAmount: 4788000,
+      discountPercent: 58,
+      promoValidUntil: '30 November 2026',
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
@@ -531,6 +478,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       months: 1,
       trialDays: 7,
       priceAmount: 399000,
+      originalPriceAmount: 799000,
+      discountPercent: 50,
+      promoValidUntil: '30 November 2026',
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
@@ -587,6 +537,9 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       months: 12,
       trialDays: 7,
       priceAmount: 3990000,
+      originalPriceAmount: 9588000,
+      discountPercent: 58,
+      promoValidUntil: '30 November 2026',
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
