@@ -420,6 +420,7 @@ function renderLandingHtmlDocument(req: FastifyRequest): string {
 <html lang="id">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="${escapeHtml(logoUrl)}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${escapeHtml(CRM_SEO_META.fullTitle)}</title>
     <meta name="description" content="${escapeHtml(CRM_SEO_META.description)}" />
