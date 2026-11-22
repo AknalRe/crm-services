@@ -835,7 +835,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         });
         const igScope =
           'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights';
-        const target = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${encodeURIComponent(oauthCreds.instagramAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=${encodeURIComponent(igScope)}&state=${encodeURIComponent(igState)}`;
+        const target = `https://www.instagram.com/oauth/authorize?enable_fb_login=1&force_reauth=0&client_id=${encodeURIComponent(oauthCreds.instagramAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=${encodeURIComponent(igScope)}&state=${encodeURIComponent(igState)}`;
         return reply.redirect(target);
       }
 
