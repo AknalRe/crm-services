@@ -133,15 +133,15 @@ export function enrichPlanWithDiscount<T extends { priceAmount: number; [key: st
     } else if (plan.slug === 'pro-annual') {
       originalPrice = 2388000;
     } else if (plan.slug === 'business-monthly') {
-      originalPrice = 499000;
+      originalPrice = 399000;
     } else if (plan.slug === 'business-annual') {
-      originalPrice = 5988000;
+      originalPrice = 4788000;
     } else if (plan.slug === 'enterprise-monthly') {
-      originalPrice = 999000;
+      originalPrice = 799000;
     } else if (plan.slug === 'enterprise-annual') {
-      originalPrice = 11988000;
+      originalPrice = 9588000;
     } else if (plan.period === 'annual') {
-      originalPrice = Math.round((plan.priceAmount * 1.35) / 10000) * 10000;
+      originalPrice = Math.round((plan.priceAmount * 1.5) / 10000) * 10000;
     } else {
       originalPrice = Math.round((plan.priceAmount * 1.5) / 1000) * 1000;
     }
@@ -367,15 +367,15 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'business-monthly',
       name: 'Business AI Bulanan',
-      tagline: 'Skala bisnis berkembang: 10 Sesi WA, 15 CS, 50.000 kontak, 100.000 siaran/bln, AI Agent, MCP Tools & API.',
+      tagline: 'Skala bisnis berkembang: 10 Sesi WA, 15 CS, 50.000 kontak, 75.000 siaran/bln, AI Agent, MCP Tools & API.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
-      priceAmount: 299000,
+      priceAmount: 199000,
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
-        maxBroadcastPerMonth: 100000,
+        maxBroadcastPerMonth: 75000,
         unlimitedContacts: false,
         maxContacts: 50000,
         birthdayBot: true,
@@ -423,15 +423,15 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'business-annual',
       name: 'Business AI Tahunan',
-      tagline: 'Paket tahunan bisnis hemat 17% (gratis 2 bln): 10 Sesi WA, 15 CS, 50.000 kontak, 100.000 siaran & AI Agent.',
+      tagline: 'Paket tahunan bisnis hemat 17% (gratis 2 bln): 10 Sesi WA, 15 CS, 50.000 kontak, 75.000 siaran & AI Agent.',
       period: 'annual',
       months: 12,
       trialDays: 7,
-      priceAmount: 2990000,
+      priceAmount: 1990000,
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
-        maxBroadcastPerMonth: 100000,
+        maxBroadcastPerMonth: 75000,
         unlimitedContacts: false,
         maxContacts: 50000,
         birthdayBot: true,
@@ -483,7 +483,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       period: 'monthly',
       months: 1,
       trialDays: 7,
-      priceAmount: 599000,
+      priceAmount: 399000,
       highlighted: false,
       features: {
         unlimitedBroadcast: true,
@@ -539,7 +539,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       period: 'annual',
       months: 12,
       trialDays: 7,
-      priceAmount: 5990000,
+      priceAmount: 3990000,
       highlighted: false,
       features: {
         unlimitedBroadcast: true,
@@ -613,7 +613,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     : isStarter
     ? 2500
     : isBusiness
-    ? 100000
+    ? 75000
     : 25000;
 
   const unlimitedContacts =
