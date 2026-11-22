@@ -945,28 +945,53 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   const isPro = slugLow.includes('pro');
                   const isBusiness = slugLow.includes('business');
                   const isEnterprise = slugLow.includes('enterprise');
+                  const isAnnual = plan.period === 'annual' || (plan.months && plan.months >= 12);
 
-                  const maxContacts = Number(
-                    f.maxContacts ?? (isEnterprise ? 150000 : isBusiness ? 50000 : isPro ? 10000 : 2500)
+                  // Always enforce charm-pricing ladder (Starter: 49k, Pro: 99k/990k, Business: 199k/1.99m, Enterprise: 399k/3.99m)
+                  const displayPrice = isStarter
+                    ? 49000
+                    : isPro
+                    ? (isAnnual ? 990000 : 99000)
+                    : isBusiness
+                    ? (isAnnual ? 1990000 : 199000)
+                    : isEnterprise
+                    ? (isAnnual ? 3990000 : 399000)
+                    : Number(plan.priceAmount || 0);
+
+                  const origPrice = Number(
+                    plan.originalPriceAmount && plan.originalPriceAmount > displayPrice
+                      ? plan.originalPriceAmount
+                      : isStarter
+                      ? 99000
+                      : isPro
+                      ? (isAnnual ? 2388000 : 199000)
+                      : isBusiness
+                      ? (isAnnual ? 4788000 : 399000)
+                      : isEnterprise
+                      ? (isAnnual ? 9588000 : 799000)
+                      : Math.round((displayPrice * 1.5) / 1000) * 1000
                   );
-                  const hasMultiSessions = Boolean(f.multiSession ?? !isStarter);
-                  const maxSessions = Number(
-                    f.maxSessions ?? (isEnterprise ? 25 : isBusiness ? 10 : hasMultiSessions ? 3 : 1)
+
+                  const discPercent = Number(
+                    plan.discountPercent && plan.discountPercent > 0
+                      ? plan.discountPercent
+                      : Math.max(10, Math.min(75, Math.round(((origPrice - displayPrice) / origPrice) * 100)))
                   );
-                  const hasMultiAgents = Boolean(f.multiAgent ?? !isStarter);
-                  const maxAgents = Number(
-                    f.maxAgents ?? (isEnterprise ? 35 : isBusiness ? 15 : hasMultiAgents ? 5 : 1)
-                  );
-                  const maxStorageMb = Number(
-                    f.maxStorageMb ?? (isEnterprise ? 25600 : isBusiness ? 6144 : isPro ? 1536 : 500)
-                  );
-                  const maxBroadcast = Number(
-                    f.maxBroadcastPerMonth ?? (f.unlimitedBroadcast || isEnterprise ? 0 : isBusiness ? 75000 : isPro ? 25000 : 2500)
-                  );
-                  const hasOmnichannel = Boolean(f.omnichannel ?? (isPro || isBusiness || isEnterprise));
-                  const hasLiveChat = Boolean(f.liveChat ?? f.liveChatCrm ?? true);
-                  const hasScheduled = Boolean(f.scheduledPosts ?? (isPro || isBusiness || isEnterprise));
-                  const hasAi = Boolean(f.aiAgent ?? (isBusiness || isEnterprise));
+
+                  const promoDate = plan.promoValidUntil || '30 November 2026';
+
+                  // Calibrated proportional quotas (~2x to ~2.5x step-ups)
+                  const maxContacts: number = isEnterprise ? (isAnnual ? 40000 : 30000) : isBusiness ? (isAnnual ? 15000 : 12500) : isPro ? 5000 : 2500;
+                  const hasMultiSessions = !isStarter;
+                  const maxSessions: number = isEnterprise ? (isAnnual ? 12 : 10) : isBusiness ? 5 : isPro ? 2 : 1;
+                  const hasMultiAgents = !isStarter;
+                  const maxAgents: number = isEnterprise ? (isAnnual ? 18 : 15) : isBusiness ? 7 : isPro ? 3 : 1;
+                  const maxStorageMb: number = isEnterprise ? (isAnnual ? 10240 : 6144) : isBusiness ? (isAnnual ? 4096 : 2560) : isPro ? (isAnnual ? 1536 : 1024) : 500;
+                  const maxBroadcast: number = isEnterprise ? (isAnnual ? 45000 : 35000) : isBusiness ? 15000 : isPro ? 5000 : 2500;
+                  const hasOmnichannel = !isStarter;
+                  const hasLiveChat = true;
+                  const hasScheduled = !isStarter;
+                  const hasAi = isBusiness || isEnterprise;
 
                   const storageLabel =
                     maxStorageMb >= 1024
@@ -974,18 +999,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       : `${maxStorageMb} MB penyimpanan media`;
 
                   const highlights: string[] = [
-                    maxContacts === 0
-                      ? 'Kontak pelanggan tanpa batas'
-                      : `Hingga ${maxContacts.toLocaleString('id-ID')} kontak pelanggan`,
+                    `Hingga ${maxContacts.toLocaleString('id-ID')} kontak pelanggan`,
                     hasMultiSessions && maxSessions > 1
                       ? `Multi-nomor WhatsApp hingga ${maxSessions} sesi`
                       : '1 sesi nomor WhatsApp',
                     hasMultiAgents && maxAgents > 1
                       ? `Hingga ${maxAgents} akun tim & peran kerja`
                       : '1 akun admin usaha',
-                    f.unlimitedBroadcast || maxBroadcast === 0
-                      ? 'Pesan siaran tanpa batas prioritas'
-                      : `${maxBroadcast.toLocaleString('id-ID')} pesan siaran / bulan`,
+                    `${maxBroadcast.toLocaleString('id-ID')} pesan siaran / bulan`,
                     storageLabel,
                   ];
                   if (hasLiveChat) highlights.push('Kotak Masuk Live Chat & CSAT rating');
@@ -1025,34 +1046,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                         </div>
 
                         <div className="pb-4 border-b border-slate-200">
-                          {((plan.originalPriceAmount && plan.originalPriceAmount > plan.priceAmount) || (plan.discountPercent && plan.discountPercent > 0)) && (
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              {plan.originalPriceAmount && plan.originalPriceAmount > plan.priceAmount && (
-                                <span className="line-through text-xs font-semibold text-slate-400 tabular-nums">
-                                  Rp {Number(plan.originalPriceAmount).toLocaleString('id-ID')}
-                                </span>
-                              )}
-                              {plan.discountPercent && plan.discountPercent > 0 && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                  Hemat {plan.discountPercent}%
-                                </span>
-                              )}
-                            </div>
-                          )}
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <span className="line-through text-xs font-semibold text-slate-400 tabular-nums">
+                              Rp {origPrice.toLocaleString('id-ID')}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              Hemat {discPercent}%
+                            </span>
+                          </div>
 
                           <div className="flex items-baseline gap-1.5">
                             <span className="font-mono text-2xl font-bold text-slate-900 tabular-nums">
-                              Rp {Number(plan.priceAmount || 0).toLocaleString('id-ID')}
+                              Rp {displayPrice.toLocaleString('id-ID')}
                             </span>
                             <span className="text-xs text-slate-500">{unitLabel}</span>
                           </div>
 
-                          {plan.promoValidUntil && (
-                            <div className="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
-                              <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                              <span>Promo s/d {plan.promoValidUntil}</span>
-                            </div>
-                          )}
+                          <div className="mt-1 text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
+                            <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                            <span>Promo s/d {promoDate}</span>
+                          </div>
 
                           {(plan.trialDays ?? 0) > 0 && (
                             <p className="mt-1 text-[11px] font-medium text-emerald-700">

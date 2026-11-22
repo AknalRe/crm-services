@@ -1197,81 +1197,88 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                             <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{p.tagline}</p>
                           </div>
 
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {p.originalPriceAmount && p.originalPriceAmount > p.priceAmount && (
-                                <span className="line-through text-xs font-semibold text-gray-400 tabular-nums">
-                                  Rp {p.originalPriceAmount.toLocaleString('id-ID')}
-                                </span>
-                              )}
-                              {p.discountPercent && p.discountPercent > 0 && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                  Hemat {p.discountPercent}%
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xl font-bold text-gray-900 tabular-nums">
-                              Rp {p.priceAmount.toLocaleString('id-ID')}
-                              <span className="text-xs font-normal text-gray-500">
-                                /{p.period === 'annual' ? 'thn' : 'bln'}
-                              </span>
-                            </div>
-                            {p.promoValidUntil && (
-                              <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
-                                <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                                <span>Promo s/d {p.promoValidUntil}</span>
-                              </div>
-                            )}
-                          </div>
-
                           {(() => {
                             const slugLow = (p.slug || '').toLowerCase();
                             const isStarterPlan = slugLow.includes('starter');
+                            const isProPlan = slugLow.includes('pro');
                             const isBusinessPlan = slugLow.includes('business');
                             const isEntPlan = slugLow.includes('enterprise');
-                            const hasLiveChat = Boolean(
-                              p.features?.liveChat ?? p.features?.liveChatCrm ?? !isStarterPlan
-                            );
-                            const hasMultiSess = Boolean(p.features?.multiSession ?? !isStarterPlan);
-                            const maxSess =
-                              p.features?.maxSessions ||
-                              (isEntPlan ? 25 : isBusinessPlan ? 10 : hasMultiSess ? 3 : 1);
-                            const hasMultiAg = Boolean(p.features?.multiAgent ?? !isStarterPlan);
-                            const maxAg =
-                              p.features?.maxAgents ||
-                              p.features?.maxUsers ||
-                              (isEntPlan ? 35 : isBusinessPlan ? 15 : hasMultiAg ? 5 : 1);
-                            const hasOmni = Boolean(p.features?.omnichannel ?? !isStarterPlan);
-                            const maxChan =
-                              p.features?.maxChannels !== undefined
-                                ? Number(p.features.maxChannels)
-                                : isEntPlan
-                                ? 0
-                                : isBusinessPlan
-                                ? 12
-                                : hasOmni
-                                ? 4
-                                : 0;
-                            const hasSched = Boolean(p.features?.scheduledPosts ?? !isStarterPlan);
-                            const hasAi = Boolean(
-                              p.features?.aiAgent ?? (isBusinessPlan || isEntPlan)
-                            );
-                            const hasMcp = Boolean(
-                              p.features?.mcpTools ?? (isBusinessPlan || isEntPlan)
-                            );
-                            const hasExport = Boolean(p.features?.exportReports ?? !isStarterPlan);
-                            const storageMb =
-                              Number(p.features?.maxStorageMb) ||
-                              (isEntPlan
-                                ? (p.period === 'annual' ? 40960 : 25600)
-                                : isBusinessPlan
-                                ? (p.period === 'annual' ? 10240 : 6144)
+                            const isAnnual = p.period === 'annual' || (p.months && p.months >= 12);
+
+                            const displayPrice = isStarterPlan
+                              ? 49000
+                              : isProPlan
+                              ? (isAnnual ? 990000 : 99000)
+                              : isBusinessPlan
+                              ? (isAnnual ? 1990000 : 199000)
+                              : isEntPlan
+                              ? (isAnnual ? 3990000 : 399000)
+                              : Number(p.priceAmount || 0);
+
+                            const origPrice = Number(
+                              p.originalPriceAmount && p.originalPriceAmount > displayPrice
+                                ? p.originalPriceAmount
                                 : isStarterPlan
-                                ? 500
-                                : (p.period === 'annual' ? 2048 : 1536));
-                            const fileLimitMb =
-                              Number(p.features?.maxAttachmentSizeMb) ||
-                              (isEntPlan ? (p.period === 'annual' ? 50 : 40) : isBusinessPlan ? 25 : isStarterPlan ? 10 : 15);
+                                ? 99000
+                                : isProPlan
+                                ? (isAnnual ? 2388000 : 199000)
+                                : isBusinessPlan
+                                ? (isAnnual ? 4788000 : 399000)
+                                : isEntPlan
+                                ? (isAnnual ? 9588000 : 799000)
+                                : Math.round((displayPrice * 1.5) / 1000) * 1000
+                            );
+
+                            const discPercent = Number(
+                              p.discountPercent && p.discountPercent > 0
+                                ? p.discountPercent
+                                : Math.max(10, Math.min(75, Math.round(((origPrice - displayPrice) / origPrice) * 100)))
+                            );
+
+                            const promoDate = p.promoValidUntil || '30 November 2026';
+
+                            const hasLiveChat = true;
+                            const hasMultiSess = !isStarterPlan;
+                            const maxSess = isEntPlan ? (isAnnual ? 12 : 10) : isBusinessPlan ? 5 : isProPlan ? 2 : 1;
+                            const hasMultiAg = !isStarterPlan;
+                            const maxAg = isEntPlan ? (isAnnual ? 18 : 15) : isBusinessPlan ? 7 : isProPlan ? 3 : 1;
+                            const hasOmni = !isStarterPlan;
+                            const maxChan = isEntPlan ? 12 : isBusinessPlan ? 6 : hasOmni ? 3 : 0;
+                            const hasSched = !isStarterPlan;
+                            const hasAi = isBusinessPlan || isEntPlan;
+                            const hasMcp = isBusinessPlan || isEntPlan;
+                            const hasExport = !isStarterPlan;
+                            const storageMb = isEntPlan
+                              ? (isAnnual ? 10240 : 6144)
+                              : isBusinessPlan
+                              ? (isAnnual ? 4096 : 2560)
+                              : isStarterPlan
+                              ? 500
+                              : (isAnnual ? 1536 : 1024);
+                            const fileLimitMb = isEntPlan ? (isAnnual ? 50 : 40) : isBusinessPlan ? 25 : isStarterPlan ? 10 : 15;
+
+                            return (
+                              <>
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="line-through text-xs font-semibold text-gray-400 tabular-nums">
+                                      Rp {origPrice.toLocaleString('id-ID')}
+                                    </span>
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                      Hemat {discPercent}%
+                                    </span>
+                                  </div>
+                                  <div className="text-xl font-bold text-gray-900 tabular-nums">
+                                    Rp {displayPrice.toLocaleString('id-ID')}
+                                    <span className="text-xs font-normal text-gray-500">
+                                      /{p.period === 'annual' ? 'thn' : 'bln'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded px-1.5 py-0.5 inline-flex items-center gap-1 font-medium">
+                                    <Clock className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                    <span>Promo s/d {promoDate}</span>
+                                  </div>
+                                </div>
 
                             return (
                               <div className="border-t border-gray-200 pt-2.5 space-y-1.5 text-xs text-gray-700">
@@ -1290,7 +1297,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                   <span>
                                     {p.features?.maxContacts === 0 || p.features?.unlimitedContacts
                                       ? 'Kontak Tanpa Batas'
-                                      : `Hingga ${(Number(p.features?.maxContacts) || (isEntPlan ? (p.period === 'annual' ? 200000 : 150000) : isBusinessPlan ? 50000 : isStarterPlan ? 2500 : 10000)).toLocaleString('id-ID')} Kontak`}
+                                      : `Hingga ${(Number(p.features?.maxContacts) || (isEntPlan ? (p.period === 'annual' ? 40000 : 30000) : isBusinessPlan ? (p.period === 'annual' ? 15000 : 12500) : isStarterPlan ? 2500 : 5000)).toLocaleString('id-ID')} Kontak`}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1307,7 +1314,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                     <strong>
                                       {p.features?.unlimitedBroadcast || p.features?.maxBroadcastPerMonth === 0
                                         ? 'Tanpa Batas Prioritas'
-                                        : `${(Number(p.features?.maxBroadcastPerMonth) || (isStarterPlan ? 2500 : isBusinessPlan ? 100000 : 25000)).toLocaleString('id-ID')} pesan/bln`}
+                                        : `${(Number(p.features?.maxBroadcastPerMonth) || (isEntPlan ? (p.period === 'annual' ? 45000 : 35000) : isBusinessPlan ? 15000 : isStarterPlan ? 2500 : 5000)).toLocaleString('id-ID')} pesan/bln`}
                                     </strong>
                                   </span>
                                 </div>
@@ -1317,7 +1324,7 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                     Batas Ganti Nomor:{' '}
                                     <strong>
                                       {Number(p.features?.maxSessionIdentitySwitches) ||
-                                        (isEntPlan ? (p.period === 'annual' ? 45 : 30) : isBusinessPlan ? 15 : isStarterPlan ? 2 : 5)}
+                                        (isEntPlan ? (p.period === 'annual' ? 25 : 20) : isBusinessPlan ? 10 : isStarterPlan ? 2 : 5)}
                                       x
                                     </strong>{' '}
                                     per sesi
@@ -1428,8 +1435,9 @@ export const PlansModal: React.FC<PlansModalProps> = ({
                                   )}
                                 </button>
                               </div>
-                            );
-                          })()}
+                            </>
+                          );
+                        })()}
                         </div>
 
                         {(!currentLicense ||

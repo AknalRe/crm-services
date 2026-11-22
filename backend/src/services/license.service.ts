@@ -121,41 +121,88 @@ export function getPromoValidUntilString(): string {
 }
 
 export function enrichPlanWithDiscount<T extends { priceAmount: number; [key: string]: any }>(plan: T): T {
+  const slug = String(plan.slug || '').toLowerCase();
+  const isAnnual = plan.period === 'annual' || (plan.months && plan.months >= 12);
+  const isStarter = slug.includes('starter');
+  const isPro = slug.includes('pro');
+  const isBusiness = slug.includes('business');
+  const isEnterprise = slug.includes('enterprise');
+
+  // Enforce calibrated charm-pricing ladder even if outdated DB row is received
+  let calibratedPrice = plan.priceAmount;
+  if (slug === 'starter-monthly') {
+    calibratedPrice = 49000;
+  } else if (slug === 'pro-monthly') {
+    calibratedPrice = 99000;
+  } else if (slug === 'pro-annual') {
+    calibratedPrice = 990000;
+  } else if (slug === 'business-monthly') {
+    calibratedPrice = 199000;
+  } else if (slug === 'business-annual') {
+    calibratedPrice = 1990000;
+  } else if (slug === 'enterprise-monthly') {
+    calibratedPrice = 399000;
+  } else if (slug === 'enterprise-annual') {
+    calibratedPrice = 3990000;
+  }
+
   const promoValidUntil = plan.promoValidUntil || getPromoValidUntilString();
   let originalPrice = plan.originalPriceAmount;
   let discountPercent = plan.discountPercent;
 
-  if (!originalPrice || originalPrice <= plan.priceAmount) {
-    if (plan.slug.includes('starter')) {
+  if (!originalPrice || originalPrice <= calibratedPrice) {
+    if (isStarter) {
       originalPrice = 99000;
-    } else if (plan.slug === 'pro-monthly') {
+    } else if (slug === 'pro-monthly') {
       originalPrice = 199000;
-    } else if (plan.slug === 'pro-annual') {
+    } else if (slug === 'pro-annual') {
       originalPrice = 2388000;
-    } else if (plan.slug === 'business-monthly') {
+    } else if (slug === 'business-monthly') {
       originalPrice = 399000;
-    } else if (plan.slug === 'business-annual') {
+    } else if (slug === 'business-annual') {
       originalPrice = 4788000;
-    } else if (plan.slug === 'enterprise-monthly') {
+    } else if (slug === 'enterprise-monthly') {
       originalPrice = 799000;
-    } else if (plan.slug === 'enterprise-annual') {
+    } else if (slug === 'enterprise-annual') {
       originalPrice = 9588000;
-    } else if (plan.period === 'annual') {
-      originalPrice = Math.round((plan.priceAmount * 1.5) / 10000) * 10000;
+    } else if (isAnnual) {
+      originalPrice = Math.round((calibratedPrice * 1.5) / 10000) * 10000;
     } else {
-      originalPrice = Math.round((plan.priceAmount * 1.5) / 1000) * 1000;
+      originalPrice = Math.round((calibratedPrice * 1.5) / 1000) * 1000;
     }
   }
 
   if (!discountPercent || discountPercent <= 0) {
-    discountPercent = Math.max(10, Math.min(75, Math.round(((originalPrice - plan.priceAmount) / originalPrice) * 100)));
+    discountPercent = Math.max(10, Math.min(75, Math.round(((originalPrice - calibratedPrice) / originalPrice) * 100)));
   }
+
+  // Enforce proportional ~2x-2.5x quotas even if database has stale schema
+  const rawFeat = plan.features || {};
+  const calibratedFeatures = {
+    ...rawFeat,
+    maxContacts: isEnterprise ? (isAnnual ? 40000 : 30000) : isBusiness ? (isAnnual ? 15000 : 12500) : isPro ? 5000 : 2500,
+    maxBroadcastPerMonth: isEnterprise ? (isAnnual ? 45000 : 35000) : isBusiness ? 15000 : isPro ? 5000 : 2500,
+    maxSessions: isEnterprise ? (isAnnual ? 12 : 10) : isBusiness ? 5 : isPro ? 2 : 1,
+    maxAgents: isEnterprise ? (isAnnual ? 18 : 15) : isBusiness ? 7 : isPro ? 3 : 1,
+    maxUsers: isEnterprise ? (isAnnual ? 18 : 15) : isBusiness ? 7 : isPro ? 3 : 1,
+    maxStorageMb: isEnterprise ? (isAnnual ? 10240 : 6144) : isBusiness ? (isAnnual ? 4096 : 2560) : isPro ? (isAnnual ? 1536 : 1024) : 500,
+    maxSessionIdentitySwitches: isEnterprise ? (isAnnual ? 25 : 20) : isBusiness ? 10 : isPro ? 5 : 2,
+    multiSession: !isStarter,
+    multiAgent: !isStarter,
+    omnichannel: !isStarter,
+    scheduledPosts: !isStarter,
+    aiAgent: isBusiness || isEnterprise,
+    mcpTools: isBusiness || isEnterprise,
+    apiAccess: isBusiness || isEnterprise,
+  };
 
   return {
     ...plan,
+    priceAmount: calibratedPrice,
     originalPriceAmount: originalPrice,
     discountPercent,
     promoValidUntil,
+    features: calibratedFeatures,
   };
 }
 
@@ -257,7 +304,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'pro-monthly',
       name: 'Growth Pro Bulanan',
-      tagline: 'Untuk tim CS kecil: Multi-nomor 3 Sesi WA, 5 CS, 10.000 kontak, 25.000 siaran/bln, omnichannel sosial & CSAT.',
+      tagline: 'Untuk tim CS kecil: 2 Sesi WA, 3 CS, 5.000 kontak, 5.000 siaran/bln, omnichannel & jadwal konten.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
@@ -265,21 +312,76 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       highlighted: true,
       features: {
         unlimitedBroadcast: false,
-        maxBroadcastPerMonth: 25000,
+        maxBroadcastPerMonth: 5000,
         unlimitedContacts: false,
-        maxContacts: 10000,
+        maxContacts: 5000,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
-        maxSessions: 3,
+        maxSessions: 2,
         maxSessionIdentitySwitches: 5,
         multiAgent: true,
-        maxAgents: 5,
-        maxUsers: 5,
-        maxTemplates: 50,
+        maxAgents: 3,
+        maxUsers: 3,
+        maxTemplates: 30,
         customRoles: true,
         omnichannel: true,
-        maxChannels: 4,
+        maxChannels: 3,
+        scheduledPosts: true,
+        autoReply: true,
+        aiAgent: false,
+        mcpTools: false,
+        exportReports: true,
+        wahaSync: true,
+        apiAccess: false,
+        supportPriority: 'fast',
+        maxStorageMb: 1024,
+        maxAttachmentSizeMb: 15,
+        allowedMenus: [
+          'dashboard',
+          'conversations',
+          'comments',
+          'feed',
+          'contacts',
+          'broadcasts',
+          'birthday',
+          'tracking',
+          'posts',
+          'ideas',
+          'media',
+          'automations',
+          'settings',
+        ],
+      },
+    },
+    {
+      id: 3,
+      catalogId: 'reneo-crm',
+      slug: 'pro-annual',
+      name: 'Growth Pro Tahunan',
+      tagline: 'Paket tahunan hemat 2 bln: 2 Sesi WA, 3 CS, 5.000 kontak, 5.000 siaran/bln & omnichannel.',
+      period: 'annual',
+      months: 12,
+      trialDays: 7,
+      priceAmount: 990000,
+      highlighted: false,
+      features: {
+        unlimitedBroadcast: false,
+        maxBroadcastPerMonth: 5000,
+        unlimitedContacts: false,
+        maxContacts: 5000,
+        birthdayBot: true,
+        liveChat: true,
+        multiSession: true,
+        maxSessions: 2,
+        maxSessionIdentitySwitches: 5,
+        multiAgent: true,
+        maxAgents: 3,
+        maxUsers: 3,
+        maxTemplates: 30,
+        customRoles: true,
+        omnichannel: true,
+        maxChannels: 3,
         scheduledPosts: true,
         autoReply: true,
         aiAgent: false,
@@ -308,66 +410,11 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       },
     },
     {
-      id: 3,
-      catalogId: 'reneo-crm',
-      slug: 'pro-annual',
-      name: 'Growth Pro Tahunan',
-      tagline: 'Paket tahunan tim CS hemat 17% (gratis 2 bln): 3 Sesi WA, 5 CS, 10.000 kontak, 25.000 siaran/bln & omnichannel.',
-      period: 'annual',
-      months: 12,
-      trialDays: 7,
-      priceAmount: 990000,
-      highlighted: false,
-      features: {
-        unlimitedBroadcast: false,
-        maxBroadcastPerMonth: 25000,
-        unlimitedContacts: false,
-        maxContacts: 10000,
-        birthdayBot: true,
-        liveChat: true,
-        multiSession: true,
-        maxSessions: 3,
-        maxSessionIdentitySwitches: 5,
-        multiAgent: true,
-        maxAgents: 5,
-        maxUsers: 5,
-        maxTemplates: 50,
-        customRoles: true,
-        omnichannel: true,
-        maxChannels: 4,
-        scheduledPosts: true,
-        autoReply: true,
-        aiAgent: false,
-        mcpTools: false,
-        exportReports: true,
-        wahaSync: true,
-        apiAccess: false,
-        supportPriority: 'fast',
-        maxStorageMb: 2048,
-        maxAttachmentSizeMb: 15,
-        allowedMenus: [
-          'dashboard',
-          'conversations',
-          'comments',
-          'feed',
-          'contacts',
-          'broadcasts',
-          'birthday',
-          'tracking',
-          'posts',
-          'ideas',
-          'media',
-          'automations',
-          'settings',
-        ],
-      },
-    },
-    {
       id: 4,
       catalogId: 'reneo-crm',
       slug: 'business-monthly',
       name: 'Business AI Bulanan',
-      tagline: 'Skala bisnis berkembang: 10 Sesi WA, 15 CS, 50.000 kontak, 75.000 siaran/bln, AI Agent, MCP Tools & API.',
+      tagline: 'Skala bisnis berkembang: 5 Sesi WA, 7 CS, 12.500 kontak, 15.000 siaran/bln, AI Agent & MCP Tools.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
@@ -375,21 +422,21 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
-        maxBroadcastPerMonth: 75000,
+        maxBroadcastPerMonth: 15000,
         unlimitedContacts: false,
-        maxContacts: 50000,
+        maxContacts: 12500,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
-        maxSessions: 10,
-        maxSessionIdentitySwitches: 15,
+        maxSessions: 5,
+        maxSessionIdentitySwitches: 10,
         multiAgent: true,
-        maxAgents: 15,
-        maxUsers: 15,
-        maxTemplates: 0,
+        maxAgents: 7,
+        maxUsers: 7,
+        maxTemplates: 50,
         customRoles: true,
         omnichannel: true,
-        maxChannels: 12,
+        maxChannels: 6,
         scheduledPosts: true,
         autoReply: true,
         aiAgent: true,
@@ -398,7 +445,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'priority',
-        maxStorageMb: 6144,
+        maxStorageMb: 2560,
         maxAttachmentSizeMb: 25,
         allowedMenus: [
           'dashboard',
@@ -423,7 +470,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'business-annual',
       name: 'Business AI Tahunan',
-      tagline: 'Paket tahunan bisnis hemat 17% (gratis 2 bln): 10 Sesi WA, 15 CS, 50.000 kontak, 75.000 siaran & AI Agent.',
+      tagline: 'Paket tahunan hemat 2 bln: 5 Sesi WA, 7 CS, 15.000 kontak, 15.000 siaran & AI Agent.',
       period: 'annual',
       months: 12,
       trialDays: 7,
@@ -431,21 +478,21 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       highlighted: false,
       features: {
         unlimitedBroadcast: false,
-        maxBroadcastPerMonth: 75000,
+        maxBroadcastPerMonth: 15000,
         unlimitedContacts: false,
-        maxContacts: 50000,
+        maxContacts: 15000,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
-        maxSessions: 10,
-        maxSessionIdentitySwitches: 15,
+        maxSessions: 5,
+        maxSessionIdentitySwitches: 10,
         multiAgent: true,
-        maxAgents: 15,
-        maxUsers: 15,
-        maxTemplates: 0,
+        maxAgents: 7,
+        maxUsers: 7,
+        maxTemplates: 50,
         customRoles: true,
         omnichannel: true,
-        maxChannels: 12,
+        maxChannels: 6,
         scheduledPosts: true,
         autoReply: true,
         aiAgent: true,
@@ -454,7 +501,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'priority',
-        maxStorageMb: 10240,
+        maxStorageMb: 4096,
         maxAttachmentSizeMb: 25,
         allowedMenus: [
           'dashboard',
@@ -479,29 +526,29 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'enterprise-monthly',
       name: 'Enterprise AI Bulanan',
-      tagline: 'Skala korporasi fleksibel: 25 Sesi WA Dedicated, 35 CS, 150.000 kontak, siaran tanpa batas, AI Agent & VIP.',
+      tagline: 'Skala korporasi: 10 Sesi WA Dedicated, 15 CS, 30.000 kontak, 35.000 siaran, AI Agent & VIP.',
       period: 'monthly',
       months: 1,
       trialDays: 7,
       priceAmount: 399000,
       highlighted: false,
       features: {
-        unlimitedBroadcast: true,
-        maxBroadcastPerMonth: 0,
+        unlimitedBroadcast: false,
+        maxBroadcastPerMonth: 35000,
         unlimitedContacts: false,
-        maxContacts: 150000,
+        maxContacts: 30000,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
-        maxSessions: 25,
-        maxSessionIdentitySwitches: 30,
+        maxSessions: 10,
+        maxSessionIdentitySwitches: 20,
         multiAgent: true,
-        maxAgents: 35,
-        maxUsers: 35,
+        maxAgents: 15,
+        maxUsers: 15,
         maxTemplates: 0,
         customRoles: true,
         omnichannel: true,
-        maxChannels: 0,
+        maxChannels: 12,
         scheduledPosts: true,
         autoReply: true,
         aiAgent: true,
@@ -510,7 +557,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'vip',
-        maxStorageMb: 25600,
+        maxStorageMb: 6144,
         maxAttachmentSizeMb: 40,
         allowedMenus: [
           'dashboard',
@@ -535,25 +582,25 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
       catalogId: 'reneo-crm',
       slug: 'enterprise-annual',
       name: 'Enterprise AI Tahunan',
-      tagline: 'Paket korporasi hemat 17% (gratis 2 bln): 25 Sesi WA Dedicated, 35 CS, 200.000 kontak, siaran tanpa batas & VIP.',
+      tagline: 'Paket korporasi hemat 2 bln: 12 Sesi WA Dedicated, 18 CS, 40.000 kontak, 45.000 siaran & VIP.',
       period: 'annual',
       months: 12,
       trialDays: 7,
       priceAmount: 3990000,
       highlighted: false,
       features: {
-        unlimitedBroadcast: true,
-        maxBroadcastPerMonth: 0,
+        unlimitedBroadcast: false,
+        maxBroadcastPerMonth: 45000,
         unlimitedContacts: false,
-        maxContacts: 200000,
+        maxContacts: 40000,
         birthdayBot: true,
         liveChat: true,
         multiSession: true,
-        maxSessions: 25,
-        maxSessionIdentitySwitches: 45,
+        maxSessions: 12,
+        maxSessionIdentitySwitches: 25,
         multiAgent: true,
-        maxAgents: 35,
-        maxUsers: 35,
+        maxAgents: 18,
+        maxUsers: 18,
         maxTemplates: 0,
         customRoles: true,
         omnichannel: true,
@@ -566,7 +613,7 @@ export function getResearchedDefaultPlans(): LicensePlanDefinition[] {
         wahaSync: true,
         apiAccess: true,
         supportPriority: 'vip',
-        maxStorageMb: 40960,
+        maxStorageMb: 10240,
         maxAttachmentSizeMb: 50,
         allowedMenus: [
           'dashboard',
@@ -602,9 +649,7 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
   const unlimitedBroadcast =
     src.unlimitedBroadcast !== undefined
       ? Boolean(src.unlimitedBroadcast)
-      : src.broadcast !== undefined
-      ? Boolean(src.broadcast)
-      : isEnterprise;
+      : false;
 
   const maxBroadcastPerMonth = unlimitedBroadcast
     ? 0
@@ -613,8 +658,10 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     : isStarter
     ? 2500
     : isBusiness
-    ? 75000
-    : 25000;
+    ? 15000
+    : isEnterprise
+    ? 35000
+    : 5000;
 
   const unlimitedContacts =
     src.unlimitedContacts !== undefined
@@ -630,10 +677,10 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     : isStarter
     ? 2500
     : isBusiness
-    ? 50000
+    ? 12500
     : isEnterprise
-    ? 150000
-    : 10000;
+    ? 30000
+    : 5000;
 
   const birthdayAutomation =
     src.birthdayBot !== undefined
@@ -657,10 +704,10 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       ? src.maxSessions
       : multiSession
       ? isEnterprise
-        ? 25
-        : isBusiness
         ? 10
-        : 3
+        : isBusiness
+        ? 5
+        : 2
       : 1;
 
   const maxSessionIdentitySwitches =
@@ -669,9 +716,9 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       : isStarter
       ? 2
       : isBusiness
-      ? 15
+      ? 10
       : isEnterprise
-      ? 30
+      ? 20
       : 5;
 
   const multiAgent =
@@ -684,10 +731,10 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
       ? src.maxUsers
       : multiAgent
       ? isEnterprise
-        ? 35
-        : isBusiness
         ? 15
-        : 5
+        : isBusiness
+        ? 7
+        : 3
       : 1;
 
   const maxUsers = maxAgents;
@@ -696,10 +743,10 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     typeof src.maxTemplates === 'number' && src.maxTemplates >= 0
       ? src.maxTemplates
       : isStarter
-      ? 10
+      ? 15
       : isBusiness || isEnterprise
       ? 0
-      : 50;
+      : 30;
 
   const customRoles =
     src.customRoles !== undefined ? Boolean(src.customRoles) : !isStarter;
@@ -712,10 +759,10 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     : typeof src.maxChannels === 'number' && src.maxChannels >= 0
     ? src.maxChannels
     : isEnterprise
-    ? 0
-    : isBusiness
     ? 12
-    : 4;
+    : isBusiness
+    ? 6
+    : 3;
 
   const scheduledPosts =
     src.scheduledPosts !== undefined ? Boolean(src.scheduledPosts) : !isStarter;
@@ -753,11 +800,11 @@ export function resolveFeatures(raw: any, isExpired: boolean, planName?: string)
     typeof src.maxStorageMb === 'number' && src.maxStorageMb > 0
       ? src.maxStorageMb
       : isEnterprise
-      ? 35840
+      ? 6144
       : isBusiness
-      ? 8192
+      ? 2560
       : isStarter
-      ? 250
+      ? 500
       : 1024;
 
   const maxAttachmentSizeMb =
