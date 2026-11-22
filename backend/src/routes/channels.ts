@@ -513,8 +513,8 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       threadsAppSecret,
       webhookVerifyToken,
       reneoOAuthReady: Boolean(config.reneo.oauthUrl),
-      directMetaReady: Boolean(metaAppId && metaAppSecret),
-      directThreadsReady: Boolean(threadsAppId && threadsAppSecret),
+      directMetaReady: Boolean(metaAppId),
+      directThreadsReady: Boolean(threadsAppId),
     };
   };
 
@@ -789,17 +789,19 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         return reply.redirect(target);
       }
 
-      if (channel === 'THREADS' && oauthCreds.threadsAppId && oauthCreds.threadsAppSecret) {
+      if (channel === 'THREADS' && oauthCreds.threadsAppId) {
         const target = `https://threads.net/oauth/authorize?client_id=${encodeURIComponent(oauthCreds.threadsAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent('threads_basic,threads_content_publish,threads_manage_replies,threads_keyword_search')}&response_type=code&state=${encodeURIComponent(state)}`;
         return reply.redirect(target);
       }
 
-      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK' || channel === 'META' || channel === 'WHATSAPP_CLOUD') && oauthCreds.metaAppId && oauthCreds.metaAppSecret) {
+      if ((channel === 'INSTAGRAM' || channel === 'FACEBOOK' || channel === 'META' || channel === 'WHATSAPP_CLOUD') && oauthCreds.metaAppId) {
         const scope =
           channel === 'WHATSAPP_CLOUD'
             ? 'whatsapp_business_management,whatsapp_business_messaging,business_management'
             : 'pages_show_list,pages_messaging,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish';
-        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(oauthCreds.metaAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&response_type=code&auth_type=rerequest&state=${encodeURIComponent(state)}`;
+        // When metaAppSecret is configured, use code flow; otherwise use zero-secret Client OAuth token flow (response_type=token)
+        const responseType = oauthCreds.metaAppSecret ? 'code' : 'token';
+        const target = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${encodeURIComponent(oauthCreds.metaAppId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&response_type=${responseType}&auth_type=rerequest&state=${encodeURIComponent(state)}`;
         return reply.redirect(target);
       }
 
@@ -813,8 +815,40 @@ export default async function channelsRouter(fastify: FastifyInstance) {
   });
 
   fastify.get<{
-    Querystring: { code?: string; grant_code?: string; state?: string; error?: string; error_description?: string };
+    Querystring: {
+      code?: string;
+      access_token?: string;
+      grant_code?: string;
+      state?: string;
+      error?: string;
+      error_description?: string;
+    };
   }>('/oauth/callback', async (req, reply) => {
+    // Bridge URL hash fragment (#access_token=...&state=...) from zero-secret Client OAuth token flow into query params
+    if (
+      !req.query?.code &&
+      !req.query?.access_token &&
+      !req.query?.grant_code &&
+      !req.query?.error
+    ) {
+      return reply.type('text/html; charset=utf-8').send(`<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><title>Menghubungkan Akun...</title></head>
+<body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb;color:#374151;font-size:13px;">
+  <div>Menyelesaikan otorisasi akun...</div>
+  <script>
+    (function(){
+      var h = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+      if (h && (h.indexOf('access_token=') !== -1 || h.indexOf('error=') !== -1)) {
+        var sep = window.location.search ? '&' : '?';
+        window.location.replace(window.location.pathname + window.location.search + sep + h);
+      } else {
+        window.location.replace('/settings/omnichannel?oauth=error&msg=' + encodeURIComponent('Otorisasi dibatalkan atau token tidak ditemukan.'));
+      }
+    })();
+  </script>
+</body></html>`);
+    }
+
     const parsedState = verifyOAuthState(String(req.query?.state || ''));
     const returnBase = parsedState?.returnBase || config.frontendUrl.replace(/\/+$/, '');
     const failRedirect = (msg: string) => {
@@ -858,38 +892,45 @@ export default async function channelsRouter(fastify: FastifyInstance) {
             });
           }
         }
-      } else if (req.query?.code) {
+      } else if (req.query?.code || req.query?.access_token) {
         const oauthCreds = await resolveEffectiveOAuthCredentials();
         const callbackUrl = `${returnBase}/api/channels/oauth/callback`;
-        if (parsedState.channel === 'THREADS' && oauthCreds.threadsAppId && oauthCreds.threadsAppSecret) {
-          const tokenRes = await axios.post(
-            'https://graph.threads.net/oauth/access_token',
-            new URLSearchParams({
-              client_id: oauthCreds.threadsAppId,
-              client_secret: oauthCreds.threadsAppSecret,
-              grant_type: 'authorization_code',
-              redirect_uri: callbackUrl,
-              code: req.query.code,
-            }).toString(),
-            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
-          );
-          const shortToken = tokenRes.data?.access_token;
+        if (parsedState.channel === 'THREADS' && oauthCreds.threadsAppId) {
+          let shortToken = String(req.query?.access_token || '').trim();
+          let fallbackUserId = '';
+          if (!shortToken && req.query?.code && oauthCreds.threadsAppSecret) {
+            const tokenRes = await axios.post(
+              'https://graph.threads.net/oauth/access_token',
+              new URLSearchParams({
+                client_id: oauthCreds.threadsAppId,
+                client_secret: oauthCreds.threadsAppSecret,
+                grant_type: 'authorization_code',
+                redirect_uri: callbackUrl,
+                code: req.query.code,
+              }).toString(),
+              { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
+            );
+            shortToken = tokenRes.data?.access_token || '';
+            fallbackUserId = String(tokenRes.data?.user_id || '');
+          }
           if (shortToken) {
             let finalThreadsToken = shortToken;
-            try {
-              const longRes = await axios.get('https://graph.threads.net/access_token', {
-                params: {
-                  grant_type: 'th_exchange_token',
-                  client_secret: oauthCreds.threadsAppSecret,
-                  access_token: shortToken,
-                },
-                timeout: 10000,
-              });
-              if (longRes.data?.access_token) {
-                finalThreadsToken = longRes.data.access_token;
+            if (oauthCreds.threadsAppSecret) {
+              try {
+                const longRes = await axios.get('https://graph.threads.net/access_token', {
+                  params: {
+                    grant_type: 'th_exchange_token',
+                    client_secret: oauthCreds.threadsAppSecret,
+                    access_token: shortToken,
+                  },
+                  timeout: 10000,
+                });
+                if (longRes.data?.access_token) {
+                  finalThreadsToken = longRes.data.access_token;
+                }
+              } catch {
+                // fallback to short token if exchange fails
               }
-            } catch {
-              // fallback to short token if exchange fails
             }
             const meRes = await axios.get('https://graph.threads.net/v1.0/me', {
               params: { fields: 'id,username,name', access_token: finalThreadsToken },
@@ -898,39 +939,44 @@ export default async function channelsRouter(fastify: FastifyInstance) {
             accountsToSave.push({
               channel: 'THREADS',
               name: meRes.data?.username ? `@${meRes.data.username}` : meRes.data?.name || 'Threads',
-              accountId: String(meRes.data?.id || tokenRes.data?.user_id),
+              accountId: String(meRes.data?.id || fallbackUserId),
               accessToken: finalThreadsToken,
             });
           }
-        } else if (oauthCreds.metaAppId && oauthCreds.metaAppSecret) {
-          const tokenRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
-            params: {
-              client_id: oauthCreds.metaAppId,
-              client_secret: oauthCreds.metaAppSecret,
-              redirect_uri: callbackUrl,
-              code: req.query.code,
-            },
-            timeout: 15000,
-          });
-          const shortUserToken = tokenRes.data?.access_token;
+        } else if (oauthCreds.metaAppId) {
+          let shortUserToken = String(req.query?.access_token || '').trim();
+          if (!shortUserToken && req.query?.code && oauthCreds.metaAppSecret) {
+            const tokenRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
+              params: {
+                client_id: oauthCreds.metaAppId,
+                client_secret: oauthCreds.metaAppSecret,
+                redirect_uri: callbackUrl,
+                code: req.query.code,
+              },
+              timeout: 15000,
+            });
+            shortUserToken = tokenRes.data?.access_token || '';
+          }
           if (shortUserToken) {
-            // Exchange to 60-day Long-Lived User Token so /me/accounts returns never-expiring Page Access Tokens
+            // Exchange to 60-day Long-Lived User Token when metaAppSecret is available
             let userToken = shortUserToken;
-            try {
-              const longUserRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
-                params: {
-                  grant_type: 'fb_exchange_token',
-                  client_id: oauthCreds.metaAppId,
-                  client_secret: oauthCreds.metaAppSecret,
-                  fb_exchange_token: shortUserToken,
-                },
-                timeout: 15000,
-              });
-              if (longUserRes.data?.access_token) {
-                userToken = longUserRes.data.access_token;
+            if (oauthCreds.metaAppSecret) {
+              try {
+                const longUserRes = await axios.get('https://graph.facebook.com/v20.0/oauth/access_token', {
+                  params: {
+                    grant_type: 'fb_exchange_token',
+                    client_id: oauthCreds.metaAppId,
+                    client_secret: oauthCreds.metaAppSecret,
+                    fb_exchange_token: shortUserToken,
+                  },
+                  timeout: 15000,
+                });
+                if (longUserRes.data?.access_token) {
+                  userToken = longUserRes.data.access_token;
+                }
+              } catch {
+                // fallback to direct user token
               }
-            } catch {
-              // fallback to short-lived user token
             }
 
             const pagesRes = await axios.get('https://graph.facebook.com/v20.0/me/accounts', {

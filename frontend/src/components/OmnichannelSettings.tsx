@@ -211,11 +211,7 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
 
   const handleStartOAuth = (targetCh: string) => {
     if (!canEdit) return;
-    if (isChannelOAuthReady(targetCh)) {
-      window.location.href = `${apiBasePath}/channels/oauth/start?channel=${encodeURIComponent(targetCh)}`;
-      return;
-    }
-    setPendingOauthChannel(targetCh);
+    window.location.href = `${apiBasePath}/channels/oauth/start?channel=${encodeURIComponent(targetCh)}`;
   };
 
   const handleSaveOauthCredentials = async (e: React.FormEvent) => {
