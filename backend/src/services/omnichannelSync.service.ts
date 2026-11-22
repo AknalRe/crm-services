@@ -23,6 +23,12 @@ export interface OmnichannelSyncResult {
   messagesSynced: number;
   commentsSynced: number;
   errors: string[];
+  details?: Array<{
+    channel: string;
+    account: string;
+    threadsFound: number;
+    hint?: string;
+  }>;
 }
 
 // Sync Instagram DMs (via Graph Conversations API) + Threads replies into CRM Inbox
@@ -32,6 +38,7 @@ export async function syncCompanyOmnichannelMessages(companyId: string): Promise
     messagesSynced: 0,
     commentsSynced: 0,
     errors: [],
+    details: [],
   };
 
   const activeAccounts = await db
@@ -51,35 +58,107 @@ export async function syncCompanyOmnichannelMessages(companyId: string): Promise
     try {
       if (acc.channel === 'INSTAGRAM') {
         const graphBase = getInstagramGraphBaseUrl(token);
-        const convPath = isInstagramLoginToken(token)
+        const isDirect = isInstagramLoginToken(token);
+        const convPath = isDirect
           ? `${graphBase}/me/conversations`
           : `${graphBase}/${encodeURIComponent(acc.accountId)}/conversations`;
 
-        const convRes = await axios.get(convPath, {
-          params: {
+        // Ensure Instagram account is subscribed to webhook fields (best-effort)
+        if (isDirect) {
+          axios
+            .post(`${graphBase}/me/subscribed_apps`, null, {
+              params: {
+                subscribed_fields: 'messages,comments,messaging_postbacks,message_reactions',
+                access_token: token,
+              },
+              timeout: 8_000,
+            })
+            .catch(() => {});
+        }
+
+        const threadMap = new Map<string, any>();
+        const queryVariants: Array<Record<string, any>> = [
+          {
             platform: 'instagram',
             fields:
               'id,updated_time,participants,messages.limit(15){id,message,created_time,from,to,attachments{mime_type,image_data,video_data,file_url}}',
             limit: 20,
             access_token: token,
           },
-          timeout: 15_000,
+          {
+            platform: 'instagram',
+            folder: 'general',
+            fields:
+              'id,updated_time,participants,messages.limit(15){id,message,created_time,from,to,attachments{mime_type,image_data,video_data,file_url}}',
+            limit: 20,
+            access_token: token,
+          },
+        ];
+
+        let primaryError: any = null;
+        for (let qi = 0; qi < queryVariants.length; qi += 1) {
+          try {
+            const convRes = await axios.get(convPath, {
+              params: queryVariants[qi],
+              timeout: 15_000,
+            });
+            const list: any[] = Array.isArray(convRes.data?.data) ? convRes.data.data : [];
+            for (const item of list) {
+              if (item?.id && !threadMap.has(String(item.id))) {
+                threadMap.set(String(item.id), item);
+              }
+            }
+          } catch (qErr: any) {
+            if (qi === 0) primaryError = qErr;
+          }
+        }
+        if (primaryError && threadMap.size === 0) {
+          throw primaryError;
+        }
+
+        const threadList: any[] = Array.from(threadMap.values());
+        result.details?.push({
+          channel: 'INSTAGRAM',
+          account: acc.name,
+          threadsFound: threadList.length,
+          hint:
+            threadList.length === 0
+              ? 'Meta mengembalikan 0 thread DM. Pastikan di Instagram HP: Pengaturan → Pesan dan balasan cerita → Kontrol pesan → Alat terhubung → Izinkan akses ke pesan = AKTIF.'
+              : undefined,
         });
 
-        const threadList: any[] = Array.isArray(convRes.data?.data) ? convRes.data.data : [];
         for (const thread of threadList) {
           const threadId = String(thread.id || '');
-          const participants: any[] = Array.isArray(thread.participants?.data)
+          let participants: any[] = Array.isArray(thread.participants?.data)
             ? thread.participants.data
             : [];
+          let rawMsgs: any[] = Array.isArray(thread.messages?.data)
+            ? [...thread.messages.data].reverse()
+            : [];
+          if (rawMsgs.length === 0 && threadId) {
+            try {
+              const detailRes = await axios.get(`${graphBase}/${encodeURIComponent(threadId)}`, {
+                params: {
+                  fields: 'participants,messages.limit(15){id,message,created_time,from,to}',
+                  access_token: token,
+                },
+                timeout: 10_000,
+              });
+              if (Array.isArray(detailRes.data?.participants?.data)) {
+                participants = detailRes.data.participants.data;
+              }
+              if (Array.isArray(detailRes.data?.messages?.data)) {
+                rawMsgs = [...detailRes.data.messages.data].reverse();
+              }
+            } catch {
+              // ignore per-thread fallback error
+            }
+          }
           const otherParticipant = participants.find(
             (p) =>
               String(p?.id || '') !== String(acc.accountId) &&
               String(p?.username || '').toLowerCase() !== acc.name.replace(/^@/, '').toLowerCase()
           );
-          const rawMsgs: any[] = Array.isArray(thread.messages?.data)
-            ? [...thread.messages.data].reverse()
-            : [];
 
           for (const m of rawMsgs) {
             const msgId = String(m?.id || '').trim();

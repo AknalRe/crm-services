@@ -1021,6 +1021,16 @@ export default async function channelsRouter(fastify: FastifyInstance) {
               accountId: igUserId,
               accessToken: igToken,
             });
+            // Auto-subscribe IG account to real-time DM & comment webhooks
+            axios
+              .post('https://graph.instagram.com/v21.0/me/subscribed_apps', null, {
+                params: {
+                  subscribed_fields: 'messages,comments,messaging_postbacks,message_reactions',
+                  access_token: igToken,
+                },
+                timeout: 8000,
+              })
+              .catch(() => {});
           }
         } else if (parsedState.channel === 'THREADS' && oauthCreds.threadsAppId) {
           let shortToken = String(req.query?.access_token || '').trim();
