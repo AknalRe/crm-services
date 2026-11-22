@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { and, sql, desc, eq, gte, isNotNull, isNull, or } from 'drizzle-orm';
 import { db } from '../db';
-import { contacts, campaigns, campaignRecipients, conversations, csatResponses, chatMessages } from '../db/schema';
+import { contacts, campaigns, campaignRecipients, conversations, csatResponses, chatMessages, channelAccounts, contactIdentities } from '../db/schema';
 import { formatCampaign, formatRecipient } from './broadcasts';
 import { CsatCriterionScoreDetail, extractCsatCriteriaDetails } from '../services/csat.service';
 import { getRequestCompanyId, getSettingMap, requirePermission } from './auth';
@@ -231,6 +231,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         csatRows,
         todayMsgRows,
         inboundMsgRows,
+        connectedChannelAccounts,
       ] = await Promise.all([
         db
           .select({
@@ -307,19 +308,49 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             conversationId: chatMessages.conversationId,
             direction: chatMessages.direction,
             body: chatMessages.body,
+            channel: chatMessages.channel,
+            wahaSession: chatMessages.wahaSession,
             createdAt: chatMessages.createdAt,
           })
           .from(chatMessages)
           .where(and(eq(chatMessages.companyId, companyId), eq(chatMessages.direction, 'INBOUND')))
           .orderBy(desc(chatMessages.createdAt))
           .limit(3000),
+        db
+          .select({
+            id: channelAccounts.id,
+            channel: channelAccounts.channel,
+            name: channelAccounts.name,
+            accountId: channelAccounts.accountId,
+            isActive: channelAccounts.isActive,
+          })
+          .from(channelAccounts)
+          .where(and(eq(channelAccounts.companyId, companyId), eq(channelAccounts.isActive, true))),
       ]);
 
-      const customerContacts = allContactsList.filter(
-        (c) => (c.kategori || '').trim().toLowerCase() !== 'grup whatsapp'
-      );
+      const isGroupCategory = (cat?: string | null) => {
+        const s = (cat || '').trim().toLowerCase();
+        return s === 'grup whatsapp' || s.includes('grup') || s.includes('group');
+      };
+      const customerContacts = allContactsList.filter((c) => !isGroupCategory(c.kategori));
       const totalContacts = customerContacts.length;
       const groupContactsCount = allContactsList.length - customerContacts.length;
+
+      const connectedChannelsMap = new Map<
+        string,
+        { channel: string; accountCount: number; accountNames: string[] }
+      >();
+      for (const acc of connectedChannelAccounts) {
+        const ch = (acc.channel || 'WHATSAPP').toUpperCase();
+        const prev = connectedChannelsMap.get(ch) || {
+          channel: ch,
+          accountCount: 0,
+          accountNames: [],
+        };
+        prev.accountCount++;
+        if (acc.name) prev.accountNames.push(acc.name);
+        connectedChannelsMap.set(ch, prev);
+      }
 
       const categoryCountMap = new Map<string, number>();
       for (const c of customerContacts) {
@@ -410,7 +441,14 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       // Group inbound chat messages by contactId
       const inboundByContact = new Map<
         string,
-        Array<{ id: string; conversationId: string; body: string; createdAt: Date }>
+        Array<{
+          id: string;
+          conversationId: string;
+          body: string;
+          channel?: string | null;
+          wahaSession?: string | null;
+          createdAt: Date;
+        }>
       >();
       for (const msg of inboundMsgRows) {
         if (!msg.contactId || !msg.createdAt) continue;
@@ -419,6 +457,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           id: msg.id,
           conversationId: msg.conversationId,
           body: msg.body || '',
+          channel: msg.channel,
+          wahaSession: msg.wahaSession,
           createdAt: new Date(msg.createdAt),
         });
         inboundByContact.set(msg.contactId, list);
@@ -436,6 +476,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         contactId: string;
         contactName: string;
         phone: string;
+        channel?: string;
+        wahaSession?: string | null;
         contactCategory?: string;
         sentAt: string | null;
         respondedAt: string;
@@ -492,6 +534,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               contactId: r.contactId,
               contactName,
               phone: r.phone,
+              channel: matchingReply.channel || 'WHATSAPP',
+              wahaSession: matchingReply.wahaSession || null,
               contactCategory: c?.kategori || 'Pelanggan',
               sentAt: sentDate.toISOString(),
               respondedAt: matchingReply.createdAt.toISOString(),
@@ -717,6 +761,23 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           criteriaMap: CriterionAggMap;
         }
       >();
+
+      for (const [chKey, _] of connectedChannelsMap.entries()) {
+        if (!channelMap.has(chKey)) {
+          channelMap.set(chKey, {
+            channel: chKey,
+            count: 0,
+            openCount: 0,
+            pendingCount: 0,
+            resolvedCount: 0,
+            slaMetCount: 0,
+            slaMeasuredCount: 0,
+            csatSum: 0,
+            csatCount: 0,
+            criteriaMap: new Map(),
+          });
+        }
+      }
 
       const agentMap = new Map<
         string,
@@ -1128,6 +1189,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             topCampaignResponseRate,
             topCampaignRespondedCount,
             birthdayTodayCount,
+            connectedChannels: Array.from(connectedChannelsMap.values()),
             contactCategories,
             activityTrend7d: trendBuckets,
           },
@@ -1189,13 +1251,16 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
         const curMonth = Number.parseInt(wibParts.month, 10);
         const curDay = Number.parseInt(wibParts.day, 10);
 
+        const isGroupCategory = (cat?: string | null) => {
+          const s = (cat || '').trim().toLowerCase();
+          return s === 'grup whatsapp' || s.includes('grup') || s.includes('group');
+        };
+
         let matched = rows;
         if (filter === 'group') {
-          matched = rows.filter((c) => (c.kategori || '').trim().toLowerCase() === 'grup whatsapp');
+          matched = rows.filter((c) => isGroupCategory(c.kategori));
         } else {
-          const nonGroupContacts = rows.filter(
-            (c) => (c.kategori || '').trim().toLowerCase() !== 'grup whatsapp'
-          );
+          const nonGroupContacts = rows.filter((c) => !isGroupCategory(c.kategori));
           if (filter === 'birthday_today') {
             matched = nonGroupContacts.filter((c) => isBirthdayToday(c.tanggalLahir, curMonth, curDay));
           } else if (filter === 'category' && value) {
@@ -1205,6 +1270,23 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
           } else {
             matched = nonGroupContacts;
           }
+        }
+
+        const identities = await db
+          .select({
+            contactId: contactIdentities.contactId,
+            channel: contactIdentities.channel,
+            handle: contactIdentities.handle,
+            externalId: contactIdentities.externalId,
+          })
+          .from(contactIdentities)
+          .where(eq(contactIdentities.companyId, companyId));
+
+        const identityMap = new Map<string, Array<{ channel: string; handle?: string | null; externalId: string }>>();
+        for (const idRow of identities) {
+          const arr = identityMap.get(idRow.contactId) || [];
+          arr.push(idRow);
+          identityMap.set(idRow.contactId, arr);
         }
 
         if (q) {
@@ -1227,6 +1309,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               nama_lengkap: c.namaLengkap,
               nama_panggilan: c.namaPanggilan,
               nomor_whatsapp: c.nomorWhatsapp,
+              identities: identityMap.get(c.id) || [],
               kategori: c.kategori || 'Tanpa Kategori',
               tags: c.tags,
               tanggal_lahir: c.tanggalLahir,
@@ -1255,6 +1338,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               contactId: chatMessages.contactId,
               conversationId: chatMessages.conversationId,
               body: chatMessages.body,
+              channel: chatMessages.channel,
+              wahaSession: chatMessages.wahaSession,
               createdAt: chatMessages.createdAt,
             })
             .from(chatMessages)
@@ -1267,11 +1352,11 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             .orderBy(desc(chatMessages.createdAt))
             .limit(3000);
 
-          const inboundMap = new Map<string, Array<{ conversationId: string; body: string; createdAt: Date }>>();
+          const inboundMap = new Map<string, Array<{ conversationId: string; body: string; channel?: string | null; wahaSession?: string | null; createdAt: Date }>>();
           for (const m of inbounds) {
             if (!m.contactId || !m.createdAt) continue;
             const l = inboundMap.get(m.contactId) || [];
-            l.push({ conversationId: m.conversationId, body: m.body || '', createdAt: new Date(m.createdAt) });
+            l.push({ conversationId: m.conversationId, body: m.body || '', channel: m.channel, wahaSession: m.wahaSession, createdAt: new Date(m.createdAt) });
             inboundMap.set(m.contactId, l);
           }
           for (const [_, l] of inboundMap.entries()) {
@@ -1301,6 +1386,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
                 const delayMins = Math.max(0, Math.round((matching.createdAt.getTime() - sentDate.getTime()) / 60000));
                 respondedList.push({
                   ...base,
+                  channel: matching.channel || 'WHATSAPP',
+                  wahaSession: matching.wahaSession || null,
                   responseSnippet: matching.body.slice(0, 160),
                   respondedAt: matching.createdAt.toISOString(),
                   conversationId: matching.conversationId,
@@ -1657,7 +1744,7 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
       if (q) {
         matched = matched.filter((r) => {
           const disp = getConversationDisplayName(r.conv, r.contact);
-          const hay = `${disp} ${r.contact?.namaLengkap || ''} ${r.contact?.nomorWhatsapp || ''} ${r.conv.wahaSession || ''} ${r.conv.assignedAgentName || ''} ${r.conv.lastMessage || ''}`.toLowerCase();
+          const hay = `${disp} ${r.contact?.namaLengkap || ''} ${r.contact?.nomorWhatsapp || ''} ${r.conv.channel || ''} ${r.conv.wahaSession || ''} ${r.conv.assignedAgentName || ''} ${r.conv.lastMessage || ''}`.toLowerCase();
           return hay.includes(q);
         });
       }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Users,
   Send,
@@ -26,6 +26,7 @@ import {
   Filter,
   SlidersHorizontal,
   Lock,
+  Globe2,
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { Button } from '../components/ui/Button';
@@ -73,6 +74,60 @@ function formatDurationShort(seconds: number | null | undefined): string {
   const hours = Math.floor(mins / 60);
   const remMin = mins % 60;
   return remMin > 0 ? `${hours}j ${remMin}m` : `${hours} jam`;
+}
+
+const KNOWN_OMNICHANNEL_CONFIG: Record<
+  string,
+  { label: string; shortLabel: string; badgeCls: string; dotCls: string }
+> = {
+  WHATSAPP: {
+    label: 'WhatsApp (WAHA)',
+    shortLabel: 'WhatsApp',
+    badgeCls: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    dotCls: 'bg-emerald-500',
+  },
+  WHATSAPP_CLOUD: {
+    label: 'WhatsApp Cloud API',
+    shortLabel: 'WA Cloud',
+    badgeCls: 'bg-teal-50 text-teal-700 border-teal-200',
+    dotCls: 'bg-teal-500',
+  },
+  INSTAGRAM: {
+    label: 'Instagram Direct',
+    shortLabel: 'Instagram',
+    badgeCls: 'bg-pink-50 text-pink-700 border-pink-200',
+    dotCls: 'bg-pink-500',
+  },
+  TELEGRAM: {
+    label: 'Telegram Bot & Chat',
+    shortLabel: 'Telegram',
+    badgeCls: 'bg-sky-50 text-sky-700 border-sky-200',
+    dotCls: 'bg-sky-500',
+  },
+  FACEBOOK: {
+    label: 'Facebook Messenger',
+    shortLabel: 'Facebook',
+    badgeCls: 'bg-blue-50 text-blue-700 border-blue-200',
+    dotCls: 'bg-blue-500',
+  },
+  THREADS: {
+    label: 'Threads Replies & Mentions',
+    shortLabel: 'Threads',
+    badgeCls: 'bg-slate-50 text-slate-700 border-slate-200',
+    dotCls: 'bg-slate-700',
+  },
+};
+
+function getChannelInfo(channelName?: string | null) {
+  const norm = (channelName || 'WHATSAPP').toUpperCase().trim();
+  return (
+    KNOWN_OMNICHANNEL_CONFIG[norm] || {
+      label: norm,
+      shortLabel: norm,
+      badgeCls: 'bg-gray-50 text-gray-700 border-gray-200',
+      dotCls: 'bg-gray-400',
+    }
+  );
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -287,6 +342,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
     new Set((convAnalytics.byChannel || []).map((c) => c.channel).filter(Boolean))
   );
 
+  const channelOptionsList = useMemo(() => {
+    const set = new Set<string>();
+    availableChannels.forEach((c) => set.add(c.toUpperCase()));
+    (stats?.summary?.connectedChannels || []).forEach((c) => set.add(c.channel.toUpperCase()));
+    ['WHATSAPP', 'WHATSAPP_CLOUD', 'INSTAGRAM', 'TELEGRAM', 'FACEBOOK', 'THREADS'].forEach((k) =>
+      set.add(k)
+    );
+    return Array.from(set).map((k) => ({
+      id: k,
+      label: getChannelInfo(k).label,
+      shortLabel: getChannelInfo(k).shortLabel,
+    }));
+  }, [availableChannels, stats?.summary?.connectedChannels]);
+
   const periodLabelMap: Record<string, string> = {
     all: 'Semua Waktu',
     today: 'Hari Ini',
@@ -430,8 +499,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
             })}
           </div>
 
-          {/* Session filter dropdown if multiple sessions exist */}
-          {availableSessions.length > 1 && (
+          {/* Omnichannel Channel filter dropdown */}
+          <div className="inline-flex items-center gap-1 text-xs">
+            <Globe2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            <select
+              value={selectedChannel}
+              onChange={(e) => setSelectedChannel(e.target.value)}
+              className="h-7 px-2 py-0.5 rounded-md border border-gray-200 bg-white text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="all">Semua Channel</option>
+              {channelOptionsList.map((ch) => (
+                <option key={ch.id} value={ch.id}>
+                  {ch.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Session filter dropdown for WAHA sessions */}
+          {availableSessions.length > 0 && (
             <div className="inline-flex items-center gap-1 text-xs">
               <Smartphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               <select
@@ -439,29 +525,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onChange={(e) => setSelectedSession(e.target.value)}
                 className="h-7 px-2 py-0.5 rounded-md border border-gray-200 bg-white text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500"
               >
-                <option value="all">Semua Sesi WA</option>
+                <option value="all">Semua Sesi / Akun WA</option>
                 {availableSessions.map((s) => (
                   <option key={s} value={s}>
                     Sesi: {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Channel filter dropdown if multiple channels exist */}
-          {availableChannels.length > 1 && (
-            <div className="inline-flex items-center gap-1 text-xs">
-              <MessageSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <select
-                value={selectedChannel}
-                onChange={(e) => setSelectedChannel(e.target.value)}
-                className="h-7 px-2 py-0.5 rounded-md border border-gray-200 bg-white text-xs font-medium text-gray-800 focus:outline-none focus:border-indigo-500"
-              >
-                <option value="all">Semua Channel</option>
-                {availableChannels.map((ch) => (
-                  <option key={ch} value={ch}>
-                    {ch}
                   </option>
                 ))}
               </select>
@@ -508,15 +575,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
           value={summary.totalContacts}
           subtitle={
             summary.groupContactsCount
-              ? `+ ${summary.groupContactsCount} grup WA`
-              : 'Database kontak aktif'
+              ? `+ ${summary.groupContactsCount} grup percakapan`
+              : 'Database kontak aktif seluruh channel'
           }
           icon={Users}
           color="indigo"
           onClick={() =>
             void openDrilldown({
               title: 'Daftar Pelanggan CRM',
-              subtitle: 'Kontak pelanggan aktif (di luar grup WhatsApp)',
+              subtitle: 'Kontak pelanggan aktif di seluruh channel (di luar grup)',
               kind: 'contacts',
               filter: 'all',
               shortcutTab: 'contacts',
@@ -527,13 +594,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <StatCard
           title="Siaran Terkirim"
           value={summary.sent}
-          subtitle={getPeriodSubtitle('Keluar dari server WA')}
+          subtitle={getPeriodSubtitle('Pesan siaran keluar')}
           icon={Send}
           color="blue"
           onClick={() =>
             void openDrilldown({
               title: 'Detail Pesan Siaran Terkirim',
-              subtitle: 'Seluruh penerima yang pesannya telah keluar dari server',
+              subtitle: 'Seluruh penerima siaran yang telah diproses keluar',
               kind: 'recipients',
               filter: 'sent',
               shortcutTab: 'tracking',
@@ -544,14 +611,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <StatCard
           title="Lead Sampai"
           value={summary.delivered}
-          subtitle={summary.deliveryRate > 0 ? `Delivery rate ${summary.deliveryRate}%` : getPeriodSubtitle('Penerima tersampaikan')}
+          subtitle={summary.deliveryRate > 0 ? `Delivery rate ${summary.deliveryRate}%` : getPeriodSubtitle('Pesan tersampaikan ke channel')}
           icon={CheckCircle2}
           color="emerald"
           trend={{ value: `${summary.deliveryRate}%`, positive: true }}
           onClick={() =>
             void openDrilldown({
               title: 'Detail Pesan Tersampaikan (Delivered)',
-              subtitle: 'Penerima dengan status centang dua atau dibaca',
+              subtitle: 'Penerima dengan status pesan tersampaikan',
               kind: 'recipients',
               filter: 'delivered',
               shortcutTab: 'tracking',
@@ -562,14 +629,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <StatCard
           title="Lead Dibaca"
           value={summary.read}
-          subtitle={summary.readRate > 0 ? `Read rate ${summary.readRate}%` : getPeriodSubtitle('Penerima centang biru')}
+          subtitle={summary.readRate > 0 ? `Read rate ${summary.readRate}%` : getPeriodSubtitle('Pesan telah dibuka / dibaca')}
           icon={Eye}
           color="purple"
           trend={{ value: `${summary.readRate}%`, positive: true }}
           onClick={() =>
             void openDrilldown({
               title: 'Detail Pesan Dibaca (Read)',
-              subtitle: 'Penerima dengan centang biru (sudah membaca pesan)',
+              subtitle: 'Penerima yang telah membuka dan membaca pesan',
               kind: 'recipients',
               filter: 'read',
               shortcutTab: 'tracking',
@@ -583,7 +650,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           subtitle={
             (summary.campaignResponseRate || 0) > 0
               ? `Response rate ${summary.campaignResponseRate}%`
-              : getPeriodSubtitle('Balasan pesan siaran')
+              : getPeriodSubtitle('Balasan di semua channel')
           }
           icon={MessageSquare}
           color="indigo"
@@ -595,7 +662,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           onClick={() =>
             void openDrilldown({
               title: 'Detail Respon Siaran Masuk',
-              subtitle: 'Lead / pelanggan yang membalas pesan setelah menerima siaran kampanye',
+              subtitle: 'Lead / pelanggan yang membalas pesan setelah menerima siaran kampanye di semua channel',
               kind: 'campaign_responses',
               filter: 'responded',
               shortcutTab: 'conversations',
@@ -895,7 +962,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="w-2.5 h-2.5 rounded-sm bg-slate-300" /> Non-Penilaian
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Siaran WA
+                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Siaran / Outbound
               </span>
             </div>
           </div>
@@ -1028,7 +1095,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {!summary.contactCategories || summary.contactCategories.length === 0 ? (
               <EmptyState
                 title="Belum ada kontak"
-                description="Tambahkan atau sinkronkan kontak WhatsApp untuk melihat distribusi kategori."
+                description="Tambahkan atau sinkronkan kontak pelanggan dari berbagai channel untuk melihat distribusi kategori."
               />
             ) : (
               <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
@@ -1096,8 +1163,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   type="button"
                   onClick={() =>
                     void openDrilldown({
-                      title: 'Percakapan Non-Penilaian & Grup WA',
-                      subtitle: `${convAnalytics.excludedCount} obrolan dikecualikan dari SLA/CSAT (${convAnalytics.groupCount || 0} Grup WA)`,
+                      title: 'Percakapan Non-Penilaian & Grup Chat',
+                      subtitle: `${convAnalytics.excludedCount} obrolan dikecualikan dari SLA/CSAT (${convAnalytics.groupCount || 0} Grup Chat)`,
                       kind: 'conversations',
                       filter: 'excluded',
                       shortcutTab: 'conversations',
@@ -1319,7 +1386,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          {(convAnalytics.bySession.length > 0 || (convAnalytics.byChannel && convAnalytics.byChannel.length > 0)) && (
+          {((convAnalytics.byChannel && convAnalytics.byChannel.length > 0) || convAnalytics.bySession.length > 0) && (
             <div className="pt-2.5 sm:pt-3 border-t border-gray-200 space-y-3">
               <button
                 type="button"
@@ -1327,10 +1394,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 className="sm:hidden w-full flex items-center justify-between gap-2 py-1 text-left text-xs font-semibold text-gray-800"
               >
                 <span className="inline-flex items-center gap-1.5">
-                  <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Distribusi Sesi WA &amp; Channel</span>
-                  <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono">
-                    {convAnalytics.bySession.length + (convAnalytics.byChannel?.length || 0)}
+                  <Globe2 className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Distribusi Channel &amp; Sesi Omnichannel</span>
+                  <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-mono">
+                    {(convAnalytics.byChannel?.length || 0) + convAnalytics.bySession.length}
                   </span>
                 </span>
                 <span className="text-[11px] font-medium text-indigo-600 inline-flex items-center gap-0.5">
@@ -1343,11 +1410,87 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </span>
               </button>
 
-              <div className={`${isMobileSectionOpen('channels') ? 'space-y-3' : 'hidden sm:block sm:space-y-3'}`}>
+              <div className={`${isMobileSectionOpen('channels') ? 'space-y-4' : 'hidden sm:block sm:space-y-4'}`}>
+                {/* 1. Channel Omnichannel (First-class citizen) */}
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-[11px] font-semibold text-gray-800 inline-flex items-center gap-1.5">
+                      <Globe2 className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Distribusi &amp; Performa per Channel Omnichannel</span>
+                    </span>
+                    <span className="text-[10px] text-gray-400">Klik kartu untuk melihat rincian chat</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {(() => {
+                      const channelList = convAnalytics.byChannel && convAnalytics.byChannel.length > 0
+                        ? convAnalytics.byChannel
+                        : [{ channel: 'WHATSAPP', count: convAnalytics.totalConversations, openCount: convAnalytics.openCount, pendingCount: convAnalytics.pendingCount, resolvedCount: convAnalytics.resolvedCount, slaRate: convAnalytics.slaComplianceRate, csatCount: convAnalytics.csatCount, avgCsat: convAnalytics.csatAverage }];
+
+                      return channelList.map((ch) => {
+                        const info = getChannelInfo(ch.channel);
+                        return (
+                          <button
+                            key={ch.channel}
+                            type="button"
+                            onClick={() =>
+                              void openDrilldown({
+                                title: `Percakapan Channel ${info.label}`,
+                                subtitle: `${ch.count} obrolan dinilai • ${ch.resolvedCount} selesai${ch.slaRate !== null && ch.slaRate !== undefined ? ` • SLA ${ch.slaRate}%` : ''}`,
+                                kind: 'conversations',
+                                filter: 'channel',
+                                value: ch.channel,
+                                shortcutTab: 'conversations',
+                                shortcutLabel: 'Buka Live Chat',
+                              })
+                            }
+                            className="flex flex-col justify-between p-3 rounded-lg border border-gray-200 bg-white hover:border-indigo-400 hover:shadow-xs transition-all text-left cursor-pointer group"
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border inline-flex items-center gap-1.5 ${info.badgeCls}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${info.dotCls}`} />
+                                <span>{info.shortLabel}</span>
+                              </span>
+                              <ChevronRight className="w-3.5 h-3.5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-gray-100">
+                              <div>
+                                <span className="text-[10px] text-gray-400 block">Total Chat</span>
+                                <strong className="font-mono text-gray-900 font-bold">{ch.count}</strong>
+                                <span className="text-[10px] text-emerald-600 ml-1">({ch.resolvedCount} selesai)</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[10px] text-gray-400 block">Kepatuhan SLA</span>
+                                {ch.slaRate !== null && ch.slaRate !== undefined ? (
+                                  <strong className="font-mono text-slate-800 font-semibold">{ch.slaRate}%</strong>
+                                ) : (
+                                  <span className="text-[10px] text-gray-400 font-mono">-</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {ch.avgCsat !== null && (
+                              <div className="mt-2 pt-1.5 border-t border-gray-50 flex items-center justify-between text-[11px]">
+                                <span className="text-gray-500 text-[10px]">Skor CSAT</span>
+                                <span className="inline-flex items-center gap-0.5 text-amber-700 font-bold font-mono">
+                                  <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                                  {ch.avgCsat} <span className="text-[9px] text-gray-400 font-normal">({ch.csatCount})</span>
+                                </span>
+                              </div>
+                            )}
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+
+                {/* 2. Sesi WhatsApp & Sub-Akun Terhubung */}
                 {convAnalytics.bySession.length > 0 && (
-                  <div>
+                  <div className="pt-3 border-t border-gray-100">
                     <span className="text-[11px] font-semibold text-gray-600 block mb-2">
-                      Distribusi per Sesi WhatsApp (Klik untuk rincian)
+                      Sesi WhatsApp &amp; Nomor Aktif ({convAnalytics.bySession.length} sesi)
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                       {convAnalytics.bySession.map((sess) => (
@@ -1356,7 +1499,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           type="button"
                           onClick={() =>
                             void openDrilldown({
-                              title: `Percakapan Sesi WA: ${sess.session}`,
+                              title: `Percakapan Sesi: ${sess.session}`,
                               subtitle: `${sess.count} obrolan dinilai • ${sess.resolvedCount} selesai${sess.slaRate !== null && sess.slaRate !== undefined ? ` • SLA ${sess.slaRate}%` : ''}`,
                               kind: 'conversations',
                               filter: 'session',
@@ -1386,58 +1529,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
                                 <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
                                 {sess.avgCsat}
-                              </span>
-                            )}
-                            <ChevronRight className="w-3 h-3 text-gray-400" />
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {convAnalytics.byChannel && convAnalytics.byChannel.length > 0 && (
-                  <div className={convAnalytics.bySession.length > 0 ? 'pt-3 border-t border-gray-100' : ''}>
-                    <span className="text-[11px] font-semibold text-gray-600 block mb-2">
-                      Distribusi per Channel Omnichannel (Klik untuk rincian)
-                    </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {convAnalytics.byChannel.map((ch) => (
-                        <button
-                          key={ch.channel}
-                          type="button"
-                          onClick={() =>
-                            void openDrilldown({
-                              title: `Percakapan Channel ${ch.channel}`,
-                              subtitle: `${ch.count} obrolan dinilai • ${ch.resolvedCount} selesai${ch.slaRate !== null && ch.slaRate !== undefined ? ` • SLA ${ch.slaRate}%` : ''}`,
-                              kind: 'conversations',
-                              filter: 'channel',
-                              value: ch.channel,
-                              shortcutTab: 'conversations',
-                              shortcutLabel: 'Buka Live Chat',
-                            })
-                          }
-                          className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md border border-gray-200 bg-gray-50/60 hover:border-indigo-300 hover:bg-indigo-50/30 text-xs transition-colors cursor-pointer"
-                        >
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <MessageSquare className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                            <span className="font-mono text-[11px] font-semibold text-gray-800 truncate">
-                              {ch.channel}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums shrink-0">
-                            <span className="text-gray-700 font-semibold">{ch.count} chat</span>
-                            <span className="text-emerald-700">({ch.resolvedCount} selesai)</span>
-                            {ch.slaRate !== null && ch.slaRate !== undefined && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-white text-slate-700 border border-slate-200">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                SLA {ch.slaRate}%
-                              </span>
-                            )}
-                            {ch.avgCsat !== null && (
-                              <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold">
-                                <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
-                                {ch.avgCsat}
                               </span>
                             )}
                             <ChevronRight className="w-3 h-3 text-gray-400" />
@@ -2299,7 +2390,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           {!stats?.respondingLeads || stats.respondingLeads.length === 0 ? (
             <EmptyState
               title="Belum ada respon siaran terdeteksi"
-              description="Ketika penerima kampanye mengirim pesan balasan masuk ke nomor WhatsApp, daftar respon dan cuplikan pesannya akan langsung muncul di sini."
+              description="Ketika penerima kampanye mengirim pesan balasan masuk melalui channel komunikasi (WhatsApp, Instagram, Telegram, dll), daftar respon dan cuplikan pesannya akan langsung muncul di sini."
             />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -2311,11 +2402,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <div>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <h4 className="font-semibold text-gray-900 text-xs sm:text-sm truncate">
-                          {lead.contactName || `+${lead.phone}`}
-                        </h4>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="font-semibold text-gray-900 text-xs sm:text-sm truncate">
+                            {lead.contactName || (lead.phone ? `+${lead.phone}` : 'Pelanggan')}
+                          </h4>
+                          {(() => {
+                            const info = getChannelInfo(lead.channel);
+                            return (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-medium border inline-flex items-center gap-1 ${info.badgeCls}`}
+                              >
+                                <span className={`w-1 h-1 rounded-full ${info.dotCls}`} />
+                                <span>{info.shortLabel}</span>
+                              </span>
+                            );
+                          })()}
+                        </div>
                         <div className="text-[11px] font-mono text-gray-500 mt-0.5">
-                          +{lead.phone}
+                          {lead.phone ? `+${lead.phone}` : 'Kontak'}
                         </div>
                       </div>
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 shrink-0">
@@ -2489,9 +2593,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div className="min-w-0">
                             <div className="font-semibold text-gray-900 truncate">{c.nama_lengkap}</div>
                             <div className="text-[11px] text-gray-500 flex flex-wrap items-center gap-2 mt-0.5">
-                              <span className="font-mono">
-                                {c.nomor_whatsapp ? `+${c.nomor_whatsapp}` : 'Tanpa nomor WA'}
-                              </span>
+                              {c.identities && c.identities.length > 0 ? (
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {c.identities.map((idRow: any, idIdx: number) => {
+                                    const info = getChannelInfo(idRow.channel);
+                                    return (
+                                      <span
+                                        key={idIdx}
+                                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${info.badgeCls}`}
+                                      >
+                                        {info.shortLabel}: {idRow.handle || idRow.externalId}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              ) : c.nomor_whatsapp ? (
+                                <span className="font-mono text-gray-700">+{c.nomor_whatsapp}</span>
+                              ) : (
+                                <span className="text-gray-400 font-mono">Kontak Omnichannel</span>
+                              )}
                               <span className="px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-[10px]">
                                 {c.kategori || 'Tanpa Kategori'}
                               </span>
@@ -2577,9 +2697,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div key={r.id || `${r.contact_id || r.contactId}-${idx}`} className="p-3 space-y-2">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="min-w-0">
-                                <span className="font-semibold text-gray-900">{contactName}</span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-semibold text-gray-900">{contactName}</span>
+                                  {(() => {
+                                    const info = getChannelInfo(r.channel);
+                                    return (
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded text-[9px] font-medium border inline-flex items-center gap-1 ${info.badgeCls}`}
+                                      >
+                                        <span className={`w-1 h-1 rounded-full ${info.dotCls}`} />
+                                        <span>{info.shortLabel}</span>
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
                                 {phone && (
-                                  <span className="ml-2 font-mono text-[11px] text-gray-500">+{phone}</span>
+                                  <span className="font-mono text-[11px] text-gray-500">+{phone}</span>
                                 )}
                               </div>
                               <div className="flex items-center gap-2">
@@ -2690,7 +2823,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <span className="font-semibold text-gray-900 truncate">{c.displayName}</span>
                             {c.isGroup && (
                               <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                                Grup WA
+                                Grup Chat
                               </span>
                             )}
                             {c.excludeFromMetrics && (
@@ -2698,9 +2831,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 {c.excludeReason || 'Non-Penilaian'}
                               </span>
                             )}
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              {c.wahaSession || c.channel}
-                            </span>
+                            {(() => {
+                              const info = getChannelInfo(c.channel);
+                              return (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium border inline-flex items-center gap-1 ${info.badgeCls}`}
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${info.dotCls}`} />
+                                  <span>{info.shortLabel}</span>
+                                  {c.wahaSession && (
+                                    <span className="opacity-75 font-mono">({c.wahaSession})</span>
+                                  )}
+                                </span>
+                              );
+                            })()}
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
                               {c.status}
                             </span>

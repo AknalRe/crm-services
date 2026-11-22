@@ -584,6 +584,8 @@ export interface RespondingLeadItem {
   contactId: string;
   contactName: string;
   phone: string;
+  channel?: string;
+  wahaSession?: string | null;
   contactCategory?: string;
   sentAt?: string | null;
   respondedAt: string;
@@ -616,6 +618,11 @@ export interface DashboardStats {
     topCampaignResponseRate?: number;
     topCampaignRespondedCount?: number;
     birthdayTodayCount: number;
+    connectedChannels?: Array<{
+      channel: string;
+      accountCount: number;
+      accountNames: string[];
+    }>;
     contactCategories?: Array<{ category: string; count: number }>;
     activityTrend7d?: Array<{
       date: string;
