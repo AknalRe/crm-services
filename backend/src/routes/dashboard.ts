@@ -1761,8 +1761,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
               new Date(conv.firstResponseAt).getTime() >= new Date(conv.firstInboundAt).getTime();
             const frtSeconds = hasFrt
               ? Math.round(
-                  (new Date(conv.firstResponseAt!).getTime() - new Date(conv.firstInboundAt!).getTime()) / 1000
-                )
+                (new Date(conv.firstResponseAt!).getTime() - new Date(conv.firstInboundAt!).getTime()) / 1000
+              )
               : null;
             const cycleStart = getConversationCycleStart(conv);
             const resolutionSeconds =
@@ -2109,8 +2109,8 @@ export default async function dashboardRouter(fastify: FastifyInstance) {
             new Date(conv.firstResponseAt).getTime() >= new Date(conv.firstInboundAt).getTime();
           const frtSec = hasFrt
             ? Math.round(
-                (new Date(conv.firstResponseAt!).getTime() - new Date(conv.firstInboundAt!).getTime()) / 1000
-              )
+              (new Date(conv.firstResponseAt!).getTime() - new Date(conv.firstInboundAt!).getTime()) / 1000
+            )
             : '';
           const cycleStart = getConversationCycleStart(conv);
           const resSec =
