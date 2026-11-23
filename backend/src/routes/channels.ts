@@ -267,6 +267,34 @@ export default async function channelsRouter(fastify: FastifyInstance) {
                 })
               );
             }
+
+            // WhatsApp Business Coexistence echoes (messages sent from the WhatsApp Business mobile app)
+            const echoes: any[] = Array.isArray(val.message_echoes) ? val.message_echoes : [];
+            for (const echo of echoes) {
+              const recipientId = String(echo.to || '').trim();
+              if (!recipientId) continue;
+              const echoBody =
+                String(
+                  echo.text?.body ||
+                    echo.image?.caption ||
+                    echo.video?.caption ||
+                    echo.document?.caption ||
+                    ''
+                ).trim() || (echo.type ? `[${String(echo.type).toUpperCase()}]` : '');
+              if (!echoBody) continue;
+
+              await runWithCompany(waAccount.companyId, () =>
+                upsertInboundChannelMessage({
+                  channel: 'WHATSAPP_CLOUD',
+                  channelAccountId: waAccount.id,
+                  externalSenderId: recipientId,
+                  senderHandle: `+${recipientId.replace(/\D/g, '')}`,
+                  externalMessageId: echo.id || null,
+                  body: `[WA Business HP] ${echoBody}`,
+                  skipAutomation: true,
+                })
+              );
+            }
           }
           continue;
         }
@@ -532,6 +560,11 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       process.env.INSTAGRAM_CONFIG_ID ||
       DEFAULT_RENEO_INSTAGRAM_CONFIG_ID
     ).trim();
+    const whatsappConfigId = (
+      sysMap.whatsapp_config_id ||
+      process.env.WHATSAPP_CONFIG_ID ||
+      ''
+    ).trim();
     const threadsAppId = (sysMap.threads_app_id || config.meta.threadsAppId || DEFAULT_RENEO_THREADS_APP_ID).trim();
     const threadsAppSecret = (sysMap.threads_app_secret || config.meta.threadsAppSecret || '').trim();
     const webhookVerifyToken = (
@@ -545,6 +578,7 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       instagramAppId,
       instagramAppSecret,
       instagramConfigId,
+      whatsappConfigId,
       threadsAppId,
       threadsAppSecret,
       webhookVerifyToken,
@@ -730,6 +764,8 @@ export default async function channelsRouter(fastify: FastifyInstance) {
       metaAppSecret?: string;
       instagramAppId?: string;
       instagramAppSecret?: string;
+      instagramConfigId?: string;
+      whatsappConfigId?: string;
       threadsAppId?: string;
       threadsAppSecret?: string;
       webhookVerifyToken?: string;
@@ -754,6 +790,12 @@ export default async function channelsRouter(fastify: FastifyInstance) {
         if (nextIgSecret !== '' || req.body?.instagramAppId === '') {
           await upsertSystemSetting('instagram_app_secret', nextIgSecret);
         }
+      }
+      if (req.body?.instagramConfigId !== undefined) {
+        await upsertSystemSetting('instagram_config_id', String(req.body.instagramConfigId).trim());
+      }
+      if (req.body?.whatsappConfigId !== undefined) {
+        await upsertSystemSetting('whatsapp_config_id', String(req.body.whatsappConfigId).trim());
       }
       if (req.body?.threadsAppId !== undefined) {
         await upsertSystemSetting('threads_app_id', String(req.body.threadsAppId).trim() || DEFAULT_RENEO_THREADS_APP_ID);
@@ -868,6 +910,15 @@ export default async function channelsRouter(fastify: FastifyInstance) {
 
       if (channel === 'INSTAGRAM' && oauthCreds.metaAppId && oauthCreds.instagramConfigId && oauthCreds.metaAppSecret) {
         const target = `https://www.facebook.com/dialog/oauth?client_id=${encodeURIComponent(oauthCreds.metaAppId)}&config_id=${encodeURIComponent(oauthCreds.instagramConfigId)}&display=popup&override_default_response_type=true&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&state=${encodeURIComponent(state)}&prompt=login`;
+        return reply.redirect(target);
+      }
+
+      if (channel === 'WHATSAPP_CLOUD' && oauthCreds.metaAppId && oauthCreds.whatsappConfigId && oauthCreds.metaAppSecret) {
+        const extras = JSON.stringify({
+          featureType: 'whatsapp_business_app_onboarding',
+          sessionInfoVersion: '3',
+        });
+        const target = `https://www.facebook.com/dialog/oauth?client_id=${encodeURIComponent(oauthCreds.metaAppId)}&config_id=${encodeURIComponent(oauthCreds.whatsappConfigId)}&override_default_response_type=true&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&extras=${encodeURIComponent(extras)}&state=${encodeURIComponent(state)}`;
         return reply.redirect(target);
       }
 
@@ -1113,6 +1164,107 @@ export default async function channelsRouter(fastify: FastifyInstance) {
                 }
               } catch {
                 // fallback to direct user token
+              }
+            }
+
+            // Discover WhatsApp Business Accounts (Cloud API & Coexistence)
+            if (parsedState.channel === 'WHATSAPP_CLOUD') {
+              const seenWaPhoneIds = new Set<string>();
+              const wabaIdsToSubscribe = new Set<string>();
+              const pushWaPhones = (wabaId: string, wabaName: string, phones: any[]) => {
+                if (wabaId) wabaIdsToSubscribe.add(wabaId);
+                for (const ph of phones) {
+                  const pid = String(ph?.id || '').trim();
+                  if (!pid || seenWaPhoneIds.has(pid)) continue;
+                  seenWaPhoneIds.add(pid);
+                  const display =
+                    String(ph?.verified_name || '').trim() ||
+                    String(ph?.display_phone_number || '').trim() ||
+                    wabaName ||
+                    `WhatsApp ${pid.slice(-4)}`;
+                  accountsToSave.push({
+                    channel: 'WHATSAPP_CLOUD',
+                    name: display,
+                    accountId: pid,
+                    accessToken: userToken,
+                  });
+                }
+              };
+
+              try {
+                const bizWaRes = await axios.get('https://graph.facebook.com/v20.0/me/businesses', {
+                  params: {
+                    fields:
+                      'id,name,owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}},client_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}',
+                    access_token: userToken,
+                  },
+                  timeout: 15000,
+                });
+                for (const biz of bizWaRes.data?.data || []) {
+                  const wabas = [
+                    ...(biz.owned_whatsapp_business_accounts?.data || []),
+                    ...(biz.client_whatsapp_business_accounts?.data || []),
+                  ];
+                  for (const waba of wabas) {
+                    pushWaPhones(
+                      String(waba?.id || ''),
+                      String(waba?.name || biz.name || ''),
+                      Array.isArray(waba?.phone_numbers?.data) ? waba.phone_numbers.data : []
+                    );
+                  }
+                }
+              } catch {
+                // fallback to debug_token granular_scopes
+              }
+
+              if (seenWaPhoneIds.size === 0 && oauthCreds.metaAppId && oauthCreds.metaAppSecret) {
+                try {
+                  const debugRes = await axios.get('https://graph.facebook.com/v20.0/debug_token', {
+                    params: {
+                      input_token: userToken,
+                      access_token: `${oauthCreds.metaAppId}|${oauthCreds.metaAppSecret}`,
+                    },
+                    timeout: 10000,
+                  });
+                  const scopes: any[] = Array.isArray(debugRes.data?.data?.granular_scopes)
+                    ? debugRes.data.data.granular_scopes
+                    : [];
+                  const wabaIds = new Set<string>();
+                  for (const sc of scopes) {
+                    if (String(sc.scope || '').startsWith('whatsapp_business_') && Array.isArray(sc.target_ids)) {
+                      for (const tid of sc.target_ids) {
+                        if (tid) wabaIds.add(String(tid));
+                      }
+                    }
+                  }
+                  for (const wabaId of wabaIds) {
+                    try {
+                      const phRes = await axios.get(
+                        `https://graph.facebook.com/v20.0/${encodeURIComponent(wabaId)}/phone_numbers`,
+                        {
+                          params: { fields: 'id,display_phone_number,verified_name', access_token: userToken },
+                          timeout: 10000,
+                        }
+                      );
+                      pushWaPhones(wabaId, '', Array.isArray(phRes.data?.data) ? phRes.data.data : []);
+                    } catch {
+                      // ignore
+                    }
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+
+              // Subscribe WABA to app webhooks (messages + smb_message_echoes for Coexistence)
+              for (const wabaId of wabaIdsToSubscribe) {
+                axios
+                  .post(
+                    `https://graph.facebook.com/v20.0/${encodeURIComponent(wabaId)}/subscribed_apps`,
+                    null,
+                    { params: { access_token: userToken }, timeout: 8000 }
+                  )
+                  .catch(() => {});
               }
             }
 

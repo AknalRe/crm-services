@@ -34,7 +34,7 @@ const CHANNEL_LABEL_MAP: Record<string, string> = {
   FACEBOOK: 'Facebook',
   THREADS: 'Threads',
   TELEGRAM: 'Telegram',
-  WHATSAPP_CLOUD: 'WhatsApp Cloud',
+  WHATSAPP_CLOUD: 'WhatsApp Business',
 };
 
 const CHANNEL_SUBTITLE_MAP: Record<string, string> = {
@@ -42,7 +42,7 @@ const CHANNEL_SUBTITLE_MAP: Record<string, string> = {
   THREADS: 'Profil',
   FACEBOOK: 'Halaman',
   TELEGRAM: 'Bot & Channel',
-  WHATSAPP_CLOUD: 'Cloud API',
+  WHATSAPP_CLOUD: 'Coexistence / Cloud API',
 };
 
 export const PlatformBrandIcon: React.FC<{ channel: string; size?: 'sm' | 'md' }> = ({
@@ -389,7 +389,7 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
           <div className="space-y-1">
             <div className="text-sm font-semibold text-gray-900">Belum ada akun terhubung</div>
             <p className="text-xs text-gray-500 max-w-md mx-auto">
-              Hubungkan akun Instagram, Threads, Facebook Page, atau Telegram agar seluruh pesan dan komentar masuk ke CRM.
+              Hubungkan akun WhatsApp Business (Coexistence / Cloud API), Instagram, Threads, Facebook Page, atau Telegram agar seluruh pesan dan komentar masuk ke CRM.
             </p>
           </div>
           {canEdit && (
@@ -594,7 +594,23 @@ export const OmnichannelSettings: React.FC<{ canEdit?: boolean }> = ({ canEdit =
             {modalView === 'picker' && (
               <>
                 {/* Square Platform Tiles Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleStartOAuth('WHATSAPP_CLOUD')}
+                    className="p-4 rounded-xl border border-gray-200 bg-gray-50/70 hover:bg-emerald-50/60 hover:border-emerald-300 transition-all flex flex-col items-center justify-center text-center gap-2.5 group"
+                  >
+                    <PlatformBrandIcon channel="WHATSAPP_CLOUD" />
+                    <div>
+                      <div className="text-xs font-bold text-gray-900 group-hover:text-emerald-700">
+                        WhatsApp Business
+                      </div>
+                      <div className="text-[11px] text-gray-500 mt-0.5">
+                        Coexistence / Cloud API
+                      </div>
+                    </div>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => handleStartOAuth('INSTAGRAM')}
