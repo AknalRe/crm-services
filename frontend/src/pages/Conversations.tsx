@@ -3330,6 +3330,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
   // Desktop hover quick-peek & mobile long-press iPhone-style chat peek (read-only, markRead: false)
   const peekCacheRef = useRef<PeekCacheMap>(new Map());
   const hoverPeekTimerRef = useRef<number | null>(null);
+  const hoverCloseTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTriggeredRef = useRef(false);
@@ -3340,6 +3341,17 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [mobilePeekConv, setMobilePeekConv] = useState<Conversation | null>(null);
   const [peekMessagesByConvId, setPeekMessagesByConvId] = useState<Record<string, ChatMessage[]>>({});
   const [peekLoadingConvId, setPeekLoadingConvId] = useState<string | null>(null);
+
+  // WhatsApp-style compact message actions (swipe right to reply + 3-dots action sheet)
+  const [actionMenuMessage, setActionMenuMessage] = useState<ChatMessage | null>(null);
+  const swipeReplyRef = useRef<{
+    msgId: string;
+    startX: number;
+    startY: number;
+    locked: 'x' | 'y' | null;
+    offsetX: number;
+  } | null>(null);
+  const [swipeReplyOffset, setSwipeReplyOffset] = useState<{ msgId: string; x: number } | null>(null);
 
   const loadPeekMessages = useCallback(async (convId: string) => {
     const cached = peekCacheRef.current.get(convId);
@@ -3365,6 +3377,24 @@ export const Conversations: React.FC<ConversationsProps> = ({
       window.clearTimeout(hoverPeekTimerRef.current);
       hoverPeekTimerRef.current = null;
     }
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleHoverPeekClose = useCallback(() => {
+    if (hoverPeekTimerRef.current !== null) {
+      window.clearTimeout(hoverPeekTimerRef.current);
+      hoverPeekTimerRef.current = null;
+    }
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current);
+    }
+    hoverCloseTimerRef.current = window.setTimeout(() => {
+      setHoverPeek(null);
+      hoverCloseTimerRef.current = null;
+    }, 160);
   }, []);
 
   const clearLongPressTimer = useCallback(() => {
@@ -5257,8 +5287,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     }, 320);
                   }}
                   onMouseLeave={() => {
-                    clearHoverPeekTimer();
-                    setHoverPeek((cur) => (cur?.conv.id === conv.id ? null : cur));
+                    scheduleHoverPeekClose();
                   }}
                   onTouchStart={(e) => {
                     const touch = e.touches[0];
@@ -6737,16 +6766,83 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         );
                       })()}
                       <div
+                        onTouchStart={(e) => {
+                          if (isRevoked || !canReplyConversation) return;
+                          const touch = e.touches[0];
+                          if (!touch) return;
+                          swipeReplyRef.current = {
+                            msgId: msg.id,
+                            startX: touch.clientX,
+                            startY: touch.clientY,
+                            locked: null,
+                            offsetX: 0,
+                          };
+                        }}
+                        onTouchMove={(e) => {
+                          const st = swipeReplyRef.current;
+                          if (!st || st.msgId !== msg.id) return;
+                          const touch = e.touches[0];
+                          if (!touch) return;
+                          const dx = touch.clientX - st.startX;
+                          const dy = touch.clientY - st.startY;
+                          if (!st.locked) {
+                            if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
+                              st.locked = 'y';
+                              return;
+                            }
+                            if (dx > 10 && dx > Math.abs(dy) * 1.25) {
+                              st.locked = 'x';
+                            } else {
+                              return;
+                            }
+                          }
+                          if (st.locked === 'x') {
+                            const clamped = Math.max(0, Math.min(54, dx));
+                            st.offsetX = clamped;
+                            setSwipeReplyOffset({ msgId: msg.id, x: clamped });
+                          }
+                        }}
+                        onTouchEnd={() => {
+                          const st = swipeReplyRef.current;
+                          swipeReplyRef.current = null;
+                          if (st && st.msgId === msg.id && st.offsetX >= 40) {
+                            if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+                              navigator.vibrate(12);
+                            }
+                            setReplyingToMessage(msg);
+                            setComposerMode('REPLY');
+                            replyInputRef.current?.focus();
+                          }
+                          setSwipeReplyOffset(null);
+                        }}
+                        onTouchCancel={() => {
+                          swipeReplyRef.current = null;
+                          setSwipeReplyOffset(null);
+                        }}
+                        style={
+                          swipeReplyOffset?.msgId === msg.id
+                            ? { transform: `translateX(${swipeReplyOffset.x}px)`, transition: 'none' }
+                            : undefined
+                        }
                         className={`relative flex flex-col ${isOutbound ? 'items-end' : 'items-start'} ${
                           isGroupInbound ? 'max-w-[calc(100%-2.5rem)]' : 'max-w-[90%]'
-                        } sm:max-w-[80%] md:max-w-[540px] lg:max-w-[580px] xl:max-w-[620px] min-w-0 transition-all duration-300 ${
+                        } sm:max-w-[80%] md:max-w-[540px] lg:max-w-[580px] xl:max-w-[620px] min-w-0 transition-transform duration-150 ${
                           highlightedMessageId === msg.id
                             ? 'scale-[1.02] ring-2 ring-indigo-500 ring-offset-2 rounded-lg'
                             : ''
                         }`}
                       >
+                        {swipeReplyOffset?.msgId === msg.id && swipeReplyOffset.x > 12 && (
+                          <div
+                            className="pointer-events-none absolute -left-9 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-md"
+                            style={{ opacity: Math.min(1, swipeReplyOffset.x / 40) }}
+                          >
+                            <Reply className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                        <div className={`w-full flex items-center gap-1 ${isOutbound ? 'flex-row-reverse' : 'flex-row'}`}>
                         <div
-                          className={`w-full min-w-0 rounded-lg px-3 py-2 text-[13px] sm:text-sm border leading-snug space-y-1 shadow-2xs ${
+                          className={`flex-1 min-w-0 rounded-lg px-3 py-2 text-[13px] sm:text-sm border leading-snug space-y-1 shadow-2xs ${
                             isCsatHighlighted ? 'ring-2 ring-amber-400' : ''
                           } ${
                             isRevoked
@@ -7754,6 +7850,37 @@ export const Conversations: React.FC<ConversationsProps> = ({
                         </div>
                         </div>
 
+                        {/* Compact WhatsApp-style 3-dots trigger beside bubble (hover on desktop, subtle icon on mobile) */}
+                        {!isRevoked && (canReplyConversation || canManageConversation) && (
+                          <div className="shrink-0 flex items-center gap-0.5 opacity-80 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity">
+                            {canReplyConversation && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingToMessage(msg);
+                                  setComposerMode('REPLY');
+                                  replyInputRef.current?.focus();
+                                }}
+                                title="Balas pesan ini"
+                                aria-label="Balas pesan ini"
+                                className="hidden md:inline-flex h-6 w-6 items-center justify-center rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              >
+                                <Reply className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setActionMenuMessage(msg)}
+                              title="Aksi pesan"
+                              aria-label="Aksi pesan"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                            >
+                              <MoreVertical className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                        </div>
+
                         {/* WhatsApp-style Reaction Pill docked on the bottom edge of the bubble */}
                         {Array.isArray(msgMeta?.reactions) && msgMeta.reactions.length > 0 && (() => {
                           // Deduplicate reactions per actor (handles historical self-reaction echo saved with both actor='CS' and own phone JID)
@@ -7845,146 +7972,6 @@ export const Conversations: React.FC<ConversationsProps> = ({
                             </div>
                           );
                         })()}
-
-                        {/* Message Actions (Balas, Teruskan, Pin, Bintang, Reaksi, Hapus) — muncul di bawah bubble dengan membuka ruang tanpa menimpa pesan lain */}
-                        {!isRevoked && (canReplyConversation || canManageConversation) && (
-                          <div
-                            className={`w-full grid transition-[grid-template-rows,opacity,margin] duration-150 ease-out ${
-                              activeReactionMsgId === msg.id
-                                ? 'grid-rows-[1fr] opacity-100 mt-1.5'
-                                : 'grid-rows-[1fr] opacity-100 mt-1 md:grid-rows-[0fr] md:opacity-0 md:mt-0 md:pointer-events-none md:group-hover:grid-rows-[1fr] md:group-hover:opacity-100 md:group-hover:mt-1.5 md:group-hover:pointer-events-auto md:group-focus-within:grid-rows-[1fr] md:group-focus-within:opacity-100 md:group-focus-within:mt-1.5 md:group-focus-within:pointer-events-auto'
-                            }`}
-                          >
-                            <div className="overflow-hidden min-h-0">
-                              <div
-                                className={`flex flex-wrap items-center gap-1 px-0.5 py-0.5 text-[10px] ${
-                                  isOutbound ? 'justify-end' : 'justify-start'
-                                }`}
-                              >
-                            {canReplyConversation && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setReplyingToMessage(msg);
-                                  setComposerMode('REPLY');
-                                  replyInputRef.current?.focus();
-                                }}
-                                title="Balas pesan ini"
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-indigo-50 hover:border-indigo-200 text-indigo-700 font-medium shadow-2xs transition-colors"
-                              >
-                                <Reply className="w-2.5 h-2.5" />
-                                <span>Balas</span>
-                              </button>
-                            )}
-                            {canReplyConversation && !isCsat && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setForwardingMessage(msg);
-                                  setForwardSearch('');
-                                  setForwardTargetConvId('');
-                                }}
-                                title="Teruskan pesan ke chat lain"
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-emerald-50 hover:border-emerald-200 text-gray-700 hover:text-emerald-700 font-medium shadow-2xs transition-colors"
-                              >
-                                <Forward className="w-2.5 h-2.5" />
-                                <span>Teruskan</span>
-                              </button>
-                            )}
-                            {canReplyConversation && (
-                              <button
-                                type="button"
-                                onClick={() => void handleStartPinMessage(msg)}
-                                title={msgMeta?.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-colors ${
-                                  msgMeta?.isPinned
-                                    ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
-                                    : 'border-gray-200 bg-white hover:bg-indigo-50 text-gray-600 hover:text-indigo-700'
-                                }`}
-                              >
-                                {msgMeta?.isPinned ? <PinOff className="w-2.5 h-2.5" /> : <Pin className="w-2.5 h-2.5" />}
-                                <span>{msgMeta?.isPinned ? 'Lepas Pin' : 'Pin'}</span>
-                              </button>
-                            )}
-                            {canReplyConversation && (
-                              <button
-                                type="button"
-                                onClick={() => void handleToggleStarMessage(msg)}
-                                title={msgMeta?.isStarred ? 'Hapus bintang' : 'Beri bintang'}
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-colors ${
-                                  msgMeta?.isStarred
-                                    ? 'bg-amber-50 border-amber-300 text-amber-800'
-                                    : 'border-gray-200 bg-white hover:bg-amber-50 text-gray-600 hover:text-amber-700'
-                                }`}
-                              >
-                                <Star className={`w-2.5 h-2.5 ${msgMeta?.isStarred ? 'fill-amber-400 text-amber-500' : ''}`} />
-                                <span>{msgMeta?.isStarred ? 'Favorit' : 'Bintang'}</span>
-                              </button>
-                            )}
-                            {canReplyConversation && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setActiveReactionMsgId((prev) => (prev === msg.id ? null : msg.id))
-                                }
-                                title="Beri reaksi emoji"
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border font-medium shadow-2xs transition-colors ${
-                                  activeReactionMsgId === msg.id
-                                    ? 'bg-amber-50 border-amber-300 text-amber-800'
-                                    : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'
-                                }`}
-                              >
-                                <SmilePlus className="w-2.5 h-2.5" />
-                                <span>Reaksi</span>
-                              </button>
-                            )}
-                            {isOutbound && !isFailed && selectedConversation?.isGroup && (
-                              <button
-                                type="button"
-                                onClick={() => void handleOpenMessageReceipts(msg)}
-                                title="Lihat info siapa yang sudah membaca & menerima pesan"
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-blue-50 hover:border-blue-200 text-gray-600 hover:text-blue-700 font-medium shadow-2xs transition-colors"
-                              >
-                                <Info className="w-2.5 h-2.5" />
-                                <span>Info</span>
-                              </button>
-                            )}
-                            {canReplyConversation &&
-                              (msg.messageType === 'NOTE' ||
-                                (isOutbound &&
-                                  !isFailed &&
-                                  (selectedConversation?.channel || 'WHATSAPP').toUpperCase() === 'WHATSAPP' &&
-                                  Boolean(msg.wahaMessageId) &&
-                                  msg.messageType !== 'CSAT' &&
-                                  msg.messageType !== 'POLL' &&
-                                  msg.messageType !== 'LOCATION' &&
-                                  msg.messageType !== 'CONTACT')) && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingMessageTarget(msg);
-                                  setEditMessageDraft(msg.body || '');
-                                }}
-                                title="Ubah isi pesan ini"
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-blue-50 hover:border-blue-200 text-gray-600 hover:text-blue-700 font-medium shadow-2xs transition-colors"
-                              >
-                                <Pencil className="w-2.5 h-2.5" />
-                                <span>Ubah</span>
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setDeleteMessageTarget(msg)}
-                              title="Hapus Pesan (Tarik / Hapus Pribadi)"
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-gray-600 hover:text-rose-600 font-medium shadow-2xs transition-colors"
-                            >
-                              <Trash2 className="w-2.5 h-2.5" />
-                              <span>Hapus</span>
-                            </button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
 
                         {!isRevoked && activeReactionMsgId === msg.id && (
                           <div className="mt-1 p-1 rounded-full bg-white border border-gray-200 shadow-sm inline-flex items-center gap-0.5 flex-wrap">
@@ -12241,6 +12228,28 @@ export const Conversations: React.FC<ConversationsProps> = ({
           anchorRect={hoverPeek.rect}
           messages={peekMessagesByConvId[hoverPeek.conv.id] || []}
           loading={peekLoadingConvId === hoverPeek.conv.id}
+          resolveMediaUrl={resolveMediaUrl}
+          onMouseEnter={() => {
+            if (hoverCloseTimerRef.current !== null) {
+              window.clearTimeout(hoverCloseTimerRef.current);
+              hoverCloseTimerRef.current = null;
+            }
+          }}
+          onMouseLeave={() => scheduleHoverPeekClose()}
+          onOpenChat={() => {
+            const target = hoverPeek.conv;
+            clearHoverPeekTimer();
+            setHoverPeek(null);
+            if (selectedConversation?.id !== target.id) {
+              setHighlightedCsatWindow(null);
+              setReplyingToMessage(null);
+              setShowMobileChatActions(false);
+              setShowComposerTools(false);
+              setActiveReactionMsgId(null);
+              setOpenProfileSections({});
+            }
+            setSelectedConversation(target);
+          }}
         />
       )}
 
@@ -12250,6 +12259,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
           title={getConversationDisplayTitle(mobilePeekConv)}
           messages={peekMessagesByConvId[mobilePeekConv.id] || []}
           loading={peekLoadingConvId === mobilePeekConv.id}
+          resolveMediaUrl={resolveMediaUrl}
           onClose={() => setMobilePeekConv(null)}
           onOpenChat={() => {
             const target = mobilePeekConv;
@@ -12266,6 +12276,177 @@ export const Conversations: React.FC<ConversationsProps> = ({
           }}
         />
       )}
+
+      {actionMenuMessage && (() => {
+        const target = actionMenuMessage;
+        const targetMeta = parseChatMessageMeta(target);
+        const targetOutbound = target.direction === 'OUTBOUND';
+        const targetFailed = target.status === 'FAILED';
+        const targetIsCsat = target.messageType === 'CSAT';
+        const targetEditable =
+          canReplyConversation &&
+          (target.messageType === 'NOTE' ||
+            (targetOutbound &&
+              !targetFailed &&
+              (selectedConversation?.channel || 'WHATSAPP').toUpperCase() === 'WHATSAPP' &&
+              Boolean(target.wahaMessageId) &&
+              target.messageType !== 'CSAT' &&
+              target.messageType !== 'POLL' &&
+              target.messageType !== 'LOCATION' &&
+              target.messageType !== 'CONTACT'));
+        return (
+          <div
+            className="fixed inset-0 z-[85] bg-slate-950/45 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-3 sm:p-4"
+            onClick={() => setActionMenuMessage(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Aksi pesan"
+          >
+            <div
+              className="w-full max-w-xs rounded-2xl bg-white border border-gray-200 shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-3.5 py-2.5 bg-slate-50 border-b border-gray-200 flex items-center justify-between gap-2">
+                <p className="text-xs text-gray-700 truncate font-medium">
+                  {target.body || `[${target.messageType || 'Media'}]`}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActionMenuMessage(null)}
+                  className="p-1 rounded-full hover:bg-gray-200/70 text-gray-500 shrink-0"
+                  aria-label="Tutup menu aksi"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {canReplyConversation && (
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between gap-1">
+                  {QUICK_REACTION_EMOJIS.slice(0, 6).map((em) => (
+                    <button
+                      key={em}
+                      type="button"
+                      disabled={reactingMsgId === target.id}
+                      onClick={() => {
+                        setActionMenuMessage(null);
+                        void handleReactMessage(target.id, em);
+                      }}
+                      className="h-9 w-9 rounded-full hover:bg-indigo-50 text-base flex items-center justify-center transition-transform active:scale-95 disabled:opacity-50"
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="divide-y divide-gray-100 text-sm">
+                {canReplyConversation && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionMenuMessage(null);
+                      setReplyingToMessage(target);
+                      setComposerMode('REPLY');
+                      replyInputRef.current?.focus();
+                    }}
+                    className="w-full px-4 py-2.5 flex items-center justify-between text-gray-800 hover:bg-indigo-50/60 hover:text-indigo-700 transition-colors"
+                  >
+                    <span>Balas</span>
+                    <Reply className="w-4 h-4 text-gray-400" />
+                  </button>
+                )}
+                {targetEditable && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionMenuMessage(null);
+                      setEditingMessageTarget(target);
+                      setEditMessageDraft(target.body || '');
+                    }}
+                    className="w-full px-4 py-2.5 flex items-center justify-between text-gray-800 hover:bg-blue-50/60 hover:text-blue-700 transition-colors"
+                  >
+                    <span>Ubah Pesan</span>
+                    <Pencil className="w-4 h-4 text-gray-400" />
+                  </button>
+                )}
+                {canReplyConversation && !targetIsCsat && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionMenuMessage(null);
+                      setForwardingMessage(target);
+                      setForwardSearch('');
+                      setForwardTargetConvId('');
+                    }}
+                    className="w-full px-4 py-2.5 flex items-center justify-between text-gray-800 hover:bg-emerald-50/60 hover:text-emerald-700 transition-colors"
+                  >
+                    <span>Teruskan</span>
+                    <Forward className="w-4 h-4 text-gray-400" />
+                  </button>
+                )}
+                {canReplyConversation && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionMenuMessage(null);
+                      void handleStartPinMessage(target);
+                    }}
+                    className="w-full px-4 py-2.5 flex items-center justify-between text-gray-800 hover:bg-indigo-50/60 transition-colors"
+                  >
+                    <span>{targetMeta?.isPinned ? 'Lepas Sematan' : 'Sematkan Pesan'}</span>
+                    {targetMeta?.isPinned ? (
+                      <PinOff className="w-4 h-4 text-indigo-500" />
+                    ) : (
+                      <Pin className="w-4 h-4 text-gray-400" />
+                    )}
+                  </button>
+                )}
+                {canReplyConversation && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionMenuMessage(null);
+                      void handleToggleStarMessage(target);
+                    }}
+                    className="w-full px-4 py-2.5 flex items-center justify-between text-gray-800 hover:bg-amber-50/60 transition-colors"
+                  >
+                    <span>{targetMeta?.isStarred ? 'Hapus Bintang' : 'Beri Bintang'}</span>
+                    <Star
+                      className={`w-4 h-4 ${
+                        targetMeta?.isStarred ? 'fill-amber-400 text-amber-500' : 'text-gray-400'
+                      }`}
+                    />
+                  </button>
+                )}
+                {targetOutbound && !targetFailed && selectedConversation?.isGroup && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionMenuMessage(null);
+                      void handleOpenMessageReceipts(target);
+                    }}
+                    className="w-full px-4 py-2.5 flex items-center justify-between text-gray-800 hover:bg-blue-50/60 transition-colors"
+                  >
+                    <span>Info Pesan</span>
+                    <Info className="w-4 h-4 text-gray-400" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActionMenuMessage(null);
+                    setDeleteMessageTarget(target);
+                  }}
+                  className="w-full px-4 py-2.5 flex items-center justify-between text-rose-600 hover:bg-rose-50 font-medium transition-colors"
+                >
+                  <span>Hapus Pesan</span>
+                  <Trash2 className="w-4 h-4 text-rose-500" />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {editingMessageTarget && (
         <div

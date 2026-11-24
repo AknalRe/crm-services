@@ -1,5 +1,15 @@
 import React, { useEffect, useRef } from 'react';
-import { Check, CheckCheck, EyeOff, Image as ImageIcon, FileText, Mic, Video, X, MessageSquare } from 'lucide-react';
+import {
+  Check,
+  CheckCheck,
+  EyeOff,
+  FileText,
+  Image as ImageIcon,
+  MessageSquare,
+  Mic,
+  Video,
+  X,
+} from 'lucide-react';
 import { ChatMessage, Conversation } from '../types';
 
 interface PeekCacheEntry {
@@ -18,40 +28,6 @@ function formatBubbleTime(iso?: string | null): string {
   }
 }
 
-function renderMediaTag(msg: ChatMessage) {
-  if (!msg.mediaType) return null;
-  if (msg.mediaType === 'image') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-600 mb-0.5">
-        <ImageIcon className="w-3 h-3" />
-        <span>Gambar</span>
-      </span>
-    );
-  }
-  if (msg.mediaType === 'video') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-600 mb-0.5">
-        <Video className="w-3 h-3" />
-        <span>Video</span>
-      </span>
-    );
-  }
-  if (msg.mediaType === 'audio') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-600 mb-0.5">
-        <Mic className="w-3 h-3" />
-        <span>Audio</span>
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-600 mb-0.5">
-      <FileText className="w-3 h-3" />
-      <span className="truncate max-w-[160px]">{msg.mediaName || 'Dokumen'}</span>
-    </span>
-  );
-}
-
 function parseMeta(raw?: string | null): Record<string, any> | null {
   if (!raw) return null;
   try {
@@ -61,6 +37,114 @@ function parseMeta(raw?: string | null): Record<string, any> | null {
   }
 }
 
+function isMediaFallbackOnlyBody(body: string): boolean {
+  const t = body.trim();
+  return (
+    t === '[Gambar]' ||
+    t === '[Video]' ||
+    t === '[Audio]' ||
+    t === '[Stiker]' ||
+    t === '[Dokumen]' ||
+    t === '[Media]' ||
+    t === '[Lampiran Media]' ||
+    /^\[Dokumen:.*\]$/.test(t)
+  );
+}
+
+function PeekMediaBlock({
+  msg,
+  meta,
+  resolveMediaUrl,
+  onMediaLoad,
+}: {
+  msg: ChatMessage;
+  meta: Record<string, any> | null;
+  resolveMediaUrl: (url?: string | null) => string;
+  onMediaLoad?: () => void;
+}) {
+  if (!msg.mediaType && !msg.mediaUrl) return null;
+  const resolved = msg.mediaUrl ? resolveMediaUrl(msg.mediaUrl) : '';
+  const isSticker = Boolean(
+    meta?.kind === 'STICKER' ||
+      (msg.mediaUrl && msg.mediaType === 'image' && msg.body.trim() === '[Stiker]')
+  );
+
+  if (msg.mediaType === 'image') {
+    if (resolved) {
+      return (
+        <div className="mb-1">
+          <img
+            src={resolved}
+            alt={msg.mediaName || (isSticker ? 'Stiker' : 'Gambar')}
+            loading="eager"
+            onLoad={onMediaLoad}
+            className={
+              isSticker
+                ? 'w-20 h-20 object-contain'
+                : 'max-h-44 w-full rounded-md object-cover border border-gray-200/80 bg-gray-100'
+            }
+          />
+        </div>
+      );
+    }
+    return (
+      <div className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-600 mb-0.5">
+        <ImageIcon className="w-3 h-3" />
+        <span>{isSticker ? 'Stiker' : 'Gambar'}</span>
+      </div>
+    );
+  }
+
+  if (msg.mediaType === 'video') {
+    if (resolved) {
+      return (
+        <div className="relative mb-1 rounded-md overflow-hidden bg-slate-900 border border-gray-200/80">
+          <video
+            src={resolved}
+            muted
+            playsInline
+            preload="metadata"
+            onLoadedData={onMediaLoad}
+            className="max-h-44 w-full object-cover"
+          />
+          <span className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/65 text-white text-[10px] font-medium">
+            <Video className="w-3 h-3" />
+            <span>Video</span>
+          </span>
+        </div>
+      );
+    }
+    return (
+      <div className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-600 mb-0.5">
+        <Video className="w-3 h-3" />
+        <span>Video</span>
+      </div>
+    );
+  }
+
+  if (msg.mediaType === 'audio') {
+    return (
+      <div className="mb-1 flex items-center gap-2 rounded-md border border-gray-200 bg-slate-50 px-2 py-1.5">
+        <Mic className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+        {resolved ? (
+          <audio controls preload="metadata" src={resolved} className="h-7 w-full max-w-[220px]" />
+        ) : (
+          <span className="text-[11px] font-medium text-gray-700">Pesan Suara / Audio</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-1 flex items-center gap-2 rounded-md border border-gray-200 bg-slate-50 px-2.5 py-1.5">
+      <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
+      <span className="text-[11px] font-medium text-gray-800 truncate">
+        {msg.mediaName || 'Dokumen'}
+      </span>
+    </div>
+  );
+}
+
 function MiniChatMessages({
   messages,
   loading,
@@ -68,6 +152,8 @@ function MiniChatMessages({
   fallbackLastMessage,
   fallbackTime,
   maxItems,
+  maxHeightClass,
+  resolveMediaUrl,
 }: {
   messages: ChatMessage[];
   loading: boolean;
@@ -75,16 +161,23 @@ function MiniChatMessages({
   fallbackLastMessage?: string | null;
   fallbackTime?: string | null;
   maxItems: number;
+  maxHeightClass: string;
+  resolveMediaUrl: (url?: string | null) => string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const visible = messages
     .filter((m) => m.messageType !== 'ACTIVITY' && m.messageType !== 'NOTE')
     .slice(-maxItems);
 
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  };
+
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    scrollToBottom();
+    const raf = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(raf);
   }, [visible.length, loading]);
 
   if (loading && visible.length === 0) {
@@ -117,7 +210,7 @@ function MiniChatMessages({
   }
 
   return (
-    <div ref={scrollRef} className="space-y-1.5 overflow-y-auto max-h-[46vh] pr-0.5">
+    <div ref={scrollRef} className={`space-y-1.5 overflow-y-auto ${maxHeightClass} pr-1`}>
       {visible.map((msg) => {
         const isOutbound = msg.direction === 'OUTBOUND';
         const meta = parseMeta(msg.metadataJson);
@@ -125,6 +218,9 @@ function MiniChatMessages({
         const isEdited = Boolean(meta?.edited);
         const isRead = msg.ackStatus >= 3 || msg.status === 'READ';
         const isDelivered = msg.ackStatus === 2 || msg.status === 'DELIVERED';
+        const hasResolvedMedia = Boolean(msg.mediaUrl);
+        const hideFallbackText = !isRevoked && hasResolvedMedia && isMediaFallbackOnlyBody(msg.body || '');
+
         return (
           <div key={msg.id} className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}>
             <div
@@ -149,10 +245,19 @@ function MiniChatMessages({
                   <div className="truncate">{msg.replyToBody || 'Pesan dikutip'}</div>
                 </div>
               )}
-              {renderMediaTag(msg)}
-              <div className={`whitespace-pre-wrap break-words ${isRevoked ? 'line-through opacity-75' : ''}`}>
-                {isRevoked ? 'Pesan ditarik' : msg.body}
-              </div>
+              {!isRevoked && (
+                <PeekMediaBlock
+                  msg={msg}
+                  meta={meta}
+                  resolveMediaUrl={resolveMediaUrl}
+                  onMediaLoad={scrollToBottom}
+                />
+              )}
+              {!hideFallbackText && (
+                <div className={`whitespace-pre-wrap break-words ${isRevoked ? 'line-through opacity-75' : ''}`}>
+                  {isRevoked ? 'Pesan ditarik' : msg.body}
+                </div>
+              )}
               <div className="mt-0.5 flex items-center justify-end gap-1 text-[9px] text-gray-400 font-mono tabular-nums">
                 {isEdited && <span className="italic font-sans">Diubah</span>}
                 <span>{formatBubbleTime(msg.createdAt)}</span>
@@ -180,15 +285,23 @@ export function DesktopConversationHoverCard({
   anchorRect,
   messages,
   loading,
+  resolveMediaUrl,
+  onMouseEnter,
+  onMouseLeave,
+  onOpenChat,
 }: {
   conv: Conversation;
   title: string;
   anchorRect: { top: number; left: number; right: number; bottom: number };
   messages: ChatMessage[];
   loading: boolean;
+  resolveMediaUrl: (url?: string | null) => string;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onOpenChat: () => void;
 }) {
-  const cardWidth = 340;
-  const maxCardHeight = 320;
+  const cardWidth = 400;
+  const estCardHeight = 420;
   const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1280;
   const viewportH = typeof window !== 'undefined' ? window.innerHeight : 800;
 
@@ -196,15 +309,18 @@ export function DesktopConversationHoverCard({
   if (left + cardWidth > viewportW - 16) {
     left = Math.max(12, anchorRect.left - cardWidth - 10);
   }
-  const top = Math.min(Math.max(12, anchorRect.top - 8), Math.max(12, viewportH - maxCardHeight - 16));
+  const top = Math.min(Math.max(12, anchorRect.top - 24), Math.max(12, viewportH - estCardHeight - 16));
 
   return (
     <div
       style={{ top, left, width: cardWidth }}
-      className="fixed z-[70] pointer-events-none hidden md:block rounded-xl border border-gray-200/90 bg-slate-50 shadow-xl overflow-hidden animate-in fade-in duration-150"
-      role="tooltip"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className="fixed z-[70] hidden md:flex flex-col rounded-xl border border-gray-200 bg-slate-50 shadow-2xl overflow-hidden"
+      role="dialog"
+      aria-label={`Pratinjau cepat ${title}`}
     >
-      <div className="px-3 py-2 bg-white border-b border-gray-200 flex items-center justify-between gap-2">
+      <div className="px-3.5 py-2.5 bg-white border-b border-gray-200 flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="text-xs font-semibold text-gray-900 truncate">{title}</div>
           <div className="text-[10px] text-gray-500 flex items-center gap-1">
@@ -212,20 +328,31 @@ export function DesktopConversationHoverCard({
             <span>Pratinjau cepat (tidak menandai dibaca)</span>
           </div>
         </div>
-        {conv.unreadCount > 0 && (
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white tabular-nums shrink-0">
-            {conv.unreadCount}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {conv.unreadCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white tabular-nums">
+              {conv.unreadCount}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onOpenChat}
+            className="px-2 py-1 rounded-md border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-[11px] font-semibold text-indigo-700 transition-colors"
+          >
+            Buka
+          </button>
+        </div>
       </div>
-      <div className="p-2.5 max-h-[260px] overflow-hidden">
+      <div className="p-2.5 bg-slate-100/70">
         <MiniChatMessages
           messages={messages}
           loading={loading}
           isGroup={conv.isGroup}
           fallbackLastMessage={conv.lastMessage}
           fallbackTime={conv.lastMessageAt}
-          maxItems={5}
+          maxItems={8}
+          maxHeightClass="max-h-[340px]"
+          resolveMediaUrl={resolveMediaUrl}
         />
       </div>
     </div>
@@ -237,6 +364,7 @@ export function MobileConversationPeekModal({
   title,
   messages,
   loading,
+  resolveMediaUrl,
   onOpenChat,
   onClose,
 }: {
@@ -244,6 +372,7 @@ export function MobileConversationPeekModal({
   title: string;
   messages: ChatMessage[];
   loading: boolean;
+  resolveMediaUrl: (url?: string | null) => string;
   onOpenChat: () => void;
   onClose: () => void;
 }) {
@@ -256,6 +385,7 @@ export function MobileConversationPeekModal({
   }, [onClose]);
 
   const initial = (title || '?').trim().charAt(0).toUpperCase();
+  const avatarSrc = conv.contact?.profile_picture_url ? resolveMediaUrl(conv.contact.profile_picture_url) : '';
 
   return (
     <div
@@ -271,9 +401,9 @@ export function MobileConversationPeekModal({
       >
         <div className="rounded-2xl border border-gray-200/80 bg-slate-50 shadow-2xl overflow-hidden flex flex-col">
           <div className="px-3.5 py-2.5 bg-white border-b border-gray-200 flex items-center gap-2.5">
-            {conv.contact?.profile_picture_url ? (
+            {avatarSrc ? (
               <img
-                src={conv.contact.profile_picture_url}
+                src={avatarSrc}
                 alt={title}
                 className="w-9 h-9 rounded-full object-cover border border-gray-200 shrink-0"
               />
@@ -304,6 +434,8 @@ export function MobileConversationPeekModal({
               fallbackLastMessage={conv.lastMessage}
               fallbackTime={conv.lastMessageAt}
               maxItems={8}
+              maxHeightClass="max-h-[52vh]"
+              resolveMediaUrl={resolveMediaUrl}
             />
           </div>
         </div>
