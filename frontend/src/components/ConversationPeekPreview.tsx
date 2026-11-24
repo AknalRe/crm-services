@@ -154,6 +154,8 @@ function MiniChatMessages({
   maxItems,
   maxHeightClass,
   resolveMediaUrl,
+  formatMessageText,
+  formatReplyText,
 }: {
   messages: ChatMessage[];
   loading: boolean;
@@ -163,6 +165,8 @@ function MiniChatMessages({
   maxItems: number;
   maxHeightClass: string;
   resolveMediaUrl: (url?: string | null) => string;
+  formatMessageText?: (text: string, msg?: ChatMessage) => React.ReactNode;
+  formatReplyText?: (text: string, msg?: ChatMessage) => string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const visible = messages
@@ -185,7 +189,7 @@ function MiniChatMessages({
       <div className="space-y-2 py-2">
         {fallbackLastMessage ? (
           <div className="rounded-lg bg-white border border-gray-200 px-2.5 py-2 text-xs text-gray-800 whitespace-pre-wrap break-words shadow-2xs">
-            <p>{fallbackLastMessage}</p>
+            <div>{formatMessageText ? formatMessageText(fallbackLastMessage) : fallbackLastMessage}</div>
             {fallbackTime && (
               <div className="mt-1 text-right text-[10px] font-mono text-gray-400">
                 {formatBubbleTime(fallbackTime)}
@@ -204,7 +208,11 @@ function MiniChatMessages({
   if (visible.length === 0) {
     return (
       <div className="rounded-lg bg-white border border-gray-200 px-3 py-2.5 text-xs text-gray-700 whitespace-pre-wrap break-words">
-        {fallbackLastMessage || 'Belum ada pesan pada percakapan ini.'}
+        {fallbackLastMessage
+          ? formatMessageText
+            ? formatMessageText(fallbackLastMessage)
+            : fallbackLastMessage
+          : 'Belum ada pesan pada percakapan ini.'}
       </div>
     );
   }
@@ -242,7 +250,13 @@ function MiniChatMessages({
                   {msg.replyToSender && (
                     <div className="font-semibold text-indigo-700 truncate">{msg.replyToSender}</div>
                   )}
-                  <div className="truncate">{msg.replyToBody || 'Pesan dikutip'}</div>
+                  <div className="truncate">
+                    {msg.replyToBody
+                      ? formatReplyText
+                        ? formatReplyText(msg.replyToBody, msg)
+                        : msg.replyToBody
+                      : 'Pesan dikutip'}
+                  </div>
                 </div>
               )}
               {!isRevoked && (
@@ -255,7 +269,7 @@ function MiniChatMessages({
               )}
               {!hideFallbackText && (
                 <div className={`whitespace-pre-wrap break-words ${isRevoked ? 'line-through opacity-75' : ''}`}>
-                  {isRevoked ? 'Pesan ditarik' : msg.body}
+                  {isRevoked ? 'Pesan ditarik' : formatMessageText ? formatMessageText(msg.body, msg) : msg.body}
                 </div>
               )}
               <div className="mt-0.5 flex items-center justify-end gap-1 text-[9px] text-gray-400 font-mono tabular-nums">
@@ -286,6 +300,8 @@ export function DesktopConversationHoverCard({
   messages,
   loading,
   resolveMediaUrl,
+  formatMessageText,
+  formatReplyText,
   onMouseEnter,
   onMouseLeave,
   onOpenChat,
@@ -296,6 +312,8 @@ export function DesktopConversationHoverCard({
   messages: ChatMessage[];
   loading: boolean;
   resolveMediaUrl: (url?: string | null) => string;
+  formatMessageText?: (text: string, msg?: ChatMessage) => React.ReactNode;
+  formatReplyText?: (text: string, msg?: ChatMessage) => string;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onOpenChat: () => void;
@@ -353,6 +371,8 @@ export function DesktopConversationHoverCard({
           maxItems={8}
           maxHeightClass="max-h-[340px]"
           resolveMediaUrl={resolveMediaUrl}
+          formatMessageText={formatMessageText}
+          formatReplyText={formatReplyText}
         />
       </div>
     </div>
@@ -365,6 +385,8 @@ export function MobileConversationPeekModal({
   messages,
   loading,
   resolveMediaUrl,
+  formatMessageText,
+  formatReplyText,
   onOpenChat,
   onClose,
 }: {
@@ -373,6 +395,8 @@ export function MobileConversationPeekModal({
   messages: ChatMessage[];
   loading: boolean;
   resolveMediaUrl: (url?: string | null) => string;
+  formatMessageText?: (text: string, msg?: ChatMessage) => React.ReactNode;
+  formatReplyText?: (text: string, msg?: ChatMessage) => string;
   onOpenChat: () => void;
   onClose: () => void;
 }) {
@@ -436,6 +460,8 @@ export function MobileConversationPeekModal({
               maxItems={8}
               maxHeightClass="max-h-[52vh]"
               resolveMediaUrl={resolveMediaUrl}
+              formatMessageText={formatMessageText}
+              formatReplyText={formatReplyText}
             />
           </div>
         </div>

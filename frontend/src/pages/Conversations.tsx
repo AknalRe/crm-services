@@ -405,7 +405,7 @@ function formatMentionPlainText(
   if (!text) return '';
   const mentionByToken = buildMentionLookupMap(mentionedContacts);
 
-  return text.replace(/@(\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?)/g, (match, rawTarget) => {
+  return text.replace(/(?<![a-zA-Z0-9._%+-])@(\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?)/g, (match, rawTarget) => {
     const cleanTarget = rawTarget.replace(/^\+/, '');
     const cleanDigits = cleanTarget.replace(/\D/g, '');
     if (cleanDigits && mySessionPhones?.has(cleanDigits)) {
@@ -447,7 +447,7 @@ function formatConversationPreview(
   if (!text) return { previewText: 'Tidak ada pesan terbaru', isMentionedMe: false };
   let isMentionedMe = false;
   const mentionByToken = buildMentionLookupMap(mentionedContacts);
-  const previewText = text.replace(/@(\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?)/g, (match, rawTarget) => {
+  const previewText = text.replace(/(?<![a-zA-Z0-9._%+-])@(\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?)/g, (match, rawTarget) => {
     const cleanTarget = rawTarget.replace(/^\+/, '');
     const cleanDigits = cleanTarget.replace(/\D/g, '');
     if (cleanDigits && mySessionPhones.has(cleanDigits)) {
@@ -527,9 +527,9 @@ function renderTextWithClickableLinks(
     )
   );
 
-  // 3. Extract URLs and @mentions BEFORE italic/bold/strike so URLs with _ or * are never split
+  // 3. Extract URLs, emails, and @mentions BEFORE italic/bold/strike so URLs/emails with _ or @ are never split or treated as mentions
   const tokenized = withInlineCodeReplaced.replace(
-    /(https?:\/\/[^\s<>\uE000\uE001]+|@(?:\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?))/gi,
+    /(https?:\/\/[^\s<>\uE000\uE001]+|\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b|(?<![a-zA-Z0-9._%+-])@(?:\+?\d{6,20}|[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9])?))/gi,
     (part) => {
       if (/^https?:\/\//i.test(part)) {
         const clean = part.replace(/[.,);!?*_~]+$/, '');
@@ -546,6 +546,18 @@ function renderTextWithClickableLinks(
               {clean}
             </a>
           ) + trailing
+        );
+      }
+
+      if (!part.startsWith('@') && part.includes('@')) {
+        return pushProtected(
+          <a
+            key={`mail-${keyCounter++}`}
+            href={`mailto:${part}`}
+            className="underline text-indigo-700 hover:text-indigo-900 break-all font-medium"
+          >
+            {part}
+          </a>
         );
       }
 
@@ -12229,6 +12241,25 @@ export const Conversations: React.FC<ConversationsProps> = ({
           messages={peekMessagesByConvId[hoverPeek.conv.id] || []}
           loading={peekLoadingConvId === hoverPeek.conv.id}
           resolveMediaUrl={resolveMediaUrl}
+          formatMessageText={(text, msg) =>
+            renderTextWithClickableLinks(
+              text,
+              selectedConversation?.id === hoverPeek.conv.id ? participantsLookup : undefined,
+              msg?.mentionedContacts || hoverPeek.conv.lastMessageMentionedContacts,
+              undefined,
+              contactsByPhone,
+              mySessionPhones
+            )
+          }
+          formatReplyText={(text, msg) =>
+            formatMentionPlainText(
+              text,
+              mySessionPhones,
+              contactsByPhone,
+              selectedConversation?.id === hoverPeek.conv.id ? participantsLookup : undefined,
+              msg?.mentionedContacts
+            )
+          }
           onMouseEnter={() => {
             if (hoverCloseTimerRef.current !== null) {
               window.clearTimeout(hoverCloseTimerRef.current);
@@ -12260,6 +12291,25 @@ export const Conversations: React.FC<ConversationsProps> = ({
           messages={peekMessagesByConvId[mobilePeekConv.id] || []}
           loading={peekLoadingConvId === mobilePeekConv.id}
           resolveMediaUrl={resolveMediaUrl}
+          formatMessageText={(text, msg) =>
+            renderTextWithClickableLinks(
+              text,
+              selectedConversation?.id === mobilePeekConv.id ? participantsLookup : undefined,
+              msg?.mentionedContacts || mobilePeekConv.lastMessageMentionedContacts,
+              undefined,
+              contactsByPhone,
+              mySessionPhones
+            )
+          }
+          formatReplyText={(text, msg) =>
+            formatMentionPlainText(
+              text,
+              mySessionPhones,
+              contactsByPhone,
+              selectedConversation?.id === mobilePeekConv.id ? participantsLookup : undefined,
+              msg?.mentionedContacts
+            )
+          }
           onClose={() => setMobilePeekConv(null)}
           onOpenChat={() => {
             const target = mobilePeekConv;
