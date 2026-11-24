@@ -1643,15 +1643,32 @@ export interface GroupMessageReceiptEntry {
 }
 
 export function extractGroupAckParticipant(payload: any, exactIds: string[]): string | null {
+  const chatCandidates = [
+    payload?.chatId,
+    payload?.to,
+    payload?._data?.Chat,
+    payload?._data?.MessageSource?.Chat,
+    payload?._data?.Info?.Chat,
+    payload?._data?.Receipt?.Chat,
+  ]
+    .map((v) => String(v || '').trim().toLowerCase())
+    .filter(Boolean);
+  const hasGroupChatField = chatCandidates.some((c) => c.endsWith('@g.us'));
+
   const directCandidates = [
     payload?.participant,
     payload?.id?.participant,
-    payload?._data?.Receipt?.Sender,
+    payload?._data?.SenderAlt,
+    payload?._data?.Sender,
+    payload?._data?.MessageSource?.SenderAlt,
+    payload?._data?.MessageSource?.Sender,
     payload?._data?.Receipt?.SenderAlt,
+    payload?._data?.Receipt?.Sender,
     payload?._data?.Info?.SenderAlt,
     payload?._data?.Info?.Sender,
     payload?._data?.participant,
     payload?._data?.key?.participant,
+    ...(hasGroupChatField ? [payload?.from] : []),
   ];
   for (const candidate of directCandidates) {
     if (typeof candidate === 'string') {
@@ -2503,11 +2520,43 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             .limit(10);
 
           const ackFrom = String(
-            payload?.from || payload?.to || payload?.chatId || payload?._data?.Info?.Chat || ''
+            payload?.from ||
+              payload?.to ||
+              payload?.chatId ||
+              payload?._data?.Chat ||
+              payload?._data?.MessageSource?.Chat ||
+              payload?._data?.Info?.Chat ||
+              payload?._data?.Receipt?.Chat ||
+              ''
           ).toLowerCase();
-          const isGroupAck =
+          const receiptSubType = String(
+            payload?._data?.Type || payload?._data?.Receipt?.Type || payload?._data?.type || ''
+          )
+            .trim()
+            .toLowerCase();
+          const isSelfSyncReceipt = receiptSubType === 'read-self' || receiptSubType === 'sender';
+
+          let isGroupAck =
             ackFrom.endsWith('@g.us') ||
+            String(payload?.chatId || '').toLowerCase().endsWith('@g.us') ||
+            String(payload?._data?.Chat || '').toLowerCase().endsWith('@g.us') ||
             exactIds.some((idVal) => idVal.toLowerCase().includes('@g.us'));
+
+          if (!isGroupAck && matchedChatMsgs.length > 0) {
+            const convIds = Array.from(new Set(matchedChatMsgs.map((m) => m.conversationId)));
+            const grpConvs = await db
+              .select({ id: conversations.id })
+              .from(conversations)
+              .where(
+                and(
+                  eq(conversations.companyId, companyId),
+                  inArray(conversations.id, convIds),
+                  eq(conversations.isGroup, true)
+                )
+              )
+              .limit(1);
+            if (grpConvs.length > 0) isGroupAck = true;
+          }
 
           let groupReceiptParticipant: {
             jid: string;
@@ -2515,47 +2564,62 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             name: string | null;
           } | null = null;
 
-          if (isGroupAck && ackValue >= 2 && matchedChatMsgs.length > 0) {
+          if (isGroupAck && !isSelfSyncReceipt && ackValue >= 2 && matchedChatMsgs.length > 0) {
             const pJid = extractGroupAckParticipant(payload, exactIds);
             if (pJid) {
-              let pPhone: string | null = null;
-              const lowerP = pJid.toLowerCase();
-              if (lowerP.endsWith('@lid')) {
-                pPhone = await wahaService
-                  .resolveLidToPhone(webhookSession || matchedChatMsgs[0].wahaSession || undefined, pJid)
-                  .catch(() => null);
-              } else {
-                const rawDigits = fromWahaChatId(pJid);
-                pPhone = rawDigits ? normalizePhoneNumber(rawDigits) || null : null;
-              }
-              let pName: string | null =
-                String(
-                  payload?.notifyName ||
-                    payload?._data?.notifyName ||
-                    payload?._data?.Info?.PushName ||
-                    ''
-                ).trim() || null;
-              if (pPhone) {
-                const variants = Array.from(
-                  new Set([pPhone, `+${pPhone}`, pPhone.startsWith('62') ? `0${pPhone.slice(2)}` : ''].filter(Boolean))
-                );
-                const cRow = await db
-                  .select({ namaLengkap: contacts.namaLengkap })
-                  .from(contacts)
-                  .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
-                  .limit(1);
-                if (cRow[0]?.namaLengkap) {
-                  pName = cRow[0].namaLengkap;
+              const ackSession = webhookSession || matchedChatMsgs[0].wahaSession || undefined;
+              const meInfo = req.body?.me as { id?: string | null; lid?: string | null } | undefined;
+              const selfUser = meInfo?.id ? fromWahaChatId(meInfo.id).toLowerCase() : '';
+              const selfLidUser = meInfo?.lid ? fromWahaChatId(meInfo.lid).toLowerCase() : '';
+              const pUser = fromWahaChatId(pJid).toLowerCase();
+              const isSelfParticipant = Boolean(
+                (selfUser && pUser === selfUser) || (selfLidUser && pUser === selfLidUser)
+              );
+
+              if (!isSelfParticipant) {
+                let pPhone: string | null = null;
+                let lidName: string | null = null;
+                const lowerP = pJid.toLowerCase();
+                if (lowerP.endsWith('@lid')) {
+                  const resolved = await wahaService
+                    .resolveLidIdentity(ackSession, pJid)
+                    .catch(() => ({ phone: null, name: null }));
+                  pPhone = resolved.phone;
+                  lidName = resolved.name;
+                } else {
+                  const rawDigits = fromWahaChatId(pJid);
+                  pPhone = rawDigits ? normalizePhoneNumber(rawDigits) || null : null;
                 }
+                let pName: string | null =
+                  String(
+                    payload?.notifyName ||
+                      payload?._data?.notifyName ||
+                      payload?._data?.Info?.PushName ||
+                      lidName ||
+                      ''
+                  ).trim() || null;
+                if (pPhone) {
+                  const variants = Array.from(
+                    new Set([pPhone, `+${pPhone}`, pPhone.startsWith('62') ? `0${pPhone.slice(2)}` : ''].filter(Boolean))
+                  );
+                  const cRow = await db
+                    .select({ namaLengkap: contacts.namaLengkap })
+                    .from(contacts)
+                    .where(and(eq(contacts.companyId, companyId), inArray(contacts.nomorWhatsapp, variants)))
+                    .limit(1);
+                  if (cRow[0]?.namaLengkap) {
+                    pName = cRow[0].namaLengkap;
+                  }
+                }
+                groupReceiptParticipant = { jid: pJid, phone: pPhone, name: pName };
               }
-              groupReceiptParticipant = { jid: pJid, phone: pPhone, name: pName };
             }
           }
 
           const updatedConvIds = new Set<string>();
           for (const mRow of matchedChatMsgs) {
             const updateFields: Record<string, any> = {};
-            if (ackValue > (mRow.ackStatus ?? 0)) {
+            if (!isSelfSyncReceipt && ackValue > (mRow.ackStatus ?? 0)) {
               updateFields.ackStatus = ackValue;
               updateFields.status = ackValue >= 3 ? 'READ' : ackValue === 2 ? 'DELIVERED' : 'SENT';
               if (ackValue >= 2) updateFields.deliveredAt = now;

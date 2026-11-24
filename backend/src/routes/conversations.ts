@@ -3863,12 +3863,49 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
         playedAt?: string | null;
       }> = Array.isArray(meta?.receipts) ? meta.receipts : [];
 
-      // Enrich contact display names & avatars by phone
-      const phones = Array.from(
+      // Enrich contact display names & avatars by phone and @lid identity
+      const lidJids = Array.from(
         new Set(
           rawReceipts
-            .map((r) => (r.phone ? String(r.phone).replace(/\D/g, '') : ''))
-            .filter(Boolean)
+            .map((r) => String(r.jid || '').trim())
+            .filter((j) => j.toLowerCase().endsWith('@lid'))
+        )
+      );
+      const lidSenderFallback = new Map<string, { name: string | null; phone: string | null }>();
+      if (lidJids.length > 0) {
+        const senderRows = await db
+          .select({
+            senderJid: chatMessages.senderJid,
+            senderName: chatMessages.senderName,
+            senderPhone: chatMessages.senderPhone,
+          })
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.companyId, companyId),
+              inArray(chatMessages.senderJid, lidJids)
+            )
+          )
+          .orderBy(desc(chatMessages.createdAt))
+          .limit(50);
+        for (const sr of senderRows) {
+          if (!sr.senderJid) continue;
+          const key = sr.senderJid.toLowerCase();
+          if (!lidSenderFallback.has(key)) {
+            lidSenderFallback.set(key, {
+              name: sr.senderName && !isGenericDisplayName(sr.senderName) ? sr.senderName : null,
+              phone: sr.senderPhone ? normalizePhoneNumber(sr.senderPhone) || null : null,
+            });
+          }
+        }
+      }
+
+      const phones = Array.from(
+        new Set(
+          [
+            ...rawReceipts.map((r) => (r.phone ? String(r.phone).replace(/\D/g, '') : '')),
+            ...Array.from(lidSenderFallback.values()).map((v) => v.phone || ''),
+          ].filter(Boolean)
         )
       );
       const contactByPhone = new Map<string, { name: string; avatarUrl: string | null }>();
@@ -3896,17 +3933,23 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       }
 
       const enriched = rawReceipts.map((r) => {
-        const normPhone = r.phone
+        const lidInfo = lidSenderFallback.get(String(r.jid || '').toLowerCase());
+        const rawPhone = r.phone || lidInfo?.phone || null;
+        const normPhone = rawPhone
           ? (() => {
-              const d = String(r.phone).replace(/\D/g, '');
+              const d = String(rawPhone).replace(/\D/g, '');
               return d.startsWith('0') ? `62${d.slice(1)}` : d;
             })()
           : null;
         const matched = normPhone ? contactByPhone.get(normPhone) : undefined;
         return {
           jid: r.jid,
-          phone: normPhone || r.phone || null,
-          name: matched?.name || r.name || (normPhone ? `+${normPhone}` : r.jid.replace(/@.*$/, '')),
+          phone: normPhone || rawPhone || null,
+          name:
+            matched?.name ||
+            (r.name && !isGenericDisplayName(r.name) ? r.name : null) ||
+            lidInfo?.name ||
+            (normPhone ? `+${normPhone}` : r.jid.replace(/@.*$/, '')),
           avatarUrl: matched?.avatarUrl || null,
           ackStatus: r.ackStatus || 2,
           deliveredAt: r.deliveredAt || null,
