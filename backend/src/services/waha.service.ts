@@ -1878,6 +1878,7 @@ export class WahaService {
       'message.ack',
       'message.reaction',
       'message.revoked',
+      'message.edited',
       'session.status',
       'presence.update',
       'poll.vote',
@@ -1906,6 +1907,7 @@ export class WahaService {
           evs.includes('message.ack') &&
           evs.includes('message.reaction') &&
           evs.includes('message.revoked') &&
+          evs.includes('message.edited') &&
           evs.includes('session.status') &&
           evs.includes('presence.update') &&
           evs.includes('poll.vote') &&
@@ -2020,6 +2022,7 @@ export class WahaService {
               'message.ack',
               'message.reaction',
               'message.revoked',
+              'message.edited',
               'session.status',
               'presence.update',
               'poll.vote',
@@ -2734,6 +2737,66 @@ export class WahaService {
           data: {
             unsupported: true,
             message: 'Fitur lepas sematan belum didukung oleh engine WAHA aktif.',
+          },
+        };
+      }
+
+      throw lastErr;
+    });
+  }
+
+  /**
+   * Edit an outbound WhatsApp message via WAHA
+   */
+  public async editMessage(
+    phoneOrJid: string,
+    wahaMessageId: string,
+    text: string,
+    sessionName?: string
+  ): Promise<WahaSendResult> {
+    const cleanMsgId = String(wahaMessageId || '').trim();
+    const cleanText = String(text || '').trim();
+    if (!cleanMsgId) {
+      return {
+        success: false,
+        error: 'ID pesan WhatsApp tidak ditemukan untuk diubah.',
+      };
+    }
+    if (!cleanText) {
+      return {
+        success: false,
+        error: 'Isi pesan baru tidak boleh kosong.',
+      };
+    }
+    return this.executeOutboundSend(phoneOrJid, sessionName, async (client, targetSession, chatId) => {
+      const stanzaId = cleanMsgId.includes('_') ? cleanMsgId.split('_').pop() : null;
+      const candidateIds = [cleanMsgId, ...(stanzaId && stanzaId !== cleanMsgId ? [stanzaId] : [])];
+
+      let lastErr: any = null;
+      for (const msgId of candidateIds) {
+        try {
+          const res = await client.put(
+            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(msgId)}`,
+            { text: cleanText, linkPreview: true },
+            { timeout: 15000 }
+          );
+          return res.data;
+        } catch (err: any) {
+          lastErr = err;
+          const st = err?.response?.status;
+          if (st === 401 || st === 403) throw err;
+        }
+      }
+
+      if (this.isWahaFeatureUnsupported(lastErr)) {
+        return {
+          __wahaMeta: {
+            unsupportedFeature: true,
+            fallbackReason: 'Fitur ubah pesan belum didukung oleh engine WAHA aktif.',
+          },
+          data: {
+            unsupported: true,
+            message: 'Fitur ubah pesan belum didukung oleh engine WAHA aktif.',
           },
         };
       }

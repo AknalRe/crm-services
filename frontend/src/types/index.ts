@@ -319,6 +319,11 @@ export interface ChatMessageMetadata {
   revokedBy?: string;
   revokedBySender?: boolean;
   revokeScope?: 'ME' | 'EVERYONE';
+  edited?: boolean;
+  editedAt?: string;
+  editedBy?: string;
+  editedBySender?: boolean;
+  editHistory?: Array<{ body: string; editedAt: string; editedBy?: string }>;
   isPinned?: boolean;
   pinnedAt?: string | null;
   pinnedBy?: string | null;

@@ -678,7 +678,10 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
     }
 
     const routePath = (req.routeOptions?.url || req.url || '').toLowerCase();
-    if (req.method === 'DELETE' && (routePath.includes('/messages/') || routePath.includes('/stickers/'))) {
+    if (
+      (req.method === 'DELETE' || req.method === 'PUT') &&
+      (routePath.includes('/messages/') || routePath.includes('/stickers/'))
+    ) {
       return requirePermission('conversations.reply', 'conversations.manage')(req, reply);
     }
     if (req.method === 'POST' && routePath.endsWith('/csat-cta')) {
@@ -4156,6 +4159,173 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+    }
+  });
+
+  // PUT edit/modify a single message (WhatsApp outbound via WAHA + local CRM audit trail, or internal NOTE)
+  fastify.put('/:id/messages/:messageId', async (req: FastifyRequest<{
+    Params: { id: string; messageId: string };
+    Body?: { body?: string; session?: string };
+  }>, reply: FastifyReply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const newBody = String(req.body?.body || '').trim();
+      if (!newBody) {
+        return reply.status(400).send({ success: false, error: 'Isi pesan tidak boleh kosong.' });
+      }
+      if (newBody.length > 4096) {
+        return reply.status(400).send({ success: false, error: 'Isi pesan maksimal 4096 karakter.' });
+      }
+
+      const convRows = await db
+        .select({ conv: conversations, contact: contacts })
+        .from(conversations)
+        .leftJoin(contacts, eq(conversations.contactId, contacts.id))
+        .where(and(eq(conversations.id, req.params.id), eq(conversations.companyId, companyId)))
+        .limit(1);
+
+      const convRow = convRows[0];
+      if (!convRow?.conv || !convRow.contact) {
+        return reply.status(404).send({ success: false, error: 'Percakapan tidak ditemukan' });
+      }
+
+      const msgRows = await db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.id, req.params.messageId),
+            eq(chatMessages.conversationId, convRow.conv.id),
+            eq(chatMessages.companyId, companyId)
+          )
+        )
+        .limit(1);
+
+      const msg = msgRows[0];
+      if (!msg) {
+        return reply.status(404).send({ success: false, error: 'Pesan tidak ditemukan' });
+      }
+
+      let prevMeta: Record<string, any> = {};
+      if (msg.metadataJson) {
+        try {
+          prevMeta = JSON.parse(msg.metadataJson);
+        } catch {
+          prevMeta = {};
+        }
+      }
+      if (prevMeta.revoked) {
+        return reply.status(400).send({ success: false, error: 'Pesan yang sudah ditarik tidak dapat diubah.' });
+      }
+      if (msg.body.trim() === newBody) {
+        return reply.send({ success: true, data: msg });
+      }
+
+      const isNote = msg.messageType === 'NOTE';
+      if (!isNote) {
+        const convChannel = (msg.channel || convRow.conv.channel || 'WHATSAPP').toUpperCase();
+        if (convChannel !== 'WHATSAPP') {
+          return reply.status(400).send({
+            success: false,
+            error: `Ubah pesan saat ini hanya didukung untuk WhatsApp dan catatan internal (kanal ini: ${convChannel}).`,
+          });
+        }
+        if (msg.direction !== 'OUTBOUND') {
+          return reply.status(400).send({
+            success: false,
+            error: 'Hanya pesan keluar Anda yang dapat diubah di WhatsApp.',
+          });
+        }
+        if (!msg.wahaMessageId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Pesan ini belum memiliki ID pesan WhatsApp yang terkirim sehingga tidak bisa diubah.',
+          });
+        }
+
+        const targetWa = await resolveWhatsAppTarget(convRow.conv, convRow.contact);
+        if (!targetWa) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Target nomor/ID WhatsApp tidak ditemukan untuk mengubah pesan.',
+          });
+        }
+
+        const targetSession =
+          msg.wahaSession ||
+          req.body?.session?.trim() ||
+          convRow.conv.wahaSession ||
+          undefined;
+
+        const editResult = await wahaService.editMessage(
+          targetWa,
+          msg.wahaMessageId,
+          newBody,
+          targetSession
+        );
+        if (!editResult.success) {
+          return reply.status(400).send({
+            success: false,
+            error: editResult.error || 'Gagal mengubah pesan di WhatsApp (WAHA).',
+          });
+        }
+      }
+
+      const currentUser = await getCurrentAuthUser(req);
+      const editedBy = currentUser?.name || 'CS';
+      const editedAt = new Date().toISOString();
+      const prevHistory: Array<{ body: string; editedAt: string; editedBy?: string }> = Array.isArray(
+        prevMeta.editHistory
+      )
+        ? prevMeta.editHistory
+        : [];
+      const updatedMeta = {
+        ...prevMeta,
+        edited: true,
+        editedAt,
+        editedBy,
+        editedBySender: false,
+        editHistory: [...prevHistory, { body: msg.body, editedAt, editedBy }].slice(-10),
+      };
+      const serializedMeta = JSON.stringify(updatedMeta);
+
+      const [updatedMsg] = await db
+        .update(chatMessages)
+        .set({
+          body: newBody,
+          metadataJson: serializedMeta,
+        })
+        .where(eq(chatMessages.id, msg.id))
+        .returning();
+
+      if (!isNote) {
+        const latestMsgRows = await db
+          .select({ id: chatMessages.id })
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.conversationId, convRow.conv.id),
+              ne(chatMessages.messageType, 'ACTIVITY'),
+              ne(chatMessages.messageType, 'NOTE')
+            )
+          )
+          .orderBy(desc(chatMessages.createdAt))
+          .limit(1);
+        if (latestMsgRows[0]?.id === msg.id) {
+          await db
+            .update(conversations)
+            .set({
+              lastMessage: newBody,
+              updatedAt: new Date(),
+            })
+            .where(eq(conversations.id, convRow.conv.id));
+        }
+      }
+
+      liveEvents.emit('conversations:update', { conversationId: convRow.conv.id }, companyId);
+      return reply.send({ success: true, data: updatedMsg || { ...msg, body: newBody, metadataJson: serializedMeta } });
+    } catch (err: any) {
+      return reply.status(500).send({ success: false, error: err?.message || 'Gagal mengubah pesan' });
     }
   });
 

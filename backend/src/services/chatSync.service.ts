@@ -9,7 +9,9 @@ import {
   extractInboundWahaMediaMeta,
   extractInboundWahaRichData,
   extractInboundWahaText,
+  extractWahaEditInfo,
   extractWahaMessageIds,
+  extractWahaQuoteInfo,
   isWahaFromMe,
   normalizeWahaAck,
 } from '../routes/waha';
@@ -194,9 +196,14 @@ export async function syncRecentWhatsAppChatMessages(
       wahaMessageId: chatMessages.wahaMessageId,
       ackStatus: chatMessages.ackStatus,
       direction: chatMessages.direction,
+      senderName: chatMessages.senderName,
       mediaUrl: chatMessages.mediaUrl,
       mediaType: chatMessages.mediaType,
       mediaName: chatMessages.mediaName,
+      replyToMessageId: chatMessages.replyToMessageId,
+      replyToBody: chatMessages.replyToBody,
+      replyToSender: chatMessages.replyToSender,
+      metadataJson: chatMessages.metadataJson,
       body: chatMessages.body,
       createdAt: chatMessages.createdAt,
     })
@@ -255,6 +262,28 @@ export async function syncRecentWhatsAppChatMessages(
       senderName = rawPush || (senderPhone ? `+${senderPhone}` : 'Anggota Grup');
     }
 
+    const resolveQuoteFields = (rawMsg: any) => {
+      const q = extractWahaQuoteInfo(rawMsg);
+      if (!q.quotedWahaId && !q.quotedRawBody) {
+        return { replyToMessageId: null, replyToBody: null, replyToSender: null };
+      }
+      let quotedRow: (typeof existingRows)[number] | undefined;
+      if (q.quotedWahaId) {
+        const cleanQ = q.quotedWahaId.trim();
+        const stanzaQ = cleanQ.includes('_') ? cleanQ.split('_').pop() || cleanQ : cleanQ;
+        quotedRow = byMsgId.get(cleanQ) || byMsgId.get(stanzaQ);
+      }
+      const replyToMessageId = quotedRow?.id || null;
+      const replyToBody = (q.quotedRawBody || quotedRow?.body || '').slice(0, 160) || null;
+      const replyToSender =
+        quotedRow?.direction === 'OUTBOUND'
+          ? quotedRow.senderName || 'Tim CS'
+          : quotedRow?.senderName ||
+            q.quotedPushName ||
+            (q.quotedFromMe ? 'Tim CS' : conv.isGroup ? 'Anggota Grup' : contact.namaLengkap || 'Pelanggan');
+      return { replyToMessageId, replyToBody, replyToSender };
+    };
+
     const ackValue = normalizeWahaAck(m);
     if (matchedExisting) {
       const updateFields: Record<string, any> = {};
@@ -269,6 +298,47 @@ export async function syncRecentWhatsAppChatMessages(
         if (ackValue >= 2) updateFields.deliveredAt = now;
         if (ackValue >= 3) updateFields.readAt = now;
         matchedExisting.ackStatus = ackValue;
+      }
+      if (!matchedExisting.replyToMessageId && !matchedExisting.replyToBody) {
+        const qFields = resolveQuoteFields(m);
+        if (qFields.replyToMessageId || qFields.replyToBody) {
+          updateFields.replyToMessageId = qFields.replyToMessageId;
+          updateFields.replyToBody = qFields.replyToBody;
+          updateFields.replyToSender = qFields.replyToSender;
+          matchedExisting.replyToMessageId = qFields.replyToMessageId;
+          matchedExisting.replyToBody = qFields.replyToBody;
+          matchedExisting.replyToSender = qFields.replyToSender;
+        }
+      }
+      const syncedEditInfo = extractWahaEditInfo(m, Boolean(m?.edited || m?._data?.edited));
+      if (syncedEditInfo?.newBody && syncedEditInfo.newBody !== matchedExisting.body) {
+        let prevMeta: Record<string, any> = {};
+        if (matchedExisting.metadataJson) {
+          try {
+            prevMeta = JSON.parse(matchedExisting.metadataJson);
+          } catch {
+            prevMeta = {};
+          }
+        }
+        const nowIso = new Date().toISOString();
+        const prevHistory: Array<{ body: string; editedAt: string; editedBy?: string }> = Array.isArray(
+          prevMeta.editHistory
+        )
+          ? prevMeta.editHistory
+          : [];
+        updateFields.body = syncedEditInfo.newBody;
+        updateFields.metadataJson = JSON.stringify({
+          ...prevMeta,
+          edited: true,
+          editedAt: nowIso,
+          editedBy: senderName,
+          editedBySender: !fromMe,
+          editHistory: [...prevHistory, { body: matchedExisting.body, editedAt: nowIso, editedBy: senderName }].slice(
+            -10
+          ),
+        });
+        matchedExisting.body = syncedEditInfo.newBody;
+        matchedExisting.metadataJson = updateFields.metadataJson;
       }
       if (!matchedExisting.mediaUrl || !matchedExisting.mediaType || !matchedExisting.mediaName) {
         const mediaCheck = extractInboundWahaMediaMeta(m);
@@ -375,10 +445,12 @@ export async function syncRecentWhatsAppChatMessages(
         : 'SENT'
       : 'DELIVERED';
 
+    const qFields = resolveQuoteFields(m);
+    const newRowId = crypto.randomUUID();
     await db
       .insert(chatMessages)
       .values({
-        id: crypto.randomUUID(),
+        id: newRowId,
         companyId: conv.companyId,
         conversationId: conv.id,
         contactId: contact.id,
@@ -391,6 +463,9 @@ export async function syncRecentWhatsAppChatMessages(
         mediaUrl: mediaDetails.mediaUrl,
         mediaType: mediaDetails.mediaType,
         mediaName: mediaDetails.mediaName,
+        replyToMessageId: qFields.replyToMessageId,
+        replyToBody: qFields.replyToBody,
+        replyToSender: qFields.replyToSender,
         wahaMessageId: primaryId,
         status: msgStatus,
         ackStatus: effectiveAck,
@@ -405,13 +480,18 @@ export async function syncRecentWhatsAppChatMessages(
 
     for (const candidate of [...exactIds, ...stanzaIds]) {
       byMsgId.set(candidate, {
-        id: primaryId,
+        id: newRowId,
         wahaMessageId: primaryId,
         ackStatus: effectiveAck,
         direction: fromMe ? 'OUTBOUND' : 'INBOUND',
+        senderName,
         mediaUrl: mediaDetails.mediaUrl,
         mediaType: mediaDetails.mediaType,
         mediaName: mediaDetails.mediaName,
+        replyToMessageId: qFields.replyToMessageId,
+        replyToBody: qFields.replyToBody,
+        replyToSender: qFields.replyToSender,
+        metadataJson: serializedMeta,
         body,
         createdAt: msgDate,
       });

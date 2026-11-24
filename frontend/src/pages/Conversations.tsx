@@ -73,6 +73,7 @@ import {
   Code,
   Quote,
   List,
+  Pencil,
 } from 'lucide-react';
 import api from '../services/api';
 import { subscribeLiveEvent } from '../services/liveEvents';
@@ -3317,6 +3318,9 @@ export const Conversations: React.FC<ConversationsProps> = ({
 
   const [deleteMessageTarget, setDeleteMessageTarget] = useState<ChatMessage | null>(null);
   const [deletingMessageScope, setDeletingMessageScope] = useState<'ME' | 'EVERYONE' | null>(null);
+  const [editingMessageTarget, setEditingMessageTarget] = useState<ChatMessage | null>(null);
+  const [editMessageDraft, setEditMessageDraft] = useState('');
+  const [savingEditMessage, setSavingEditMessage] = useState(false);
   const [receiptInfoTarget, setReceiptInfoTarget] = useState<ChatMessage | null>(null);
   const [receiptInfoLoading, setReceiptInfoLoading] = useState(false);
   const [receiptInfoError, setReceiptInfoError] = useState<string | null>(null);
@@ -3337,6 +3341,51 @@ export const Conversations: React.FC<ConversationsProps> = ({
       setReceiptInfoError(err?.response?.data?.error || err?.message || 'Gagal memuat info status pesan.');
     } finally {
       setReceiptInfoLoading(false);
+    }
+  };
+
+  const handleSaveEditMessage = async () => {
+    if (!selectedConversation || !editingMessageTarget || savingEditMessage) return;
+    const trimmed = editMessageDraft.trim();
+    if (!trimmed) {
+      toast.error('Isi pesan tidak boleh kosong');
+      return;
+    }
+    if (trimmed === editingMessageTarget.body.trim()) {
+      setEditingMessageTarget(null);
+      return;
+    }
+    setSavingEditMessage(true);
+    try {
+      const updated = await api.editConversationMessage(
+        selectedConversation.id,
+        editingMessageTarget.id,
+        trimmed,
+        selectedSession || undefined
+      );
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === editingMessageTarget.id
+            ? {
+                ...m,
+                body: updated?.body || trimmed,
+                metadataJson: updated?.metadataJson ?? m.metadataJson,
+              }
+            : m
+        )
+      );
+      setEditingMessageTarget(null);
+      setEditMessageDraft('');
+      toast.success(
+        editingMessageTarget.messageType === 'NOTE'
+          ? 'Catatan internal berhasil diubah'
+          : 'Pesan berhasil diubah di WhatsApp dan CRM'
+      );
+      void fetchConversations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || 'Gagal mengubah pesan');
+    } finally {
+      setSavingEditMessage(false);
     }
   };
 
@@ -7527,6 +7576,33 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               <Star className="w-3 h-3 text-amber-500 fill-amber-400 shrink-0" />
                             </span>
                           )}
+                          {msgMeta?.edited && (
+                            <span
+                              title={(() => {
+                                const timeStr = msgMeta.editedAt
+                                  ? new Date(msgMeta.editedAt).toLocaleString('id-ID', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })
+                                  : '';
+                                const prevBody =
+                                  Array.isArray(msgMeta.editHistory) && msgMeta.editHistory.length > 0
+                                    ? msgMeta.editHistory[msgMeta.editHistory.length - 1]?.body
+                                    : '';
+                                return [
+                                  `Diubah${msgMeta.editedBy ? ` oleh ${msgMeta.editedBy}` : ''}${timeStr ? ` (${timeStr})` : ''}`,
+                                  prevBody ? `Sebelumnya: ${prevBody.slice(0, 120)}` : '',
+                                ]
+                                  .filter(Boolean)
+                                  .join('\n');
+                              })()}
+                              className="italic font-sans text-[10px] text-gray-500"
+                            >
+                              Diubah
+                            </span>
+                          )}
                           <span>
                             {new Date(msg.createdAt).toLocaleTimeString('id-ID', {
                               hour: '2-digit',
@@ -7758,6 +7834,29 @@ export const Conversations: React.FC<ConversationsProps> = ({
                               >
                                 <Info className="w-2.5 h-2.5" />
                                 <span>Info</span>
+                              </button>
+                            )}
+                            {canReplyConversation &&
+                              (msg.messageType === 'NOTE' ||
+                                (isOutbound &&
+                                  !isFailed &&
+                                  (selectedConversation?.channel || 'WHATSAPP').toUpperCase() === 'WHATSAPP' &&
+                                  Boolean(msg.wahaMessageId) &&
+                                  msg.messageType !== 'CSAT' &&
+                                  msg.messageType !== 'POLL' &&
+                                  msg.messageType !== 'LOCATION' &&
+                                  msg.messageType !== 'CONTACT')) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMessageTarget(msg);
+                                  setEditMessageDraft(msg.body || '');
+                                }}
+                                title="Ubah isi pesan ini"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-gray-200 bg-white hover:bg-blue-50 hover:border-blue-200 text-gray-600 hover:text-blue-700 font-medium shadow-2xs transition-colors"
+                              >
+                                <Pencil className="w-2.5 h-2.5" />
+                                <span>Ubah</span>
                               </button>
                             )}
                             <button
@@ -12016,6 +12115,87 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 onClick={() => setDeleteMessageTarget(null)}
               >
                 Batal
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingMessageTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => !savingEditMessage && setEditingMessageTarget(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-lg border border-gray-200 shadow-xl overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Pencil className="w-4 h-4 text-blue-600 shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-gray-900 truncate">
+                    {editingMessageTarget.messageType === 'NOTE' ? 'Ubah Catatan Internal' : 'Ubah Pesan WhatsApp'}
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    {editingMessageTarget.messageType === 'NOTE'
+                      ? 'Perubahan disimpan di riwayat CRM.'
+                      : 'Perubahan akan langsung diperbarui di WhatsApp dan CRM.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={savingEditMessage}
+                onClick={() => setEditingMessageTarget(null)}
+                className="p-1 rounded hover:bg-gray-100 text-gray-500"
+                aria-label="Tutup dialog ubah pesan"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-2">
+              <textarea
+                rows={4}
+                value={editMessageDraft}
+                onChange={(e) => setEditMessageDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    void handleSaveEditMessage();
+                  } else if (e.key === 'Escape' && !savingEditMessage) {
+                    setEditingMessageTarget(null);
+                  }
+                }}
+                disabled={savingEditMessage}
+                placeholder="Tulis isi pesan yang baru..."
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-y"
+                autoFocus
+              />
+              <p className="text-[11px] text-gray-500">
+                Tekan Ctrl+Enter untuk menyimpan perubahan.
+              </p>
+            </div>
+
+            <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={savingEditMessage}
+                onClick={() => setEditingMessageTarget(null)}
+              >
+                Batal
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={savingEditMessage || !editMessageDraft.trim()}
+                onClick={() => void handleSaveEditMessage()}
+              >
+                {savingEditMessage ? 'Menyimpan...' : 'Simpan Perubahan'}
               </Button>
             </div>
           </div>

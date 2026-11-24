@@ -386,6 +386,255 @@ export function extractWahaContextInfo(payload: any): Record<string, any> | null
   return null;
 }
 
+export interface WahaQuoteInfo {
+  quotedWahaId: string | null;
+  quotedRawBody: string | null;
+  quotedParticipant: string;
+  quotedPushName: string;
+  quotedFromMe: boolean;
+}
+
+export function extractWahaQuoteInfo(payload: any): WahaQuoteInfo {
+  const ctxInfo = extractWahaContextInfo(payload);
+  const rawReplyToId =
+    typeof payload?.replyTo === 'string'
+      ? payload.replyTo
+      : typeof payload?.replyTo?.id === 'string'
+      ? payload.replyTo.id
+      : payload?.replyTo?.id?._serialized ||
+        payload?.replyTo?.id?.id ||
+        payload?.replyTo?.stanzaId ||
+        payload?.replyTo?.stanzaID ||
+        null;
+
+  const quotedWahaIdCandidate =
+    rawReplyToId ||
+    payload?._data?.quotedStanzaID ||
+    payload?._data?.quotedStanzaId ||
+    payload?._data?.Info?.QuotedStanzaID ||
+    ctxInfo?.stanzaId ||
+    ctxInfo?.stanzaID ||
+    ctxInfo?.StanzaID ||
+    ctxInfo?.StanzaId ||
+    null;
+
+  const quotedWahaId =
+    typeof quotedWahaIdCandidate === 'string' && quotedWahaIdCandidate.trim()
+      ? quotedWahaIdCandidate.trim()
+      : null;
+
+  const rawQuotedNode =
+    ctxInfo?.quotedMessage ||
+    ctxInfo?.QuotedMessage ||
+    payload?._data?.quotedMsg ||
+    payload?._data?.QuotedMessage ||
+    payload?._data?.Info?.QuotedMessage ||
+    payload?.replyTo?._data?.message ||
+    payload?.replyTo?._data?.Message ||
+    payload?.replyTo?._data ||
+    null;
+
+  const quotedMsgNode =
+    rawQuotedNode && typeof rawQuotedNode === 'object' ? unwrapWahaProtoMessage(rawQuotedNode) : null;
+
+  const docNode =
+    quotedMsgNode?.documentMessage ||
+    quotedMsgNode?.DocumentMessage ||
+    quotedMsgNode?.documentWithCaptionMessage?.message?.documentMessage ||
+    quotedMsgNode?.DocumentWithCaptionMessage?.Message?.DocumentMessage ||
+    null;
+
+  const docFileName = String(docNode?.fileName || docNode?.FileName || docNode?.title || '').trim();
+
+  const rawBodyCandidate =
+    payload?.replyTo?.body ||
+    payload?.replyTo?.text ||
+    payload?._data?.quotedMsg?.body ||
+    payload?._data?.quotedMsg?.caption ||
+    quotedMsgNode?.conversation ||
+    quotedMsgNode?.Conversation ||
+    quotedMsgNode?.extendedTextMessage?.text ||
+    quotedMsgNode?.ExtendedTextMessage?.Text ||
+    quotedMsgNode?.imageMessage?.caption ||
+    quotedMsgNode?.ImageMessage?.Caption ||
+    quotedMsgNode?.videoMessage?.caption ||
+    quotedMsgNode?.VideoMessage?.Caption ||
+    docNode?.caption ||
+    docNode?.Caption ||
+    (docFileName ? `[Dokumen: ${docFileName}]` : null) ||
+    (quotedMsgNode?.imageMessage || quotedMsgNode?.ImageMessage ? '[Gambar]' : null) ||
+    (quotedMsgNode?.videoMessage || quotedMsgNode?.VideoMessage ? '[Video]' : null) ||
+    (quotedMsgNode?.audioMessage || quotedMsgNode?.AudioMessage ? '[Audio]' : null) ||
+    (quotedMsgNode?.stickerMessage || quotedMsgNode?.StickerMessage ? '[Stiker]' : null) ||
+    (quotedMsgNode?.locationMessage || quotedMsgNode?.LocationMessage ? '[Lokasi]' : null) ||
+    (quotedMsgNode?.contactMessage || quotedMsgNode?.ContactMessage ? '[Kontak]' : null) ||
+    (quotedMsgNode?.pollCreationMessage || quotedMsgNode?.PollCreationMessage ? '[Polling]' : null) ||
+    null;
+
+  const quotedRawBody =
+    typeof rawBodyCandidate === 'string' && rawBodyCandidate.trim() ? rawBodyCandidate.trim() : null;
+
+  const quotedPushName = String(
+    payload?.replyTo?.notifyName ||
+      payload?.replyTo?.pushName ||
+      payload?.replyTo?.senderName ||
+      payload?.replyTo?._data?.notifyName ||
+      payload?.replyTo?._data?.pushName ||
+      payload?._data?.quotedMsg?.notifyName ||
+      payload?._data?.quotedMsg?.pushName ||
+      ''
+  ).trim();
+
+  const quotedParticipant = String(
+    payload?.replyTo?.participantPn ||
+      payload?.replyTo?.participant ||
+      payload?._data?.quotedParticipant ||
+      ctxInfo?.participantPn ||
+      ctxInfo?.ParticipantPn ||
+      ctxInfo?.participant ||
+      ctxInfo?.Participant ||
+      ''
+  ).trim();
+
+  const quotedFromMe = Boolean(
+    payload?.replyTo?.fromMe === true ||
+      payload?._data?.quotedMsg?.fromMe === true ||
+      (quotedWahaId && quotedWahaId.startsWith('true_'))
+  );
+
+  return {
+    quotedWahaId,
+    quotedRawBody,
+    quotedParticipant,
+    quotedPushName,
+    quotedFromMe,
+  };
+}
+
+export interface WahaEditInfo {
+  targetMessageId: string;
+  newBody: string;
+}
+
+function extractTextFromEditedMessageNode(node: any): string {
+  if (!node || typeof node !== 'object') return '';
+  const unwrapped = unwrapWahaProtoMessage(node);
+  const candidate =
+    unwrapped?.conversation ||
+    unwrapped?.Conversation ||
+    unwrapped?.extendedTextMessage?.text ||
+    unwrapped?.ExtendedTextMessage?.Text ||
+    unwrapped?.imageMessage?.caption ||
+    unwrapped?.ImageMessage?.Caption ||
+    unwrapped?.videoMessage?.caption ||
+    unwrapped?.VideoMessage?.Caption ||
+    unwrapped?.documentMessage?.caption ||
+    unwrapped?.DocumentMessage?.Caption ||
+    unwrapped?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
+    unwrapped?.DocumentWithCaptionMessage?.Message?.DocumentMessage?.Caption ||
+    '';
+  return typeof candidate === 'string' ? candidate.trim() : '';
+}
+
+export function extractWahaEditInfo(payload: any, isEditedEvent = false): WahaEditInfo | null {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const roots = [
+    payload?._data?.message,
+    payload?._data?.Message,
+    payload?._data?.Info?.Message,
+    payload?.message,
+    payload?.after?._data?.Message,
+    payload?.after?._data?.message,
+    payload?.after?.message,
+    payload?._data,
+    payload,
+  ];
+
+  for (const root of roots) {
+    let cur = root;
+    for (let depth = 0; depth < 6 && cur && typeof cur === 'object'; depth++) {
+      const editedWrap = cur.editedMessage || cur.EditedMessage;
+      const proto =
+        editedWrap?.message?.protocolMessage ||
+        editedWrap?.Message?.ProtocolMessage ||
+        cur.protocolMessage ||
+        cur.ProtocolMessage;
+
+      if (proto && typeof proto === 'object') {
+        const pType = proto.type ?? proto.Type;
+        const innerEdited = proto.editedMessage || proto.EditedMessage;
+        const isEditProto =
+          pType === 14 ||
+          String(pType || '').toUpperCase() === 'MESSAGE_EDIT' ||
+          Boolean(innerEdited && typeof innerEdited === 'object');
+
+        if (isEditProto) {
+          const targetId = String(
+            proto.key?.id ||
+              proto.key?.ID ||
+              proto.Key?.ID ||
+              proto.Key?.id ||
+              payload?.editedMessageId ||
+              payload?._data?.protocolMessageKey?.id ||
+              payload?._data?.protocolMessageKey?._serialized ||
+              payload?.before?.id ||
+              ''
+          ).trim();
+          const newBody =
+            extractTextFromEditedMessageNode(innerEdited) ||
+            String(payload?.body || payload?.text || payload?.after?.body || '').trim();
+          if (targetId && newBody) {
+            return { targetMessageId: targetId, newBody };
+          }
+        }
+      }
+
+      cur =
+        cur.deviceSentMessage?.message ||
+        cur.deviceSentMessage?.Message ||
+        cur.DeviceSentMessage?.message ||
+        cur.DeviceSentMessage?.Message ||
+        cur.ephemeralMessage?.message ||
+        cur.ephemeralMessage?.Message ||
+        cur.EphemeralMessage?.message ||
+        cur.EphemeralMessage?.Message ||
+        cur.viewOnceMessage?.message ||
+        cur.viewOnceMessage?.Message ||
+        cur.viewOnceMessageV2?.message ||
+        cur.viewOnceMessageV2?.Message ||
+        null;
+    }
+  }
+
+  if (isEditedEvent) {
+    const rawId =
+      payload?.editedMessageId ||
+      payload?.messageId ||
+      payload?.before?.id ||
+      payload?.after?.id ||
+      (typeof payload?.id === 'string' ? payload.id : payload?.id?._serialized || payload?.id?.id) ||
+      payload?._data?.protocolMessageKey?.id ||
+      payload?._data?.key?.id ||
+      payload?._data?.Info?.ID ||
+      '';
+    const targetId = String(rawId || '').trim();
+    const newBody = String(
+      payload?.body ||
+        payload?.text ||
+        payload?.after?.body ||
+        payload?.after?.text ||
+        payload?._data?.body ||
+        ''
+    ).trim();
+    if (targetId && newBody) {
+      return { targetMessageId: targetId, newBody };
+    }
+  }
+
+  return null;
+}
+
 export function extractWahaForwardingMeta(payload: any): {
   forwarded: boolean;
   forwardingScore: number;
@@ -534,6 +783,7 @@ export interface InboundWahaRichData {
     emoji: string;
   } | null;
   revokedTargetId?: string | null;
+  editedTarget?: WahaEditInfo | null;
 }
 
 export function extractInboundWahaRichData(
@@ -542,7 +792,7 @@ export function extractInboundWahaRichData(
   fallbackText?: string
 ): InboundWahaRichData {
   const base = extractBaseInboundWahaRichData(payload, mediaMeta, fallbackText);
-  if (!base.reaction && !base.revokedTargetId) {
+  if (!base.reaction && !base.revokedTargetId && !base.editedTarget) {
     const fwdMeta = extractWahaForwardingMeta(payload);
     if (fwdMeta) {
       base.metadata = { ...(base.metadata || {}), ...fwdMeta };
@@ -579,6 +829,17 @@ function extractBaseInboundWahaRichData(
         },
       };
     }
+  }
+
+  // 2a. Edited message (protocolMessage type 14 / MESSAGE_EDIT across NOWEB, GOWS, WEBJS)
+  const editedTarget = extractWahaEditInfo(payload, false);
+  if (editedTarget) {
+    return {
+      messageType: 'TEXT',
+      body: editedTarget.newBody,
+      metadata: null,
+      editedTarget,
+    };
   }
 
   // 2. Revoked / Deleted for everyone by sender (protocolMessage type 0 / REVOKE across NOWEB, GOWS, WEBJS)
@@ -2577,9 +2838,103 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         }
       }
 
-      // 1c. Message Reactions (message.reaction event) & Revocations (message.revoked event)
-      if ((event === 'message.reaction' || event === 'message.revoked') && payload) {
+      // 1c. Message Reactions (message.reaction), Revocations (message.revoked), & Edits (message.edited)
+      if ((event === 'message.reaction' || event === 'message.revoked' || event === 'message.edited') && payload) {
         const now = new Date();
+        if (event === 'message.edited') {
+          const editInfo = extractWahaEditInfo(payload, true);
+          if (editInfo) {
+            const cleanTarget = editInfo.targetMessageId;
+            const stanzaPart = cleanTarget.includes('_') ? cleanTarget.split('_').pop() || cleanTarget : cleanTarget;
+            const targetMsgs = await db
+              .select()
+              .from(chatMessages)
+              .where(
+                and(
+                  eq(chatMessages.companyId, companyId),
+                  or(
+                    eq(chatMessages.wahaMessageId, cleanTarget),
+                    eq(chatMessages.wahaMessageId, stanzaPart),
+                    like(chatMessages.wahaMessageId, `%_${stanzaPart}`),
+                    like(chatMessages.wahaMessageId, `%_${stanzaPart}_%`)
+                  )
+                )
+              )
+              .limit(10);
+            const scopedTarget = pickSessionScopedMessage(targetMsgs, webhookSession);
+            if (scopedTarget) {
+              let prevMeta: Record<string, any> = {};
+              if (scopedTarget.metadataJson) {
+                try {
+                  prevMeta = JSON.parse(scopedTarget.metadataJson);
+                } catch {
+                  prevMeta = {};
+                }
+              }
+              const editFromMe = isWahaFromMe(payload?.after || payload);
+              const rawPushName = String(
+                payload?.after?.pushName ||
+                  payload?.before?.pushName ||
+                  payload?.pushName ||
+                  payload?._data?.Info?.PushName ||
+                  ''
+              ).trim();
+              const editedByLabel = editFromMe
+                ? scopedTarget.senderName || 'WhatsApp'
+                : rawPushName || scopedTarget.senderName || 'Pengirim';
+              const nowIso = now.toISOString();
+              const prevHistory: Array<{ body: string; editedAt: string; editedBy?: string }> = Array.isArray(
+                prevMeta.editHistory
+              )
+                ? prevMeta.editHistory
+                : [];
+              const nextHistory =
+                scopedTarget.body !== editInfo.newBody
+                  ? [...prevHistory, { body: scopedTarget.body, editedAt: nowIso, editedBy: editedByLabel }].slice(-10)
+                  : prevHistory;
+
+              await db
+                .update(chatMessages)
+                .set({
+                  body: editInfo.newBody,
+                  metadataJson: JSON.stringify({
+                    ...prevMeta,
+                    edited: true,
+                    editedAt: nowIso,
+                    editedBy: editedByLabel,
+                    editedBySender: !editFromMe,
+                    editHistory: nextHistory,
+                  }),
+                })
+                .where(eq(chatMessages.id, scopedTarget.id));
+
+              const latestMsgRows = await db
+                .select({ id: chatMessages.id })
+                .from(chatMessages)
+                .where(
+                  and(
+                    eq(chatMessages.conversationId, scopedTarget.conversationId),
+                    ne(chatMessages.messageType, 'ACTIVITY'),
+                    ne(chatMessages.messageType, 'NOTE')
+                  )
+                )
+                .orderBy(desc(chatMessages.createdAt))
+                .limit(1);
+              if (latestMsgRows[0]?.id === scopedTarget.id) {
+                await db
+                  .update(conversations)
+                  .set({
+                    lastMessage: editInfo.newBody,
+                    updatedAt: now,
+                  })
+                  .where(eq(conversations.id, scopedTarget.conversationId));
+              }
+              liveEvents.emit('conversations:update', { conversationId: scopedTarget.conversationId }, companyId);
+            }
+          }
+          return reply.send({ success: true, message: 'Message edit processed' });
+        }
+
         const richReaction = extractInboundWahaRichData(payload, {
           hasMedia: false,
           rawMediaUrl: null,
@@ -3494,6 +3849,94 @@ export default async function wahaRouter(fastify: FastifyInstance) {
           return reply.send({ success: true, message: 'Inline reaction processed' });
         }
 
+        // Handle inline message edit protocolMessage (type 14 / MESSAGE_EDIT) delivered on message / message.any
+        if (richData.editedTarget) {
+          const cleanTarget = richData.editedTarget.targetMessageId;
+          const newBody = richData.editedTarget.newBody;
+          const stanzaPart = cleanTarget.includes('_') ? cleanTarget.split('_').pop() || cleanTarget : cleanTarget;
+          const targetMsgs = await db
+            .select()
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.companyId, companyId),
+                or(
+                  eq(chatMessages.wahaMessageId, cleanTarget),
+                  eq(chatMessages.wahaMessageId, stanzaPart),
+                  like(chatMessages.wahaMessageId, `%_${stanzaPart}`),
+                  like(chatMessages.wahaMessageId, `%_${stanzaPart}_%`)
+                )
+              )
+            )
+            .limit(10);
+          const scopedTarget = pickSessionScopedMessage(targetMsgs, webhookSession);
+          if (scopedTarget) {
+            let prevMeta: Record<string, any> = {};
+            if (scopedTarget.metadataJson) {
+              try {
+                prevMeta = JSON.parse(scopedTarget.metadataJson);
+              } catch {
+                prevMeta = {};
+              }
+            }
+            const nowIso = now.toISOString();
+            const rawPushName = String(
+              payload?.pushName || payload?._data?.notifyName || payload?._data?.Info?.PushName || ''
+            ).trim();
+            const editedByLabel = isFromMe
+              ? scopedTarget.senderName || 'WhatsApp'
+              : rawPushName || scopedTarget.senderName || 'Pengirim';
+            const prevHistory: Array<{ body: string; editedAt: string; editedBy?: string }> = Array.isArray(
+              prevMeta.editHistory
+            )
+              ? prevMeta.editHistory
+              : [];
+            const nextHistory =
+              scopedTarget.body !== newBody
+                ? [...prevHistory, { body: scopedTarget.body, editedAt: nowIso, editedBy: editedByLabel }].slice(-10)
+                : prevHistory;
+
+            await db
+              .update(chatMessages)
+              .set({
+                body: newBody,
+                metadataJson: JSON.stringify({
+                  ...prevMeta,
+                  edited: true,
+                  editedAt: nowIso,
+                  editedBy: editedByLabel,
+                  editedBySender: !isFromMe,
+                  editHistory: nextHistory,
+                }),
+              })
+              .where(eq(chatMessages.id, scopedTarget.id));
+
+            const latestMsgRows = await db
+              .select({ id: chatMessages.id })
+              .from(chatMessages)
+              .where(
+                and(
+                  eq(chatMessages.conversationId, scopedTarget.conversationId),
+                  ne(chatMessages.messageType, 'ACTIVITY'),
+                  ne(chatMessages.messageType, 'NOTE')
+                )
+              )
+              .orderBy(desc(chatMessages.createdAt))
+              .limit(1);
+            if (latestMsgRows[0]?.id === scopedTarget.id) {
+              await db
+                .update(conversations)
+                .set({
+                  lastMessage: newBody,
+                  updatedAt: now,
+                })
+                .where(eq(conversations.id, scopedTarget.conversationId));
+            }
+            liveEvents.emit('conversations:update', { conversationId: scopedTarget.conversationId }, companyId);
+          }
+          return reply.send({ success: true, message: 'Inline message edit processed' });
+        }
+
         // Handle inline message revocation protocolMessage delivered on message.any
         if (richData.revokedTargetId) {
           const cleanTarget = richData.revokedTargetId;
@@ -3658,28 +4101,9 @@ export default async function wahaRouter(fastify: FastifyInstance) {
         const body = richData.body || (hasMedia ? mediaFallbackLabel : '');
 
         const ctxInfo = extractWahaContextInfo(payload);
-        const quotedWahaId =
-          (typeof payload.replyTo === 'string' ? payload.replyTo : payload.replyTo?.id) ||
-          payload._data?.quotedStanzaID ||
-          ctxInfo?.stanzaId ||
-          ctxInfo?.stanzaID ||
-          null;
-        const quotedMsgNode = ctxInfo?.quotedMessage || payload._data?.quotedMsg || null;
-        const quotedRawBody =
-          payload.replyTo?.body ||
-          payload._data?.quotedMsg?.body ||
-          quotedMsgNode?.conversation ||
-          quotedMsgNode?.extendedTextMessage?.text ||
-          quotedMsgNode?.imageMessage?.caption ||
-          quotedMsgNode?.videoMessage?.caption ||
-          quotedMsgNode?.documentMessage?.caption ||
-          quotedMsgNode?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
-          (quotedMsgNode?.documentMessage?.fileName ? `[Dokumen: ${quotedMsgNode.documentMessage.fileName}]` : null) ||
-          (quotedMsgNode?.imageMessage ? '[Gambar]' : null) ||
-          (quotedMsgNode?.videoMessage ? '[Video]' : null) ||
-          (quotedMsgNode?.audioMessage ? '[Audio]' : null) ||
-          (quotedMsgNode?.stickerMessage ? '[Stiker]' : null) ||
-          null;
+        const quoteInfo = extractWahaQuoteInfo(payload);
+        const quotedWahaId = quoteInfo.quotedWahaId;
+        const quotedRawBody = quoteInfo.quotedRawBody;
 
         const { mentions: inboundMentions, mentionHints } = extractInboundWahaMentions(payload, ctxInfo);
         if (inboundMentions.length > 0 || Object.keys(mentionHints).length > 0) {
@@ -4249,25 +4673,8 @@ export default async function wahaRouter(fastify: FastifyInstance) {
             )
             .limit(1);
 
-          const quotedPushName = String(
-            payload.replyTo?.notifyName ||
-            payload.replyTo?.pushName ||
-            payload.replyTo?.senderName ||
-            payload.replyTo?._data?.notifyName ||
-            payload.replyTo?._data?.pushName ||
-            payload._data?.quotedMsg?.notifyName ||
-            payload._data?.quotedMsg?.pushName ||
-            ''
-          ).trim();
-
-          const quotedParticipant = String(
-            payload.replyTo?.participantPn ||
-            payload.replyTo?.participant ||
-            payload._data?.quotedParticipant ||
-            ctxInfo?.participantPn ||
-            ctxInfo?.participant ||
-            ''
-          ).trim();
+          const quotedPushName = quoteInfo.quotedPushName;
+          const quotedParticipant = quoteInfo.quotedParticipant;
 
           const resolveContactNameByPhoneOrJid = async (
             rawJid?: string | null,
@@ -4328,7 +4735,7 @@ export default async function wahaRouter(fastify: FastifyInstance) {
                   resolvedQuotedContact.phone || quotedRows[0].senderPhone
                 ) || 'Anggota Grup';
             }
-          } else if (payload.replyTo?.fromMe === true) {
+          } else if (quoteInfo.quotedFromMe) {
             replyToSender = pickBestContactDisplayName(quotedPushName, null, null) || 'Tim CS';
           } else if (quotedParticipant) {
             const resolvedQuotedContact = await resolveContactNameByPhoneOrJid(quotedParticipant, null);

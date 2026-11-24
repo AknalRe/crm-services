@@ -420,6 +420,18 @@ export const api = {
     });
     return res.data;
   },
+  editConversationMessage: async (
+    conversationId: string,
+    messageId: string,
+    body: string,
+    session?: string
+  ): Promise<ChatMessage> => {
+    const res = await client.put(`/conversations/${conversationId}/messages/${messageId}`, {
+      body,
+      ...(session ? { session } : {}),
+    });
+    return res.data.data;
+  },
   deleteConversationMessage: async (
     conversationId: string,
     messageId: string,
