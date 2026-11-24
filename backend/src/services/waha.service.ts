@@ -87,7 +87,16 @@ export function resolveSessionPrivacyRule(
   sessionName?: string | null
 ): WahaSessionPrivacyRule {
   const cleanSession = String(sessionName || '').trim();
-  const specific = cleanSession ? privacyConfig.sessions?.[cleanSession] : undefined;
+  let specific = cleanSession ? privacyConfig.sessions?.[cleanSession] : undefined;
+  if (!specific && cleanSession && privacyConfig.sessions) {
+    const lowerTarget = cleanSession.toLowerCase();
+    for (const [k, v] of Object.entries(privacyConfig.sessions)) {
+      if (k.trim().toLowerCase() === lowerTarget) {
+        specific = v;
+        break;
+      }
+    }
+  }
   return {
     autoReadOnOpen:
       typeof specific?.autoReadOnOpen === 'boolean'
@@ -2521,8 +2530,15 @@ export class WahaService {
   public async sendSeen(
     phone: string,
     sessionName?: string,
-    opts?: { messageIds?: string[] }
+    opts?: { messageIds?: string[]; companyId?: string | null }
   ): Promise<WahaSendResult> {
+    const privacy = await this.resolveSessionPrivacy(sessionName, opts?.companyId).catch(() => null);
+    if (privacy && !privacy.readReceipts) {
+      return {
+        success: false,
+        error: 'Centang 2 biru (Read Receipts) dinonaktifkan pada pengaturan privasi sesi ini.',
+      };
+    }
     const cleanIds = (opts?.messageIds || []).map((id) => id.trim()).filter(Boolean);
     return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
       try {
@@ -2939,8 +2955,15 @@ export class WahaService {
   public async setTyping(
     phone: string,
     typing: boolean,
-    sessionName?: string
+    sessionName?: string,
+    companyId?: string | null
   ): Promise<WahaSendResult> {
+    if (typing) {
+      const privacy = await this.resolveSessionPrivacy(sessionName, companyId).catch(() => null);
+      if (privacy && !privacy.sendOnlinePresence) {
+        return { success: true };
+      }
+    }
     return this.executeOutboundSend(phone, sessionName, async (client, targetSession, chatId) => {
       const endpoint = typing ? '/api/startTyping' : '/api/stopTyping';
       const res = await client.post(

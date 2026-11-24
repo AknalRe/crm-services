@@ -522,12 +522,19 @@ export async function handleInboundAutomation(params: {
             }
           }
 
+          const waPrivacy =
+            channel === 'WHATSAPP'
+              ? await wahaService.resolveSessionPrivacy(sessionName || undefined).catch(() => null)
+              : null;
+          const allowWaTyping = waPrivacy ? waPrivacy.sendOnlinePresence : true;
+          const allowWaSendSeen = waPrivacy ? waPrivacy.readReceipts && waPrivacy.autoReadOnOpen : true;
+
           const waTypingTarget =
             channel === 'WHATSAPP' && aiCfg.humanTyping !== false
               ? (isGroup ? externalThreadId : contact.nomorWhatsapp || externalThreadId) || null
               : null;
           const aiStartedAt = Date.now();
-          if (waTypingTarget) {
+          if (waTypingTarget && allowWaTyping) {
             // Tampilkan status "sedang mengetik..." tanpa sendSeen dulu agar pesan tidak tertandai dibaca jika AI gagal / tidak membalas
             await wahaService.setTyping(waTypingTarget, true, sessionName || undefined).catch(() => {});
           }
@@ -567,8 +574,12 @@ export async function handleInboundAutomation(params: {
               const typingMs = Math.min(8000, Math.max(1500, aiResult.reply.length * 35));
               const remainingMs = typingMs - (Date.now() - aiStartedAt);
               if (remainingMs > 0) await new Promise((resolve) => setTimeout(resolve, remainingMs));
-              // Tandai pesan dibaca (centang 2 biru) sesaat sebelum balasan terkirim
-              await wahaService.sendSeen(waTypingTarget, sessionName || undefined).catch(() => {});
+              // Tandai pesan dibaca (centang 2 biru) hanya jika privasi auto-read & readReceipts aktif
+              if (allowWaSendSeen) {
+                await wahaService
+                  .sendSeen(waTypingTarget, sessionName || undefined)
+                  .catch(() => {});
+              }
             }
             try {
               // 1. Kirim pesan balasan ke pelanggan terlebih dahulu

@@ -2399,6 +2399,10 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       if (event === 'session.status') {
         const sessName = webhookSession || payload?.name || 'default';
         if (payload?.status === 'WORKING' && payload?.me?.id) {
+          void wahaService
+            .resolveSessionPrivacy(sessName, companyId)
+            .then((rule) => wahaService.syncSessionPrivacyToWaha(sessName, rule))
+            .catch(() => {});
           try {
             const lic = await licenseService.getLicense(companyId, false);
             const maxLimit = lic.features.maxSessionIdentitySwitches || 2;
