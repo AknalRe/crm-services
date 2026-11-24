@@ -113,6 +113,11 @@ import {
 } from '../lib/emojiStickers';
 import { LABEL_COLOR_MAP } from '../components/MasterDataSettings';
 import { VerifiedMetaBadge } from '../components/VerifiedMetaBadge';
+import {
+  DesktopConversationHoverCard,
+  MobileConversationPeekModal,
+  PeekCacheMap,
+} from '../components/ConversationPeekPreview';
 import { hasPerm } from '../lib/permissions';
 
 const CHANNEL_META: Record<OmnichannelType, { label: string; short: string; cls: string; dot: string }> = {
@@ -3321,6 +3326,61 @@ export const Conversations: React.FC<ConversationsProps> = ({
   const [editingMessageTarget, setEditingMessageTarget] = useState<ChatMessage | null>(null);
   const [editMessageDraft, setEditMessageDraft] = useState('');
   const [savingEditMessage, setSavingEditMessage] = useState(false);
+
+  // Desktop hover quick-peek & mobile long-press iPhone-style chat peek (read-only, markRead: false)
+  const peekCacheRef = useRef<PeekCacheMap>(new Map());
+  const hoverPeekTimerRef = useRef<number | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const [hoverPeek, setHoverPeek] = useState<{
+    conv: Conversation;
+    rect: { top: number; left: number; right: number; bottom: number };
+  } | null>(null);
+  const [mobilePeekConv, setMobilePeekConv] = useState<Conversation | null>(null);
+  const [peekMessagesByConvId, setPeekMessagesByConvId] = useState<Record<string, ChatMessage[]>>({});
+  const [peekLoadingConvId, setPeekLoadingConvId] = useState<string | null>(null);
+
+  const loadPeekMessages = useCallback(async (convId: string) => {
+    const cached = peekCacheRef.current.get(convId);
+    if (cached && Date.now() - cached.fetchedAt < 30_000) {
+      setPeekMessagesByConvId((prev) => (prev[convId] ? prev : { ...prev, [convId]: cached.items }));
+      return;
+    }
+    setPeekLoadingConvId(convId);
+    try {
+      const page = await api.getConversationMessagesPage(convId, { markRead: false, limit: 8 });
+      const items = page.items || [];
+      peekCacheRef.current.set(convId, { items, fetchedAt: Date.now() });
+      setPeekMessagesByConvId((prev) => ({ ...prev, [convId]: items }));
+    } catch {
+      // keep fallback lastMessage preview if request fails
+    } finally {
+      setPeekLoadingConvId((cur) => (cur === convId ? null : cur));
+    }
+  }, []);
+
+  const clearHoverPeekTimer = useCallback(() => {
+    if (hoverPeekTimerRef.current !== null) {
+      window.clearTimeout(hoverPeekTimerRef.current);
+      hoverPeekTimerRef.current = null;
+    }
+  }, []);
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressOriginRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearHoverPeekTimer();
+      clearLongPressTimer();
+    };
+  }, [clearHoverPeekTimer, clearLongPressTimer]);
   const [receiptInfoTarget, setReceiptInfoTarget] = useState<ChatMessage | null>(null);
   const [receiptInfoLoading, setReceiptInfoLoading] = useState(false);
   const [receiptInfoError, setReceiptInfoError] = useState<string | null>(null);
@@ -5184,7 +5244,60 @@ export const Conversations: React.FC<ConversationsProps> = ({
                 <button
                   key={conv.id}
                   type="button"
+                  onMouseEnter={(e) => {
+                    if (typeof window !== 'undefined' && !window.matchMedia('(hover: hover)').matches) return;
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    clearHoverPeekTimer();
+                    hoverPeekTimerRef.current = window.setTimeout(() => {
+                      setHoverPeek({
+                        conv,
+                        rect: { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom },
+                      });
+                      void loadPeekMessages(conv.id);
+                    }, 320);
+                  }}
+                  onMouseLeave={() => {
+                    clearHoverPeekTimer();
+                    setHoverPeek((cur) => (cur?.conv.id === conv.id ? null : cur));
+                  }}
+                  onTouchStart={(e) => {
+                    const touch = e.touches[0];
+                    if (!touch) return;
+                    longPressTriggeredRef.current = false;
+                    clearLongPressTimer();
+                    longPressOriginRef.current = { x: touch.clientX, y: touch.clientY };
+                    longPressTimerRef.current = window.setTimeout(() => {
+                      longPressTriggeredRef.current = true;
+                      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+                        navigator.vibrate(15);
+                      }
+                      setHoverPeek(null);
+                      setMobilePeekConv(conv);
+                      void loadPeekMessages(conv.id);
+                    }, 450);
+                  }}
+                  onTouchMove={(e) => {
+                    const origin = longPressOriginRef.current;
+                    const touch = e.touches[0];
+                    if (!origin || !touch) return;
+                    if (Math.hypot(touch.clientX - origin.x, touch.clientY - origin.y) > 10) {
+                      clearLongPressTimer();
+                    }
+                  }}
+                  onTouchEnd={() => clearLongPressTimer()}
+                  onTouchCancel={() => clearLongPressTimer()}
+                  onContextMenu={(e) => {
+                    if (longPressTriggeredRef.current) {
+                      e.preventDefault();
+                    }
+                  }}
                   onClick={() => {
+                    clearHoverPeekTimer();
+                    setHoverPeek(null);
+                    if (longPressTriggeredRef.current) {
+                      longPressTriggeredRef.current = false;
+                      return;
+                    }
                     if (selectedConversation?.id !== conv.id) {
                       setHighlightedCsatWindow(null);
                       setReplyingToMessage(null);
@@ -5195,7 +5308,7 @@ export const Conversations: React.FC<ConversationsProps> = ({
                     }
                     setSelectedConversation(conv);
                   }}
-                  className={`w-full px-3 py-2.5 text-left flex items-start gap-2.5 transition-colors ${
+                  className={`w-full px-3 py-2.5 text-left flex items-start gap-2.5 transition-colors select-none ${
                     isSelected
                       ? 'bg-indigo-50/70 border-l-2 border-indigo-600'
                       : 'hover:bg-gray-100/70 bg-white'
@@ -12119,6 +12232,39 @@ export const Conversations: React.FC<ConversationsProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {hoverPeek && !mobilePeekConv && (
+        <DesktopConversationHoverCard
+          conv={hoverPeek.conv}
+          title={getConversationDisplayTitle(hoverPeek.conv)}
+          anchorRect={hoverPeek.rect}
+          messages={peekMessagesByConvId[hoverPeek.conv.id] || []}
+          loading={peekLoadingConvId === hoverPeek.conv.id}
+        />
+      )}
+
+      {mobilePeekConv && (
+        <MobileConversationPeekModal
+          conv={mobilePeekConv}
+          title={getConversationDisplayTitle(mobilePeekConv)}
+          messages={peekMessagesByConvId[mobilePeekConv.id] || []}
+          loading={peekLoadingConvId === mobilePeekConv.id}
+          onClose={() => setMobilePeekConv(null)}
+          onOpenChat={() => {
+            const target = mobilePeekConv;
+            setMobilePeekConv(null);
+            if (selectedConversation?.id !== target.id) {
+              setHighlightedCsatWindow(null);
+              setReplyingToMessage(null);
+              setShowMobileChatActions(false);
+              setShowComposerTools(false);
+              setActiveReactionMsgId(null);
+              setOpenProfileSections({});
+            }
+            setSelectedConversation(target);
+          }}
+        />
       )}
 
       {editingMessageTarget && (
