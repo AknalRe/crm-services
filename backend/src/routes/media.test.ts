@@ -8,6 +8,7 @@ import Fastify from 'fastify';
 import type { AuthUserSession } from './auth';
 import conversationsRouter from './conversations';
 import mediaRouter, {
+  buildContentDisposition,
   createSignedMediaFetchUrl,
   signMediaAccessToken,
   verifyMediaAccessToken,
@@ -143,4 +144,19 @@ test('createSignedMediaFetchUrl leaves external third-party URLs untouched', asy
   const external = 'https://cdn.example.com/promo/banner.jpg';
   const result = await createSignedMediaFetchUrl(external, 300, 'any-secret');
   assert.equal(result, external);
+});
+
+test('buildContentDisposition names the download after the sender file, not the stored name', () => {
+  assert.equal(
+    buildContentDisposition('1795577115066_c93e04e5.rar', 'Frame Akreditasi Merr.rar'),
+    `inline; filename="Frame Akreditasi Merr.rar"; filename*=UTF-8''Frame%20Akreditasi%20Merr.rar`
+  );
+  // a name without an extension keeps the stored one, and the stored name is the fallback when the sender name is empty
+  assert.match(buildContentDisposition('1_ab.pdf', 'Proposal'), /filename="Proposal\.pdf"/);
+  assert.match(buildContentDisposition('1_ab.pdf', ''), /filename="1_ab\.pdf"/);
+  assert.match(buildContentDisposition('1_ab.pdf', null, 'attachment'), /^attachment; /);
+  // non-ASCII names get an ASCII fallback plus the UTF-8 form; quotes and path parts cannot leak into the header
+  const header = buildContentDisposition('1_ab.docx', 'Laporan "Q3" é/../x.docx');
+  assert.ok(!header.includes('/'), header);
+  assert.match(header, /filename\*=UTF-8''Laporan%20%22Q3%22%20%C3%A9_\.\._x\.docx/);
 });

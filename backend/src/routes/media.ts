@@ -214,6 +214,37 @@ export async function readMediaMetadata(filename: string): Promise<MediaMetadata
   }
   return null;
 }
+// Name the browser saves a served file under: the original name the sender used, with the stored extension kept when it has none
+export function buildContentDisposition(storedName: string, originalName?: string | null, disposition = 'inline'): string {
+  const storedExt = path.extname(storedName);
+  let name = String(originalName || '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[/\x5c]+/g, '_')
+    .trim();
+  if (!name || name === '.' || name === '..') name = storedName;
+  else if (!path.extname(name) && storedExt) name += storedExt;
+  name = name.slice(0, 200);
+  const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\x5c]/g, '');
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+async function resolveOriginalFileName(filename: string): Promise<string | null> {
+  const meta = await readMediaMetadata(filename);
+  if (meta?.originalFileName) return meta.originalFileName;
+  // the metadata file is gone (volume lost or never written): the chat message still remembers the name
+  try {
+    const rows = await db
+      .select({ mediaName: chatMessages.mediaName })
+      .from(chatMessages)
+      .where(ilike(chatMessages.mediaUrl, `%${filename}%`))
+      .limit(1);
+    return rows[0]?.mediaName || null;
+  } catch {
+    return null;
+  }
+}
+
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/jpg': '.jpg',
@@ -778,7 +809,10 @@ export default async function mediaRouter(
         const ext = path.extname(filename).toLowerCase();
         const contentType = EXT_MIME[ext] || 'application/octet-stream';
         reply.header('Content-Type', contentType);
-        reply.header('Content-Disposition', `inline; filename="${filename.replace(/"/g, '')}"`);
+        reply.header(
+          'Content-Disposition',
+          buildContentDisposition(filename, await resolveOriginalFileName(filename))
+        );
         reply.header('X-Content-Type-Options', 'nosniff');
         reply.header('Accept-Ranges', 'bytes');
         reply.header('Vary', 'Cookie');
