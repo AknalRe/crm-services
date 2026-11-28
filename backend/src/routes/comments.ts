@@ -79,7 +79,7 @@ export async function applyCommentAutomations(
       });
       if (!matched) {
         if (!comment.replyText && lic.features.aiAgent) {
-          const aiCfg = await getAiAgentConfig();
+          const aiCfg = await getAiAgentConfig(companyId);
           const ageMs = Date.now() - new Date(comment.createdAt).getTime();
           if (
             aiCfg.enabled &&
@@ -94,7 +94,8 @@ export async function applyCommentAutomations(
                 channel: comment.channel,
                 isComment: true,
               });
-              if (aiRes.reply) {
+              const latestAiCfg = await getAiAgentConfig(companyId);
+              if (aiRes.reply && latestAiCfg.enabled && latestAiCfg.autoReplyComment) {
                 await sendCommentReplyApi(acc, comment, aiRes.reply);
                 await db
                   .update(socialComments)

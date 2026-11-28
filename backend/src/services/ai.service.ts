@@ -9,6 +9,13 @@ import {
   systemSettings,
 } from '../db/schema';
 import {
+  DEFAULT_COMPANY_ID,
+  getActiveCompanyId,
+  getCompanySettingValue,
+  upsertCompanySetting,
+  upsertSystemSetting,
+} from './tenantContext';
+import {
   AgentToolRegistry,
   AiQueuedOutboundMedia,
   AiToolCallTrace,
@@ -819,18 +826,41 @@ export function sanitizeConfigForClient(cfg: AiAgentConfig): AiAgentConfig {
   };
 }
 
-export async function getAiAgentConfig(): Promise<AiAgentConfig> {
-  const [configRow] = await db
-    .select()
-    .from(systemSettings)
-    .where(eq(systemSettings.key, 'ai_agent_config'));
-  if (!configRow?.value) {
-    return { ...DEFAULT_AI_CONFIG, fallbacks: [] };
+export async function getAiAgentConfig(companyId?: string): Promise<AiAgentConfig> {
+  const cid = getActiveCompanyId(companyId);
+  const companyVal = await getCompanySettingValue('ai_agent_config', cid);
+  if (companyVal) {
+    try {
+      return sanitizeStoredConfig(JSON.parse(companyVal));
+    } catch {
+      return { ...DEFAULT_AI_CONFIG, fallbacks: [] };
+    }
   }
-  try {
-    return sanitizeStoredConfig(JSON.parse(configRow.value));
-  } catch {
-    return { ...DEFAULT_AI_CONFIG, fallbacks: [] };
+  if (cid === DEFAULT_COMPANY_ID) {
+    const [configRow] = await db
+      .select()
+      .from(systemSettings)
+      .where(eq(systemSettings.key, 'ai_agent_config'));
+    if (configRow?.value) {
+      try {
+        return sanitizeStoredConfig(JSON.parse(configRow.value));
+      } catch {
+        return { ...DEFAULT_AI_CONFIG, fallbacks: [] };
+      }
+    }
+  }
+  return { ...DEFAULT_AI_CONFIG, fallbacks: [] };
+}
+
+export async function saveAiAgentConfig(
+  cfg: AiAgentConfig,
+  companyId?: string
+): Promise<void> {
+  const cid = getActiveCompanyId(companyId);
+  const payload = JSON.stringify(cfg);
+  await upsertCompanySetting('ai_agent_config', payload, cid);
+  if (cid === DEFAULT_COMPANY_ID) {
+    await upsertSystemSetting('ai_agent_config', payload);
   }
 }
 
@@ -1804,6 +1834,9 @@ export async function generateAiAgentReply(
   }
 ): Promise<AiGenerationResult> {
   const cfg = options?.configOverride || (await getAiAgentConfig());
+  if (!options?.isSimulator && !cfg.enabled) {
+    throw new Error('Layanan Agent AI sedang dinonaktifkan');
+  }
 
   let books: AiKnowledgeBookRecord[] = options?.kbBooksOverride || [];
   let rawItems: AiKnowledgeRecord[] = options?.kbItemsOverride || [];

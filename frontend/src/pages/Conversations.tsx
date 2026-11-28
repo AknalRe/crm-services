@@ -223,18 +223,44 @@ const FALLBACK_EXT_MIME: Record<string, string> = {
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.csv': 'text/csv',
   '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.log': 'text/plain',
+  '.json': 'application/json',
+  '.xml': 'application/xml',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml',
+  '.sql': 'application/sql',
+  '.rtf': 'application/rtf',
+  '.odt': 'application/vnd.oasis.opendocument.text',
+  '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+  '.odp': 'application/vnd.oasis.opendocument.presentation',
   '.zip': 'application/zip',
-  '.rar': 'application/x-rar-compressed',
+  '.rar': 'application/vnd.rar',
+  '.7z': 'application/x-7z-compressed',
+  '.tar': 'application/x-tar',
+  '.gz': 'application/gzip',
+  '.tgz': 'application/gzip',
+  '.bz2': 'application/x-bzip2',
+  '.xz': 'application/x-xz',
+  '.iso': 'application/x-iso9660-image',
+  '.apk': 'application/vnd.android.package-archive',
+  '.psd': 'image/vnd.adobe.photoshop',
+  '.ai': 'application/postscript',
+  '.eps': 'application/postscript',
+  '.heic': 'image/heic',
+  '.mkv': 'video/x-matroska',
+  '.flac': 'audio/flac',
 };
 
 function inferAttachmentMime(file: File): string {
-  if (file.type && file.type.trim()) return file.type.trim();
+  const rawType = (file.type || '').trim().toLowerCase();
+  if (rawType && rawType !== 'application/octet-stream') return rawType;
   const dotIdx = file.name.lastIndexOf('.');
   if (dotIdx >= 0) {
     const ext = file.name.slice(dotIdx).toLowerCase();
     if (FALLBACK_EXT_MIME[ext]) return FALLBACK_EXT_MIME[ext];
   }
-  return 'application/octet-stream';
+  return rawType || 'application/octet-stream';
 }
 
 interface PendingAttachmentItem {
@@ -2112,11 +2138,13 @@ export const Conversations: React.FC<ConversationsProps> = ({
     e.target.value = '';
     if (fileList.length === 0) return;
 
-    const oversized = fileList.filter((f) => f.size > 10 * 1024 * 1024);
+    const maxMb = licenseInfo?.features?.maxAttachmentSizeMb || 25;
+    const maxBytes = maxMb * 1024 * 1024;
+    const oversized = fileList.filter((f) => f.size > maxBytes);
     if (oversized.length > 0) {
-      toast.error(`Beberapa berkas melebihi batas 10 MB (${oversized.map((f) => f.name).join(', ')})`);
+      toast.error(`Beberapa berkas melebihi batas ${maxMb} MB (${oversized.map((f) => f.name).join(', ')})`);
     }
-    const validFiles = fileList.filter((f) => f.size <= 10 * 1024 * 1024);
+    const validFiles = fileList.filter((f) => f.size <= maxBytes);
     if (validFiles.length === 0) return;
 
     const newItems: PendingAttachmentItem[] = [];

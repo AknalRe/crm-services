@@ -774,7 +774,7 @@ export const Broadcasts: React.FC<BroadcastsProps> = ({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+                  accept="*/*"
                   onChange={handleLocalFileUpload}
                   className="hidden"
                 />

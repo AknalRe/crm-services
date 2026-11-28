@@ -45,7 +45,7 @@ import {
   hasUserPermission,
   requirePermission,
 } from './auth';
-import { readUploadedMediaAsDataUri, saveBase64MediaFile, saveMediaBufferFile } from './media';
+import { inferMimeFromFilename, readUploadedMediaAsDataUri, saveBase64MediaFile, saveMediaBufferFile } from './media';
 import { extractInboundWahaMediaMeta, pickBestContactDisplayName, isGenericDisplayName } from './waha';
 import { syncWhatsAppProfile } from '../services/profile.service';
 import { syncRecentWhatsAppChatMessages } from '../services/chatSync.service';
@@ -3519,23 +3519,32 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             kind: 'STICKER',
             sticker: { isAnimated: false },
           };
-        } else if (mediaBase64 && mediaMimetype) {
+        } else if (mediaBase64) {
+          const rawMime = String(mediaMimetype || '').split(';')[0].trim().toLowerCase();
+          const effectiveMediaMime =
+            rawMime && rawMime !== 'application/octet-stream'
+              ? rawMime
+              : inferMimeFromFilename(mediaName) || rawMime || 'application/octet-stream';
           persistedMessageType = 'MEDIA';
           mediaType = asDocument
             ? 'document'
-            : mediaMimetype.startsWith('image/')
+            : effectiveMediaMime.startsWith('image/')
               ? 'image'
-              : mediaMimetype.startsWith('video/')
+              : effectiveMediaMime.startsWith('video/')
                 ? 'video'
-                : mediaMimetype.startsWith('audio/')
+                : effectiveMediaMime.startsWith('audio/')
                   ? 'audio'
                   : 'document';
           try {
+            const lic = await licenseService.getLicense(companyId).catch(() => null);
+            const maxBytes = (lic?.features?.maxAttachmentSizeMb || 25) * 1024 * 1024;
             const savedMedia = await saveBase64MediaFile({
               base64: mediaBase64,
-              mimeType: mediaMimetype,
+              mimeType: effectiveMediaMime,
               fileName: mediaName,
+              maxBytes,
               metadata: {
+                companyId,
                 channel: conversation.conv.channel || 'WHATSAPP',
                 sessionName: targetSession,
                 source: 'OUTBOUND',
@@ -3548,7 +3557,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             if (mediaType === 'image') {
               storedMediaUrl = mediaBase64.startsWith('data:')
                 ? mediaBase64
-                : `data:${mediaMimetype};base64,${mediaBase64}`;
+                : `data:${effectiveMediaMime};base64,${mediaBase64}`;
             } else {
               console.warn('[Conversations] Gagal menyimpan berkas lampiran ke disk:', saveErr?.message);
             }
@@ -3557,7 +3566,7 @@ export default async function conversationsRouter(fastify: FastifyInstance) {
             targetWa,
             {
               base64: mediaBase64,
-              mimetype: mediaMimetype,
+              mimetype: effectiveMediaMime,
               filename: mediaName || 'attachment',
               caption: bodyText,
               replyTo: quotedWahaId,

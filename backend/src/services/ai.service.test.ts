@@ -638,3 +638,37 @@ test('generateAiAgentReply executes MCP and CRM tool calls across multi-round Op
   assert.equal(antRes.toolCalls[0].toolName, 'crm_search_knowledge');
   assert.match(antRes.reply, /ringkasan FAQ/);
 });
+
+test('generateAiAgentReply blocks runtime replies when AI service is disabled', async () => {
+  await assert.rejects(
+    () =>
+      generateAiAgentReply('Halo admin', {
+        configOverride: {
+          ...DEFAULT_AI_CONFIG,
+          enabled: false,
+          autoReplyDm: true,
+          provider: 'LOCAL_KB',
+        },
+        kbBooksOverride: [],
+        kbItemsOverride: [],
+        skillsOverride: [],
+        mcpServersOverride: [],
+      }),
+    /dinonaktifkan/i
+  );
+
+  // Simulator still works when explicitly flagged with isSimulator: true
+  const simRes = await generateAiAgentReply('Halo admin', {
+    isSimulator: true,
+    configOverride: {
+      ...DEFAULT_AI_CONFIG,
+      enabled: false,
+      provider: 'LOCAL_KB',
+    },
+    kbBooksOverride: [],
+    kbItemsOverride: [],
+    skillsOverride: [],
+    mcpServersOverride: [],
+  });
+  assert.ok(simRes.reply.length > 0);
+});

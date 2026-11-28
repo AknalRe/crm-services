@@ -41,7 +41,7 @@ import {
 import './services/queue.service'; // Start BullMQ worker
 
 const fastify = Fastify({
-  bodyLimit: 16 * 1024 * 1024,
+  bodyLimit: 50 * 1024 * 1024,
   logger: {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
   },

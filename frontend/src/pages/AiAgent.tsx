@@ -490,13 +490,37 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
   };
 
   const handleToggleAgentEnabled = async (checked: boolean) => {
+    const prevEnabled = config.enabled;
     setConfig((prev) => ({ ...prev, enabled: checked }));
     try {
       const saved = await api.saveAiAgentConfig({ enabled: checked });
-      setConfig((prev) => ({ ...prev, enabled: saved.enabled }));
-      toast.success(checked ? 'Agent AI diaktifkan' : 'Agent AI dinonaktifkan');
+      setConfig((prev) => ({ ...prev, enabled: Boolean(saved.enabled) }));
+      toast.success(saved.enabled ? 'Agent AI diaktifkan' : 'Agent AI dinonaktifkan — tidak akan membalas chat masuk');
     } catch {
+      setConfig((prev) => ({ ...prev, enabled: prevEnabled }));
       toast.error('Gagal mengubah status aktif Agent AI');
+    }
+  };
+
+  const handleChangePersonalityConfig = (patch: Partial<AiAgentConfig>) => {
+    setConfig((prev) => ({ ...prev, ...patch }));
+    // Immediately persist critical auto-reply switches so disabling takes effect without needing Save click
+    if (patch.autoReplyDm !== undefined || patch.autoReplyComment !== undefined) {
+      const syncPatch: Partial<AiAgentConfig> = {};
+      if (patch.autoReplyDm !== undefined) syncPatch.autoReplyDm = patch.autoReplyDm;
+      if (patch.autoReplyComment !== undefined) syncPatch.autoReplyComment = patch.autoReplyComment;
+      void api
+        .saveAiAgentConfig(syncPatch)
+        .then((saved) => {
+          setConfig((prev) => ({
+            ...prev,
+            autoReplyDm: Boolean(saved.autoReplyDm),
+            autoReplyComment: Boolean(saved.autoReplyComment),
+          }));
+        })
+        .catch(() => {
+          toast.error('Gagal menyimpan status balasan otomatis AI');
+        });
     }
   };
 
@@ -702,7 +726,7 @@ export const AiAgent: React.FC<{ currentUser?: AuthStatus['user'] | null }> = ({
             <AiPersonalityPromptPanel
               config={config}
               savingConfig={savingConfig}
-              onChangeConfig={(patch) => setConfig((prev) => ({ ...prev, ...patch }))}
+              onChangeConfig={handleChangePersonalityConfig}
               onSave={handleSaveConfig}
             />
           </fieldset>

@@ -251,11 +251,22 @@ const MIME_EXT: Record<string, string> = {
   'image/png': '.png',
   'image/webp': '.webp',
   'image/gif': '.gif',
+  'image/bmp': '.bmp',
+  'image/tiff': '.tiff',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
+  'image/x-icon': '.ico',
+  'image/vnd.microsoft.icon': '.ico',
+  'image/svg+xml': '.svg',
   'video/mp4': '.mp4',
   'video/quicktime': '.mov',
   'video/webm': '.webm',
   'video/x-msvideo': '.avi',
   'video/3gpp': '.3gp',
+  'video/x-matroska': '.mkv',
+  'video/x-flv': '.flv',
+  'video/x-ms-wmv': '.wmv',
+  'video/x-m4v': '.m4v',
   'audio/mpeg': '.mp3',
   'audio/mp3': '.mp3',
   'audio/ogg': '.ogg',
@@ -263,6 +274,9 @@ const MIME_EXT: Record<string, string> = {
   'audio/mp4': '.m4a',
   'audio/aac': '.aac',
   'audio/opus': '.opus',
+  'audio/flac': '.flac',
+  'audio/x-ms-wma': '.wma',
+  'audio/amr': '.amr',
   'application/pdf': '.pdf',
   'application/msword': '.doc',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
@@ -270,16 +284,41 @@ const MIME_EXT: Record<string, string> = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
   'application/vnd.ms-powerpoint': '.ppt',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+  'application/rtf': '.rtf',
+  'text/rtf': '.rtf',
+  'application/vnd.oasis.opendocument.text': '.odt',
+  'application/vnd.oasis.opendocument.spreadsheet': '.ods',
+  'application/vnd.oasis.opendocument.presentation': '.odp',
+  'application/epub+zip': '.epub',
   'text/csv': '.csv',
   'text/plain': '.txt',
   'text/markdown': '.md',
   'text/vcard': '.vcf',
   'application/json': '.json',
   'application/xml': '.xml',
+  'text/xml': '.xml',
+  'application/yaml': '.yaml',
+  'text/yaml': '.yaml',
+  'application/sql': '.sql',
   'application/zip': '.zip',
   'application/x-zip-compressed': '.zip',
+  'application/x-zip': '.zip',
+  'application/vnd.rar': '.rar',
   'application/x-rar-compressed': '.rar',
+  'application/x-rar': '.rar',
+  'application/rar': '.rar',
   'application/x-7z-compressed': '.7z',
+  'application/x-tar': '.tar',
+  'application/gzip': '.gz',
+  'application/x-gzip': '.gz',
+  'application/x-bzip2': '.bz2',
+  'application/x-xz': '.xz',
+  'application/zstd': '.zst',
+  'application/x-iso9660-image': '.iso',
+  'application/vnd.ms-cab-compressed': '.cab',
+  'application/vnd.android.package-archive': '.apk',
+  'image/vnd.adobe.photoshop': '.psd',
+  'application/postscript': '.eps',
 };
 
 const EXT_MIME: Record<string, string> = {
@@ -288,18 +327,31 @@ const EXT_MIME: Record<string, string> = {
   '.png': 'image/png',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+  '.tiff': 'image/tiff',
+  '.tif': 'image/tiff',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+  '.ico': 'image/x-icon',
   '.svg': 'image/svg+xml',
   '.mp4': 'video/mp4',
   '.mov': 'video/quicktime',
   '.webm': 'video/webm',
   '.avi': 'video/x-msvideo',
   '.3gp': 'video/3gpp',
+  '.mkv': 'video/x-matroska',
+  '.flv': 'video/x-flv',
+  '.wmv': 'video/x-ms-wmv',
+  '.m4v': 'video/x-m4v',
   '.mp3': 'audio/mpeg',
   '.ogg': 'audio/ogg',
   '.wav': 'audio/wav',
   '.m4a': 'audio/mp4',
   '.aac': 'audio/aac',
   '.opus': 'audio/opus',
+  '.flac': 'audio/flac',
+  '.wma': 'audio/x-ms-wma',
+  '.amr': 'audio/amr',
   '.pdf': 'application/pdf',
   '.doc': 'application/msword',
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -307,16 +359,72 @@ const EXT_MIME: Record<string, string> = {
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.ppt': 'application/vnd.ms-powerpoint',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.rtf': 'application/rtf',
+  '.odt': 'application/vnd.oasis.opendocument.text',
+  '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+  '.odp': 'application/vnd.oasis.opendocument.presentation',
+  '.epub': 'application/epub+zip',
   '.csv': 'text/csv',
   '.txt': 'text/plain',
   '.md': 'text/markdown',
+  '.log': 'text/plain',
+  '.ini': 'text/plain',
   '.vcf': 'text/vcard',
   '.json': 'application/json',
   '.xml': 'application/xml',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml',
+  '.toml': 'text/plain',
+  '.sql': 'application/sql',
   '.zip': 'application/zip',
-  '.rar': 'application/x-rar-compressed',
+  '.rar': 'application/vnd.rar',
   '.7z': 'application/x-7z-compressed',
+  '.tar': 'application/x-tar',
+  '.gz': 'application/gzip',
+  '.tgz': 'application/gzip',
+  '.bz2': 'application/x-bzip2',
+  '.xz': 'application/x-xz',
+  '.zst': 'application/zstd',
+  '.iso': 'application/x-iso9660-image',
+  '.cab': 'application/vnd.ms-cab-compressed',
+  '.apk': 'application/vnd.android.package-archive',
+  '.dmg': 'application/octet-stream',
+  '.deb': 'application/octet-stream',
+  '.rpm': 'application/octet-stream',
+  '.exe': 'application/octet-stream',
+  '.msi': 'application/octet-stream',
+  '.psd': 'image/vnd.adobe.photoshop',
+  '.ai': 'application/postscript',
+  '.eps': 'application/postscript',
+  '.cdr': 'application/octet-stream',
+  '.dwg': 'application/octet-stream',
+  '.dxf': 'application/octet-stream',
+  '.fig': 'application/octet-stream',
+  '.sketch': 'application/octet-stream',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
 };
+
+export function inferMimeFromFilename(fileName?: string | null): string | null {
+  const ext = path.extname(String(fileName || '')).toLowerCase();
+  return ext ? EXT_MIME[ext] || null : null;
+}
+
+function isSafeMediaExtension(ext: string): boolean {
+  return /^\.[a-z0-9]{1,10}$/i.test(ext);
+}
+
+function isInlinePreviewableMime(contentType: string): boolean {
+  const base = normalizeMimeBase(contentType);
+  if (!base) return false;
+  if (base === 'image/svg+xml') return false;
+  if (base.startsWith('image/') || base.startsWith('video/') || base.startsWith('audio/')) {
+    return true;
+  }
+  return base === 'application/pdf' || base === 'text/plain' || base === 'text/csv' || base === 'application/json';
+}
 
 function normalizeMimeBase(raw?: string | null): string {
   return String(raw || '').split(';')[0].trim().toLowerCase();
@@ -525,7 +633,7 @@ export async function saveMediaBufferFile(params: {
   metadata?: MediaMetadata;
 }): Promise<{ filename: string; relativeUrl: string; mimeType: string }> {
   const mimeType = normalizeMimeBase(params.mimeType);
-  const maxBytes = params.maxBytes ?? 10 * 1024 * 1024;
+  const maxBytes = params.maxBytes ?? 25 * 1024 * 1024;
   if (!params.buffer || params.buffer.length === 0) {
     throw new Error('File kosong');
   }
@@ -535,9 +643,13 @@ export async function saveMediaBufferFile(params: {
   }
 
   const extFromName = path.extname(String(params.fileName || '')).toLowerCase();
+  const isGenericMime = !mimeType || mimeType === 'application/octet-stream';
   const ext =
+    (!isGenericMime && MIME_EXT[mimeType]) ||
+    (isSafeMediaExtension(extFromName) ? extFromName : '') ||
     MIME_EXT[mimeType] ||
-    (EXT_MIME[extFromName] ? extFromName : params.fallbackExt || '.bin');
+    params.fallbackExt ||
+    '.bin';
   const safeName = `${Date.now()}_${crypto.randomUUID().slice(0, 8)}${ext}`;
 
   ensureUploadsDir();
@@ -550,10 +662,13 @@ export async function saveMediaBufferFile(params: {
     originalFileName: params.metadata?.originalFileName || params.fileName,
   });
 
+  const resolvedMime =
+    (!isGenericMime && mimeType) || EXT_MIME[ext] || mimeType || 'application/octet-stream';
+
   return {
     filename: safeName,
     relativeUrl: `/api/media/files/${safeName}`,
-    mimeType: mimeType || EXT_MIME[ext] || 'application/octet-stream',
+    mimeType: resolvedMime,
   };
 }
 
@@ -774,10 +889,10 @@ export default async function mediaRouter(
   );
 
   // Authenticated file serving endpoint (or signed short-lived m_tok for external channel publishing) with HTTP Range support
-  fastify.get<{ Params: { filename: string }; Querystring: { m_tok?: string } }>(
+  fastify.get<{ Params: { filename: string }; Querystring: { m_tok?: string; download?: string } }>(
     '/files/:filename',
     async (
-      req: FastifyRequest<{ Params: { filename: string }; Querystring: { m_tok?: string } }>,
+      req: FastifyRequest<{ Params: { filename: string }; Querystring: { m_tok?: string; download?: string } }>,
       reply: FastifyReply
     ) => {
       try {
@@ -808,10 +923,13 @@ export default async function mediaRouter(
         const totalSize = stat.size;
         const ext = path.extname(filename).toLowerCase();
         const contentType = EXT_MIME[ext] || 'application/octet-stream';
+        const forceDownload = req.query?.download === '1' || req.query?.download === 'true';
+        const disposition =
+          forceDownload || !isInlinePreviewableMime(contentType) ? 'attachment' : 'inline';
         reply.header('Content-Type', contentType);
         reply.header(
           'Content-Disposition',
-          buildContentDisposition(filename, await resolveOriginalFileName(filename))
+          buildContentDisposition(filename, await resolveOriginalFileName(filename), disposition)
         );
         reply.header('X-Content-Type-Options', 'nosniff');
         reply.header('Accept-Ranges', 'bytes');

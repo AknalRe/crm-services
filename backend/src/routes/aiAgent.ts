@@ -23,6 +23,7 @@ import {
   mergeAiAgentConfig,
   resolveSlotApiKey,
   sanitizeConfigForClient,
+  saveAiAgentConfig,
   verifySingleAiSlot,
 } from '../services/ai.service';
 import {
@@ -40,7 +41,7 @@ import {
   sanitizeMcpEndpointUrl,
   serializeMcpServerForClient,
 } from '../services/mcpClient.service';
-import { requirePermission } from './auth';
+import { getRequestCompanyId, requirePermission } from './auth';
 
 export { DEFAULT_AI_CONFIG as DEFAULT_CONFIG, getAiAgentConfig, generateAiAgentReply };
 
@@ -86,9 +87,10 @@ export default async function aiAgentRouter(fastify: FastifyInstance) {
     return reply.send({ success: true, data: AI_PROVIDER_CATALOG });
   });
 
-  fastify.get('/config', async (_req: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/config', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
-      const cfg = await getAiAgentConfig();
+      const companyId = getRequestCompanyId(req);
+      const cfg = await getAiAgentConfig(companyId);
       return reply.send({
         success: true,
         data: sanitizeConfigForClient(cfg),
@@ -100,7 +102,8 @@ export default async function aiAgentRouter(fastify: FastifyInstance) {
 
   fastify.put<{ Body: Partial<AiAgentConfig> }>('/config', async (req, reply) => {
     try {
-      const prev = await getAiAgentConfig();
+      const companyId = getRequestCompanyId(req);
+      const prev = await getAiAgentConfig(companyId);
       let next: AiAgentConfig;
       try {
         next = mergeAiAgentConfig(prev, req.body || {});
@@ -111,14 +114,7 @@ export default async function aiAgentRouter(fastify: FastifyInstance) {
         });
       }
 
-      const payload = JSON.stringify(next);
-      await db
-        .insert(systemSettings)
-        .values({ key: 'ai_agent_config', value: payload })
-        .onConflictDoUpdate({
-          target: systemSettings.key,
-          set: { value: payload, updatedAt: new Date() },
-        });
+      await saveAiAgentConfig(next, companyId);
 
       return reply.send({
         success: true,

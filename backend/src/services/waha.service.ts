@@ -1118,6 +1118,8 @@ export class WahaService {
       baseURL: cleanBaseUrl,
       headers,
       timeout: timeoutMs,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
     });
   }
 
@@ -3201,7 +3203,11 @@ export class WahaService {
         ...(file.replyTo ? { reply_to: file.replyTo } : {}),
         ...(file.mentions && file.mentions.length > 0 ? { mentions: file.mentions } : {}),
       };
-      const mediaConfig = { timeout: 60000 };
+      const mediaConfig = {
+        timeout: 90000,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      };
 
       if (isImage) {
         const res = await client.post('/api/sendImage', payload, mediaConfig);

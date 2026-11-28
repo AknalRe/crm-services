@@ -23,6 +23,7 @@ import {
 import { wahaService } from './waha.service';
 import { OmnichannelType, sendOutboundChannelMessage } from './channel.service';
 import { liveEvents } from './events.service';
+import { licenseService } from './license.service';
 import { getActiveCompanyId, listActiveCompanyIds, runWithCompany, upsertCompanySetting } from './tenantContext';
 import { sendCsatCtaForConversation, recordConversationActivity } from './csatSender.service';
 
@@ -82,6 +83,7 @@ async function sendAutoReplyMessage(params: {
   text: string;
   replyToMessageId?: string | null;
   outboundMedia?: AiQueuedOutboundMedia[];
+  replySource?: 'AI_BOT' | 'AUTO_REPLY' | 'WELCOME' | 'OFF_HOURS';
 }): Promise<void> {
   const {
     conversationId,
@@ -94,7 +96,21 @@ async function sendAutoReplyMessage(params: {
     text,
     replyToMessageId,
     outboundMedia,
+    replySource = 'AUTO_REPLY',
   } = params;
+  const senderLabel = replySource === 'AI_BOT' ? 'Agent AI' : 'Auto-Reply';
+  const sentViaMeta =
+    replySource === 'AI_BOT'
+      ? { sentVia: 'AI_BOT', sentViaLabel: 'Bot AI' }
+      : {
+          sentVia: replySource,
+          sentViaLabel:
+            replySource === 'WELCOME'
+              ? 'Pesan Sambutan'
+              : replySource === 'OFF_HOURS'
+                ? 'Luar Jam Kerja'
+                : 'Balasan Otomatis',
+        };
   const now = new Date();
   let msgId: string | null = `auto_${crypto.randomUUID()}`;
   let sendSucceeded = true;
@@ -159,10 +175,10 @@ async function sendAutoReplyMessage(params: {
     channel,
     externalMessageId: channel === 'WHATSAPP' ? null : msgId,
     wahaSession: channel === 'WHATSAPP' ? effectiveSession : null,
-    senderName: 'Agent AI',
+    senderName: senderLabel,
     body: text,
     replyToMessageId: resolvedReplyToId,
-    metadataJson: JSON.stringify({ sentVia: 'AI_BOT', sentViaLabel: 'Bot AI' }),
+    metadataJson: JSON.stringify(sentViaMeta),
     wahaMessageId: channel === 'WHATSAPP' ? msgId : null,
     status: sendSucceeded ? 'SENT' : 'FAILED',
     ackStatus: sendSucceeded ? 1 : -1,
@@ -421,6 +437,7 @@ export async function handleInboundAutomation(params: {
           await sendAutoReplyMessage({
             ...replyBase,
             text: formatPersonalization(rule.replyText, contact),
+            replySource: 'AUTO_REPLY',
           });
           return;
         }
@@ -432,14 +449,16 @@ export async function handleInboundAutomation(params: {
       await sendAutoReplyMessage({
         ...replyBase,
         text: formatPersonalization(settings.welcome_message.trim(), contact),
+        replySource: 'WELCOME',
       });
       return;
     }
 
-    // 4. AI Agent DM Auto-Reply (if enabled + autoReplyDm)
+    // 4. AI Agent DM Auto-Reply (strictly requires license feature + enabled + autoReplyDm)
     if (inboundBody.trim()) {
       try {
-        const aiCfg = await getAiAgentConfig();
+        const lic = await licenseService.getLicense(resolvedCompanyId).catch(() => null);
+        const aiCfg = await getAiAgentConfig(resolvedCompanyId);
         const [convState] = await db
           .select({
             escalatedAt: conversations.escalatedAt,
@@ -451,6 +470,7 @@ export async function handleInboundAutomation(params: {
           .limit(1);
         const isHandledByHuman = Boolean(convState?.escalatedAt || convState?.assignedAgentId);
         if (
+          (!lic || lic.features.aiAgent !== false) &&
           aiCfg.enabled &&
           aiCfg.autoReplyDm &&
           !isHandledByHuman &&
@@ -582,12 +602,18 @@ export async function handleInboundAutomation(params: {
               }
             }
             try {
+              // Re-verify AI is still enabled right before sending (prevents late in-flight replies after toggle-off)
+              const latestAiCfg = await getAiAgentConfig(resolvedCompanyId);
+              if (!latestAiCfg.enabled || !latestAiCfg.autoReplyDm) {
+                return;
+              }
               // 1. Kirim pesan balasan ke pelanggan terlebih dahulu
               await sendAutoReplyMessage({
                 ...replyBase,
                 text: aiResult.reply,
                 replyToMessageId: aiResult.replyToMessageId || null,
                 outboundMedia: aiResult.outboundMedia,
+                replySource: 'AI_BOT',
               });
 
               // 2. Setelah pesan terkirim, baru buat catatan internal dan linimasa aktivitas perpindahan tugas
@@ -639,6 +665,7 @@ export async function handleInboundAutomation(params: {
         await sendAutoReplyMessage({
           ...replyBase,
           text: formatPersonalization(settings.offhours_message.trim(), contact),
+          replySource: 'OFF_HOURS',
         });
       }
     }

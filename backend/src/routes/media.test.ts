@@ -160,3 +160,33 @@ test('buildContentDisposition names the download after the sender file, not the 
   assert.ok(!header.includes('/'), header);
   assert.match(header, /filename\*=UTF-8''Laporan%20%22Q3%22%20%C3%A9_\.\._x\.docx/);
 });
+
+test('inferMimeFromFilename and archive saving support rar, 7z, tar, gz, and custom extensions', async () => {
+  const { inferMimeFromFilename, resolveUploadsDir, saveMediaBufferFile } = await import('./media');
+  assert.equal(inferMimeFromFilename('arsip.rar'), 'application/vnd.rar');
+  assert.equal(inferMimeFromFilename('backup.7z'), 'application/x-7z-compressed');
+  assert.equal(inferMimeFromFilename('dump.tar'), 'application/x-tar');
+  assert.equal(inferMimeFromFilename('logs.gz'), 'application/gzip');
+  assert.equal(inferMimeFromFilename('app.apk'), 'application/vnd.android.package-archive');
+
+  const savedRar = await saveMediaBufferFile({
+    buffer: Buffer.from('Rar!demo'),
+    mimeType: 'application/octet-stream',
+    fileName: 'Dokumen Klien.rar',
+  });
+  assert.ok(savedRar.filename.endsWith('.rar'), savedRar.filename);
+  assert.equal(savedRar.mimeType, 'application/vnd.rar');
+
+  const savedCdr = await saveMediaBufferFile({
+    buffer: Buffer.from('CDRdemo'),
+    mimeType: 'application/octet-stream',
+    fileName: 'desain-banner.cdr',
+  });
+  assert.ok(savedCdr.filename.endsWith('.cdr'), savedCdr.filename);
+
+  const uploadsDir = resolveUploadsDir();
+  for (const name of [savedRar.filename, savedCdr.filename]) {
+    await fs.promises.unlink(path.join(uploadsDir, name)).catch(() => {});
+    await fs.promises.unlink(path.join(uploadsDir, '.meta', `${name}.json`)).catch(() => {});
+  }
+});
