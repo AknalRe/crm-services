@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveConversationSyncBumpUpdate } from './chatSync.service';
+import { computeNextWahaSyncDelayMs, resolveConversationSyncBumpUpdate } from './chatSync.service';
 
 test('resolveConversationSyncBumpUpdate bumps conversation when newer message is synced', () => {
   const prevAt = new Date('2026-11-19T08:00:00.000Z');
@@ -74,4 +74,46 @@ test('resolveConversationSyncBumpUpdate does not bump when nothing was inserted'
   });
 
   assert.equal(res, null);
+});
+
+test('computeNextWahaSyncDelayMs slows polling when webhooks are healthy and backs off on slow WAHA responses', () => {
+  const healthy = computeNextWahaSyncDelayMs({
+    hasRecentWebhook: true,
+    durationMs: 250,
+    failed: false,
+    consecutiveSlowOrError: 2,
+  });
+  assert.deepEqual(healthy, { delayMs: 45_000, nextSlowStreak: 0 });
+
+  const fallback = computeNextWahaSyncDelayMs({
+    hasRecentWebhook: false,
+    durationMs: 180,
+    failed: false,
+    consecutiveSlowOrError: 0,
+  });
+  assert.deepEqual(fallback, { delayMs: 25_000, nextSlowStreak: 0 });
+
+  const slow1 = computeNextWahaSyncDelayMs({
+    hasRecentWebhook: true,
+    durationMs: 5_200,
+    failed: false,
+    consecutiveSlowOrError: 0,
+  });
+  assert.deepEqual(slow1, { delayMs: 60_000, nextSlowStreak: 1 });
+
+  const slow2 = computeNextWahaSyncDelayMs({
+    hasRecentWebhook: true,
+    durationMs: 200,
+    failed: true,
+    consecutiveSlowOrError: 1,
+  });
+  assert.deepEqual(slow2, { delayMs: 120_000, nextSlowStreak: 2 });
+
+  const capped = computeNextWahaSyncDelayMs({
+    hasRecentWebhook: false,
+    durationMs: 14_000,
+    failed: true,
+    consecutiveSlowOrError: 4,
+  });
+  assert.deepEqual(capped, { delayMs: 180_000, nextSlowStreak: 4 });
 });

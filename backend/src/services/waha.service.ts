@@ -149,6 +149,29 @@ export function resolveWahaMediaTargetUrl(
   }
 }
 
+export function isEphemeralTunnelWebhookUrl(rawUrl?: string | null): boolean {
+  const trimmed = String(rawUrl || '').trim();
+  if (!trimmed) return false;
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase();
+    return host.endsWith('.trycloudflare.com');
+  } catch {
+    return false;
+  }
+}
+
+export const REQUIRED_WAHA_WEBHOOK_EVENTS = [
+  'message.any',
+  'message.ack',
+  'message.reaction',
+  'message.revoked',
+  'message.edited',
+  'session.status',
+  'presence.update',
+  'poll.vote',
+  'poll.vote.failed',
+] as const;
+
 export function isPrivateOrInternalUrl(rawUrl?: string | null): boolean {
   const trimmed = String(rawUrl || '').trim();
   if (!trimmed) return true;
@@ -783,6 +806,7 @@ export interface WahaSessionInfo {
 export class WahaService {
   private static instance: WahaService;
   private webhookSyncAt = new Map<string, number>();
+  private webhookSyncInFlight = new Set<string>();
   private presenceSubscribeAt = new Map<string, number>();
   private lidPhoneCache = new Map<string, string>();
   private lidNameCache = new Map<string, string>();
@@ -792,6 +816,7 @@ export class WahaService {
   >();
   private readonly EXTERNAL_ENGINE_CACHE_MS = 60_000;
   private lastWebhookEventByCompany = new Map<string, WahaWebhookTelemetry>();
+  private lastRealWebhookAtByCompany = new Map<string, number>();
   private webhookEventLogByCompany = new Map<string, WahaWebhookTelemetry[]>();
   private detectedPublicUrlByCompany = new Map<string, string>();
   private registeredSessionsCache = new Map<string, { sessions: Set<string>; checkedAt: number }>();
@@ -822,9 +847,18 @@ export class WahaService {
       ...(compactPayload !== undefined ? { payload: compactPayload } : {}),
     };
     this.lastWebhookEventByCompany.set(cid, normalizedEntry);
+    if (entry.event !== 'chat.sync') {
+      const parsedMs = Date.parse(entry.receivedAt);
+      this.lastRealWebhookAtByCompany.set(cid, Number.isFinite(parsedMs) ? parsedMs : Date.now());
+    }
     const prev = this.webhookEventLogByCompany.get(cid) || [];
     const next = [normalizedEntry, ...prev].slice(0, 120);
     this.webhookEventLogByCompany.set(cid, next);
+  }
+
+  public getLastRealWebhookAt(companyId?: string): number | null {
+    const cid = getActiveCompanyId(companyId);
+    return this.lastRealWebhookAtByCompany.get(cid) ?? null;
   }
 
   public getLastWebhookEvent(companyId?: string): WahaWebhookTelemetry | null {
@@ -1820,15 +1854,20 @@ export class WahaService {
       const sessionSummaries = ownedList.map((s) => ({ name: s.name, status: s.status }));
       const connectedSessions = sessionSummaries.filter((s) => s.status === 'WORKING').length;
 
-      // Ensure active/QR sessions have CRM's reachable webhook URL + inbound/ack events subscribed
+      // Ensure active/QR sessions have CRM's reachable webhook URL + inbound/ack events subscribed sequentially
       if (webhookReachableForExternal) {
-        for (const item of ownedList) {
-          if (item.status === 'WORKING' || item.status === 'SCAN_QR_CODE') {
-            void this.ensureSessionWebhook(client, item.name, item.raw, {
-              mode: currentConfig.mode,
-              targetUrl: resolvedWebhook.url,
-            });
-          }
+        const toSync = ownedList.filter(
+          (item) => item.status === 'WORKING' || item.status === 'SCAN_QR_CODE'
+        );
+        if (toSync.length > 0) {
+          void (async () => {
+            for (const item of toSync) {
+              await this.ensureSessionWebhook(client, item.name, item.raw, {
+                mode: currentConfig.mode,
+                targetUrl: resolvedWebhook.url,
+              }).catch(() => {});
+            }
+          })();
         }
       }
 
@@ -1883,18 +1922,7 @@ export class WahaService {
       return false;
     }
 
-    const requiredEvents = [
-      'message',
-      'message.any',
-      'message.ack',
-      'message.reaction',
-      'message.revoked',
-      'message.edited',
-      'session.status',
-      'presence.update',
-      'poll.vote',
-      'poll.vote.failed',
-    ];
+    const requiredEvents: string[] = [...REQUIRED_WAHA_WEBHOOK_EVENTS];
     let sessionData = existingSessionData;
     if (!sessionData) {
       try {
@@ -1908,37 +1936,46 @@ export class WahaService {
     const existingConfig = sessionData?.config && typeof sessionData.config === 'object' ? sessionData.config : {};
     const existingWebhooks: any[] = Array.isArray(existingConfig.webhooks) ? existingConfig.webhooks : [];
     const normTarget = targetUrl.replace(/\/+$/, '');
-    const hasValidWebhook = existingWebhooks.some((wh) => {
+    const crmWebhookEntries = existingWebhooks.filter(
+      (wh) => wh && typeof wh.url === 'string' && wh.url.includes('/api/waha/webhook')
+    );
+    const hasStaleTunnelWebhook = existingWebhooks.some((wh) => {
       if (!wh || typeof wh.url !== 'string') return false;
-      if (wh.url.trim().replace(/\/+$/, '') !== normTarget) return false;
-      const evs: string[] = Array.isArray(wh.events) ? wh.events : [];
-      return (
-        evs.includes('*') ||
-        (evs.includes('message.any') &&
-          evs.includes('message.ack') &&
-          evs.includes('message.reaction') &&
-          evs.includes('message.revoked') &&
-          evs.includes('message.edited') &&
-          evs.includes('session.status') &&
-          evs.includes('presence.update') &&
-          evs.includes('poll.vote') &&
-          evs.includes('poll.vote.failed'))
-      );
+      const normWh = wh.url.trim().replace(/\/+$/, '');
+      return normWh !== normTarget && isEphemeralTunnelWebhookUrl(normWh);
     });
+    const hasValidWebhook =
+      !hasStaleTunnelWebhook &&
+      crmWebhookEntries.length === 1 &&
+      existingWebhooks.some((wh) => {
+        if (!wh || typeof wh.url !== 'string') return false;
+        if (wh.url.trim().replace(/\/+$/, '') !== normTarget) return false;
+        const evs: string[] = Array.isArray(wh.events) ? wh.events : [];
+        if (evs.includes('*')) return true;
+        const hasRedundantMessage = evs.includes('message') && evs.includes('message.any');
+        if (hasRedundantMessage) return false;
+        return requiredEvents.every((ev) => evs.includes(ev));
+      });
 
     if (hasValidWebhook) return true;
 
     const cid = getActiveCompanyId();
-    const syncCacheKey = `${cid}::${sessionName}`;
+    const syncCacheKey = `${cid}::${sessionName.toLowerCase()}`;
+    if (this.webhookSyncInFlight.has(syncCacheKey)) return false;
     if (!opts?.force) {
       const lastAttempt = this.webhookSyncAt.get(syncCacheKey) || 0;
-      if (Date.now() - lastAttempt < 30_000) return false;
+      if (Date.now() - lastAttempt < 10 * 60_000) return false;
     }
     this.webhookSyncAt.set(syncCacheKey, Date.now());
+    this.webhookSyncInFlight.add(syncCacheKey);
 
-    const preservedWebhooks = existingWebhooks.filter(
-      (wh) => wh && typeof wh.url === 'string' && !wh.url.includes('/api/waha/webhook')
-    );
+    const preservedWebhooks = existingWebhooks.filter((wh) => {
+      if (!wh || typeof wh.url !== 'string') return false;
+      const normWh = wh.url.trim().replace(/\/+$/, '');
+      if (normWh.includes('/api/waha/webhook')) return false;
+      if (normWh !== normTarget && isEphemeralTunnelWebhookUrl(normWh)) return false;
+      return true;
+    });
     const nextWebhooks = [
       ...preservedWebhooks,
       {
@@ -1955,7 +1992,7 @@ export class WahaService {
           webhooks: nextWebhooks,
         },
       });
-      // WAHA GOWS only activates newly subscribed webhook events (message.any, presence.update, message.ack) after restart
+      // WAHA GOWS only activates updated webhook plugin config (added events or removed dead URLs) after restart
       if (typeof client.post === 'function' && String(sessionData?.status || '').toUpperCase() === 'WORKING') {
         await Promise.resolve(
           client.post(`/api/sessions/${encodeURIComponent(sessionName)}/restart`)
@@ -1969,6 +2006,8 @@ export class WahaService {
         err?.response?.data || err?.message
       );
       return false;
+    } finally {
+      this.webhookSyncInFlight.delete(syncCacheKey);
     }
   }
 
@@ -2027,18 +2066,7 @@ export class WahaService {
       ? [
           {
             url: resolvedWebhook.url,
-            events: [
-              'message',
-              'message.any',
-              'message.ack',
-              'message.reaction',
-              'message.revoked',
-              'message.edited',
-              'session.status',
-              'presence.update',
-              'poll.vote',
-              'poll.vote.failed',
-            ],
+            events: [...REQUIRED_WAHA_WEBHOOK_EVENTS],
           },
         ]
       : [];
@@ -2185,26 +2213,38 @@ export class WahaService {
   /**
    * List sessions belonging to this CRM instance (scoped in shared internal WAHA mode)
    */
-  public async listSessions(requestBaseUrl?: string | null): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
+  public async listSessions(
+    requestBaseUrl?: string | null,
+    opts?: { skipWebhookSync?: boolean }
+  ): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
     const conf = await this.getConfig();
     const { client, session, ownerPrefix } = await this.getClient();
-    const resolvedWebhook = await this.resolveEffectiveWebhookUrl(conf, requestBaseUrl);
-    const webhookReachableForExternal = conf.mode !== 'EXTERNAL' || resolvedWebhook.isPublic;
+    const resolvedWebhook = opts?.skipWebhookSync
+      ? { url: '', isPublic: false }
+      : await this.resolveEffectiveWebhookUrl(conf, requestBaseUrl);
+    const webhookReachableForExternal =
+      !opts?.skipWebhookSync && (conf.mode !== 'EXTERNAL' || resolvedWebhook.isPublic);
     try {
       const rawList = await this.fetchRawSessionList(client);
       if (webhookReachableForExternal) {
-        for (const item of rawList) {
+        const toSync = rawList.filter((item: any) => {
           const itemName = String(item?.name || 'default');
           const itemStatus = String(item?.status || 'UNKNOWN');
-          if (
+          return (
             this.isOwnedSession(itemName, ownerPrefix) &&
             (itemStatus === 'WORKING' || itemStatus === 'SCAN_QR_CODE')
-          ) {
-            void this.ensureSessionWebhook(client, itemName, item, {
-              mode: conf.mode,
-              targetUrl: resolvedWebhook.url,
-            });
-          }
+          );
+        });
+        if (toSync.length > 0) {
+          void (async () => {
+            for (const item of toSync) {
+              const itemName = String(item?.name || 'default');
+              await this.ensureSessionWebhook(client, itemName, item, {
+                mode: conf.mode,
+                targetUrl: resolvedWebhook.url,
+              }).catch(() => {});
+            }
+          })();
         }
       }
       const sessions: WahaSessionInfo[] = rawList
@@ -3701,37 +3741,43 @@ export class WahaService {
   }
 
   /**
-   * Fetch recent chat messages from WAHA to backfill any messages missed by webhooks (e.g. external device sends)
+   * Fetch recent chat messages from WAHA to backfill any messages missed by webhooks (e.g. external device sends).
+   * Defaults to downloadMedia=false so routine inbox sync never stalls WAHA MediaManager with bulk downloads.
    */
   public async fetchChatMessages(
     jid: string,
     limit = 25,
     sessionName?: string,
-    offset = 0
+    offset = 0,
+    opts?: { downloadMedia?: boolean }
   ): Promise<any[]> {
     const cleanJid = String(jid || '').trim();
     if (!cleanJid) return [];
+    const wantMedia = Boolean(opts?.downloadMedia);
     try {
       const { client, targetSession } = await this.resolveReadableSession(sessionName);
-      try {
-        const res = await client.get(
-          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
-          {
-            params: { limit, offset, downloadMedia: true },
-            timeout: 15000,
-          }
-        );
-        return Array.isArray(res.data) ? res.data : [];
-      } catch {
-        const res = await client.get(
-          `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
-          {
-            params: { limit, offset, downloadMedia: false },
-            timeout: 8000,
-          }
-        );
-        return Array.isArray(res.data) ? res.data : [];
+      if (wantMedia) {
+        try {
+          const res = await client.get(
+            `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
+            {
+              params: { limit, offset, downloadMedia: true },
+              timeout: 15000,
+            }
+          );
+          return Array.isArray(res.data) ? res.data : [];
+        } catch {
+          // Fall through to lightweight metadata-only fetch
+        }
       }
+      const res = await client.get(
+        `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
+        {
+          params: { limit, offset, downloadMedia: false },
+          timeout: 8000,
+        }
+      );
+      return Array.isArray(res.data) ? res.data : [];
     } catch {
       return [];
     }
@@ -3769,15 +3815,16 @@ export class WahaService {
             return res.data;
           }
         } catch {
-          // Try next candidate or batch scan below
+          // Try next candidate or metadata scan below
         }
       }
 
+      // Scan metadata first without bulk-downloading media across 60 messages
       const listRes = await client.get(
         `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages`,
         {
-          params: { limit: 60, downloadMedia: true },
-          timeout: 25000,
+          params: { limit: 60, downloadMedia: false },
+          timeout: 12000,
         }
       );
       if (Array.isArray(listRes.data)) {
@@ -3799,6 +3846,23 @@ export class WahaService {
             return tail === cleanMsgId || tail === shortStanzaId;
           });
           if (matched) {
+            for (const resolvedId of Array.from(new Set(rawIds))) {
+              if (resolvedId === cleanMsgId || resolvedId === shortStanzaId) continue;
+              try {
+                const singleRes = await client.get(
+                  `/api/${encodeURIComponent(targetSession)}/chats/${encodeURIComponent(cleanJid)}/messages/${encodeURIComponent(resolvedId)}`,
+                  {
+                    params: { downloadMedia: true },
+                    timeout: 20000,
+                  }
+                );
+                if (singleRes.data && typeof singleRes.data === 'object') {
+                  return singleRes.data;
+                }
+              } catch {
+                // fall back to item metadata
+              }
+            }
             return item;
           }
         }

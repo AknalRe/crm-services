@@ -2833,3 +2833,138 @@ test('getWebhookEventLog strictly isolates per company and filters by registered
   wahaService.clearWebhookEventLog(companyA);
   wahaService.clearWebhookEventLog(companyB);
 });
+
+test('syncSessionWebhooks removes redundant message event, strips dead trycloudflare tunnels, preserves third-party webhooks, and stays idempotent', async (t) => {
+  const { isEphemeralTunnelWebhookUrl, REQUIRED_WAHA_WEBHOOK_EVENTS } =
+    require('./waha.service') as typeof import('./waha.service');
+
+  assert.equal(
+    isEphemeralTunnelWebhookUrl('https://lover-decades-thumbs-chosen.trycloudflare.com/api/whatsapp/webhook'),
+    true
+  );
+  assert.equal(
+    isEphemeralTunnelWebhookUrl('https://apisigud.claricebeauty.co.id/api/pos/crm/waha-webhook'),
+    false
+  );
+  assert.equal(REQUIRED_WAHA_WEBHOOK_EVENTS.includes('message' as any), false);
+  assert.equal(REQUIRED_WAHA_WEBHOOK_EVENTS.includes('message.any'), true);
+
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha-gows.example.com',
+    apiKey: 'test-key',
+    session: 'WA_TEST',
+    customWebhookUrl: 'https://crm.reneo.my.id/api/waha/webhook',
+  });
+
+  const origCreate = axios.create;
+  let currentWebhooks: any[] = [
+    {
+      url: 'https://apisigud.claricebeauty.co.id/api/pos/crm/waha-webhook',
+      events: ['message', 'session.status'],
+    },
+    {
+      url: 'https://lover-decades-thumbs-chosen.trycloudflare.com/api/whatsapp/webhook',
+      events: ['message'],
+    },
+    {
+      url: 'https://crm.reneo.my.id/api/waha/webhook',
+      events: ['message', 'message.any', 'message.ack', 'session.status'],
+    },
+  ];
+  let putCalls = 0;
+  let restartCalls = 0;
+
+  (axios as any).create = () => ({
+    get: async (url: string) => {
+      if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      if (url.startsWith('/api/sessions')) {
+        return {
+          data: [
+            {
+              name: 'WA_TEST',
+              status: 'WORKING',
+              config: { webhooks: currentWebhooks },
+            },
+          ],
+        };
+      }
+      return { data: {} };
+    },
+    put: async (_url: string, body: any) => {
+      putCalls += 1;
+      currentWebhooks = body?.config?.webhooks || [];
+      return { data: {} };
+    },
+    post: async (url: string) => {
+      if (url.endsWith('/restart')) restartCalls += 1;
+      return { data: {} };
+    },
+  });
+  t.after(() => {
+    (axios as any).create = origCreate;
+  });
+
+  // First sync cleans duplicate 'message' event and dead trycloudflare tunnel while keeping apisigud intact
+  const first = await wahaService.syncSessionWebhooks('https://crm.reneo.my.id');
+  assert.deepEqual(first.synced, ['WA_TEST']);
+  assert.equal(putCalls, 1);
+  assert.equal(restartCalls, 1);
+  assert.deepEqual(
+    currentWebhooks.map((w) => w.url),
+    [
+      'https://apisigud.claricebeauty.co.id/api/pos/crm/waha-webhook',
+      'https://crm.reneo.my.id/api/waha/webhook',
+    ]
+  );
+  const crmEntry = currentWebhooks.find((w) => w.url === 'https://crm.reneo.my.id/api/waha/webhook');
+  assert.ok(crmEntry);
+  assert.equal(crmEntry.events.includes('message'), false);
+  assert.equal(crmEntry.events.includes('message.any'), true);
+
+  // Second sync is a no-op (no PUT, no restart)
+  const second = await wahaService.syncSessionWebhooks('https://crm.reneo.my.id');
+  assert.deepEqual(second.synced, ['WA_TEST']);
+  assert.equal(putCalls, 1);
+  assert.equal(restartCalls, 1);
+
+  // listSessions with skipWebhookSync does not mutate webhooks even if config drifts
+  currentWebhooks = [{ url: 'https://crm.reneo.my.id/api/waha/webhook', events: ['message'] }];
+  await wahaService.listSessions('https://crm.reneo.my.id', { skipWebhookSync: true });
+  assert.equal(putCalls, 1);
+  assert.equal(restartCalls, 1);
+});
+
+test('fetchChatMessages defaults to downloadMedia=false unless explicitly opted in', async (t) => {
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha-gows.example.com',
+    apiKey: 'test-key',
+    session: 'WA_TEST',
+  });
+
+  const origCreate = axios.create;
+  const capturedParams: any[] = [];
+  (axios as any).create = () => ({
+    get: async (url: string, opts?: any) => {
+      if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      if (url.startsWith('/api/sessions')) {
+        return { data: [{ name: 'WA_TEST', status: 'WORKING' }] };
+      }
+      if (url.includes('/messages')) {
+        capturedParams.push(opts?.params);
+        return { data: [{ id: 'msg1', body: 'Halo' }] };
+      }
+      return { data: {} };
+    },
+  });
+  t.after(() => {
+    (axios as any).create = origCreate;
+  });
+
+  await wahaService.fetchChatMessages('6281234567890@c.us', 15, 'WA_TEST', 0);
+  assert.equal(capturedParams[0]?.downloadMedia, false);
+
+  await wahaService.fetchChatMessages('6281234567890@c.us', 15, 'WA_TEST', 0, { downloadMedia: true });
+  assert.equal(capturedParams[1]?.downloadMedia, true);
+});

@@ -24,8 +24,32 @@ import {
 } from './phone.utils';
 import { listActiveCompanyIds, runWithCompany } from './tenantContext';
 
-const CHAT_SYNC_COOLDOWN_MS = 15_000;
+const CHAT_SYNC_COOLDOWN_MS = 30_000;
+const BG_SYNC_WEBHOOK_HEALTHY_WINDOW_MS = 5 * 60_000;
+const BG_SYNC_INTERVAL_HEALTHY_MS = 45_000;
+const BG_SYNC_INTERVAL_FALLBACK_MS = 25_000;
+const BG_SYNC_SLOW_THRESHOLD_MS = 3_000;
+const BG_SYNC_MAX_BACKOFF_MS = 180_000;
+const MAX_BG_CHATS_PER_SESSION = 3;
 const lastChatSyncAt = new Map<string, number>();
+
+export function computeNextWahaSyncDelayMs(params: {
+  hasRecentWebhook: boolean;
+  durationMs: number;
+  failed: boolean;
+  consecutiveSlowOrError: number;
+}): { delayMs: number; nextSlowStreak: number } {
+  const isSlowOrFailed = params.failed || params.durationMs >= BG_SYNC_SLOW_THRESHOLD_MS;
+  if (isSlowOrFailed) {
+    const nextSlowStreak = Math.min(params.consecutiveSlowOrError + 1, 4);
+    const delayMs = Math.min(60_000 * Math.pow(2, nextSlowStreak - 1), BG_SYNC_MAX_BACKOFF_MS);
+    return { delayMs, nextSlowStreak };
+  }
+  return {
+    delayMs: params.hasRecentWebhook ? BG_SYNC_INTERVAL_HEALTHY_MS : BG_SYNC_INTERVAL_FALLBACK_MS,
+    nextSlowStreak: 0,
+  };
+}
 
 function parseWahaTimestamp(raw: unknown): Date {
   const num = Number(raw);
@@ -91,16 +115,16 @@ async function resolveSyncedMediaDetails(
   const mediaFallbackLabel = mediaMeta.isSticker
     ? '[Stiker]'
     : mediaMeta.mediaType === 'image'
-    ? '[Gambar]'
-    : mediaMeta.mediaType === 'video'
-    ? '[Video]'
-    : mediaMeta.mediaType === 'audio'
-    ? '[Audio]'
-    : mediaMeta.mediaType === 'document'
-    ? mediaMeta.mediaName
-      ? `[Dokumen: ${mediaMeta.mediaName}]`
-      : '[Dokumen]'
-    : '[Lampiran Media]';
+      ? '[Gambar]'
+      : mediaMeta.mediaType === 'video'
+        ? '[Video]'
+        : mediaMeta.mediaType === 'audio'
+          ? '[Audio]'
+          : mediaMeta.mediaType === 'document'
+            ? mediaMeta.mediaName
+              ? `[Dokumen: ${mediaMeta.mediaName}]`
+              : '[Dokumen]'
+            : '[Lampiran Media]';
 
   let mediaUrl: string | null = mediaMeta.rawMediaUrl;
   let mediaName: string | null = mediaMeta.mediaName;
@@ -159,7 +183,7 @@ async function resolveSyncedMediaDetails(
 export async function syncRecentWhatsAppChatMessages(
   conv: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
-  opts?: { force?: boolean; limit?: number; offset?: number }
+  opts?: { force?: boolean; limit?: number; offset?: number; downloadMedia?: boolean }
 ): Promise<{ inserted: number; acksUpdated: number; fetchedCount: number }> {
   if ((conv.channel || 'WHATSAPP').toUpperCase() !== 'WHATSAPP') {
     return { inserted: 0, acksUpdated: 0, fetchedCount: 0 };
@@ -186,7 +210,8 @@ export async function syncRecentWhatsAppChatMessages(
     targetJid,
     limit,
     conv.wahaSession || undefined,
-    offset
+    offset,
+    { downloadMedia: Boolean(opts?.downloadMedia) }
   );
   if (rawMessages.length === 0) return { inserted: 0, acksUpdated: 0, fetchedCount: 0 };
 
@@ -279,8 +304,8 @@ export async function syncRecentWhatsAppChatMessages(
         quotedRow?.direction === 'OUTBOUND'
           ? quotedRow.senderName || 'Tim CS'
           : quotedRow?.senderName ||
-            q.quotedPushName ||
-            (q.quotedFromMe ? 'Tim CS' : conv.isGroup ? 'Anggota Grup' : contact.namaLengkap || 'Pelanggan');
+          q.quotedPushName ||
+          (q.quotedFromMe ? 'Tim CS' : conv.isGroup ? 'Anggota Grup' : contact.namaLengkap || 'Pelanggan');
       return { replyToMessageId, replyToBody, replyToSender };
     };
 
@@ -375,7 +400,7 @@ export async function syncRecentWhatsAppChatMessages(
           .update(chatMessages)
           .set(updateFields)
           .where(eq(chatMessages.id, matchedExisting.id))
-          .catch(() => {});
+          .catch(() => { });
         acksUpdated++;
       }
       continue;
@@ -422,7 +447,7 @@ export async function syncRecentWhatsAppChatMessages(
           bodyMatch.ackStatus = ackValue;
         }
         if (Object.keys(patch).length > 0) {
-          await db.update(chatMessages).set(patch).where(eq(chatMessages.id, bodyMatch.id)).catch(() => {});
+          await db.update(chatMessages).set(patch).where(eq(chatMessages.id, bodyMatch.id)).catch(() => { });
           acksUpdated++;
         }
         continue;
@@ -441,8 +466,8 @@ export async function syncRecentWhatsAppChatMessages(
       ? effectiveAck >= 3
         ? 'READ'
         : effectiveAck === 2
-        ? 'DELIVERED'
-        : 'SENT'
+          ? 'DELIVERED'
+          : 'SENT'
       : 'DELIVERED';
 
     const qFields = resolveQuoteFields(m);
@@ -476,7 +501,7 @@ export async function syncRecentWhatsAppChatMessages(
         createdAt: msgDate,
       })
       .onConflictDoNothing()
-      .catch(() => {});
+      .catch(() => { });
 
     for (const candidate of [...exactIds, ...stanzaIds]) {
       byMsgId.set(candidate, {
@@ -523,7 +548,7 @@ export async function syncRecentWhatsAppChatMessages(
       .update(conversations)
       .set(bumpUpdate)
       .where(eq(conversations.id, conv.id))
-      .catch(() => {});
+      .catch(() => { });
   }
 
   if (inserted > 0 || acksUpdated > 0) {
@@ -535,12 +560,13 @@ export async function syncRecentWhatsAppChatMessages(
 
 let wahaBgSyncTimer: NodeJS.Timeout | null = null;
 let wahaBgSyncRunning = false;
+let wahaBgSlowStreak = 0;
 
 export async function syncCompanyRecentWhatsAppChats(companyId: string): Promise<number> {
   let totalInserted = 0;
   let sessions: Array<{ name: string; status: string }> = [];
   try {
-    const listed = await wahaService.listSessions();
+    const listed = await wahaService.listSessions(undefined, { skipWebhookSync: true });
     sessions = listed.sessions || [];
   } catch {
     return 0;
@@ -549,10 +575,12 @@ export async function syncCompanyRecentWhatsAppChats(companyId: string): Promise
   if (workingSessions.length === 0) return 0;
 
   for (const sess of workingSessions) {
-    const recentChats = await wahaService.fetchRecentChats(sess.name, 12);
+    const recentChats = await wahaService.fetchRecentChats(sess.name, 8);
     if (recentChats.length === 0) continue;
 
+    let syncedChatsForSession = 0;
     for (const chat of recentChats) {
+      if (syncedChatsForSession >= MAX_BG_CHATS_PER_SESSION) break;
       if (!chat || typeof chat !== 'object') continue;
       const rawChatId = String(
         typeof chat.id === 'string'
@@ -590,13 +618,12 @@ export async function syncCompanyRecentWhatsAppChats(companyId: string): Promise
           const existingLast = await db
             .select({
               id: chatMessages.id,
-              mediaUrl: chatMessages.mediaUrl,
             })
             .from(chatMessages)
             .where(and(eq(chatMessages.companyId, companyId), or(...idMatchConditions)))
             .limit(1);
-          const lastHasMedia = Boolean(lastMsg.hasMedia || lastMsg.media?.url);
-          if (existingLast[0] && (!lastHasMedia || existingLast[0].mediaUrl)) {
+          // Skip chats whose latest message is already stored; missing media is recovered on-demand
+          if (existingLast[0]) {
             continue;
           }
         }
@@ -685,9 +712,11 @@ export async function syncCompanyRecentWhatsAppChats(companyId: string): Promise
       }
 
       if (matchedConv && matchedContact) {
+        syncedChatsForSession++;
         const res = await syncRecentWhatsAppChatMessages(matchedConv, matchedContact, {
-          force: true,
-          limit: 15,
+          force: false,
+          limit: 10,
+          downloadMedia: false,
         });
         if (res.inserted > 0) {
           totalInserted += res.inserted;
@@ -711,18 +740,50 @@ export async function syncCompanyRecentWhatsAppChats(companyId: string): Promise
 
 export function startWahaBackgroundSyncMonitor(): void {
   if (wahaBgSyncTimer) return;
-  wahaBgSyncTimer = setInterval(async () => {
-    if (wahaBgSyncRunning) return;
+
+  const scheduleNext = (delayMs: number) => {
+    wahaBgSyncTimer = setTimeout(runCycle, delayMs);
+    wahaBgSyncTimer.unref?.();
+  };
+
+  const runCycle = async () => {
+    wahaBgSyncTimer = null;
+    if (wahaBgSyncRunning) {
+      scheduleNext(BG_SYNC_INTERVAL_FALLBACK_MS);
+      return;
+    }
     wahaBgSyncRunning = true;
+    const startedAt = Date.now();
+    let failed = false;
+    let hasRecentWebhook = false;
     try {
       const companyIds = await listActiveCompanyIds();
+      const nowMs = Date.now();
       for (const cid of companyIds) {
-        await runWithCompany(cid, () => syncCompanyRecentWhatsAppChats(cid)).catch(() => 0);
+        const lastWhAt = wahaService.getLastRealWebhookAt(cid);
+        if (lastWhAt && nowMs - lastWhAt <= BG_SYNC_WEBHOOK_HEALTHY_WINDOW_MS) {
+          hasRecentWebhook = true;
+        }
+        await runWithCompany(cid, () => syncCompanyRecentWhatsAppChats(cid)).catch(() => {
+          failed = true;
+          return 0;
+        });
       }
     } catch {
-      // ignore transient poll errors
+      failed = true;
     } finally {
       wahaBgSyncRunning = false;
+      const durationMs = Date.now() - startedAt;
+      const next = computeNextWahaSyncDelayMs({
+        hasRecentWebhook,
+        durationMs,
+        failed,
+        consecutiveSlowOrError: wahaBgSlowStreak,
+      });
+      wahaBgSlowStreak = next.nextSlowStreak;
+      scheduleNext(next.delayMs);
     }
-  }, 12_000);
+  };
+
+  scheduleNext(BG_SYNC_INTERVAL_FALLBACK_MS);
 }
