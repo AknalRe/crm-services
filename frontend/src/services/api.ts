@@ -638,8 +638,19 @@ export const api = {
     const res = await client.get('/waha/qr', { params: session ? { session } : undefined });
     return res.data.data;
   },
-  getWahaSessions: async (): Promise<{ sessions: WahaSessionItem[]; activeSession: string }> => {
-    const res = await client.get('/waha/sessions');
+  getWahaSessions: async (opts?: {
+    includeIgnored?: boolean;
+  }): Promise<{ sessions: WahaSessionItem[]; activeSession: string; ignoredSessions?: string[] }> => {
+    const res = await client.get('/waha/sessions', {
+      params: opts?.includeIgnored ? { includeIgnored: '1' } : undefined,
+    });
+    return res.data.data;
+  },
+  setWahaSessionIgnored: async (
+    session: string,
+    ignored: boolean
+  ): Promise<{ session: string; ignored: boolean; ignoredSessions: string[]; webhookUpdated: boolean }> => {
+    const res = await client.post('/waha/sessions/ignore', { session, ignored });
     return res.data.data;
   },
   createWahaSession: async (name: string, setActive = true): Promise<any> => {

@@ -2968,3 +2968,93 @@ test('fetchChatMessages defaults to downloadMedia=false unless explicitly opted 
   await wahaService.fetchChatMessages('6281234567890@c.us', 15, 'WA_TEST', 0, { downloadMedia: true });
   assert.equal(capturedParams[1]?.downloadMedia, true);
 });
+
+test('ignored WAHA sessions are excluded from listSessions/outbound/webhook sync and detach only CRM webhook', async (t) => {
+  const { parseIgnoredWahaSessions, isSessionNameIgnored } =
+    require('./waha.service') as typeof import('./waha.service');
+
+  assert.deepEqual(parseIgnoredWahaSessions('["WA_TEST", "wa_test", "  other  "]'), ['WA_TEST', 'other']);
+  assert.equal(isSessionNameIgnored('wa_test', ['WA_TEST']), true);
+  assert.equal(isSessionNameIgnored('HRIS_HR', ['WA_TEST']), false);
+
+  stubGetConfig(t, {
+    mode: 'EXTERNAL',
+    baseUrl: 'https://waha-gows.example.com',
+    apiKey: 'test-key',
+    session: 'WA_TEST',
+    customWebhookUrl: 'https://crm.reneo.my.id/api/waha/webhook',
+    ignoredSessions: ['WA_TEST'],
+  });
+
+  const origCreate = axios.create;
+  const sessionWebhooks: Record<string, any[]> = {
+    HRIS_HR: [
+      { url: 'https://crm.reneo.my.id/api/waha/webhook', events: ['message', 'message.any'] },
+    ],
+    WA_TEST: [
+      { url: 'https://apisigud.claricebeauty.co.id/api/pos/crm/waha-webhook', events: ['message.any'] },
+      { url: 'https://crm.reneo.my.id/api/waha/webhook', events: ['message.any'] },
+    ],
+  };
+
+  (axios as any).create = () => ({
+    get: async (url: string) => {
+      if (url === '/api/version') return { data: { version: '2026.8.2', engine: 'GOWS', tier: 'PLUS' } };
+      if (url.startsWith('/api/sessions')) {
+        return {
+          data: [
+            { name: 'HRIS_HR', status: 'WORKING', config: { webhooks: sessionWebhooks.HRIS_HR } },
+            { name: 'WA_TEST', status: 'WORKING', config: { webhooks: sessionWebhooks.WA_TEST } },
+          ],
+        };
+      }
+      return { data: {} };
+    },
+    put: async (url: string, body: any) => {
+      const name = decodeURIComponent(url.split('/').pop() || '');
+      sessionWebhooks[name] = body?.config?.webhooks || [];
+      return { data: {} };
+    },
+    post: async () => ({ data: { id: 'true_628123@c.us_OK1' } }),
+  });
+  t.after(() => {
+    (axios as any).create = origCreate;
+  });
+
+  // Default listSessions hides ignored WA_TEST and picks HRIS_HR as activeSession
+  const operational = await wahaService.listSessions('https://crm.reneo.my.id', { skipWebhookSync: true });
+  assert.deepEqual(operational.sessions.map((s) => s.name), ['HRIS_HR']);
+  assert.equal(operational.activeSession, 'HRIS_HR');
+
+  // Admin listSessions with includeIgnored returns both with ignored flag
+  const adminList = await wahaService.listSessions('https://crm.reneo.my.id', {
+    skipWebhookSync: true,
+    includeIgnored: true,
+  });
+  assert.deepEqual(
+    adminList.sessions.map((s) => ({ name: s.name, ignored: s.ignored })),
+    [
+      { name: 'HRIS_HR', ignored: false },
+      { name: 'WA_TEST', ignored: true },
+    ]
+  );
+
+  // syncSessionWebhooks syncs HRIS_HR and detaches ONLY CRM webhook from ignored WA_TEST while keeping apisigud
+  const syncRes = await wahaService.syncSessionWebhooks('https://crm.reneo.my.id');
+  assert.deepEqual(syncRes.synced, ['HRIS_HR']);
+  assert.deepEqual(syncRes.detached, ['WA_TEST']);
+  assert.deepEqual(
+    sessionWebhooks.WA_TEST.map((w) => w.url),
+    ['https://apisigud.claricebeauty.co.id/api/pos/crm/waha-webhook']
+  );
+
+  // Explicit outbound send via ignored session is blocked
+  const blockedSend = await wahaService.sendTextMessage('081234567890', 'Tes', 'WA_TEST');
+  assert.equal(blockedSend.success, false);
+  assert.match(blockedSend.error || '', /diabaikan/i);
+
+  // Implicit outbound send skips ignored default WA_TEST and sends via HRIS_HR
+  const autoSend = await wahaService.sendTextMessage('081234567890', 'Tes');
+  assert.equal(autoSend.success, true);
+  assert.equal(autoSend.sessionUsed, 'HRIS_HR');
+});

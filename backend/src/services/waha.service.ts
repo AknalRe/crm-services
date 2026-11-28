@@ -149,6 +149,46 @@ export function resolveWahaMediaTargetUrl(
   }
 }
 
+export function parseIgnoredWahaSessions(raw: unknown): string[] {
+  let list: unknown[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        list = parsed;
+      } else {
+        list = trimmed.split(',');
+      }
+    } catch {
+      list = trimmed.split(',');
+    }
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of list) {
+    const clean = String(item || '').trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(clean);
+  }
+  return result;
+}
+
+export function isSessionNameIgnored(
+  sessionName: string | null | undefined,
+  ignoredSessions?: readonly string[] | null
+): boolean {
+  const clean = String(sessionName || '').trim().toLowerCase();
+  if (!clean || !ignoredSessions || ignoredSessions.length === 0) return false;
+  return ignoredSessions.some((s) => String(s || '').trim().toLowerCase() === clean);
+}
+
 export function isEphemeralTunnelWebhookUrl(rawUrl?: string | null): boolean {
   const trimmed = String(rawUrl || '').trim();
   if (!trimmed) return false;
@@ -783,6 +823,7 @@ export interface WahaConfig {
   hasApiKey?: boolean;
   customWebhookUrl?: string;
   detectedPublicUrl?: string;
+  ignoredSessions?: string[];
   externalConfig?: {
     baseUrl: string;
     apiKey?: string;
@@ -797,6 +838,7 @@ export interface WahaConfig {
 export interface WahaSessionInfo {
   name: string;
   status: string;
+  ignored?: boolean;
   me?: {
     id?: string;
     pushName?: string;
@@ -1373,6 +1415,7 @@ export class WahaService {
       const settings = await getCompanySettingMap(cid);
       const customWebhookUrl = (settings['waha_webhook_url'] || '').trim();
       const detectedPublicUrl = (settings['waha_detected_public_url'] || '').trim();
+      const ignoredSessions = parseIgnoredWahaSessions(settings['waha_ignored_sessions']);
       if (detectedPublicUrl && !isPrivateOrInternalUrl(detectedPublicUrl)) {
         this.detectedPublicUrlByCompany.set(cid, detectedPublicUrl);
       }
@@ -1409,6 +1452,7 @@ export class WahaService {
           hasApiKey: internalConfig.hasApiKey,
           customWebhookUrl,
           detectedPublicUrl: detectedPublicUrl || cachedDetected || undefined,
+          ignoredSessions,
           externalConfig,
           internalConfig,
         };
@@ -1423,6 +1467,7 @@ export class WahaService {
         hasApiKey: externalConfig.hasApiKey,
         customWebhookUrl,
         detectedPublicUrl: detectedPublicUrl || cachedDetected || undefined,
+        ignoredSessions,
         externalConfig,
         internalConfig,
       };
@@ -1434,6 +1479,7 @@ export class WahaService {
         mode: 'INTERNAL',
         internalLocked: true,
         hasApiKey: Boolean(config.waha.apiKey && config.waha.apiKey.trim() !== ''),
+        ignoredSessions: [],
       };
     }
   }
@@ -1832,14 +1878,19 @@ export class WahaService {
         }))
         .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
 
+      const ignoredSessions = currentConfig.ignoredSessions || [];
+      const activeOwnedList = ownedList.filter(
+        (s) => !isSessionNameIgnored(s.name, ignoredSessions)
+      );
+
       let resolvedActiveSession = session;
-      let sessionData: any = ownedList.find((s) => s.name === session)?.raw || null;
-      if (!sessionData && currentConfig.mode === 'EXTERNAL' && ownedList.length > 0) {
-        const preferred = ownedList.find((s) => s.status === 'WORKING') || ownedList[0];
+      let sessionData: any = activeOwnedList.find((s) => s.name === session)?.raw || null;
+      if (!sessionData && currentConfig.mode === 'EXTERNAL' && activeOwnedList.length > 0) {
+        const preferred = activeOwnedList.find((s) => s.status === 'WORKING') || activeOwnedList[0];
         sessionData = preferred.raw;
         resolvedActiveSession = preferred.name;
         currentConfig.session = preferred.name;
-      } else if (!sessionData && session) {
+      } else if (!sessionData && session && !isSessionNameIgnored(session, ignoredSessions)) {
         try {
           const res = await client.get(`/api/sessions/${encodeURIComponent(session)}`);
           sessionData = res.data;
@@ -1851,12 +1902,12 @@ export class WahaService {
       }
 
       const status = sessionData?.status || 'NOT_FOUND';
-      const sessionSummaries = ownedList.map((s) => ({ name: s.name, status: s.status }));
+      const sessionSummaries = activeOwnedList.map((s) => ({ name: s.name, status: s.status }));
       const connectedSessions = sessionSummaries.filter((s) => s.status === 'WORKING').length;
 
-      // Ensure active/QR sessions have CRM's reachable webhook URL + inbound/ack events subscribed sequentially
+      // Ensure active/QR non-ignored sessions have CRM's reachable webhook URL + inbound/ack events subscribed sequentially
       if (webhookReachableForExternal) {
-        const toSync = ownedList.filter(
+        const toSync = activeOwnedList.filter(
           (item) => item.status === 'WORKING' || item.status === 'SCAN_QR_CODE'
         );
         if (toSync.length > 0) {
@@ -2012,19 +2063,148 @@ export class WahaService {
   }
 
   /**
+   * Remove only CRM's own /api/waha/webhook entry from a WAHA session while keeping third-party webhooks intact.
+   */
+  private async detachSessionWebhook(
+    client: AxiosInstance,
+    sessionName: string,
+    existingSessionData?: any
+  ): Promise<boolean> {
+    let sessionData = existingSessionData;
+    if (!sessionData) {
+      try {
+        const res = await client.get(`/api/sessions/${encodeURIComponent(sessionName)}`);
+        sessionData = res.data;
+      } catch {
+        return false;
+      }
+    }
+
+    const existingConfig = sessionData?.config && typeof sessionData.config === 'object' ? sessionData.config : {};
+    const existingWebhooks: any[] = Array.isArray(existingConfig.webhooks) ? existingConfig.webhooks : [];
+    const remainingWebhooks = existingWebhooks.filter(
+      (wh) => !(wh && typeof wh.url === 'string' && wh.url.includes('/api/waha/webhook'))
+    );
+    if (remainingWebhooks.length === existingWebhooks.length) {
+      return false;
+    }
+
+    try {
+      await client.put(`/api/sessions/${encodeURIComponent(sessionName)}`, {
+        name: sessionName,
+        config: {
+          ...existingConfig,
+          webhooks: remainingWebhooks,
+        },
+      });
+      if (typeof client.post === 'function' && String(sessionData?.status || '').toUpperCase() === 'WORKING') {
+        await Promise.resolve(
+          client.post(`/api/sessions/${encodeURIComponent(sessionName)}/restart`)
+        ).catch(() => {});
+      }
+      console.log(`[WahaService] Detached CRM webhook from ignored session "${sessionName}"`);
+      return true;
+    } catch (err: any) {
+      console.warn(
+        `[WahaService] Failed to detach CRM webhook from session "${sessionName}":`,
+        err?.response?.data || err?.message
+      );
+      return false;
+    }
+  }
+
+  public async getIgnoredSessions(companyId?: string): Promise<string[]> {
+    const conf = await this.getConfig(false, companyId);
+    return conf.ignoredSessions || [];
+  }
+
+  public async isSessionIgnored(sessionName?: string | null, companyId?: string): Promise<boolean> {
+    if (!sessionName || !sessionName.trim()) return false;
+    const ignored = await this.getIgnoredSessions(companyId);
+    return isSessionNameIgnored(sessionName, ignored);
+  }
+
+  /**
+   * Toggle ignore flag for a WAHA session in CRM without deleting the session on the shared WAHA server.
+   * Ignoring detaches CRM's webhook and stops polling/ingestion; un-ignoring re-attaches CRM's webhook.
+   */
+  public async setSessionIgnored(
+    sessionName: string,
+    ignored: boolean,
+    requestBaseUrl?: string | null,
+    companyId?: string
+  ): Promise<{
+    session: string;
+    ignored: boolean;
+    ignoredSessions: string[];
+    webhookUpdated: boolean;
+  }> {
+    const clean = String(sessionName || '').trim();
+    if (!clean) {
+      throw new Error('Nama sesi tidak boleh kosong');
+    }
+    const cid = getActiveCompanyId(companyId);
+    const conf = await this.getConfig(false, cid);
+    const current = parseIgnoredWahaSessions(conf.ignoredSessions || []);
+    const lowerClean = clean.toLowerCase();
+    const nextList = ignored
+      ? parseIgnoredWahaSessions([...current, clean])
+      : current.filter((item) => item.toLowerCase() !== lowerClean);
+
+    await upsertCompanySetting('waha_ignored_sessions', JSON.stringify(nextList), cid);
+    this.invalidateRegisteredSessionsCache(cid);
+
+    let webhookUpdated = false;
+    try {
+      const { client, ownerPrefix } = await this.getClient();
+      if (ignored) {
+        webhookUpdated = await this.detachSessionWebhook(client, clean);
+        if (conf.session && conf.session.trim().toLowerCase() === lowerClean) {
+          const fallback = await this.pickLiveWorkingSession(client, ownerPrefix, clean, nextList);
+          if (fallback) {
+            await upsertCompanySetting('waha_session', fallback, cid).catch(() => {});
+          }
+        }
+      } else {
+        const resolved = await this.resolveEffectiveWebhookUrl(conf, requestBaseUrl, cid);
+        const reachable = conf.mode !== 'EXTERNAL' || resolved.isPublic;
+        if (reachable && resolved.url) {
+          webhookUpdated = await this.ensureSessionWebhook(client, clean, undefined, {
+            mode: conf.mode,
+            targetUrl: resolved.url,
+            force: true,
+          });
+        }
+      }
+    } catch {
+      // Setting is already saved even if WAHA server is temporarily unreachable
+    }
+
+    return {
+      session: clean,
+      ignored,
+      ignoredSessions: nextList,
+      webhookUpdated,
+    };
+  }
+
+  /**
    * Force webhook configuration sync across all owned sessions
    */
   public async syncSessionWebhooks(requestBaseUrl?: string | null): Promise<{
     webhookUrl: string;
     synced: string[];
+    detached?: string[];
     skippedReason?: string;
   }> {
     const conf = await this.getConfig(false);
+    const ignoredSessions = conf.ignoredSessions || [];
     const resolved = await this.resolveEffectiveWebhookUrl(conf, requestBaseUrl);
     if (conf.mode === 'EXTERNAL' && !resolved.isPublic) {
       return {
         webhookUrl: resolved.url,
         synced: [],
+        detached: [],
         skippedReason:
           'URL Webhook saat ini masih bersifat internal Docker/lokal. Masukkan URL HTTPS publik CRM agar server WAHA eksternal dapat mengirimkan event masuk.',
       };
@@ -2037,7 +2217,13 @@ export class WahaService {
       .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
 
     const synced: string[] = [];
+    const detached: string[] = [];
     for (const item of owned) {
+      if (isSessionNameIgnored(item.name, ignoredSessions)) {
+        const removed = await this.detachSessionWebhook(client, item.name, item.raw);
+        if (removed) detached.push(item.name);
+        continue;
+      }
       const ok = await this.ensureSessionWebhook(client, item.name, item.raw, {
         mode: conf.mode,
         targetUrl: resolved.url,
@@ -2045,7 +2231,7 @@ export class WahaService {
       });
       if (ok) synced.push(item.name);
     }
-    return { webhookUrl: resolved.url, synced };
+    return { webhookUrl: resolved.url, synced, detached };
   }
 
   /**
@@ -2196,6 +2382,7 @@ export class WahaService {
 
     try {
       const conf = await this.getConfig(false, cid);
+      if (isSessionNameIgnored(cleanSession, conf.ignoredSessions)) return;
       const resolved = await this.resolveEffectiveWebhookUrl(conf, requestBaseUrl, cid);
       const reachable = conf.mode !== 'EXTERNAL' || resolved.isPublic;
       if (!reachable || !resolved.url) return;
@@ -2215,9 +2402,10 @@ export class WahaService {
    */
   public async listSessions(
     requestBaseUrl?: string | null,
-    opts?: { skipWebhookSync?: boolean }
-  ): Promise<{ sessions: WahaSessionInfo[]; activeSession: string }> {
+    opts?: { skipWebhookSync?: boolean; includeIgnored?: boolean }
+  ): Promise<{ sessions: WahaSessionInfo[]; activeSession: string; ignoredSessions?: string[] }> {
     const conf = await this.getConfig();
+    const ignoredSessions = conf.ignoredSessions || [];
     const { client, session, ownerPrefix } = await this.getClient();
     const resolvedWebhook = opts?.skipWebhookSync
       ? { url: '', isPublic: false }
@@ -2232,6 +2420,7 @@ export class WahaService {
           const itemStatus = String(item?.status || 'UNKNOWN');
           return (
             this.isOwnedSession(itemName, ownerPrefix) &&
+            !isSessionNameIgnored(itemName, ignoredSessions) &&
             (itemStatus === 'WORKING' || itemStatus === 'SCAN_QR_CODE')
           );
         });
@@ -2247,18 +2436,29 @@ export class WahaService {
           })();
         }
       }
-      const sessions: WahaSessionInfo[] = rawList
-        .map((item: any) => ({
-          name: String(item.name || 'default'),
-          status: String(item.status || 'UNKNOWN'),
-          me: item.me || null,
-        }))
+      const allOwnedSessions: WahaSessionInfo[] = rawList
+        .map((item: any) => {
+          const name = String(item.name || 'default');
+          return {
+            name,
+            status: String(item.status || 'UNKNOWN'),
+            ignored: isSessionNameIgnored(name, ignoredSessions),
+            me: item.me || null,
+          };
+        })
         .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
+      const nonIgnoredSessions = allOwnedSessions.filter((s) => !s.ignored);
+      const sessions = opts?.includeIgnored ? allOwnedSessions : nonIgnoredSessions;
       let activeSession = session;
-      if (conf.mode === 'EXTERNAL' && sessions.length > 0 && !sessions.some((s) => s.name === session)) {
-        activeSession = sessions.find((s) => s.status === 'WORKING')?.name || sessions[0].name;
+      if (
+        conf.mode === 'EXTERNAL' &&
+        nonIgnoredSessions.length > 0 &&
+        !nonIgnoredSessions.some((s) => s.name === session)
+      ) {
+        activeSession =
+          nonIgnoredSessions.find((s) => s.status === 'WORKING')?.name || nonIgnoredSessions[0].name;
       }
-      return { sessions, activeSession };
+      return { sessions, activeSession, ignoredSessions };
     } catch (err: any) {
       throw this.wrapWahaError(err, 'Gagal mengambil daftar sesi WAHA');
     }
@@ -2451,16 +2651,23 @@ export class WahaService {
   private async pickLiveWorkingSession(
     client: AxiosInstance,
     ownerPrefix: string | null,
-    excludeSession?: string
+    excludeSession?: string,
+    ignoredSessionsOverride?: readonly string[]
   ): Promise<string | null> {
     try {
+      const ignoredSessions =
+        ignoredSessionsOverride !== undefined ? ignoredSessionsOverride : await this.getIgnoredSessions();
       const rawList = await this.fetchRawSessionList(client);
       const owned = rawList
         .map((item: any) => ({
           name: String(item.name || 'default'),
           status: String(item.status || 'UNKNOWN'),
         }))
-        .filter((item) => this.isOwnedSession(item.name, ownerPrefix));
+        .filter(
+          (item) =>
+            this.isOwnedSession(item.name, ownerPrefix) &&
+            !isSessionNameIgnored(item.name, ignoredSessions)
+        );
       const working = owned.find((s) => s.status === 'WORKING' && s.name !== excludeSession);
       if (working) return working.name;
       const anyOther = owned.find((s) => s.name !== excludeSession);
@@ -2500,14 +2707,25 @@ export class WahaService {
 
     let resolvedSession = sessionName?.trim() || undefined;
     try {
+      const ignoredSessions = await this.getIgnoredSessions();
       const { client, session, ownerPrefix, mode } = await this.getClient();
       let targetSession = resolvedSession
         ? this.resolveOwnedSessionName(resolvedSession, ownerPrefix)
         : session;
       this.assertOwnedSession(targetSession, ownerPrefix);
 
-      if (!resolvedSession && (targetSession === 'default' || !targetSession)) {
-        const liveSession = await this.pickLiveWorkingSession(client, ownerPrefix);
+      if (resolvedSession && isSessionNameIgnored(targetSession, ignoredSessions)) {
+        return {
+          success: false,
+          error: `Sesi WhatsApp "${targetSession}" sedang diabaikan di pengaturan WAHA CRM.`,
+        };
+      }
+
+      if (
+        !resolvedSession &&
+        (targetSession === 'default' || !targetSession || isSessionNameIgnored(targetSession, ignoredSessions))
+      ) {
+        const liveSession = await this.pickLiveWorkingSession(client, ownerPrefix, undefined, ignoredSessions);
         if (liveSession) {
           targetSession = liveSession;
         }

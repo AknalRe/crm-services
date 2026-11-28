@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  EyeOff,
   AlertTriangle,
   RotateCcw,
   History,
@@ -634,7 +635,7 @@ export const Settings: React.FC<SettingsProps> = ({
   const fetchSessions = useCallback(async () => {
     setSessionsLoading(true);
     try {
-      const data = await api.getWahaSessions();
+      const data = await api.getWahaSessions({ includeIgnored: true });
       setSessions(data.sessions || []);
       setSessionsError(null);
     } catch (err: any) {
@@ -840,6 +841,31 @@ export const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const handleToggleIgnoreSession = async (targetName: string, nextIgnored: boolean) => {
+    setSessionBusyName(targetName);
+    try {
+      const res = await api.setWahaSessionIgnored(targetName, nextIgnored);
+      if (nextIgnored) {
+        toast.info(
+          res.webhookUpdated
+            ? `Sesi "${targetName}" diabaikan oleh CRM dan webhook CRM dilepas dari sesi tersebut.`
+            : `Sesi "${targetName}" ditandai diabaikan oleh CRM.`
+        );
+      } else {
+        toast.success(
+          res.webhookUpdated
+            ? `Sesi "${targetName}" diaktifkan kembali dan webhook CRM telah dipasang.`
+            : `Sesi "${targetName}" diaktifkan kembali di CRM.`
+        );
+      }
+      await Promise.all([Promise.resolve(onRefreshStatus()), fetchSessions()]);
+    } catch (err: any) {
+      toast.error(err.response?.data?.error || `Gagal memperbarui status sesi "${targetName}"`);
+    } finally {
+      setSessionBusyName(null);
+    }
+  };
+
   const handleQuickStartSession = async (targetName: string) => {
     setSessionBusyName(targetName);
     try {
@@ -948,14 +974,16 @@ export const Settings: React.FC<SettingsProps> = ({
     wahaStatus?.config?.internalConfig?.hasApiKey ??
     (savedMode === 'INTERNAL' ? Boolean(wahaStatus?.config?.hasApiKey) : false);
   const liveActiveSession = wahaStatus?.activeSession || wahaStatus?.config?.session || session;
+  const managedSessions = sessions.filter((s) => !s.ignored);
+  const ignoredSessionsCount = sessions.length - managedSessions.length;
   const inspectedSession =
-    !isPendingModeSwitch && inspectedSessionName && sessions.some((s) => s.name === inspectedSessionName)
+    !isPendingModeSwitch && inspectedSessionName && managedSessions.some((s) => s.name === inspectedSessionName)
       ? inspectedSessionName
       : liveActiveSession;
   const activeSessionItem = isPendingModeSwitch
     ? undefined
-    : sessions.find((s) => s.name === inspectedSession);
-  const workingSessionsCount = sessions.filter((s) => s.status === 'WORKING').length;
+    : managedSessions.find((s) => s.name === inspectedSession);
+  const workingSessionsCount = managedSessions.filter((s) => s.status === 'WORKING').length;
   const filteredSessions = sessionSearch.trim()
     ? sessions.filter((s) => {
         const q = sessionSearch.trim().toLowerCase();
@@ -1648,6 +1676,11 @@ export const Settings: React.FC<SettingsProps> = ({
                   )}
 
                   <div className="divide-y divide-gray-200 border border-gray-200 rounded-md overflow-hidden">
+                    {ignoredSessionsCount > 0 && (
+                      <div className="px-3.5 py-2 bg-amber-50/70 border-b border-amber-200 text-[11px] text-amber-900">
+                        <strong>{ignoredSessionsCount} sesi diabaikan</strong> oleh CRM. Sesi yang diabaikan tidak menerima webhook CRM, tidak dipolling, dan disembunyikan dari Inbox/Broadcast tanpa menghapus sesi di server WAHA bersama.
+                      </div>
+                    )}
                     {sessions.length === 0 ? (
                       <div className="p-3 text-xs text-gray-500 text-center bg-gray-50">
                         {sessionsLoading
@@ -1662,7 +1695,8 @@ export const Settings: React.FC<SettingsProps> = ({
                       </div>
                     ) : (
                       filteredSessions.map((item) => {
-                        const isDefaultFallback = item.name === liveActiveSession;
+                        const isIgnored = Boolean(item.ignored);
+                        const isDefaultFallback = !isIgnored && item.name === liveActiveSession;
                         const isInspected = item.name === inspectedSession;
                         const isWorking = item.status === 'WORKING';
                         const isBusy = sessionBusyName === item.name;
@@ -1672,13 +1706,23 @@ export const Settings: React.FC<SettingsProps> = ({
                         return (
                           <div
                             key={item.name}
-                            onClick={() => setInspectedSessionName(item.name)}
-                            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 text-xs cursor-pointer transition-colors ${
-                              isInspected ? 'bg-indigo-50/40' : 'bg-white hover:bg-gray-50'
+                            onClick={() => {
+                              if (!isIgnored) setInspectedSessionName(item.name);
+                            }}
+                            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2.5 text-xs transition-colors ${
+                              isIgnored
+                                ? 'bg-gray-50/90 text-gray-500'
+                                : isInspected
+                                  ? 'bg-indigo-50/40 cursor-pointer'
+                                  : 'bg-white hover:bg-gray-50 cursor-pointer'
                             }`}
                           >
                             <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                              <span className="font-mono font-semibold text-gray-900 truncate">
+                              <span
+                                className={`font-mono font-semibold truncate ${
+                                  isIgnored ? 'text-gray-500 line-through' : 'text-gray-900'
+                                }`}
+                              >
                                 {item.name}
                               </span>
                               {accountLabel && (
@@ -1691,49 +1735,87 @@ export const Settings: React.FC<SettingsProps> = ({
                               >
                                 {statusMeta.rowLabel}
                               </span>
-                              {isWorking && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  Aktif
+                              {isIgnored ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                                  <EyeOff className="w-2.5 h-2.5" />
+                                  Diabaikan CRM
                                 </span>
-                              )}
-                              {isDefaultFallback && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                  Default
-                                </span>
+                              ) : (
+                                <>
+                                  {isWorking && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      Aktif
+                                    </span>
+                                  )}
+                                  {isDefaultFallback && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                      Default
+                                    </span>
+                                  )}
+                                </>
                               )}
                             </div>
 
                             <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end shrink-0" onClick={(e) => e.stopPropagation()}>
-                              {!isDefaultFallback && (
+                              {isIgnored ? (
                                 <Button
                                   type="button"
                                   variant="secondary"
                                   size="sm"
                                   disabled={!canEditSettings || isBusy}
-                                  onClick={() => handleSwitchActiveSession(item.name)}
+                                  isLoading={isBusy}
+                                  onClick={() => void handleToggleIgnoreSession(item.name, false)}
+                                  title="Aktifkan kembali sesi ini di CRM dan pasang webhook CRM"
                                 >
-                                  Jadikan Default
+                                  <Eye className="w-3.5 h-3.5 mr-1" />
+                                  Aktifkan di CRM
                                 </Button>
-                              )}
-                              {!isWorking && (
+                              ) : (
                                 <>
+                                  {!isDefaultFallback && (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      disabled={!canEditSettings || isBusy}
+                                      onClick={() => handleSwitchActiveSession(item.name)}
+                                    >
+                                      Jadikan Default
+                                    </Button>
+                                  )}
+                                  {!isWorking && (
+                                    <>
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={!canEditSettings || isBusy}
+                                        onClick={() => void handleQuickStartSession(item.name)}
+                                      >
+                                        Start
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={!canEditSettings}
+                                        onClick={() => onOpenQr(item.name)}
+                                      >
+                                        Scan QR
+                                      </Button>
+                                    </>
+                                  )}
                                   <Button
                                     type="button"
-                                    variant="secondary"
+                                    variant="ghost"
                                     size="sm"
                                     disabled={!canEditSettings || isBusy}
-                                    onClick={() => void handleQuickStartSession(item.name)}
+                                    className="text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                                    onClick={() => void handleToggleIgnoreSession(item.name, true)}
+                                    title="Abaikan sesi ini di CRM (lepas webhook CRM dan hentikan polling tanpa menghapus sesi di WAHA)"
                                   >
-                                    Start
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    disabled={!canEditSettings}
-                                    onClick={() => onOpenQr(item.name)}
-                                  >
-                                    Scan QR
+                                    <EyeOff className="w-3.5 h-3.5 mr-1" />
+                                    Abaikan
                                   </Button>
                                 </>
                               )}
@@ -1965,17 +2047,17 @@ export const Settings: React.FC<SettingsProps> = ({
               </p>
             </div>
 
-            {sessions.length > 1 && !isPendingModeSwitch && (
+            {managedSessions.length > 1 && !isPendingModeSwitch && (
               <div>
                 <label className="block text-[11px] font-medium text-gray-600 mb-1">
-                  Sesi yang Dikontrol ({workingSessionsCount}/{sessions.length} Aktif)
+                  Sesi yang Dikontrol ({workingSessionsCount}/{managedSessions.length} Aktif)
                 </label>
                 <select
                   value={inspectedSession}
                   onChange={(e) => setInspectedSessionName(e.target.value)}
                   className="w-full h-9 px-2.5 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
                 >
-                  {sessions.map((s) => (
+                  {managedSessions.map((s) => (
                     <option key={s.name} value={s.name}>
                       {s.name} ({s.status})
                     </option>
@@ -2610,7 +2692,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
             <div className={`${showMobileWahaTest ? 'space-y-3.5' : 'hidden lg:block lg:space-y-4'}`}>
 
-            {sessions.length > 0 && (
+            {managedSessions.length > 0 && (
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Sesi WhatsApp Pengirim
@@ -2620,7 +2702,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   onChange={(e) => setTestSession(e.target.value)}
                   className="w-full h-9 px-3 bg-white border border-gray-200 rounded-md text-xs font-mono focus:outline-none focus:border-indigo-500"
                 >
-                  {sessions.map((s) => (
+                  {managedSessions.map((s) => (
                     <option key={s.name} value={s.name}>
                       {s.name} ({s.status})
                     </option>

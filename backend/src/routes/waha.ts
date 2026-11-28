@@ -2075,13 +2075,19 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     }
   });
 
-  // GET all WAHA sessions
-  fastify.get('/sessions', { preHandler: requireWahaRead }, async (req: FastifyRequest, reply: FastifyReply) => {
+  // GET all WAHA sessions (excludes ignored sessions by default unless includeIgnored=1|true)
+  fastify.get<{
+    Querystring: { includeIgnored?: string };
+  }>('/sessions', { preHandler: requireWahaRead }, async (req, reply) => {
     try {
       const companyId = getRequestCompanyId(req);
       const lic = await licenseService.getLicense(companyId, false);
       const maxLimit = lic.features.maxSessionIdentitySwitches || 2;
-      const data = await wahaService.listSessions(resolveRequestPublicBase(req));
+      const includeIgnored =
+        req.query?.includeIgnored === '1' || req.query?.includeIgnored === 'true';
+      const data = await wahaService.listSessions(resolveRequestPublicBase(req), {
+        includeIgnored,
+      });
       const sessionsWithIdentity = await Promise.all(
         data.sessions.map(async (s) => {
           const ident = await SessionIdentityService.getIdentityInfo(companyId, s.name, maxLimit);
@@ -2100,6 +2106,36 @@ export default async function wahaRouter(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       return reply.status(error.statusCode || 500).send({ success: false, error: error.message });
+    }
+  });
+
+  // POST ignore or re-enable a WAHA session in CRM (detaches/re-attaches CRM webhook without deleting on WAHA)
+  fastify.post<{
+    Body: { session: string; ignored: boolean };
+  }>('/sessions/ignore', { preHandler: requireWahaManage }, async (req, reply) => {
+    try {
+      const companyId = getRequestCompanyId(req);
+      const sessionName = String(req.body?.session || '').trim();
+      if (!sessionName) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Nama sesi wajib diisi',
+        });
+      }
+      const ignored = Boolean(req.body?.ignored);
+      const result = await wahaService.setSessionIgnored(
+        sessionName,
+        ignored,
+        resolveRequestPublicBase(req),
+        companyId
+      );
+      liveEvents.emit('waha:status', {
+        action: ignored ? 'ignore' : 'unignore',
+        session: sessionName,
+      }, companyId);
+      return reply.send({ success: true, data: result });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     }
   });
 
@@ -2362,6 +2398,22 @@ export default async function wahaRouter(fastify: FastifyInstance) {
     return await runWithCompany(companyId, async () => {
     try {
       if (sessionHint) {
+        const isIgnored = await wahaService.isSessionIgnored(sessionHint, companyId);
+        if (isIgnored) {
+          wahaService.recordWebhookEvent({
+            receivedAt: new Date().toISOString(),
+            event: event || 'unknown',
+            session: sessionHint,
+            from: null,
+            outcome: 'IGNORED',
+            note: 'Sesi diabaikan di pengaturan WAHA CRM',
+          }, companyId);
+          return reply.status(200).send({
+            success: true,
+            ignored: true,
+            reason: 'session_ignored',
+          });
+        }
         const isRegistered = await wahaService.isSessionRegisteredForCompany(sessionHint, companyId);
         if (!isRegistered) {
           return reply.status(200).send({

@@ -673,6 +673,7 @@ export interface DashboardDrilldownResponse {
 export interface WahaSessionItem {
   name: string;
   status: string;
+  ignored?: boolean;
   me?: {
     id?: string;
     pushName?: string;
@@ -710,6 +711,7 @@ export interface WahaStatus {
     internalLocked?: boolean;
     hasApiKey?: boolean;
     customWebhookUrl?: string;
+    ignoredSessions?: string[];
     externalConfig?: {
       baseUrl: string;
       apiKey?: string;
